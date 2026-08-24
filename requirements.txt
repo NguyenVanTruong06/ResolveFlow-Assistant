@@ -1,0 +1,4 @@
+﻿faster-whisper
+ffmpeg-python
+numpy
+pydantic
