@@ -1,4 +1,5 @@
 import os
+import html
 from typing import List, Dict, Any
 
 class FCPXMLGenerator:
@@ -50,7 +51,7 @@ class FCPXMLGenerator:
                 title_xml = FCPXMLGenerator._build_title_element(
                     offset_ms=start_ms,
                     dur_ms=dur_ms,
-                    text=card_text,
+                    text=html.escape(card_text),
                     font_name=font_name,
                     font_size=font_size,
                     color=standard_color
@@ -76,14 +77,15 @@ class FCPXMLGenerator:
                 # Dựng chuỗi văn bản XML chứa styling highlight từ active_word
                 text_spans = []
                 for sub_w in words:
-                    word_str = sub_w["word"].strip() + " "
+                    raw_word = sub_w["word"].strip() + " "
+                    escaped_word = html.escape(raw_word)
                     if sub_w == active_word:
                         text_spans.append(
-                            f'<text-style ref="ts_highlight">{word_str}</text-style>'
+                            f'<text-style ref="ts_highlight">{escaped_word}</text-style>'
                         )
                     else:
                         text_spans.append(
-                            f'<text-style ref="ts_normal">{word_str}</text-style>'
+                            f'<text-style ref="ts_normal">{escaped_word}</text-style>'
                         )
 
                 text_content = "".join(text_spans)
@@ -119,10 +121,11 @@ class FCPXMLGenerator:
 
     @staticmethod
     def _build_title_element(offset_ms: int, dur_ms: int, text: str, font_name: str, font_size: int, color: str) -> str:
+        escaped_text = html.escape(text)
         return f"""
               <title ref="r2" offset="{offset_ms}/1000s" duration="{dur_ms}/1000s" start="0s" role="Video">
                 <text>
-                  <text-style ref="ts_normal">{text}</text-style>
+                  <text-style ref="ts_normal">{escaped_text}</text-style>
                 </text>
                 <text-style-def id="ts_normal">
                   <text-style font="{font_name}" fontSize="{font_size}" fontColor="{color}" alignment="center"/>

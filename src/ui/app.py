@@ -124,11 +124,18 @@ class PipelineWorker(QThread):
                             if sub["start"] >= k_start and sub["end"] <= k_end:
                                 offset_start = rec_start + (sub["start"] - k_start)
                                 offset_end = rec_start + (sub["end"] - k_start)
+                                mapped_words = []
+                                for w in sub.get("words", []):
+                                    mapped_words.append({
+                                        "word": w["word"],
+                                        "start": rec_start + (w["start"] - k_start),
+                                        "end": rec_start + (w["end"] - k_start)
+                                    })
                                 merged_subtitles.append({
                                     "start": offset_start,
                                     "end": offset_end,
                                     "text": sub["text"],
-                                    "words": sub.get("words", [])
+                                    "words": mapped_words
                                 })
                                 
                         cumulative_record_seconds = rec_end

@@ -396,7 +396,8 @@ def split_subtitles(subtitles: List[Dict[str, Any]], max_chars: int) -> List[Dic
                 new_subtitles.append({
                     "start": current_segment_words[0]["start"],
                     "end": current_segment_words[-1]["end"],
-                    "text": " ".join([w["word"].strip() for w in current_segment_words])
+                    "text": " ".join([w["word"].strip() for w in current_segment_words]),
+                    "words": list(current_segment_words)
                 })
             current_segment_words = [word_info]
             current_len = len(word)
@@ -408,7 +409,8 @@ def split_subtitles(subtitles: List[Dict[str, Any]], max_chars: int) -> List[Dic
         new_subtitles.append({
             "start": current_segment_words[0]["start"],
             "end": current_segment_words[-1]["end"],
-            "text": " ".join([w["word"].strip() for w in current_segment_words])
+            "text": " ".join([w["word"].strip() for w in current_segment_words]),
+            "words": list(current_segment_words)
         })
         
     return new_subtitles
