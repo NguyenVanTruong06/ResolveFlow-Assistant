@@ -144,3 +144,30 @@ def test_split_subtitles() -> None:
 def test_is_vertical_video(tmp_path) -> None:
     from src.core.resolve_api import is_vertical_video
     assert is_vertical_video("non_existent.mp4") is False
+
+def test_map_subtitles_to_timeline() -> None:
+    from src.core.resolve_api import map_subtitles_to_timeline, map_time_to_timeline
+    
+    keep_intervals = [(1.0, 3.0), (5.0, 8.0)]
+    
+    assert map_time_to_timeline(0.5, keep_intervals) == 0.0
+    assert map_time_to_timeline(1.5, keep_intervals) == 0.5
+    assert map_time_to_timeline(4.0, keep_intervals) == 2.0
+    assert map_time_to_timeline(6.0, keep_intervals) == 3.0
+    
+    subs = [
+        {
+            "start": 1.2,
+            "end": 2.5,
+            "text": "Hello world",
+            "words": [
+                {"word": "Hello", "start": 1.2, "end": 1.8},
+                {"word": "world", "start": 1.9, "end": 2.5}
+            ]
+        }
+    ]
+    mapped = map_subtitles_to_timeline(subs, keep_intervals, base_rec_time=0.0)
+    assert len(mapped) == 1
+    assert abs(mapped[0]["start"] - 0.2) < 0.001
+    assert abs(mapped[0]["end"] - 1.5) < 0.001
+    assert abs(mapped[0]["words"][0]["start"] - 0.2) < 0.001

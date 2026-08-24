@@ -1,6 +1,6 @@
 import os
 import sys
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from pydantic import BaseModel, Field
 
 class SubtitleConfig(BaseModel):
@@ -414,3 +414,63 @@ def split_subtitles(subtitles: List[Dict[str, Any]], max_chars: int) -> List[Dic
         })
         
     return new_subtitles
+
+def map_time_to_timeline(t_src: float, keep_intervals: List[Tuple[float, float]], base_rec_time: float = 0.0) -> float:
+    """
+    Ánh xạ mốc thời gian nguồn (source time) sang mốc thời gian trên timeline đã cắt (record time).
+    """
+    if not keep_intervals:
+        return base_rec_time + t_src
+
+    current_rec = base_rec_time
+    for s_i, e_i in keep_intervals:
+        if t_src < s_i:
+            return current_rec
+        elif s_i <= t_src <= e_i:
+            return current_rec + (t_src - s_i)
+        else:
+            current_rec += (e_i - s_i)
+
+    return current_rec
+
+def map_subtitles_to_timeline(
+    subtitles: List[Dict[str, Any]], 
+    keep_intervals: List[Tuple[float, float]], 
+    base_rec_time: float = 0.0
+) -> List[Dict[str, Any]]:
+    """
+    Chuyển đổi toàn bộ mốc thời gian của phụ đề và các từ đơn sang mốc thời gian tương ứng trên timeline đã cắt khoảng lặng.
+    Đảm bảo 100% không bị mất phụ đề ở đầu/cuối và khớp tuyệt đối với video đã cắt.
+    """
+    if not keep_intervals:
+        return subtitles
+
+    mapped_subs = []
+    for sub in subtitles:
+        new_start = map_time_to_timeline(sub["start"], keep_intervals, base_rec_time)
+        new_end = map_time_to_timeline(sub["end"], keep_intervals, base_rec_time)
+        
+        # Nếu thời lượng quá ngắn, giữ lại thời lượng tối thiểu 0.2s để chữ không bị nháy biến mất
+        if new_end <= new_start:
+            new_end = new_start + 0.2
+            
+        mapped_words = []
+        for w in sub.get("words", []):
+            w_start = map_time_to_timeline(w["start"], keep_intervals, base_rec_time)
+            w_end = map_time_to_timeline(w["end"], keep_intervals, base_rec_time)
+            if w_end <= w_start:
+                w_end = w_start + 0.1
+            mapped_words.append({
+                "word": w["word"],
+                "start": w_start,
+                "end": w_end
+            })
+
+        mapped_subs.append({
+            "start": new_start,
+            "end": new_end,
+            "text": sub["text"],
+            "words": mapped_words
+        })
+
+    return mapped_subs

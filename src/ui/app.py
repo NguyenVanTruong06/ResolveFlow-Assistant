@@ -64,7 +64,8 @@ class PipelineWorker(QThread):
 
             # Danh sách tích lũy các khoảng thoại và phụ đề để ghép nối
             merged_edl_events = []
-            merged_subtitles = []
+            merged_cut_subtitles = []
+            merged_orig_subtitles = []
             cumulative_record_seconds = 0.0
 
             # Lấy thư mục của tệp đầu tiên để làm đầu ra cho tệp ghép nối
@@ -91,25 +92,30 @@ class PipelineWorker(QThread):
                 # Transcribe
                 self.log_signal.emit(f"   🎙 Dịch giọng nói...")
                 lang_code = None if self.language == "Auto" else ("vi" if self.language == "Tiếng Việt" else "en")
-                subtitles = transcriber.transcribe(temp_wav, language=lang_code)
-                self.log_signal.emit(f"   ✔ Phát hiện {len(subtitles)} đoạn thoại.")
+                raw_subtitles = transcriber.transcribe(temp_wav, language=lang_code)
+                self.log_signal.emit(f"   ✔ Phát hiện {len(raw_subtitles)} đoạn thoại.")
                 
-                # Cắt khoảng lặng
-                self.log_signal.emit(f"   ✂ Lọc khoảng lặng...")
-                keep_intervals = SilenceDetector.detect_silence_from_wav(temp_wav, cut_config)
-                self.log_signal.emit(f"   ✔ Giữ lại {len(keep_intervals)} phân đoạn âm thanh.")
+                # Ngắt câu phụ đề của clip theo giới hạn ký tự
+                clip_subs = split_subtitles(raw_subtitles, self.max_chars)
+                merged_orig_subtitles.extend(clip_subs)
 
-                # Xử lý ghép nối (Stitching)
+                # Lọc khoảng lặng
+                keep_intervals = []
+                if self.run_cut:
+                    self.log_signal.emit(f"   ✂ Lọc khoảng lặng...")
+                    keep_intervals = SilenceDetector.detect_silence_from_wav(temp_wav, cut_config)
+                    self.log_signal.emit(f"   ✔ Giữ lại {len(keep_intervals)} phân đoạn âm thanh.")
+
+                # Xử lý ghép nối (Stitching) & Ánh xạ mốc thời gian phụ đề
                 if keep_intervals:
-                    # FPS của clip
                     fps = EDLGenerator.get_video_fps(video_path)
+                    clip_start_rec = cumulative_record_seconds
                     
                     for k_start, k_end in keep_intervals:
                         dur = k_end - k_start
                         rec_start = cumulative_record_seconds
                         rec_end = rec_start + dur
                         
-                        # Tạo event EDL
                         merged_edl_events.append({
                             "video_path": video_path,
                             "src_in": k_start,
@@ -118,30 +124,14 @@ class PipelineWorker(QThread):
                             "rec_out": rec_end,
                             "fps": fps
                         })
-                        
-                        # Bản đồ phụ đề tương ứng rơi vào keep_interval này
-                        for sub in subtitles:
-                            if sub["start"] >= k_start and sub["end"] <= k_end:
-                                offset_start = rec_start + (sub["start"] - k_start)
-                                offset_end = rec_start + (sub["end"] - k_start)
-                                mapped_words = []
-                                for w in sub.get("words", []):
-                                    mapped_words.append({
-                                        "word": w["word"],
-                                        "start": rec_start + (w["start"] - k_start),
-                                        "end": rec_start + (w["end"] - k_start)
-                                    })
-                                merged_subtitles.append({
-                                    "start": offset_start,
-                                    "end": offset_end,
-                                    "text": sub["text"],
-                                    "words": mapped_words
-                                })
-                                
                         cumulative_record_seconds = rec_end
+                        
+                    # Ánh xạ phụ đề theo mốc thời gian của timeline đã cắt
+                    from src.core.resolve_api import map_subtitles_to_timeline
+                    mapped_clip_subs = map_subtitles_to_timeline(clip_subs, keep_intervals, clip_start_rec)
+                    merged_cut_subtitles.extend(mapped_clip_subs)
                 else:
-                    # Video câm hoặc không có lời nói (B-roll / Cảnh lót): Tự động giữ nguyên 100% thời lượng clip
-                    self.log_signal.emit(f"   ℹ Không phát hiện tiếng nói. Tự động giữ nguyên 100% thời lượng clip (B-roll mode).")
+                    # Clip câm / B-roll hoặc không bật tính năng cắt khoảng lặng: Giữ nguyên 100% thời lượng clip
                     try:
                         clip_dur = AudioExtractor.get_audio_duration(video_path)
                     except Exception:
@@ -160,6 +150,8 @@ class PipelineWorker(QThread):
                             "fps": fps
                         })
                         cumulative_record_seconds = rec_end
+                        
+                    merged_cut_subtitles.extend(clip_subs)
 
                 # Dọn dẹp tệp WAV tạm thời
                 try:
@@ -172,41 +164,28 @@ class PipelineWorker(QThread):
                 progress_val = int((idx + 1) / total_clips * 80)
                 self.progress_signal.emit(progress_val)
 
-            # Ngắt câu phụ đề đã ghép nối dựa trên max_chars
-            if merged_subtitles:
-                self.log_signal.emit(f"\n📝 Đang định dạng và ngắt câu cho phụ đề ghép nối ({self.max_chars} ký tự/dòng)...")
-                merged_subtitles = split_subtitles(merged_subtitles, self.max_chars)
-
-            # Xuất file phụ đề tổng hợp SRT
-            output_srt = os.path.join(base_dir, f"{stamped_name}.srt")
+            # Phụ đề cho Timeline ĐÃ CẮT (khớp 100% với EDL timeline)
             sub_config = SubtitleConfig()
-            resolve_auto.insert_subtitles_to_timeline(
-                merged_subtitles, 
-                sub_config, 
-                output_srt_path=output_srt,
-                log_callback=self.log_signal.emit
-            )
-            self.progress_signal.emit(90)
-
-            # Xuất file phụ đề động Karaoke FCPXML
-            output_fcpxml = os.path.join(base_dir, f"{stamped_name}_karaoke.fcpxml")
-            self.log_signal.emit(f"📝 Đang tạo tệp phụ đề động Karaoke (FCPXML) tại:\n      👉 {os.path.abspath(output_fcpxml)}")
             from src.core.fcpxml_generator import FCPXMLGenerator
             
-            FCPXMLGenerator.generate_karaoke_fcpxml(
-                subtitles=merged_subtitles,
-                output_path=output_fcpxml,
-                font_name=self.font_name,
-                font_size=self.font_size
-            )
-
-            # Tạo file EDL ghép nối và import vào Resolve
-            if merged_edl_events and self.run_cut:
+            if self.run_cut and merged_edl_events:
+                output_cut_srt = os.path.join(base_dir, f"{stamped_name}_cut.srt")
+                resolve_auto.generate_srt(merged_cut_subtitles, output_cut_srt)
+                
+                output_cut_fcpxml = os.path.join(base_dir, f"{stamped_name}_cut_karaoke.fcpxml")
+                FCPXMLGenerator.generate_karaoke_fcpxml(
+                    subtitles=merged_cut_subtitles,
+                    output_path=output_cut_fcpxml,
+                    font_name=self.font_name,
+                    font_size=self.font_size
+                )
+                
+                # Tạo file EDL ghép nối và import vào Resolve
                 output_edl = os.path.join(base_dir, f"{stamped_name}_cut.edl")
-                self.log_signal.emit(f"📝 Đang tạo tệp Edit Decision List (EDL) ghép nối tại:\n      👉 {os.path.abspath(output_edl)}")
+                self.log_signal.emit(f"\n📝 Đang tạo tệp Edit Decision List (EDL) tại:\n      👉 {os.path.abspath(output_edl)}")
                 EDLGenerator.create_multi_clip_edl(merged_edl_events, output_edl)
                 
-                self.log_signal.emit("🤖 Đang gửi yêu cầu import EDL ghép nối sang DaVinci Resolve...")
+                self.log_signal.emit("🤖 Đang gửi yêu cầu import EDL sang DaVinci Resolve...")
                 timeline_name = f"{stamped_name}_Silent_Cut"
                 resolve_auto.import_edl_to_timeline(
                     edl_path=output_edl,
@@ -215,8 +194,37 @@ class PipelineWorker(QThread):
                     log_callback=self.log_signal.emit
                 )
 
+            # Phụ đề cho Video GỐC CHƯA CẮT (khớp 100% với video nguồn)
+            output_orig_srt = os.path.join(base_dir, f"{stamped_name}_original.srt")
+            resolve_auto.generate_srt(merged_orig_subtitles, output_orig_srt)
+            
+            output_orig_fcpxml = os.path.join(base_dir, f"{stamped_name}_original_karaoke.fcpxml")
+            FCPXMLGenerator.generate_karaoke_fcpxml(
+                subtitles=merged_orig_subtitles,
+                output_path=output_orig_fcpxml,
+                font_name=self.font_name,
+                font_size=self.font_size
+            )
+
+            # Luôn lưu 1 file .srt chuẩn mang tên chính của video để kéo thả nhanh nhất
+            output_main_srt = os.path.join(base_dir, f"{stamped_name}.srt")
+            main_subs = merged_cut_subtitles if (self.run_cut and merged_edl_events) else merged_orig_subtitles
+            resolve_auto.generate_srt(main_subs, output_main_srt)
+
             self.progress_signal.emit(100)
-            self.log_signal.emit("🎉 Quy trình tự động hóa ResolveFlow hoàn thành mỹ mãn!")
+            self.log_signal.emit("\n=======================================================")
+            self.log_signal.emit("🎉 HOÀN THÀNH XUẤT TỆP THÀNH CÔNG:")
+            if self.run_cut and merged_edl_events:
+                self.log_signal.emit("✂ [DÀNH CHO TIMELINE ĐÃ CẮT KHOẢNG LẶNG]")
+                self.log_signal.emit(f"   👉 1. File cắt Timeline: {os.path.basename(output_edl)}")
+                self.log_signal.emit(f"   👉 2. Phụ đề đã cắt (SRT): {os.path.basename(output_cut_srt)}")
+                self.log_signal.emit(f"   👉 3. Phụ đề Karaoke nảy chữ: {os.path.basename(output_cut_fcpxml)}")
+                self.log_signal.emit("\n🎬 [DÀNH CHO VIDEO GỐC CHƯA CẮT]")
+                self.log_signal.emit(f"   👉 Phụ đề gốc (SRT): {os.path.basename(output_orig_srt)}")
+            else:
+                self.log_signal.emit(f"   👉 1. Phụ đề SRT: {os.path.basename(output_main_srt)}")
+                self.log_signal.emit(f"   👉 2. Phụ đề Karaoke FCPXML: {os.path.basename(output_orig_fcpxml)}")
+            self.log_signal.emit("=======================================================")
             self.finished_signal.emit(True, "Hoàn thành!")
 
         except Exception as e:
