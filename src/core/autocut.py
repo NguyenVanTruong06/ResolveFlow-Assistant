@@ -188,6 +188,10 @@ class EDLGenerator:
     """
 
     @staticmethod
+    def get_video_fps(video_path: str) -> float:
+        return get_video_fps(video_path)
+
+    @staticmethod
     def generate_edl_content(video_path: str, keep_intervals: List[Tuple[float, float]], fps: float = 30.0) -> str:
         clip_name = os.path.basename(video_path)
         lines = [
