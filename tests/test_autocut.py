@@ -82,3 +82,30 @@ def test_detect_silence_file_not_found() -> None:
     config = AudioCutConfig()
     with pytest.raises(FileNotFoundError):
         SilenceDetector.detect_silence_from_wav("non_existent_audio.wav", config)
+
+def test_seconds_to_timecode() -> None:
+    from src.core.autocut import seconds_to_timecode
+    assert seconds_to_timecode(0.0, 30.0) == "00:00:00:00"
+    assert seconds_to_timecode(1.5, 30.0) == "00:00:01:15"
+    assert seconds_to_timecode(3661.2, 25.0) == "01:01:01:05"
+
+def test_edl_generation(tmp_path) -> None:
+    from src.core.autocut import EDLGenerator
+    from unittest.mock import patch
+    video_path = os.path.join(tmp_path, "dummy.mp4")
+    with open(video_path, "w") as f:
+        f.write("")
+        
+    keep_intervals = [(1.0, 3.5), (5.0, 8.0)]
+    output_edl = os.path.join(tmp_path, "test.edl")
+    
+    with patch('src.core.autocut.get_video_fps', return_value=30.0):
+        EDLGenerator.create_edl(video_path, keep_intervals, output_edl)
+        
+    assert os.path.exists(output_edl)
+    with open(output_edl, "r", encoding="utf-8") as f:
+        content = f.read()
+        
+    assert "TITLE: Silence Cut" in content
+    assert "001  AX       V     C        00:00:01:00 00:00:03:15 00:00:00:00 00:00:02:15" in content
+    assert "* FROM CLIP NAME: dummy.mp4" in content

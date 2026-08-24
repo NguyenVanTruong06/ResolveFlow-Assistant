@@ -58,3 +58,89 @@ def test_connect_fail() -> None:
     with patch('os.path.exists', return_value=False):
         connected = automator.connect()
         assert connected is False
+
+def test_insert_subtitles_to_timeline_no_timeline(tmp_path) -> None:
+    """
+    Kiểm tra insert_subtitles_to_timeline khi không có timeline hoạt động.
+    """
+    automator = ResolveAutomation()
+    subtitles = [
+        {"start": 1.0, "end": 2.0, "text": "Test line."}
+    ]
+    config = SubtitleConfig()
+    output_file = os.path.join(tmp_path, "output.srt")
+    
+    logs = []
+    def log_cb(msg):
+        logs.append(msg)
+        
+    with patch.object(automator, 'get_active_timeline', return_value=None):
+        res = automator.insert_subtitles_to_timeline(
+            subtitles, 
+            config, 
+            output_srt_path=output_file, 
+            log_callback=log_cb
+        )
+        assert res is True
+        
+    assert os.path.exists(output_file)
+    assert any("Không tìm thấy Timeline" in log for log in logs)
+    assert any("Đã xuất file phụ đề SRT cục bộ thành công" in log for log in logs)
+    assert any(os.path.abspath(output_file) in log for log in logs)
+
+def test_import_edl_to_timeline(tmp_path) -> None:
+    """
+    Kiểm tra import_edl_to_timeline khi Resolve không chạy.
+    """
+    automator = ResolveAutomation()
+    edl_file = os.path.join(tmp_path, "test.edl")
+    video_file = os.path.join(tmp_path, "test.mp4")
+    with open(edl_file, "w") as f:
+        f.write("")
+    with open(video_file, "w") as f:
+        f.write("")
+        
+    logs = []
+    def log_cb(msg):
+        logs.append(msg)
+        
+    with patch.object(automator, 'connect', return_value=False):
+        res = automator.import_edl_to_timeline(
+            edl_path=edl_file,
+            video_path=video_file,
+            timeline_name="Test Timeline",
+            log_callback=log_cb
+        )
+        assert res is False
+        
+    assert any("Không thể kết nối tới ứng dụng DaVinci Resolve" in log for log in logs)
+
+def test_split_subtitles() -> None:
+    from src.core.resolve_api import split_subtitles
+    raw_subtitles = [
+        {
+            "start": 0.0,
+            "end": 4.5,
+            "text": "Hello world this is a test segment for resolve flow.",
+            "words": [
+                {"word": "Hello", "start": 0.0, "end": 0.5},
+                {"word": "world", "start": 0.6, "end": 1.0},
+                {"word": "this", "start": 1.1, "end": 1.5},
+                {"word": "is", "start": 1.6, "end": 2.0},
+                {"word": "a", "start": 2.1, "end": 2.2},
+                {"word": "test", "start": 2.3, "end": 2.8},
+                {"word": "segment", "start": 2.9, "end": 3.5},
+                {"word": "for", "start": 3.6, "end": 3.9},
+                {"word": "resolve", "start": 4.0, "end": 4.2},
+                {"word": "flow.", "start": 4.3, "end": 4.5}
+            ]
+        }
+    ]
+    wrapped = split_subtitles(raw_subtitles, max_chars=15)
+    for seg in wrapped:
+        assert len(seg["text"]) <= 15
+        assert seg["start"] < seg["end"]
+
+def test_is_vertical_video(tmp_path) -> None:
+    from src.core.resolve_api import is_vertical_video
+    assert is_vertical_video("non_existent.mp4") is False

@@ -17,7 +17,7 @@ class PipelineWorker(QThread):
     progress_signal = pyqtSignal(int)
     finished_signal = pyqtSignal(bool, str)
 
-    def __init__(self, video_path, model_size, language, run_cut, silence_db, min_duration):
+    def __init__(self, video_path, model_size, language, run_cut, silence_db, min_duration, max_chars):
         super().__init__()
         self.video_path = video_path
         self.model_size = model_size
@@ -25,6 +25,7 @@ class PipelineWorker(QThread):
         self.run_cut = run_cut
         self.silence_db = silence_db
         self.min_duration = min_duration
+        self.max_chars = max_chars
 
     def run(self):
         try:
@@ -67,6 +68,13 @@ class PipelineWorker(QThread):
             lang_code = None if self.language == "Auto" else ("vi" if self.language == "Tiếng Việt" else "en")
             subtitles = transcriber.transcribe(output_wav, language=lang_code)
             self.log_signal.emit(f"   ✔ Hoàn thành dịch. Phát hiện {len(subtitles)} phân đoạn.")
+            self.progress_signal.emit(72)
+            
+            # Tách/Ngắt chữ thành các dòng ngắn gọn theo max_chars
+            from src.core.resolve_api import split_subtitles
+            self.log_signal.emit(f"   📝 Đang ngắt phụ đề theo giới hạn: {self.max_chars} ký tự/dòng...")
+            subtitles = split_subtitles(subtitles, self.max_chars)
+            self.log_signal.emit(f"   ✔ Đã xử lý ngắt câu xong.")
             self.progress_signal.emit(75)
 
             # -------------------------------------------------------------
@@ -76,8 +84,17 @@ class PipelineWorker(QThread):
             from src.core.resolve_api import SubtitleConfig, ResolveAutomation
             resolve_auto = ResolveAutomation()
             
+            # Tự động mở DaVinci Resolve nếu chưa mở
+            resolve_auto.ensure_resolve_running(log_callback=self.log_signal.emit)
+            
             sub_config = SubtitleConfig()
-            resolve_auto.insert_subtitles_to_timeline(subtitles, sub_config)
+            output_srt = os.path.join(base_dir, f"{base_name}.srt")
+            resolve_auto.insert_subtitles_to_timeline(
+                subtitles, 
+                sub_config, 
+                output_srt_path=output_srt,
+                log_callback=self.log_signal.emit
+            )
             self.progress_signal.emit(90)
 
             # -------------------------------------------------------------
@@ -85,17 +102,32 @@ class PipelineWorker(QThread):
             # -------------------------------------------------------------
             if self.run_cut:
                 self.log_signal.emit("✂ Bước 4/4: Đang phân tích sóng âm thô PCM để cắt khoảng lặng...")
-                from src.core.autocut import AudioCutConfig, SilenceDetector
+                from src.core.autocut import AudioCutConfig, SilenceDetector, EDLGenerator
                 
                 cut_config = AudioCutConfig(
                     min_silent_duration=self.min_duration,
                     silence_threshold_db=self.silence_db,
-                    padding_seconds=0.1
+                    padding_seconds=0.25
                 )
                 
                 keep_intervals = SilenceDetector.detect_silence_from_wav(output_wav, cut_config)
-                self.log_signal.emit(f"   ✔ Đã phát hiện {len(keep_intervals)} khoảng âm nói. Đang cấu hình EDL cắt thô...")
-                # Fallback hoặc tích hợp EDL
+                self.log_signal.emit(f"   ✔ Đã phát hiện {len(keep_intervals)} khoảng âm nói.")
+                
+                if keep_intervals:
+                    output_edl = os.path.join(base_dir, f"{base_name}_cut.edl")
+                    self.log_signal.emit(f"   📝 Đang tạo tệp Edit Decision List (EDL) tại:\n      👉 {os.path.abspath(output_edl)}")
+                    EDLGenerator.create_edl(self.video_path, keep_intervals, output_edl)
+                    
+                    self.log_signal.emit("   🤖 Đang cố gắng gửi yêu cầu import EDL sang DaVinci Resolve...")
+                    timeline_name = f"{base_name}_Silent_Cut"
+                    resolve_auto.import_edl_to_timeline(
+                        edl_path=output_edl,
+                        video_path=self.video_path,
+                        timeline_name=timeline_name,
+                        log_callback=self.log_signal.emit
+                    )
+                else:
+                    self.log_signal.emit("   ⚠ Không phát hiện đoạn thoại nào, bỏ qua việc tạo EDL.")
             
             # Giải phóng VRAM
             self.log_signal.emit("♻ Giải phóng bộ nhớ đệm AI VRAM...")
@@ -171,6 +203,9 @@ class ResolveFlowApp(QMainWindow):
         self.txt_color = QLineEdit("#FFFFFF")
         form_sub.addRow("Màu chữ (Hex):", self.txt_color)
         
+        self.txt_max_chars = QLineEdit("42")
+        form_sub.addRow("Ký tự tối đa/dòng:", self.txt_max_chars)
+        
         left_panel.addWidget(group_sub)
 
         # Group 3: Smart Silent Cut (Auto-Editor)
@@ -217,10 +252,15 @@ class ResolveFlowApp(QMainWindow):
         self.lbl_file = QLineEdit()
         self.lbl_file.setPlaceholderText("Vui lòng chọn tệp video nguồn...")
         self.lbl_file.setReadOnly(True)
+        
+        btn_auto = QPushButton("Tự lấy từ Resolve")
+        btn_auto.clicked.connect(self._auto_detect_video)
+        
         btn_browse = QPushButton("Chọn Video")
         btn_browse.clicked.connect(self._browse_file)
         
         file_layout.addWidget(self.lbl_file)
+        file_layout.addWidget(btn_auto)
         file_layout.addWidget(btn_browse)
         right_panel.addLayout(file_layout)
         right_panel.addSpacing(10)
@@ -326,6 +366,37 @@ class ResolveFlowApp(QMainWindow):
         if file_path:
             self.lbl_file.setText(file_path)
             self.txt_console.appendPlainText(f"📁 Đã chọn tệp: {file_path}")
+            self._update_default_chars_limit(file_path)
+
+    def _auto_detect_video(self):
+        from src.core.resolve_api import ResolveAutomation
+        resolve_auto = ResolveAutomation()
+        self.txt_console.appendPlainText("🔍 Đang kết nối DaVinci Resolve để tự động tìm video...")
+        
+        # Thử kết nối
+        if not resolve_auto.connect():
+            self.txt_console.appendPlainText("❌ Lỗi: Không thể kết nối tới DaVinci Resolve. Đảm bảo phần mềm đang mở và đã bật API scripting.")
+            return
+            
+        file_path = resolve_auto.auto_detect_video_path()
+        if file_path:
+            self.lbl_file.setText(file_path)
+            self.txt_console.appendPlainText(f"✔ Tự động phát hiện video thành công!\n👉 Tệp: {file_path}")
+            self._update_default_chars_limit(file_path)
+        else:
+            self.txt_console.appendPlainText("⚠ Không phát hiện được video nào đang được chọn trong Media Pool hoặc Timeline. Vui lòng chọn thủ công.")
+
+    def _update_default_chars_limit(self, video_path):
+        try:
+            from src.core.resolve_api import is_vertical_video
+            if is_vertical_video(video_path):
+                self.txt_max_chars.setText("22")
+                self.txt_console.appendPlainText("📱 Phát hiện Video Dọc: Đã tự động đổi giới hạn chữ thành 22 ký tự/dòng để vừa khung hình đứng.")
+            else:
+                self.txt_max_chars.setText("42")
+                self.txt_console.appendPlainText("🖥 Phát hiện Video Ngang: Đã tự động đổi giới hạn chữ thành 42 ký tự/dòng (tiêu chuẩn).")
+        except Exception:
+            pass
 
     def _run_pipeline(self):
         video_path = self.lbl_file.text()
@@ -342,6 +413,10 @@ class ResolveFlowApp(QMainWindow):
         run_cut = self.check_cut.isChecked()
         silence_db = float(self.slide_db.value())
         min_duration = float(self.slide_dur.value() / 10.0)
+        try:
+            max_chars = int(self.txt_max_chars.text())
+        except ValueError:
+            max_chars = 42
 
         # Khởi tạo Worker Thread để chạy nền
         self.worker = PipelineWorker(
@@ -350,7 +425,8 @@ class ResolveFlowApp(QMainWindow):
             language=language,
             run_cut=run_cut,
             silence_db=silence_db,
-            min_duration=min_duration
+            min_duration=min_duration,
+            max_chars=max_chars
         )
 
         # Kết nối tín hiệu

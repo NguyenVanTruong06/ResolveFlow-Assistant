@@ -17,7 +17,7 @@ class AudioCutConfig(BaseModel):
         description="Ngưỡng âm lượng (dB) để coi là im lặng (dưới ngưỡng này sẽ bị cắt)"
     )
     padding_seconds: float = Field(
-        default=0.1, ge=0.0, le=1.0,
+        default=0.25, ge=0.0, le=1.0,
         description="Thời gian đệm (giây) ở hai đầu điểm cắt để tránh mất chữ thoại đầu/cuối"
     )
 
@@ -149,3 +149,88 @@ class SilenceDetector:
                 padded_keep_intervals.append((new_start, new_end))
 
         return padded_keep_intervals
+
+def get_video_fps(video_path: str) -> float:
+    """
+    Lấy tốc độ khung hình (FPS) của tệp video sử dụng ffprobe.
+    """
+    try:
+        import ffmpeg
+        probe = ffmpeg.probe(video_path)
+        video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
+        if video_stream:
+            avg_frame_rate = video_stream.get('avg_frame_rate', '30/1')
+            if '/' in avg_frame_rate:
+                num, den = map(float, avg_frame_rate.split('/'))
+                return num / den if den != 0 else 30.0
+            return float(avg_frame_rate)
+    except Exception:
+        pass
+    return 30.0
+
+def seconds_to_timecode(seconds: float, fps: float) -> str:
+    """
+    Chuyển đổi số giây thành định dạng Timecode CMX3600 (HH:MM:SS:FF).
+    """
+    seconds = max(0.0, seconds)
+    hrs = int(seconds // 3600)
+    mins = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    frames = int(round((seconds % 1) * fps))
+    if frames >= int(fps):
+        frames = int(fps) - 1
+    return f"{hrs:02d}:{mins:02d}:{secs:02d}:{frames:02d}"
+
+class EDLGenerator:
+    """
+    Lớp hỗ trợ sinh tệp tin Edit Decision List (EDL) định dạng CMX3600
+    để tự động hóa cắt dựng đồng bộ Video + Audio trong DaVinci Resolve.
+    """
+
+    @staticmethod
+    def generate_edl_content(video_path: str, keep_intervals: List[Tuple[float, float]], fps: float = 30.0) -> str:
+        clip_name = os.path.basename(video_path)
+        lines = [
+            "TITLE: Silence Cut",
+            "FCM: NON-DROP FRAME",
+            ""
+        ]
+
+        current_record_time = 0.0
+        for idx, (start, end) in enumerate(keep_intervals, 1):
+            duration = end - start
+            if duration <= 0:
+                continue
+
+            src_in_tc = seconds_to_timecode(start, fps)
+            src_out_tc = seconds_to_timecode(end, fps)
+
+            rec_in_tc = seconds_to_timecode(current_record_time, fps)
+            current_record_time += duration
+            rec_out_tc = seconds_to_timecode(current_record_time, fps)
+
+            event_num = f"{idx:03d}"
+
+            # Event cho luồng Video
+            lines.append(f"{event_num}  AX       V     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            lines.append(f"* FROM CLIP NAME: {clip_name}")
+
+            # Event cho luồng Audio (Track 1)
+            lines.append(f"{event_num}  AX       A     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            lines.append(f"* FROM CLIP NAME: {clip_name}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def create_edl(video_path: str, keep_intervals: List[Tuple[float, float]], output_edl_path: str) -> str:
+        fps = get_video_fps(video_path)
+        content = EDLGenerator.generate_edl_content(video_path, keep_intervals, fps)
+
+        parent_dir = os.path.dirname(output_edl_path)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
+
+        with open(output_edl_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        return output_edl_path
