@@ -234,3 +234,45 @@ class EDLGenerator:
             f.write(content)
 
         return output_edl_path
+
+    @staticmethod
+    def create_multi_clip_edl(events: List[Dict[str, Any]], output_edl_path: str) -> str:
+        """
+        Tạo tệp EDL ghép nối nhiều nguồn clip khác nhau.
+        Mỗi phần tử trong events chứa: video_path, src_in, src_out, rec_in, rec_out, fps
+        """
+        lines = [
+            "TITLE: Silence Cut Multi-Clip",
+            "FCM: NON-DROP FRAME",
+            ""
+        ]
+
+        for idx, ev in enumerate(events, 1):
+            clip_name = os.path.basename(ev["video_path"])
+            fps = ev["fps"]
+            
+            src_in_tc = seconds_to_timecode(ev["src_in"], fps)
+            src_out_tc = seconds_to_timecode(ev["src_out"], fps)
+            rec_in_tc = seconds_to_timecode(ev["rec_in"], fps)
+            rec_out_tc = seconds_to_timecode(ev["rec_out"], fps)
+            
+            event_num = f"{idx:03d}"
+            
+            # Event cho luồng Video
+            lines.append(f"{event_num}  AX       V     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            lines.append(f"* FROM CLIP NAME: {clip_name}")
+
+            # Event cho luồng Audio (Track 1)
+            lines.append(f"{event_num}  AX       A     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            lines.append(f"* FROM CLIP NAME: {clip_name}")
+
+        content = "\n".join(lines)
+        
+        parent_dir = os.path.dirname(output_edl_path)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
+
+        with open(output_edl_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        return output_edl_path

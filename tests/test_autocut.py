@@ -109,3 +109,36 @@ def test_edl_generation(tmp_path) -> None:
     assert "TITLE: Silence Cut" in content
     assert "001  AX       V     C        00:00:01:00 00:00:03:15 00:00:00:00 00:00:02:15" in content
     assert "* FROM CLIP NAME: dummy.mp4" in content
+
+def test_multi_clip_edl(tmp_path) -> None:
+    from src.core.autocut import EDLGenerator
+    events = [
+        {
+            "video_path": "clip1.mp4",
+            "src_in": 1.0,
+            "src_out": 4.0,
+            "rec_in": 0.0,
+            "rec_out": 3.0,
+            "fps": 30.0
+        },
+        {
+            "video_path": "clip2.mp4",
+            "src_in": 2.0,
+            "src_out": 5.0,
+            "rec_in": 3.0,
+            "rec_out": 6.0,
+            "fps": 30.0
+        }
+    ]
+    output_edl = os.path.join(tmp_path, "multi.edl")
+    EDLGenerator.create_multi_clip_edl(events, output_edl)
+    
+    assert os.path.exists(output_edl)
+    with open(output_edl, "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    assert "TITLE: Silence Cut Multi-Clip" in content
+    assert "001  AX       V     C        00:00:01:00 00:00:04:00 00:00:00:00 00:00:03:00" in content
+    assert "* FROM CLIP NAME: clip1.mp4" in content
+    assert "002  AX       V     C        00:00:02:00 00:00:05:00 00:00:03:00 00:00:06:00" in content
+    assert "* FROM CLIP NAME: clip2.mp4" in content

@@ -17,42 +17,27 @@ class PipelineWorker(QThread):
     progress_signal = pyqtSignal(int)
     finished_signal = pyqtSignal(bool, str)
 
-    def __init__(self, video_path, model_size, language, run_cut, silence_db, min_duration, max_chars):
+    def __init__(self, video_paths, model_size, language, run_cut, silence_db, min_duration, max_chars, font_name, font_size):
         super().__init__()
-        self.video_path = video_path
+        self.video_paths = video_paths
         self.model_size = model_size
         self.language = language
         self.run_cut = run_cut
         self.silence_db = silence_db
         self.min_duration = min_duration
         self.max_chars = max_chars
+        self.font_name = font_name
+        self.font_size = font_size
 
     def run(self):
         try:
-            self.log_signal.emit("🚀 Đang khởi động ResolveFlow-Assistant...")
+            self.log_signal.emit("🚀 Đang khởi động ResolveFlow-Assistant v2.0 (Quy trình hàng loạt)...")
             self.progress_signal.emit(5)
 
-            # Lấy đường dẫn cơ sở của tệp video
-            base_dir = os.path.dirname(self.video_path)
-            base_name = os.path.splitext(os.path.basename(self.video_path))[0]
-            output_wav = os.path.join(base_dir, f"{base_name}_extracted.wav")
-
-            # -------------------------------------------------------------
-            # Bước 1: Trích xuất kênh âm thanh bằng FFmpeg
-            # -------------------------------------------------------------
-            self.log_signal.emit("🔊 Bước 1/4: Đang trích xuất audio bằng FFmpeg...")
-            from src.core.audio import AudioExtractor
-            AudioExtractor.extract_audio(self.video_path, output_wav)
-            self.log_signal.emit("   ✔ Trích xuất âm thanh thành công.")
-            self.progress_signal.emit(30)
-
-            # -------------------------------------------------------------
-            # Bước 2: Tải model AI và thực hiện nhận diện STT
-            # -------------------------------------------------------------
-            self.log_signal.emit(f"🤖 Bước 2/4: Đang tải mô hình Whisper AI '{self.model_size}' lên GPU/CPU...")
+            # Khởi tạo mô hình Whisper AI một lần duy nhất cho toàn danh sách
+            self.log_signal.emit(f"🤖 Tải mô hình Whisper AI '{self.model_size}'...")
             from src.core.transcriber import ModelConfig, ResolveTranscriber
             
-            # Cấu hình Pydantic ModelConfig
             model_config = ModelConfig(
                 model_size=self.model_size,
                 device="cuda",
@@ -61,78 +46,168 @@ class PipelineWorker(QThread):
             transcriber = ResolveTranscriber(model_config)
             transcriber.load_model()
             
-            self.log_signal.emit("   ✔ Đang tiến hành dịch giọng nói thô ngoại tuyến...")
-            self.progress_signal.emit(50)
-            
-            # Xác định ngôn ngữ dịch (Auto nếu là tự động phát hiện)
-            lang_code = None if self.language == "Auto" else ("vi" if self.language == "Tiếng Việt" else "en")
-            subtitles = transcriber.transcribe(output_wav, language=lang_code)
-            self.log_signal.emit(f"   ✔ Hoàn thành dịch. Phát hiện {len(subtitles)} phân đoạn.")
-            self.progress_signal.emit(72)
-            
-            # Tách/Ngắt chữ thành các dòng ngắn gọn theo max_chars
-            from src.core.resolve_api import split_subtitles
-            self.log_signal.emit(f"   📝 Đang ngắt phụ đề theo giới hạn: {self.max_chars} ký tự/dòng...")
-            subtitles = split_subtitles(subtitles, self.max_chars)
-            self.log_signal.emit(f"   ✔ Đã xử lý ngắt câu xong.")
-            self.progress_signal.emit(75)
-
-            # -------------------------------------------------------------
-            # Bước 3: Vẽ phụ đề tự động lên DaVinci Resolve
-            # -------------------------------------------------------------
-            self.log_signal.emit("✏ Bước 3/4: Đang kết nối DaVinci Resolve để chèn phụ đề...")
+            # Kết nối DaVinci Resolve để kiểm tra
             from src.core.resolve_api import SubtitleConfig, ResolveAutomation
             resolve_auto = ResolveAutomation()
-            
-            # Tự động mở DaVinci Resolve nếu chưa mở
             resolve_auto.ensure_resolve_running(log_callback=self.log_signal.emit)
+
+            # Cấu hình cắt khoảng lặng
+            from src.core.autocut import AudioCutConfig, SilenceDetector, EDLGenerator
+            cut_config = AudioCutConfig(
+                min_silent_duration=self.min_duration,
+                silence_threshold_db=self.silence_db,
+                padding_seconds=0.25
+            )
+
+            from src.core.audio import AudioExtractor
+            from src.core.resolve_api import split_subtitles
+
+            # Danh sách tích lũy các khoảng thoại và phụ đề để ghép nối
+            merged_edl_events = []
+            merged_subtitles = []
+            cumulative_record_seconds = 0.0
+
+            # Lấy thư mục của tệp đầu tiên để làm đầu ra cho tệp ghép nối
+            first_video = self.video_paths[0]
+            base_dir = os.path.dirname(first_video)
             
+            # Tên file cho tệp ghép nối tổng hợp
+            if len(self.video_paths) == 1:
+                stamped_name = os.path.splitext(os.path.basename(first_video))[0]
+            else:
+                stamped_name = f"ResolveFlow_Merged_{len(self.video_paths)}clips"
+
+            total_clips = len(self.video_paths)
+            for idx, video_path in enumerate(self.video_paths):
+                self.log_signal.emit(f"\n🎬 [Clip {idx+1}/{total_clips}] Bắt đầu xử lý: {os.path.basename(video_path)}")
+                
+                # Trích xuất âm thanh
+                clip_base_name = os.path.splitext(os.path.basename(video_path))[0]
+                temp_wav = os.path.join(base_dir, f"{clip_base_name}_temp_extracted.wav")
+                
+                self.log_signal.emit(f"   🔊 Trích xuất audio...")
+                AudioExtractor.extract_audio(video_path, temp_wav)
+                
+                # Transcribe
+                self.log_signal.emit(f"   🎙 Dịch giọng nói...")
+                lang_code = None if self.language == "Auto" else ("vi" if self.language == "Tiếng Việt" else "en")
+                subtitles = transcriber.transcribe(temp_wav, language=lang_code)
+                self.log_signal.emit(f"   ✔ Phát hiện {len(subtitles)} đoạn thoại.")
+                
+                # Cắt khoảng lặng
+                self.log_signal.emit(f"   ✂ Lọc khoảng lặng...")
+                keep_intervals = SilenceDetector.detect_silence_from_wav(temp_wav, cut_config)
+                self.log_signal.emit(f"   ✔ Giữ lại {len(keep_intervals)} phân đoạn âm thanh.")
+
+                # Xử lý ghép nối (Stitching)
+                if keep_intervals:
+                    # FPS của clip
+                    fps = EDLGenerator.get_video_fps(video_path)
+                    
+                    for k_start, k_end in keep_intervals:
+                        dur = k_end - k_start
+                        rec_start = cumulative_record_seconds
+                        rec_end = rec_start + dur
+                        
+                        # Tạo event EDL
+                        merged_edl_events.append({
+                            "video_path": video_path,
+                            "src_in": k_start,
+                            "src_out": k_end,
+                            "rec_in": rec_start,
+                            "rec_out": rec_end,
+                            "fps": fps
+                        })
+                        
+                        # Bản đồ phụ đề tương ứng rơi vào keep_interval này
+                        for sub in subtitles:
+                            if sub["start"] >= k_start and sub["end"] <= k_end:
+                                offset_start = rec_start + (sub["start"] - k_start)
+                                offset_end = rec_start + (sub["end"] - k_start)
+                                merged_subtitles.append({
+                                    "start": offset_start,
+                                    "end": offset_end,
+                                    "text": sub["text"],
+                                    "words": sub.get("words", [])
+                                })
+                                
+                        cumulative_record_seconds = rec_end
+                else:
+                    # Video câm hoặc không có lời nói (B-roll / Cảnh lót): Tự động giữ nguyên 100% thời lượng clip
+                    self.log_signal.emit(f"   ℹ Không phát hiện tiếng nói. Tự động giữ nguyên 100% thời lượng clip (B-roll mode).")
+                    try:
+                        clip_dur = AudioExtractor.get_audio_duration(video_path)
+                    except Exception:
+                        clip_dur = 0.0
+                    
+                    if clip_dur > 0:
+                        fps = EDLGenerator.get_video_fps(video_path)
+                        rec_start = cumulative_record_seconds
+                        rec_end = rec_start + clip_dur
+                        merged_edl_events.append({
+                            "video_path": video_path,
+                            "src_in": 0.0,
+                            "src_out": clip_dur,
+                            "rec_in": rec_start,
+                            "rec_out": rec_end,
+                            "fps": fps
+                        })
+                        cumulative_record_seconds = rec_end
+
+                # Dọn dẹp tệp WAV tạm thời
+                try:
+                    if os.path.exists(temp_wav):
+                        os.remove(temp_wav)
+                except Exception:
+                    pass
+
+                # Cập nhật tiến độ hàng đợi
+                progress_val = int((idx + 1) / total_clips * 80)
+                self.progress_signal.emit(progress_val)
+
+            # Ngắt câu phụ đề đã ghép nối dựa trên max_chars
+            if merged_subtitles:
+                self.log_signal.emit(f"\n📝 Đang định dạng và ngắt câu cho phụ đề ghép nối ({self.max_chars} ký tự/dòng)...")
+                merged_subtitles = split_subtitles(merged_subtitles, self.max_chars)
+
+            # Xuất file phụ đề tổng hợp SRT
+            output_srt = os.path.join(base_dir, f"{stamped_name}.srt")
             sub_config = SubtitleConfig()
-            output_srt = os.path.join(base_dir, f"{base_name}.srt")
             resolve_auto.insert_subtitles_to_timeline(
-                subtitles, 
+                merged_subtitles, 
                 sub_config, 
                 output_srt_path=output_srt,
                 log_callback=self.log_signal.emit
             )
             self.progress_signal.emit(90)
 
-            # -------------------------------------------------------------
-            # Bước 4: Tự động cắt khoảng lặng thông minh (Tùy chọn)
-            # -------------------------------------------------------------
-            if self.run_cut:
-                self.log_signal.emit("✂ Bước 4/4: Đang phân tích sóng âm thô PCM để cắt khoảng lặng...")
-                from src.core.autocut import AudioCutConfig, SilenceDetector, EDLGenerator
+            # Xuất file phụ đề động Karaoke FCPXML
+            output_fcpxml = os.path.join(base_dir, f"{stamped_name}_karaoke.fcpxml")
+            self.log_signal.emit(f"📝 Đang tạo tệp phụ đề động Karaoke (FCPXML) tại:\n      👉 {os.path.abspath(output_fcpxml)}")
+            from src.core.fcpxml_generator import FCPXMLGenerator
+            
+            FCPXMLGenerator.generate_karaoke_fcpxml(
+                subtitles=merged_subtitles,
+                output_path=output_fcpxml,
+                font_name=self.font_name,
+                font_size=self.font_size
+            )
+
+            # Tạo file EDL ghép nối và import vào Resolve
+            if merged_edl_events and self.run_cut:
+                output_edl = os.path.join(base_dir, f"{stamped_name}_cut.edl")
+                self.log_signal.emit(f"📝 Đang tạo tệp Edit Decision List (EDL) ghép nối tại:\n      👉 {os.path.abspath(output_edl)}")
+                EDLGenerator.create_multi_clip_edl(merged_edl_events, output_edl)
                 
-                cut_config = AudioCutConfig(
-                    min_silent_duration=self.min_duration,
-                    silence_threshold_db=self.silence_db,
-                    padding_seconds=0.25
+                self.log_signal.emit("🤖 Đang gửi yêu cầu import EDL ghép nối sang DaVinci Resolve...")
+                timeline_name = f"{stamped_name}_Silent_Cut"
+                resolve_auto.import_edl_to_timeline(
+                    edl_path=output_edl,
+                    video_path=first_video,
+                    timeline_name=timeline_name,
+                    log_callback=self.log_signal.emit
                 )
-                
-                keep_intervals = SilenceDetector.detect_silence_from_wav(output_wav, cut_config)
-                self.log_signal.emit(f"   ✔ Đã phát hiện {len(keep_intervals)} khoảng âm nói.")
-                
-                if keep_intervals:
-                    output_edl = os.path.join(base_dir, f"{base_name}_cut.edl")
-                    self.log_signal.emit(f"   📝 Đang tạo tệp Edit Decision List (EDL) tại:\n      👉 {os.path.abspath(output_edl)}")
-                    EDLGenerator.create_edl(self.video_path, keep_intervals, output_edl)
-                    
-                    self.log_signal.emit("   🤖 Đang cố gắng gửi yêu cầu import EDL sang DaVinci Resolve...")
-                    timeline_name = f"{base_name}_Silent_Cut"
-                    resolve_auto.import_edl_to_timeline(
-                        edl_path=output_edl,
-                        video_path=self.video_path,
-                        timeline_name=timeline_name,
-                        log_callback=self.log_signal.emit
-                    )
-                else:
-                    self.log_signal.emit("   ⚠ Không phát hiện đoạn thoại nào, bỏ qua việc tạo EDL.")
-            
-            # Giải phóng VRAM
-            self.log_signal.emit("♻ Giải phóng bộ nhớ đệm AI VRAM...")
-            transcriber.unload_model()
-            
+
             self.progress_signal.emit(100)
             self.log_signal.emit("🎉 Quy trình tự động hóa ResolveFlow hoàn thành mỹ mãn!")
             self.finished_signal.emit(True, "Hoàn thành!")
@@ -140,6 +215,12 @@ class PipelineWorker(QThread):
         except Exception as e:
             self.log_signal.emit(f"❌ Gặp lỗi nghiêm trọng: {str(e)}")
             self.finished_signal.emit(False, str(e))
+        finally:
+            try:
+                transcriber.unload_model()
+            except Exception:
+                pass
+
 
 
 class ResolveFlowApp(QMainWindow):
@@ -148,9 +229,10 @@ class ResolveFlowApp(QMainWindow):
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ResolveFlow Assistant v1.0 - AI Video Automation Suite")
+        self.setWindowTitle("ResolveFlow Assistant v2.0 - AI Video Automation Suite")
         self.resize(950, 650)
         self.worker = None
+        self.selected_files = []
         self._init_ui()
         self._apply_stylesheet()
 
@@ -360,13 +442,18 @@ class ResolveFlowApp(QMainWindow):
         self.setStyleSheet(stylesheet)
 
     def _browse_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_paths, _ = QFileDialog.getOpenFileNames(
             self, "Chọn Tệp Video nguồn", "", "Video files (*.mp4 *.mov *.mkv *.avi);;All files (*.*)"
         )
-        if file_path:
-            self.lbl_file.setText(file_path)
-            self.txt_console.appendPlainText(f"📁 Đã chọn tệp: {file_path}")
-            self._update_default_chars_limit(file_path)
+        if file_paths:
+            self.selected_files = file_paths
+            if len(file_paths) == 1:
+                self.lbl_file.setText(file_paths[0])
+                self.txt_console.appendPlainText(f"📁 Đã chọn tệp: {file_paths[0]}")
+            else:
+                self.lbl_file.setText("; ".join(file_paths))
+                self.txt_console.appendPlainText(f"📁 Đã chọn hàng loạt {len(file_paths)} tệp video.")
+            self._update_default_chars_limit(file_paths[0])
 
     def _auto_detect_video(self):
         from src.core.resolve_api import ResolveAutomation
@@ -378,11 +465,16 @@ class ResolveFlowApp(QMainWindow):
             self.txt_console.appendPlainText("❌ Lỗi: Không thể kết nối tới DaVinci Resolve. Đảm bảo phần mềm đang mở và đã bật API scripting.")
             return
             
-        file_path = resolve_auto.auto_detect_video_path()
-        if file_path:
-            self.lbl_file.setText(file_path)
-            self.txt_console.appendPlainText(f"✔ Tự động phát hiện video thành công!\n👉 Tệp: {file_path}")
-            self._update_default_chars_limit(file_path)
+        file_paths = resolve_auto.auto_detect_video_paths()
+        if file_paths:
+            self.selected_files = file_paths
+            if len(file_paths) == 1:
+                self.lbl_file.setText(file_paths[0])
+                self.txt_console.appendPlainText(f"✔ Tự động phát hiện video thành công!\n👉 Tệp: {file_paths[0]}")
+            else:
+                self.lbl_file.setText("; ".join(file_paths))
+                self.txt_console.appendPlainText(f"✔ Tự động phát hiện {len(file_paths)} video từ Resolve thành công!")
+            self._update_default_chars_limit(file_paths[0])
         else:
             self.txt_console.appendPlainText("⚠ Không phát hiện được video nào đang được chọn trong Media Pool hoặc Timeline. Vui lòng chọn thủ công.")
 
@@ -399,8 +491,13 @@ class ResolveFlowApp(QMainWindow):
             pass
 
     def _run_pipeline(self):
-        video_path = self.lbl_file.text()
-        if not video_path:
+        video_paths = getattr(self, "selected_files", [])
+        if not video_paths:
+            video_path = self.lbl_file.text()
+            if video_path:
+                video_paths = [video_path]
+
+        if not video_paths:
             self.txt_console.appendPlainText("❌ Lỗi: Vui lòng chọn tệp video trước khi khởi chạy!")
             return
 
@@ -418,15 +515,23 @@ class ResolveFlowApp(QMainWindow):
         except ValueError:
             max_chars = 42
 
+        font_name = self.txt_font.text()
+        try:
+            font_size = int(self.txt_size.text())
+        except ValueError:
+            font_size = 48
+
         # Khởi tạo Worker Thread để chạy nền
         self.worker = PipelineWorker(
-            video_path=video_path,
+            video_paths=video_paths,
             model_size=model_size,
             language=language,
             run_cut=run_cut,
             silence_db=silence_db,
             min_duration=min_duration,
-            max_chars=max_chars
+            max_chars=max_chars,
+            font_name=font_name,
+            font_size=font_size
         )
 
         # Kết nối tín hiệu

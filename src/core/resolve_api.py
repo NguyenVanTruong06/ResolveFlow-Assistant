@@ -105,48 +105,38 @@ class ResolveAutomation:
             log(" ❌ Không tìm thấy đường dẫn cài đặt mặc định của DaVinci Resolve tại C:\\Program Files\\...")
         return False
 
-    def auto_detect_video_path(self) -> Optional[str]:
+    def auto_detect_video_paths(self) -> List[str]:
         """
-        Tự động phát hiện đường dẫn tệp video đang hoạt động trong DaVinci Resolve.
+        Tự động phát hiện danh sách đường dẫn các tệp video đang hoạt động trong DaVinci Resolve.
         Thử theo thứ tự ưu tiên:
-        1. Thử lấy từ các clip đang được chọn trong Media Pool (GetSelectedClips).
-        2. Thử lấy từ clip nằm ngay dưới thanh trượt Playhead trên Timeline hiện tại (GetCurrentVideoItem).
-        3. Thử lấy clip đầu tiên trên track Video 1 của Timeline hiện tại.
+        1. Lấy tất cả clip đang được chọn trong Media Pool (GetSelectedClips).
+        2. Lấy toàn bộ clip trên track Video 1 của Timeline hiện tại.
+        3. Lấy clip dưới Playhead trên Timeline hiện tại.
 
         Returns:
-            str: Đường dẫn tuyệt đối tới tệp video nguồn, hoặc None nếu không phát hiện được.
+            List[str]: Danh sách các đường dẫn tệp video nguồn hợp lệ.
         """
         if not self.resolve or not self.current_project:
             if not self.connect():
-                return None
+                return []
 
+        paths = []
         # 1. Thử lấy từ các clip đang chọn trong Media Pool
         try:
             media_pool = self.current_project.GetMediaPool()
             if media_pool:
                 selected_clips = media_pool.GetSelectedClips()
                 if selected_clips:
-                    file_path = selected_clips[0].GetClipProperty("File Path")
-                    if file_path and os.path.exists(file_path):
-                        return file_path
+                    for clip in selected_clips:
+                        file_path = clip.GetClipProperty("File Path")
+                        if file_path and os.path.exists(file_path) and file_path not in paths:
+                            paths.append(file_path)
+                    if paths:
+                        return paths
         except Exception:
             pass
 
-        # 2. Thử lấy từ clip dưới Playhead trên Timeline hiện tại
-        try:
-            timeline = self.get_active_timeline()
-            if timeline:
-                current_video_item = timeline.GetCurrentVideoItem()
-                if current_video_item:
-                    media_pool_item = current_video_item.GetMediaPoolItem()
-                    if media_pool_item:
-                        file_path = media_pool_item.GetClipProperty("File Path")
-                        if file_path and os.path.exists(file_path):
-                            return file_path
-        except Exception:
-            pass
-
-        # 3. Thử lấy clip đầu tiên trên track Video 1
+        # 2. Thử lấy toàn bộ clip trên track Video 1 của Timeline hiện tại
         try:
             timeline = self.get_active_timeline()
             if timeline:
@@ -156,12 +146,37 @@ class ResolveAutomation:
                         media_pool_item = item.GetMediaPoolItem()
                         if media_pool_item:
                             file_path = media_pool_item.GetClipProperty("File Path")
-                            if file_path and os.path.exists(file_path):
-                                return file_path
+                            if file_path and os.path.exists(file_path) and file_path not in paths:
+                                paths.append(file_path)
+                    if paths:
+                        return paths
         except Exception:
             pass
 
-        return None
+        # 3. Thử lấy từ clip dưới Playhead trên Timeline hiện tại
+        try:
+            timeline = self.get_active_timeline()
+            if timeline:
+                current_video_item = timeline.GetCurrentVideoItem()
+                if current_video_item:
+                    media_pool_item = current_video_item.GetMediaPoolItem()
+                    if media_pool_item:
+                        file_path = media_pool_item.GetClipProperty("File Path")
+                        if file_path and os.path.exists(file_path) and file_path not in paths:
+                            paths.append(file_path)
+                    if paths:
+                        return paths
+        except Exception:
+            pass
+
+        return paths
+
+    def auto_detect_video_path(self) -> Optional[str]:
+        """
+        Tự động phát hiện đường dẫn tệp video đơn lẻ đang hoạt động trong DaVinci Resolve.
+        """
+        paths = self.auto_detect_video_paths()
+        return paths[0] if paths else None
 
     def get_active_timeline(self) -> Optional[Any]:
         """

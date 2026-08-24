@@ -8,6 +8,7 @@
 | Phiên bản | Ngày | Tác giả | Mô tả thay đổi |
 | :--- | :--- | :--- | :--- |
 | 1.0 | 24/08/2026 | Nguyễn Văn Trường / Antigravity | Khởi tạo tài liệu đặc tả SRS ban đầu cho ResolveFlow Assistant |
+| 2.0 | 24/08/2026 | Nguyễn Văn Trường / Antigravity | Nâng cấp SRS lên v2.0: Quy trình dựng đa góc quay/đa clip và Phụ đề động Kinetic animated |
 
 ---
 
@@ -178,6 +179,30 @@ Hệ thống tận dụng tối đa kiến trúc phần cứng cục bộ, đặ
   2. Hệ thống phân tích sóng âm của track audio.
   3. Sinh mã lệnh hoặc tạo file XML/EDL tương thích với Resolve để thực hiện thao tác cắt (Cut/Slice) và kéo các đoạn có âm thanh sát lại với nhau (Ripple Delete).
 
+#### 3.2.4 Tính năng 4: Dựng hàng loạt & Ghép nối chuỗi Video (Batch & Multi-Clip Sequencing) [v2.0]
+* **Mục đích:** Hỗ trợ quy trình dựng phim rảnh tay bằng cách xếp hàng loạt clip thô vào hàng đợi xử lý, tự động lọc khoảng lặng cho từng clip và ghép nối chúng liên tiếp trên một Timeline duy nhất theo mốc thời gian luỹ tiến.
+* **Trình tự Kích hoạt/Phản hồi (Stimulus/Response):**
+  1. Người dùng chọn nhiều file video (hoặc cả thư mục chứa video).
+  2. Hệ thống tạo Batch Processing Queue để chạy tuần tự hoặc song song việc trích xuất audio và lọc khoảng lặng.
+  3. Khi xuất tệp EDL hoặc chèn Timeline, hệ thống tính toán thời lượng thực và cộng dồn điểm ghép (`Timeline In/Out`) của clip tiếp theo ngay tại frame kế tiếp của clip trước.
+  4. Xuất ra 1 timeline duy nhất được xếp hoàn hảo các cú quay đã lọc sạch khoảng lặng.
+* **Các yêu cầu chức năng chi tiết:**
+  - **FR-4.1:** Hỗ trợ Batch Processing Queue, hiển thị tiến độ tổng thể của danh sách hàng đợi.
+  - **FR-4.2:** Tự động sắp xếp các clip theo thời gian ghi hình (Timecode hoặc Creation Time) để đảm bảo trình tự dựng chính xác.
+  - **FR-4.3 (Auto-take filtering):** Phân tích và phát hiện các câu nói bị vấp/lặp (Multi-takes) để lọc và chỉ giữ lại cú quay thành công nhất (ví dụ: Take cuối cùng).
+
+#### 3.2.5 Tính năng 5: Phụ đề động Karaoke & Hiệu ứng chữ (Animated Karaoke Subtitles) [v2.0]
+* **Mục đích:** Tạo hiệu ứng chữ nảy động (Bounce/Pop-up) và thay đổi màu sắc nổi bật (Highlight) từng từ một theo nhịp nói giống như CapCut để thu hút người xem.
+* **Trình tự Kích hoạt/Phản hồi (Stimulus/Response):**
+  - Sử dụng thông tin word-level timestamps của Whisper để nhóm 2-4 từ thành một card phụ đề ngắn.
+  - Tạo cấu trúc Fusion Text+ Template với tính năng Character Level Styling (CLS).
+  - Ghi keyframe thay đổi tỷ lệ (Scale: `1.0 -> 1.2 -> 1.0`) và màu sắc (Trắng -> Vàng) khớp chính xác với thời gian bắt đầu/kết thúc phát âm của từng từ.
+  - Kết xuất ra file định dạng FCPXML chứa sẵn các layer Text+ Modifier này để import vào Resolve.
+* **Các yêu cầu chức năng chi tiết:**
+  - **FR-5.1:** Hỗ trợ tạo Karaoke Word Highlight (chữ đổi màu chạy theo nhịp đọc).
+  - **FR-5.2:** Hỗ trợ các kiểu chuyển động chữ nảy (Kinetic Bounce, Pop-up, Zoom In).
+  - **FR-5.3:** Xuất tệp FCPXML (.fcpxml) tích hợp keyframes chuyển động để người dùng Resolve bản Free/Studio có thể import thẳng mà không bị mất hiệu ứng.
+
 ---
 
 ### 3.3 Yêu cầu hiệu năng (Performance Requirements)
@@ -222,9 +247,13 @@ Dưới đây là bảng ma trận truy vết yêu cầu (Traceability Matrix) g
 
 | Mã yêu cầu | Mô tả chi tiết | Module triển khai | Độ ưu tiên (H/M/L) | Trạng thái hiện tại |
 | :--- | :--- | :--- | :--- | :--- |
-| **REQ-STT-01** | Trích xuất âm thanh từ Timeline | `src/core/audio.py` | **High (H)** | Đã lên thiết kế |
-| **REQ-STT-02** | Nhận diện giọng nói offline bằng GPU | `src/core/transcriber.py` | **High (H)** | Đã lên thiết kế |
-| **REQ-SUB-01** | Tạo tệp phụ đề định dạng SRT/VTT | `src/core/subtitle.py` | **High (H)** | Đã lên thiết kế |
-| **REQ-SUB-02** | Chèn phụ đề tự động thành Text+ trong Resolve | `src/core/resolve_api.py` | **High (H)** | Đã lên thiết kế |
-| **REQ-CUT-01** | Tự động phát hiện khoảng lặng & cắt video | `src/core/autocut.py` | **Medium (M)** | Đang nghiên cứu |
-| **REQ-GUI-01** | Giao diện điều khiển ứng dụng trực quan | `src/ui/app.py` | **Medium (M)** | Đang nghiên cứu |
+| **REQ-STT-01** | Trích xuất âm thanh từ Timeline | `src/core/audio.py` | **High (H)** | Đã triển khai |
+| **REQ-STT-02** | Nhận diện giọng nói offline bằng GPU | `src/core/transcriber.py` | **High (H)** | Đã triển khai |
+| **REQ-SUB-01** | Tạo tệp phụ đề định dạng SRT/VTT | `src/core/subtitle.py` | **High (H)** | Đã triển khai |
+| **REQ-SUB-02** | Chèn phụ đề tự động thành Text+ trong Resolve | `src/core/resolve_api.py` | **High (H)** | Đã triển khai |
+| **REQ-CUT-01** | Tự động phát hiện khoảng lặng & cắt video | `src/core/autocut.py` | **Medium (M)** | Đã triển khai |
+| **REQ-GUI-01** | Giao diện điều khiển ứng dụng trực quan | `src/ui/app.py` | **Medium (M)** | Đã triển khai |
+| **REQ-BATCH-01** | Xếp hàng đợi xử lý hàng loạt nhiều video [v2.0] | `src/ui/app.py` | **Medium (M)** | Đang lên kế hoạch |
+| **REQ-STITCH-01** | Ghép nối chuỗi EDL / Timeline liên tục [v2.0] | `src/core/autocut.py` | **High (H)** | Đang lên kế hoạch |
+| **REQ-KARA-01** | Highlight đổi màu từng từ Karaoke [v2.0] | `src/core/resolve_api.py` | **Medium (M)** | Đang lên kế hoạch |
+| **REQ-ANIM-01** | Kinetic Text Pop-up nảy chữ bằng FCPXML [v2.0] | `src/core/resolve_api.py` | **Medium (M)** | Đang lên kế hoạch |
