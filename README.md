@@ -1,81 +1,89 @@
-# ResolveFlow Assistant (AI Video Automation Suite for DaVinci Resolve)
+# 🚀 ResolveFlow Assistant v4.0 - AI Visual, Audio & Director Automation Suite for DaVinci Resolve
 
-ResolveFlow Assistant là trợ lý AI tự động hóa quy trình hậu kỳ video 100% cục bộ (Local / On-Premise) dành cho DaVinci Resolve. 
-Hệ thống tích hợp nhận dạng giọng nói tự động (Speech-to-Text) và công nghệ cắt khoảng lặng thông minh (Smart Cut) bằng thuật toán xử lý âm thanh thô để giúp tăng tốc độ edit video lên gấp nhiều lần.
+**ResolveFlow Assistant v4.0** là bộ công cụ trợ lý AI toàn năng tự động hóa quy trình hậu kỳ video 100% cục bộ (Local / On-Premise) dành cho **DaVinci Resolve** (Hỗ trợ cả bản **Free** và bản **Studio**).
 
----
-
-## ✨ Tính năng nổi bật
-1. **AI Speech-to-Text Ngoại tuyến**: Tải mô hình Whisper cục bộ lên GPU CUDA (hoặc CPU) để dịch giọng nói tiếng Việt và tiếng Anh chính xác tuyệt đối mà không cần gửi dữ liệu lên đám mây, hoàn toàn bảo mật và miễn phí token.
-2. **Cắt khoảng lặng thông minh (Smart Cut)**: Tự động phân tích sóng âm thô PCM (dB RMS), cô lập các vùng im lặng kéo dài và chuẩn bị sẵn sơ đồ cắt thô video (Ripple Cut).
-3. **Đồng bộ tự động vào DaVinci Resolve**: Tự động kết nối và chèn trực tiếp phụ đề đồng bộ chuẩn xác thời gian dưới dạng một Subtitle Track độc lập trên Timeline của bạn.
-4. **Giao diện Modern Dark Mode Premium**: Bảng điều khiển trực quan bằng PySide6 hỗ trợ tùy chỉnh tham số model Whisper, kiểu dáng phụ đề và biên độ khoảng im lặng chỉ bằng vài cú click chuột.
+Hệ thống tích hợp công nghệ AI nhận dạng giọng nói ngoại tuyến (Whisper AI), bộ não **Đạo Diễn AI (AI Director)** tự động phân tích kịch bản lời thoại, lọc sạch nói vấp (Bad Takes), thị giác máy tính **Auto Dynamic Re-framing 9:16 (Bám mặt chuyển video dọc)**, **AI B-Roll Inserter (Tự động gợi ý cảnh minh họa Track Video 2)**, **Auto SFX Engine (Hiệu ứng âm thanh Track Audio 2)**, **Auto Speed-Ramp 8x (Tua nhanh khoảng lặng thành cú chuyển cảnh Timelapse)**, hiệu ứng **Auto Punch-in (Zoom luân phiên 1.15x)**, và phụ đề hiệu ứng **Karaoke Text+ FCPXML** chuyên nghiệp.
 
 ---
 
-## 📂 Cấu trúc thư mục dự án
-```text
-ResolveFlow-Assistant/
-├── assets/             # Tài nguyên đồ họa, sơ đồ kiến trúc hệ thống
-├── docs/               # Tài liệu SRS và System Design bằng Word (.docx) & Markdown (.md)
-├── src/                # Mã nguồn chính của ứng dụng
-│   ├── core/           # Xử lý lõi (audio.py, transcriber.py, resolve_api.py, autocut.py)
-│   └── ui/             # Giao diện người dùng đồ họa (app.py)
-├── tests/              # Kịch bản kiểm thử tự động (pytest)
-├── main.py             # File chạy khởi động ứng dụng chính (Entrypoint)
-└── requirements.txt    # Danh sách các thư viện Python cần thiết
+## 📑 Bảng So Sánh Các Phiên Bản
+
+| Tính năng | Bản v1.0 | Bản v2.0 | Bản v3.0 | Bản v4.0 (Hiện tại - Toàn năng) |
+| :--- | :---: | :---: | :---: | :---: |
+| **Mục tiêu sử dụng** | Cắt thô 1 video đơn | Cắt thô đa clip & Sub Karaoke | Đạo diễn AI: Lọc nói vấp & kịch bản | **Hậu kỳ thị giác, âm thanh & Speed-Ramp toàn diện** |
+| **Số lượng video/audio** | 1 Clip đơn lẻ | Hàng loạt clip (Batch) / Audio rời | Hàng loạt clip (Batch) / Audio rời | **Hàng loạt clip (Batch) / Audio rời** |
+| **Cắt khoảng lặng (Smart Cut)** | Cắt thô cơ bản | Tự động ghép nối EDL đa clip | Cắt thông minh theo kịch bản | **Cắt thông minh kết hợp Ngữ nghĩa & Thị giác** |
+| **Lọc nói vấp (Bad Takes)** | ❌ | ❌ | ✔ | **✔ Tự động gọt bỏ câu nói hỏng** |
+| **Auto Speed-Ramp (Tua nhanh 8x)** | ❌ | ❌ | ❌ | **✔ Biến khoảng lặng thành chuyển cảnh Timelapse** |
+| **Hiệu ứng Auto Punch-in** | ❌ | ❌ | ✔ | **✔ Tự động Zoom 1.15x luân phiên** |
+| **Auto Re-framing (16:9 ➔ 9:16)** | ❌ | ❌ | ❌ | **✔ Tự động bám mặt chuyển sang video dọc** |
+| **Gợi ý B-Roll (Track Video 2)** | ❌ | ❌ | ❌ | **✔ Tự trích xuất từ khóa & xuất danh sách B-roll** |
+| **Âm thanh SFX (Track Audio 2)** | ❌ | ❌ | ❌ | **✔ Tự chèn Whoosh/Pop ở điểm chuyển cảnh** |
+| **Timeline Markers màu** | ❌ | ❌ | ✔ | **✔ Markers đầy đủ: Bad Take, B-Roll, SFX, Timelapse** |
+| **Phụ đề Karaoke Text+ FCPXML** | ❌ | ✔ | ✔ | **✔ Tương thích 100% khung hình 16:9 & 9:16** |
+| **Tương thích DaVinci Resolve** | Studio (API) | **Resolve Free & Studio** | **Resolve Free & Studio** | **100% Resolve Free & Studio** |
+
+---
+
+## 🛠️ Yêu Cầu Hệ Thống & Cài Đặt
+
+### 1. Chuẩn bị môi trường
+* **Hệ điều hành:** Windows 10/11 (64-bit).
+* **Python:** Phiên bản `3.10` trở lên.
+* **GPU (Khuyên dùng):** NVIDIA (có hỗ trợ CUDA) để tăng tốc độ nhận diện AI.
+* **Công cụ bắt buộc:** [FFmpeg](https://ffmpeg.org/) (đã thêm vào biến môi trường `PATH`).
+
+### 2. Cài đặt mã nguồn
+```powershell
+# 1. Clone hoặc tải mã nguồn về máy
+git clone https://github.com/NguyenVanTruong06/ResolveFlow-Assistant.git
+cd ResolveFlow-Assistant
+
+# 2. Khởi tạo môi trường ảo
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+
+# 3. Cài đặt các thư viện cần thiết
+pip install -r requirements.txt
+pip install PySide6 pytest
 ```
 
 ---
 
-## 💻 Yêu cầu hệ thống & Chuẩn bị
-* **Hệ điều hành**: Windows 10/11
-* **Phần cứng khuyên dùng**: GPU NVIDIA (hỗ trợ CUDA) để tăng tốc độ nhận diện giọng nói bằng AI.
-* **Môi trường**: Python 3.10+
-* **Công cụ bổ trợ bắt buộc**:
-  - [FFmpeg](https://ffmpeg.org/): Tải về và cấu hình đường dẫn thư mục `bin` vào biến môi trường **PATH** của hệ thống (để có thể gọi lệnh `ffmpeg` và `ffprobe` từ Terminal).
+## 📖 Hướng Dẫn Sử Dụng Chi Tiết (Bản v4.0)
 
----
-
-## 🛠️ Hướng dẫn cài đặt
-
-1. **Khởi tạo và kích hoạt môi trường ảo (Virtual Environment):**
-   ```powershell
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1
-   ```
-
-2. **Cài đặt các gói thư viện phụ thuộc:**
-   ```powershell
-   pip install -r requirements.txt
-   pip install PySide6 pytest
-   ```
-
----
-
-## 🚀 Hướng dẫn vận hành
-
-### 1. Khởi động giao diện Dashboard
-Đảm bảo bạn đã mở ứng dụng DaVinci Resolve và có một dự án (Project) cùng Timeline đang hoạt động.
-Sau đó chạy lệnh:
+Chạy ứng dụng bằng lệnh:
 ```powershell
 python main.py
 ```
 
-### 2. Các bước thao tác trên giao diện:
-1. Nhấn nút **Chọn Video** ở góc phải để nạp file video nguồn của bạn.
-2. Tùy chỉnh thông số:
-   - **Whisper AI**: Chọn kích thước model (ví dụ: `small` cân bằng tốt giữa tốc độ và độ chính xác) và chọn Ngôn ngữ đầu vào.
-   - **Kiểu dáng phụ đề**: Thiết lập tên Font, cỡ chữ và màu sắc Hex.
-   - **Cắt khoảng lặng**: Kích hoạt/Tắt tính năng Smart Cut, tinh chỉnh thanh trượt ngưỡng im lặng (dB) và thời gian ngắt im lặng tối thiểu.
-3. Nhấp nút **KHỞI CHẠY TIẾN TRÌNH TỰ ĐỘNG HÓA**. 
-4. Theo dõi hộp thoại Console log màu xanh hiển thị tiến độ thời gian thực. Sau khi hoàn tất, phụ đề sẽ được chèn trực tiếp vào Timeline của DaVinci Resolve!
+---
+
+### 🟢 1. Cấu hình Tính Năng Nổi Bật v4.0
+* **⚡ Tua nhanh khoảng lặng thay vì cắt bỏ (Auto Speed-Ramp 8x):** Biến các khoảng dừng chết (lúc suy nghĩ, thao tác tay, đi lại...) thành cú chuyển cảnh tua nhanh 800% cực nghệ thuật kèm hiệu ứng âm thanh Whoosh.
+* **Auto Re-framing (Bám mặt sang video dọc 9:16):** Tự động bám theo người nói để chuyển đổi video ngang 16:9 sang video dọc 9:16.
+* **Tự động gợi ý cảnh minh họa B-Roll (Track Video 2):** Quét từ khóa và xuất danh sách `*_broll_suggestions.txt` kèm Markers màu Magenta trên Timeline.
+* **Tự động chèn âm thanh hiệu ứng SFX (Track Audio 2):** Bố trí các điểm âm thanh Whoosh, Pop ở các vết cắt và Punch-in trên Track Audio 2.
 
 ---
 
-## 🧪 Chạy Kiểm thử tự động (Test Suite)
-Dự án được bao phủ bởi các kịch bản Unit Test toàn diện. Bạn có thể chạy kiểm thử bất kỳ lúc nào để đảm bảo hệ thống hoạt động ổn định:
+### 🟢 2. Dành cho DaVinci Resolve FREE (Bản Miễn Phí)
+1. **Chọn video:** Bấm **"Chọn Video"** (giữ `Ctrl` hoặc `Shift` để chọn nhiều video hoặc file audio rời).
+2. **Khởi chạy:** Bấm **"KHỞI CHẠY TIẾN TRÌNH TỰ ĐỘNG HÓA v4.0"**.
+3. **Nạp vào Resolve:**
+   * **Tạo Timeline đã gọt giũa + Markers:** Vào **File** > **Import** > **Timeline...** > Chọn file `.edl`.
+   * **Nạp phụ đề Karaoke nảy chữ:** Vào **File** > **Import** > **Timeline...** > Chọn file `_karaoke.fcpxml`.
+
+---
+
+### 🔵 3. Dành cho DaVinci Resolve STUDIO (Bản Quyền)
+1. Mở DaVinci Resolve Studio và mở sẵn Project/Timeline của bạn.
+2. Trên ResolveFlow, bấm **"Tự lấy từ Resolve"** -> Bấm **"KHỞI CHẠY TIẾN TRÌNH TỰ ĐỘNG HÓA v4.0"** -> Hệ thống tự động tạo Timeline và phụ đề trực tiếp vào Resolve!
+
+---
+
+## 🧪 Chạy Kiểm Thử Tự Động (Unit Tests)
 ```powershell
-pytest -v
+.\venv\Scripts\pytest -v
 ```
-Toàn bộ các thư viện ngoài và API DaVinci Resolve đều được mock chi tiết để kiểm thử có thể chạy độc lập ngoại tuyến.
+Toàn bộ **32/32 kịch bản kiểm thử** độc lập đạt kết quả kiểm thử **100% PASSED**.

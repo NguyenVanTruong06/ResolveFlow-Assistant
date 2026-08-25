@@ -1,5 +1,5 @@
 import gc
-from typing import Literal, Optional, List, Dict, Any
+from typing import Literal, Optional, List, Dict, Any, Callable
 from pydantic import BaseModel, Field
 
 class ModelConfig(BaseModel):
@@ -61,7 +61,12 @@ class ResolveTranscriber:
             compute_type=compute_type
         )
 
-    def transcribe(self, audio_path: str, language: Optional[str] = None) -> List[Dict[str, Any]]:
+    def transcribe(
+        self,
+        audio_path: str,
+        language: Optional[str] = None,
+        is_cancelled_callback: Optional[Callable[[], bool]] = None
+    ) -> List[Dict[str, Any]]:
         """
         Thực hiện nhận dạng giọng nói ngoại tuyến từ tệp âm thanh.
 
@@ -69,6 +74,7 @@ class ResolveTranscriber:
             audio_path (str): Đường dẫn tệp âm thanh đầu vào (.wav).
             language (str, optional): Mã ngôn ngữ đích (ví dụ: 'vi' cho Tiếng Việt, 'en' cho Tiếng Anh). 
                                      Mặc định là None (Tự động nhận diện ngôn ngữ).
+            is_cancelled_callback (Callable, optional): Hàm kiểm tra yêu cầu hủy luồng từ người dùng.
 
         Returns:
             List[Dict[str, Any]]: Danh sách các phân đoạn hội thoại kèm thời gian start/end và từ đơn.
@@ -89,6 +95,8 @@ class ResolveTranscriber:
 
         results = []
         for segment in segments:
+            if is_cancelled_callback and is_cancelled_callback():
+                break
             words_data = []
             if segment.words:
                 for w in segment.words:

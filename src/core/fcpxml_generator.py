@@ -1,11 +1,13 @@
 import os
 import html
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 class FCPXMLGenerator:
     """
-    Tạo tệp FCPXML (Final Cut Pro XML) chuyên nghiệp tích hợp hiệu ứng phụ đề động Karaoke
-    (đổi màu chữ và phóng to từ đang nói) tương thích hoàn hảo với DaVinci Resolve Free và Studio.
+    Tạo tệp FCPXML (Final Cut Pro XML v1.9) chuyên nghiệp tích hợp:
+    - Hiệu ứng phụ đề động Karaoke (đổi màu chữ và phóng to từ đang nói).
+    - Hỗ trợ định dạng khung hình Ngang 16:9 (1920x1080) và Dọc 9:16 (1080x1920).
+    - Tương thích hoàn hảo với DaVinci Resolve Free và Studio.
     """
     @staticmethod
     def generate_karaoke_fcpxml(
@@ -15,20 +17,24 @@ class FCPXMLGenerator:
         font_name: str = "Arial",
         font_size: int = 48,
         standard_color: str = "1 1 1 1",      # RGBA Trắng
-        highlight_color: str = "1 0.84 0 1"   # RGBA Vàng (#FFD700)
+        highlight_color: str = "1 0.84 0 1",  # RGBA Vàng (#FFD700)
+        aspect_ratio: str = "16:9",           # "16:9" hoặc "9:16"
+        markers: Optional[List[Dict[str, Any]]] = None
     ) -> str:
+        format_name = "FFVideoFormat1080x1920p" if aspect_ratio == "9:16" else "FFVideoFormat1080p"
+        
         # Định nghĩa các tài nguyên
         lines = [
             '<?xml version="1.0" encoding="UTF-8"?>',
             '<!DOCTYPE fcpxml>',
             '<fcpxml version="1.9">',
             '  <resources>',
-            f'    <format id="r1" name="FFVideoFormat1080p" frameDuration="1/{int(fps)}s"/>',
+            f'    <format id="r1" name="{format_name}" frameDuration="1/{int(fps)}s"/>',
             '    <effect id="r2" name="Text+" uid=".../Titles.localized/Bumper.localized/Text+.localized"/>',
             '  </resources>',
             '  <library>',
             '    <event name="ResolveFlow Project">',
-            '      <project name="ResolveFlow Karaoke Timeline">',
+            '      <project name="ResolveFlow Timeline">',
             f'        <sequence duration="3600s" format="r1" tcStart="0s">',
             '          <spine>',
             '            <gap name="Gap" offset="0s" duration="3600s">'
@@ -44,7 +50,6 @@ class FCPXMLGenerator:
             card_text = sub["text"]
 
             if not words:
-                # Nếu không có từ đơn (dự phòng), xuất chữ thường không highlight
                 start_ms = int(card_start * 1000)
                 dur_ms = int((card_end - card_start) * 1000)
                 
@@ -59,12 +64,10 @@ class FCPXMLGenerator:
                 lines.append(title_xml)
                 continue
 
-            # Xuất từng phân đoạn nhỏ tương ứng với thời lượng của mỗi từ
             for w_idx, active_word in enumerate(words):
                 w_start = active_word["start"]
                 w_end = active_word["end"]
                 
-                # Cắt các mốc thời gian thừa nằm ngoài biên của sub card
                 w_start = max(card_start, min(card_end, w_start))
                 w_end = max(card_start, min(card_end, w_end))
                 
@@ -74,7 +77,6 @@ class FCPXMLGenerator:
                 w_start_ms = int(w_start * 1000)
                 w_dur_ms = int((w_end - w_start) * 1000)
 
-                # Dựng chuỗi văn bản XML chứa styling highlight từ active_word
                 text_spans = []
                 for sub_w in words:
                     raw_word = sub_w["word"].strip() + " "
@@ -104,6 +106,16 @@ class FCPXMLGenerator:
               </title>"""
                 lines.append(title_xml)
 
+        # Thêm các Markers ghi chú nếu có
+        if markers:
+            for m in markers:
+                m_start_ms = int(m.get("time", 0.0) * 1000)
+                m_dur_ms = int(m.get("duration", 1.0) * 1000)
+                m_name = html.escape(m.get("name", "Marker"))
+                m_note = html.escape(m.get("note", ""))
+                marker_xml = f'              <marker start="{m_start_ms}/1000s" duration="{m_dur_ms}/1000s" value="{m_name}" note="{m_note}"/>'
+                lines.append(marker_xml)
+
         lines.extend([
             '            </gap>',
             '          </spine>',
@@ -115,6 +127,10 @@ class FCPXMLGenerator:
         ])
 
         content = "\n".join(lines)
+        parent_dir = os.path.dirname(output_path)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
+
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(content)
         return output_path

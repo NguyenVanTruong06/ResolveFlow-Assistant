@@ -1,15 +1,23 @@
 import os
 import sys
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Literal
 from pydantic import BaseModel, Field
 
 class SubtitleConfig(BaseModel):
     """
     Lớp cấu hình phong cách chữ của phụ đề sử dụng Pydantic.
     """
+    split_mode: Literal["characters", "words"] = Field(
+        default="characters",
+        description="Chế độ ngắt câu: 'characters' (theo số ký tự) hoặc 'words' (theo số từ)"
+    )
+    split_limit: int = Field(
+        default=42, ge=1, le=200,
+        description="Giới hạn tối đa (số ký tự hoặc số từ) trên một dòng trước khi ngắt câu"
+    )
     max_chars_per_line: int = Field(
         default=42, ge=10, le=80,
-        description="Số lượng ký tự tối đa trên một dòng trước khi ngắt câu"
+        description="Số lượng ký tự tối đa trên một dòng (tương thích ngược)"
     )
     font_name: str = Field(
         default="Arial",
@@ -348,11 +356,35 @@ def is_vertical_video(video_path: str) -> bool:
         pass
     return False
 
-def split_subtitles(subtitles: List[Dict[str, Any]], max_chars: int) -> List[Dict[str, Any]]:
+def split_subtitles(
+    subtitles: List[Dict[str, Any]], 
+    max_chars: Optional[int] = None,
+    limit: Optional[int] = None,
+    mode: Literal["characters", "words"] = "characters"
+) -> List[Dict[str, Any]]:
     """
-    Tách các phân đoạn phụ đề dựa trên số ký tự tối đa trên một dòng,
-    sử dụng thông tin từ đơn (word-level timestamps) để tính toán mốc thời gian chính xác.
+    Tách các phân đoạn phụ đề dựa trên:
+    - Chế độ 'characters': Số ký tự tối đa trên một dòng (mặc định 42 cho 16:9, 22 cho 9:16).
+    - Chế độ 'words': Số từ tối đa trên một dòng/card (ví dụ: 4-6 từ cho Shorts/Reels/TikTok).
+    Sử dụng thông tin mốc thời gian từ đơn (word-level timestamps) để đảm bảo đồng bộ âm thanh chuẩn xác 100%.
+
+    Args:
+        subtitles (List[Dict[str, Any]]): Danh sách phân đoạn phụ đề thô từ Whisper.
+        max_chars (int, optional): Tham số số ký tự tối đa (để tương thích ngược).
+        limit (int, optional): Giới hạn tối đa (ký tự hoặc từ tùy theo mode).
+        mode (str): 'characters' hoặc 'words'.
+
+    Returns:
+        List[Dict[str, Any]]: Danh sách các phân đoạn phụ đề đã được ngắt dòng tối ưu.
     """
+    # Xác định giá trị giới hạn hiệu dụng
+    if limit is not None:
+        effective_limit = limit
+    elif max_chars is not None:
+        effective_limit = max_chars
+    else:
+        effective_limit = 42 if mode == "characters" else 6
+
     new_subtitles = []
     words = []
     
@@ -391,14 +423,19 @@ def split_subtitles(subtitles: List[Dict[str, Any]], max_chars: int) -> List[Dic
         if current_segment_words:
             silence_gap = word_info["start"] - current_segment_words[-1]["end"]
             
-        if (current_len > 0 and current_len + additional_len > max_chars) or silence_gap > 1.5:
-            if current_segment_words:
-                new_subtitles.append({
-                    "start": current_segment_words[0]["start"],
-                    "end": current_segment_words[-1]["end"],
-                    "text": " ".join([w["word"].strip() for w in current_segment_words]),
-                    "words": list(current_segment_words)
-                })
+        # Kiểm tra điều kiện ngắt dòng theo chế độ
+        if mode == "words":
+            should_split = (len(current_segment_words) >= effective_limit) or (silence_gap > 1.5)
+        else:
+            should_split = (current_len > 0 and current_len + additional_len > effective_limit) or (silence_gap > 1.5)
+
+        if should_split and current_segment_words:
+            new_subtitles.append({
+                "start": current_segment_words[0]["start"],
+                "end": current_segment_words[-1]["end"],
+                "text": " ".join([w["word"].strip() for w in current_segment_words]),
+                "words": list(current_segment_words)
+            })
             current_segment_words = [word_info]
             current_len = len(word)
         else:

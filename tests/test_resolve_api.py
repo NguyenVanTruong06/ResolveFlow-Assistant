@@ -136,10 +136,28 @@ def test_split_subtitles() -> None:
             ]
         }
     ]
-    wrapped = split_subtitles(raw_subtitles, max_chars=15)
-    for seg in wrapped:
+    # Test 1: Chế độ ký tự (Characters mode)
+    wrapped_chars = split_subtitles(raw_subtitles, max_chars=15, mode="characters")
+    for seg in wrapped_chars:
         assert len(seg["text"]) <= 15
         assert seg["start"] < seg["end"]
+
+    # Test 2: Chế độ số từ (Words mode - ví dụ 3 từ/dòng)
+    wrapped_words = split_subtitles(raw_subtitles, limit=3, mode="words")
+    for seg in wrapped_words:
+        assert len(seg["text"].split()) <= 3
+        assert seg["start"] < seg["end"]
+
+    # Test 3: Chế độ 1 từ/dòng (Shorts single-word pop)
+    single_word_subs = split_subtitles(raw_subtitles, limit=1, mode="words")
+    assert len(single_word_subs) == 10
+    for seg in single_word_subs:
+        assert len(seg["text"].split()) == 1
+
+    # Test 4: Tương thích ngược gọi theo positional arg
+    wrapped_legacy = split_subtitles(raw_subtitles, 20)
+    for seg in wrapped_legacy:
+        assert len(seg["text"]) <= 20
 
 def test_is_vertical_video(tmp_path) -> None:
     from src.core.resolve_api import is_vertical_video

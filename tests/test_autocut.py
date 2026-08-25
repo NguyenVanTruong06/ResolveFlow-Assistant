@@ -3,6 +3,7 @@ import wave
 import struct
 import pytest
 import numpy as np
+from unittest.mock import patch
 from pydantic import ValidationError
 from src.core.autocut import AudioCutConfig, SilenceDetector
 
@@ -142,3 +143,15 @@ def test_multi_clip_edl(tmp_path) -> None:
     assert "* FROM CLIP NAME: clip1.mp4" in content
     assert "002  AX       V     C        00:00:02:00 00:00:05:00 00:00:03:00 00:00:06:00" in content
     assert "* FROM CLIP NAME: clip2.mp4" in content
+
+def test_detect_intervals_with_speedup():
+    from src.core.autocut import AudioCutConfig, SilenceDetector
+    config = AudioCutConfig(speed_up_silence=True, silence_speed_multiplier=8.0)
+    with patch('src.core.autocut.SilenceDetector.detect_silence_from_wav', return_value=[(2.0, 5.0), (10.0, 15.0)]):
+        with patch('src.core.audio.AudioExtractor.get_audio_duration', return_value=20.0):
+            segments = SilenceDetector.detect_intervals_with_speedup("dummy.wav", config, speed_multiplier=8.0)
+            assert len(segments) >= 3
+            speedup_segs = [s for s in segments if s["type"] == "speedup"]
+            assert len(speedup_segs) >= 1
+            assert speedup_segs[0]["speed"] == 8.0
+

@@ -1,7 +1,7 @@
 import os
 import wave
 import numpy as np
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 class AudioCutConfig(BaseModel):
@@ -19,6 +19,14 @@ class AudioCutConfig(BaseModel):
     padding_seconds: float = Field(
         default=0.25, ge=0.0, le=1.0,
         description="Thời gian đệm (giây) ở hai đầu điểm cắt để tránh mất chữ thoại đầu/cuối"
+    )
+    speed_up_silence: bool = Field(
+        default=False,
+        description="Tua nhanh khoảng lặng thay vì cắt bỏ (Auto Speed-Ramp / Timelapse)"
+    )
+    silence_speed_multiplier: float = Field(
+        default=8.0, ge=2.0, le=20.0,
+        description="Hệ số tốc độ tua nhanh khoảng lặng (ví dụ 8.0x)"
     )
 
 class SilenceDetector:
@@ -150,6 +158,82 @@ class SilenceDetector:
 
         return padded_keep_intervals
 
+    @staticmethod
+    def detect_intervals_with_speedup(
+        wav_path: str,
+        config: AudioCutConfig,
+        speed_multiplier: float = 8.0
+    ) -> List[Dict[str, Any]]:
+        """
+        Phân tích tệp WAV và trả về toàn bộ dòng thời gian bao gồm:
+        - Các đoạn thoại bình thường (speed = 1.0x).
+        - Các đoạn im lặng được gán hiệu ứng tua nhanh (speed = speed_multiplier).
+        """
+        keep_intervals = SilenceDetector.detect_silence_from_wav(wav_path, config)
+        try:
+            from src.core.audio import AudioExtractor
+            duration = AudioExtractor.get_audio_duration(wav_path)
+        except Exception:
+            duration = keep_intervals[-1][1] if keep_intervals else 0.0
+
+        timeline_segments = []
+        current_time = 0.0
+
+        for start, end in keep_intervals:
+            # Nếu có khoảng lặng trước đoạn thoại này
+            if start > current_time:
+                silence_dur = start - current_time
+                if silence_dur >= config.min_silent_duration:
+                    timeline_segments.append({
+                        "type": "speedup",
+                        "start": current_time,
+                        "end": start,
+                        "duration": silence_dur,
+                        "speed": speed_multiplier,
+                        "rec_duration": silence_dur / speed_multiplier,
+                        "note": f"⚡ Tua nhanh Timelapse ({speed_multiplier}x)"
+                    })
+                else:
+                    # Khoảng lặng quá ngắn, giữ nguyên 1.0x
+                    timeline_segments.append({
+                        "type": "voice",
+                        "start": current_time,
+                        "end": start,
+                        "duration": silence_dur,
+                        "speed": 1.0,
+                        "rec_duration": silence_dur,
+                        "note": "Khoảng nghỉ ngắn"
+                    })
+
+            # Đoạn thoại chính
+            voice_dur = end - start
+            timeline_segments.append({
+                "type": "voice",
+                "start": start,
+                "end": end,
+                "duration": voice_dur,
+                "speed": 1.0,
+                "rec_duration": voice_dur,
+                "note": "Thoại chính"
+            })
+            current_time = end
+
+        # Xử lý khoảng lặng cuối cùng
+        if current_time < duration:
+            silence_dur = duration - current_time
+            if silence_dur >= config.min_silent_duration:
+                timeline_segments.append({
+                    "type": "speedup",
+                    "start": current_time,
+                    "end": duration,
+                    "duration": silence_dur,
+                    "speed": speed_multiplier,
+                    "rec_duration": silence_dur / speed_multiplier,
+                    "note": f"⚡ Tua nhanh Timelapse ({speed_multiplier}x)"
+                })
+
+        return timeline_segments
+
 def get_video_fps(video_path: str) -> float:
     """
     Lấy tốc độ khung hình (FPS) của tệp video sử dụng ffprobe.
@@ -240,10 +324,14 @@ class EDLGenerator:
         return output_edl_path
 
     @staticmethod
-    def create_multi_clip_edl(events: List[Dict[str, Any]], output_edl_path: str) -> str:
+    def create_multi_clip_edl(
+        events: List[Dict[str, Any]], 
+        output_edl_path: str,
+        markers: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
         """
-        Tạo tệp EDL ghép nối nhiều nguồn clip khác nhau.
-        Mỗi phần tử trong events chứa: video_path, src_in, src_out, rec_in, rec_out, fps
+        Tạo tệp EDL ghép nối nhiều nguồn clip khác nhau (hỗ trợ Markers & Punch-in Tags).
+        Mỗi phần tử trong events chứa: video_path, src_in, src_out, rec_in, rec_out, fps, punch_in (tùy chọn)
         """
         lines = [
             "TITLE: Silence Cut Multi-Clip",
@@ -265,10 +353,28 @@ class EDLGenerator:
             # Event cho luồng Video
             lines.append(f"{event_num}  AX       V     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
             lines.append(f"* FROM CLIP NAME: {clip_name}")
+            
+            if ev.get("punch_in"):
+                lines.append(f"* COMMENT: PUNCH_IN_ZOOM_{ev.get('punch_in_scale', 1.15)}X")
+
+            if ev.get("is_speedup") or ev.get("speed", 1.0) > 1.0:
+                speed_val = ev.get("speed", 8.0)
+                lines.append(f"* COMMENT: SPEED_RAMP_{speed_val}X")
 
             # Event cho luồng Audio (Track 1)
             lines.append(f"{event_num}  AX       A     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
             lines.append(f"* FROM CLIP NAME: {clip_name}")
+
+        # Thêm danh sách Markers nếu có (Chuẩn CMX3600 Locator của DaVinci Resolve)
+        if markers:
+            for m in markers:
+                m_time = m.get("time", 0.0)
+                m_color = m.get("color", "Blue")
+                m_name = m.get("name", "Marker")
+                m_note = m.get("note", "")
+                fps_val = events[0]["fps"] if events else 30.0
+                m_tc = seconds_to_timecode(m_time, fps_val)
+                lines.append(f"* LOC: {m_tc} {m_color} {m_name} - {m_note}")
 
         content = "\n".join(lines)
         
