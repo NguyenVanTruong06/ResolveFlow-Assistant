@@ -60,7 +60,7 @@ def test_audit_reporter_teaser_and_manifest(tmp_path):
         description="EDL timeline đã cắt"
     )
     # Tạo dummy file để add_output_file nhận diện
-    with open(os.path.join(tmp_path, "Vlog_cut.edl"), "w") as f:
+    with open(os.path.join(tmp_path, "Vlog_cut.edl"), "w", encoding="utf-8") as f:
         f.write("")
 
     reporter.add_output_file(

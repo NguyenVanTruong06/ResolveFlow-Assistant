@@ -94,7 +94,7 @@ def test_edl_generation(tmp_path) -> None:
     from src.core.autocut import EDLGenerator
     from unittest.mock import patch
     video_path = os.path.join(tmp_path, "dummy.mp4")
-    with open(video_path, "w") as f:
+    with open(video_path, "w", encoding="utf-8") as f:
         f.write("")
         
     keep_intervals = [(1.0, 3.5), (5.0, 8.0)]

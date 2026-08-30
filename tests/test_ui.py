@@ -124,7 +124,7 @@ def test_pipeline_worker_execution_mocked(tmp_path):
     import os
     from unittest.mock import patch
     dummy_video = os.path.join(tmp_path, "mock_clip.mp4")
-    with open(dummy_video, "w") as f:
+    with open(dummy_video, "w", encoding="utf-8") as f:
         f.write("mock")
 
     worker = PipelineWorker(
@@ -167,7 +167,7 @@ def test_pipeline_worker_no_transcription_optimization(tmp_path):
     import os
     from unittest.mock import patch
     dummy_video = os.path.join(tmp_path, "mock_clip_no_sub.mp4")
-    with open(dummy_video, "w") as f:
+    with open(dummy_video, "w", encoding="utf-8") as f:
         f.write("mock")
 
     worker = PipelineWorker(
@@ -210,7 +210,7 @@ def test_pipeline_worker_phases_mocked(tmp_path):
     import os
     from unittest.mock import patch
     dummy_video = os.path.join(tmp_path, "phase_clip.mp4")
-    with open(dummy_video, "w") as f:
+    with open(dummy_video, "w", encoding="utf-8") as f:
         f.write("mock")
 
     # ---- PHASE 1 RUN ----

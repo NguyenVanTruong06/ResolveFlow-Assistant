@@ -95,9 +95,9 @@ def test_import_edl_to_timeline(tmp_path) -> None:
     automator = ResolveAutomation()
     edl_file = os.path.join(tmp_path, "test.edl")
     video_file = os.path.join(tmp_path, "test.mp4")
-    with open(edl_file, "w") as f:
+    with open(edl_file, "w", encoding="utf-8") as f:
         f.write("")
-    with open(video_file, "w") as f:
+    with open(video_file, "w", encoding="utf-8") as f:
         f.write("")
         
     logs = []

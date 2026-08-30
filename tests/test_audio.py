@@ -11,7 +11,7 @@ def test_get_audio_duration(mock_probe, tmp_path) -> None:
     """
     # Tạo tệp trống để os.path.exists vượt qua kiểm tra thành công
     dummy_file = os.path.join(tmp_path, "dummy.wav")
-    with open(dummy_file, "w") as f:
+    with open(dummy_file, "w", encoding="utf-8") as f:
         f.write("")
 
     # Thiết lập giá trị trả về giả lập của ffprobe
