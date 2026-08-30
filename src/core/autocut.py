@@ -16,11 +16,11 @@ class AudioCutConfig(BaseModel):
         description="Thời gian im lặng tối thiểu (giây) để quyết định cắt bỏ"
     )
     silence_threshold_db: float = Field(
-        default=-35.0, ge=-100.0, le=0.0,
+        default=-38.0, ge=-100.0, le=0.0,
         description="Ngưỡng âm lượng (dB) để coi là im lặng (dưới ngưỡng này sẽ bị cắt)"
     )
     padding_seconds: float = Field(
-        default=0.25, ge=0.0, le=1.0,
+        default=0.30, ge=0.0, le=1.0,
         description="Thời gian đệm (giây) ở hai đầu điểm cắt để tránh mất chữ thoại đầu/cuối"
     )
     speed_up_silence: bool = Field(

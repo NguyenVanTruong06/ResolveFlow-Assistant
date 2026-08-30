@@ -78,10 +78,11 @@ class BadTakeDetector:
         return clean_w in fillers
 
     @classmethod
-    def detect_bad_takes(cls, subtitles: List[Dict[str, Any]], similarity_threshold: float = 0.55) -> List[int]:
+    def detect_bad_takes(cls, subtitles: List[Dict[str, Any]], similarity_threshold: float = 0.75) -> List[int]:
         """
-        Duyệt qua danh sách các đoạn phụ đề và phát hiện các index bị coi là "nói thử / nói vấp".
-        Khi phát hiện 2 câu nói có phần mở đầu giống nhau liên tiếp, đoạn trước sẽ được đánh dấu để loại bỏ.
+        Duyệt qua danh sách các đoạn phụ đề và phát hiện các index bị coi là "nói thử / nói vấp" (False Starts).
+        Chỉ loại bỏ khi có căn cứ rõ ràng (lặp lại phần lớn câu hoặc tương đồng rất cao kèm khoảng dừng ngắn).
+        Tránh cắt nhầm các câu bình thường hoặc các thẻ phụ đề liên tiếp bị chia nhỏ.
 
         Returns:
             List[int]: Danh sách index của các đoạn sub cần bị loại bỏ do là Bad Take.
@@ -104,8 +105,14 @@ class BadTakeDetector:
             if not curr_words or not next_words:
                 continue
 
+            # Không coi đoạn quá ngắn (1-2 từ) là bad take trừ khi lặp lại y hệt
+            if len(curr_words) < 3:
+                if curr_words == next_words[:len(curr_words)] and len(curr_words) == len(next_words):
+                    bad_take_indices.add(i)
+                continue
+
             # 1. Kiểm tra sự trùng lặp phần đầu câu (Prefix match)
-            # Ví dụ: "hôm nay tôi sẽ" vs "hôm nay tôi sẽ hướng dẫn các bạn làm món ăn..."
+            # Yêu cầu trùng ít nhất 3 từ VÀ chiếm hơn 50% số từ của câu trước đó
             min_len = min(len(curr_words), len(next_words))
             matched_prefix_count = 0
             for w1, w2 in zip(curr_words, next_words):
@@ -114,19 +121,18 @@ class BadTakeDetector:
                 else:
                     break
 
-            # Nếu đoạn trước rất ngắn (dưới 6 từ) và đoạn sau lặp lại ít nhất 2 từ đầu tiên
-            if len(curr_words) <= 6 and matched_prefix_count >= 2:
-                bad_take_indices.add(i)
-                continue
+            if matched_prefix_count >= 3 and (matched_prefix_count / len(curr_words)) >= 0.5:
+                gap = subtitles[i + 1]["start"] - subtitles[i]["end"]
+                if gap < 4.0:
+                    bad_take_indices.add(i)
+                    continue
 
-            # 2. Sử dụng SequenceMatcher để tính độ tương đồng
+            # 2. Sử dụng SequenceMatcher để tính độ tương đồng cao (>= 0.75)
             matcher = difflib.SequenceMatcher(None, curr_words, next_words)
             ratio = matcher.ratio()
 
-            # Nếu độ tương đồng cao và khoảng cách giữa 2 đoạn dưới 3 giây
             gap = subtitles[i + 1]["start"] - subtitles[i]["end"]
             if ratio >= similarity_threshold and gap < 3.5:
-                # Đánh dấu đoạn nói trước là đoạn hỏng
                 bad_take_indices.add(i)
 
         return sorted(list(bad_take_indices))
@@ -173,11 +179,9 @@ class AIDirector:
             summary_subs, _ = self._extract_summary_segments(valid_subtitles, target_duration=self.config.target_duration_seconds or 180.0)
 
         for idx, sub in enumerate(subtitles):
-            # Tính điểm tin cậy trung bình của các từ
             words = sub.get("words", [])
             avg_prob = sum(w.get("probability", 1.0) for w in words) / len(words) if words else 1.0
 
-            # Xác định quyết định và lý do
             if idx in bad_take_indices:
                 decision = "cut"
                 reason = "Nói vấp (Bad Take)"
@@ -232,6 +236,7 @@ class AIDirector:
         """
         Nhận vào danh sách proposed_segments đã được người dùng chỉnh sửa/duyệt trên GUI.
         Tính toán keep_intervals, punch_in_events, markers và stats cuối cùng.
+        Bảo toàn trọn vẹn dải âm thanh và khoảng đệm (padding) của SilenceDetector.
         """
         if not subtitles or not proposed_segments:
             return {
@@ -246,6 +251,7 @@ class AIDirector:
         
         final_subs = []
         markers = []
+        cut_ranges = []
         removed_bad_takes_count = 0
 
         for idx, sub in enumerate(subtitles):
@@ -268,6 +274,7 @@ class AIDirector:
                 else:
                     final_subs.append(sub)
             else:
+                cut_ranges.append((sub["start"], sub["end"]))
                 if "bad take" in p.reason.lower() or "vấp" in p.reason.lower():
                     removed_bad_takes_count += 1
                     markers.append({
@@ -286,21 +293,37 @@ class AIDirector:
                         "color": "Red"
                     })
 
-        raw_intervals = []
-        for sub in final_subs:
-            s_start = max(0.0, sub["start"] - 0.15)
-            s_end = min(total_duration, sub["end"] + 0.15)
-            raw_intervals.append((s_start, s_end))
+        # Giữ nguyên mốc cắt âm thanh chuẩn từ SilenceDetector và chỉ loại trừ đúng các đoạn cut_ranges
+        if silence_keep_intervals:
+            current_intervals = list(silence_keep_intervals)
+            for c_start, c_end in cut_ranges:
+                new_intervals = []
+                for k_start, k_end in current_intervals:
+                    if c_end <= k_start or c_start >= k_end:
+                        new_intervals.append((k_start, k_end))
+                    else:
+                        if c_start > k_start:
+                            new_intervals.append((k_start, c_start))
+                        if c_end < k_end:
+                            new_intervals.append((c_end, k_end))
+                current_intervals = new_intervals
+            merged_intervals = [(s, e) for (s, e) in current_intervals if (e - s) >= 0.05]
+        else:
+            raw_intervals = []
+            for sub in final_subs:
+                s_start = max(0.0, sub["start"] - 0.30)
+                s_end = min(total_duration, sub["end"] + 0.30)
+                raw_intervals.append((s_start, s_end))
 
-        merged_intervals = []
-        for s_start, s_end in sorted(raw_intervals, key=lambda x: x[0]):
-            if merged_intervals and s_start <= merged_intervals[-1][1] + 0.2:
-                merged_intervals[-1] = (merged_intervals[-1][0], max(merged_intervals[-1][1], s_end))
-            else:
-                merged_intervals.append((s_start, s_end))
+            merged_intervals = []
+            for s_start, s_end in sorted(raw_intervals, key=lambda x: x[0]):
+                if merged_intervals and s_start <= merged_intervals[-1][1] + 0.2:
+                    merged_intervals[-1] = (merged_intervals[-1][0], max(merged_intervals[-1][1], s_end))
+                else:
+                    merged_intervals.append((s_start, s_end))
 
         if not merged_intervals:
-            merged_intervals = silence_keep_intervals
+            merged_intervals = silence_keep_intervals or [(0.0, total_duration)]
 
         punch_in_events = []
         if self.config.enable_punch_in and len(merged_intervals) > 1:

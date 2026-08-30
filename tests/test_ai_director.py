@@ -46,23 +46,31 @@ def test_ai_director_clean_talk_process():
     assert len(result["keep_intervals"]) >= 1
     assert len(result["markers"]) > 0
 
-def test_ai_director_viral_shorts():
-    config = AIDirectorConfig(
-        mode="viral_shorts",
-        target_duration_seconds=10.0
-    )
+def test_bad_take_detector_split_cards_not_false_positive():
+    # Khi phụ đề bị chia thành các thẻ 4-5 từ, các câu có phần đầu tương tự không được bị coi là bad take
+    subtitles = [
+        {"start": 0.0, "end": 1.5, "text": "Chúng ta sẽ cùng tìm"},
+        {"start": 1.6, "end": 3.2, "text": "hiểu phương pháp làm video này"},
+        {"start": 3.5, "end": 5.0, "text": "Chúng ta sẽ thấy kết quả rất rõ."}
+    ]
+    bad_takes = BadTakeDetector.detect_bad_takes(subtitles)
+    assert len(bad_takes) == 0
+
+def test_ai_director_preserves_silence_lead_in_padding():
+    config = AIDirectorConfig(mode="clean_talk", remove_bad_takes=False)
     director = AIDirector(config)
     subtitles = [
-        {"start": 0.0, "end": 4.0, "text": "Bí mật này sẽ giúp bạn tiết kiệm 50% thời gian dựng video."},
-        {"start": 4.5, "end": 8.0, "text": "Đầu tiên là bạn phải sử dụng công cụ AI tự động này."},
-        {"start": 8.5, "end": 15.0, "text": "Nó giúp bạn gọt giũa kịch bản và cắt sạch những câu nói vấp."},
-        {"start": 15.5, "end": 25.0, "text": "Và sau cùng là xuất file EDL thẳng vào DaVinci Resolve."}
+        {"start": 1.0, "end": 3.0, "text": "Xin chào các bạn đã quay trở lại."}
     ]
-    result = director.process_semantic_cut(
+    # Dải âm thanh gốc từ SilenceDetector có đệm đầu 0.3s (từ 0.7s)
+    silence_intervals = [(0.7, 3.3)]
+    
+    result = director.apply_approved_segments(
         subtitles=subtitles,
-        silence_keep_intervals=[(0.0, 25.0)],
-        total_duration=25.0
+        proposed_segments=director.generate_proposed_segments(subtitles),
+        silence_keep_intervals=silence_intervals,
+        total_duration=5.0
     )
-    # Tổng thời lượng của video ngắn phải được giới hạn
-    total_kept = sum(e - s for s, e in result["keep_intervals"])
-    assert total_kept <= 12.0
+    # Đoạn giữ lại phải giữ nguyên vẹn mốc 0.7s không bị cắt cụt đầu câu
+    assert result["keep_intervals"] == [(0.7, 3.3)]
+
