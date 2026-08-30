@@ -79,7 +79,10 @@ class ProxyManager:
         ]
 
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
+            res = subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, timeout=180, encoding="utf-8", errors="replace"
+            )
             return (res.returncode == 0) and os.path.exists(norm_out) and os.path.getsize(norm_out) > 0
         except Exception:
             return False

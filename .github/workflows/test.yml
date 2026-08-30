@@ -6,14 +6,15 @@ on:
   pull_request:
     branches: [ "main" ]
 
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+  QT_QPA_PLATFORM: "offscreen"
+
 jobs:
   test:
     name: Run Unit Tests (Python ${{ matrix.python-version }}) on Windows
     runs-on: windows-latest
-    env:
-      QT_QPA_PLATFORM: offscreen
-      PYTHONIOENCODING: utf-8
-      PYTHONUTF8: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -41,16 +42,12 @@ jobs:
 
     - name: Run Test Suite with Pytest
       run: |
-        pytest -v
+        python -m pytest -v
 
   build-check:
     name: Dry-run Packaging Build (Windows Python 3.11)
     runs-on: windows-latest
     needs: test
-    env:
-      QT_QPA_PLATFORM: offscreen
-      PYTHONIOENCODING: utf-8
-      PYTHONUTF8: "1"
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4

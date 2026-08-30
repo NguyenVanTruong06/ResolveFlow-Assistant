@@ -46,7 +46,10 @@ class DryRunValidator:
                 "-show_format", "-show_streams", video_path
             ]
             try:
-                res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=5)
+                res = subprocess.run(
+                    cmd, capture_output=True, text=True, check=True, timeout=5,
+                    encoding="utf-8", errors="replace"
+                )
                 probe = json.loads(res.stdout)
             except Exception:
                 return info

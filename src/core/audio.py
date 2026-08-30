@@ -44,18 +44,24 @@ class AudioExtractor:
             # Fallback trực tiếp bằng subprocess nếu ffmpeg-python gặp sự cố
             try:
                 cmd = ["ffmpeg", "-y", "-i", norm_video, "-ac", "1", "-ar", "16000", "-vn", norm_output]
-                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+                res = subprocess.run(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, timeout=120, encoding="utf-8", errors="replace"
+                )
                 if res.returncode != 0:
-                    stderr_msg = res.stderr or (e.stderr.decode("utf-8") if e.stderr else str(e))
+                    stderr_msg = res.stderr or (e.stderr.decode("utf-8", errors="replace") if e.stderr else str(e))
                     raise RuntimeError(f"Lỗi FFmpeg khi trích xuất âm thanh: {stderr_msg}") from e
             except Exception as sub_e:
-                stderr_msg = e.stderr.decode("utf-8") if e.stderr else str(e)
+                stderr_msg = e.stderr.decode("utf-8", errors="replace") if (hasattr(e, 'stderr') and e.stderr) else str(e)
                 raise RuntimeError(f"Lỗi FFmpeg khi trích xuất âm thanh: {stderr_msg}") from sub_e
 
         if not os.path.exists(norm_output) or os.path.getsize(norm_output) == 0:
             # Thử lần cuối bằng lệnh subprocess trực tiếp
             cmd = ["ffmpeg", "-y", "-i", norm_video, "-ac", "1", "-ar", "16000", "-vn", norm_output]
-            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+            subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, timeout=120, encoding="utf-8", errors="replace"
+            )
             if not os.path.exists(norm_output) or os.path.getsize(norm_output) == 0:
                 raise RuntimeError(f"Không thể tạo tệp âm thanh WAV tại: {norm_output}")
 
