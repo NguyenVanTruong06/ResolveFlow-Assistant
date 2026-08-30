@@ -1,0 +1,18 @@
+{
+  "id": "bounce_word",
+  "name": "Bounce Word (Nhảy chữ Spring)",
+  "font": "Arial",
+  "size": 52,
+  "weight": "extra_bold",
+  "standard_color": "#FFFFFF",
+  "highlight_color": "#00FFCC",
+  "outline_color": "#111111",
+  "outline_width": 0.15,
+  "animation": "bounce",
+  "timing_curve": "spring",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

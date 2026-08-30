@@ -1,0 +1,18 @@
+{
+  "id": "box_highlight",
+  "name": "Box Highlight (Hộp màu bám từ)",
+  "font": "Arial",
+  "size": 46,
+  "weight": "bold",
+  "standard_color": "#FFFFFF",
+  "highlight_color": "#FFFFFF",
+  "outline_color": "#000000",
+  "outline_width": 0.0,
+  "animation": "box_highlight",
+  "timing_curve": "ease-in-out",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": "#E60000",
+  "glow_color": null,
+  "gradient_colors": null
+}

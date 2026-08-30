@@ -22,6 +22,7 @@ coverage.xml
 # ==========================================
 # ResolveFlow Specific / Media Files
 # ==========================================
+.resolveflow_cache/
 *.mp4
 *.mov
 *.wav

@@ -1,4 +1,5 @@
 import gc
+import re
 from typing import Literal, Optional, List, Dict, Any, Callable
 from pydantic import BaseModel, Field
 
@@ -18,6 +19,41 @@ class ModelConfig(BaseModel):
         default="float16",
         description="Định dạng số học để tối ưu hóa bộ nhớ: float16 (khuyên dùng cho GPU) hoặc float32"
     )
+
+def is_whisper_hallucination(text: str) -> bool:
+    """
+    Phát hiện các câu sinh tự động (hallucination) phổ biến của Whisper khi gặp khoảng lặng
+    hoặc âm thanh nhiễu (ví dụ: 'Thank you for watching', 'Thanks for watching',...).
+    """
+    clean = re.sub(r'[^a-zA-Z0-9\sàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]', '', text.lower().strip())
+    
+    # Danh sách các câu boilerplate/hallucination phổ biến
+    patterns = [
+        r"^thank\s+you\s+for\s+watching$",
+        r"^thank\s+you$",
+        r"^thanks\s+for\s+watching$",
+        r"^thank\s+you\s+so\s+much$",
+        r"^thanks$",
+        r"^subscribe$",
+        r"^please\s+subscribe$",
+        r"^subscribe\s+to\s+my\s+channel$",
+        r"^subtitles\s+by$",
+        r"^cảm\s+ơn\s+các\s+bạn\s+đã\s+xem$",
+        r"^cảm\s+ơn\s+đã\s+xem$",
+        r"^hẹn\s+gặp\s+lại$",
+        r"^tạm\s+biệt$"
+    ]
+    
+    for pat in patterns:
+        if re.search(pat, clean):
+            return True
+            
+    # Lọc các từ lặp vô nghĩa như "you", "shh", "sh", "uh", "um", "ah", "oh"
+    if clean in ["you", "shh", "sh", "uh", "um", "ah", "oh"]:
+        return True
+        
+    return False
+
 
 class ResolveTranscriber:
     """
@@ -65,26 +101,24 @@ class ResolveTranscriber:
         self,
         audio_path: str,
         language: Optional[str] = None,
-        is_cancelled_callback: Optional[Callable[[], bool]] = None
+        is_cancelled_callback: Optional[Callable[[], bool]] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Thực hiện nhận dạng giọng nói ngoại tuyến từ tệp âm thanh.
+        Thực hiện nhận dạng giọng nói ngoại tuyến từ tệp âm thanh kèm streaming progress.
 
         Args:
             audio_path (str): Đường dẫn tệp âm thanh đầu vào (.wav).
-            language (str, optional): Mã ngôn ngữ đích (ví dụ: 'vi' cho Tiếng Việt, 'en' cho Tiếng Anh). 
-                                     Mặc định là None (Tự động nhận diện ngôn ngữ).
-            is_cancelled_callback (Callable, optional): Hàm kiểm tra yêu cầu hủy luồng từ người dùng.
+            language (str, optional): Mã ngôn ngữ đích.
+            is_cancelled_callback (Callable, optional): Hàm kiểm tra yêu cầu hủy luồng.
+            progress_callback (Callable, optional): Hàm callback báo tiến độ (timestamp, text).
 
         Returns:
-            List[Dict[str, Any]]: Danh sách các phân đoạn hội thoại kèm thời gian start/end và từ đơn.
+            List[Dict[str, Any]]: Danh sách các phân đoạn hội thoại.
         """
         if self.model is None:
             self.load_model()
 
-        # Thực thi dịch offline
-        # VAD filter tự động loại bỏ tạp âm và các khoảng im lặng dài
-        # Word timestamps cho phép lấy chính xác mốc thời gian của từng từ đơn lẻ
         segments, info = self.model.transcribe(
             audio_path,
             language=language,
@@ -94,9 +128,16 @@ class ResolveTranscriber:
         )
 
         results = []
+        total_duration = info.duration if hasattr(info, 'duration') and info.duration > 0 else 1.0
+
         for segment in segments:
             if is_cancelled_callback and is_cancelled_callback():
                 break
+            
+            segment_text = segment.text.strip()
+            if is_whisper_hallucination(segment_text):
+                continue
+
             words_data = []
             if segment.words:
                 for w in segment.words:
@@ -110,9 +151,13 @@ class ResolveTranscriber:
             results.append({
                 "start": segment.start,
                 "end": segment.end,
-                "text": segment.text.strip(),
+                "text": segment_text,
                 "words": words_data
             })
+
+            if progress_callback:
+                progress_ratio = min(1.0, segment.end / total_duration)
+                progress_callback(progress_ratio, segment_text)
 
         return results
 
@@ -122,9 +167,7 @@ class ResolveTranscriber:
         """
         if self.model is not None:
             self.model = None
-            # Thu dọn rác bộ nhớ Python
             gc.collect()
-            # Làm rỗng cache CUDA của PyTorch
             try:
                 import torch
                 if torch.cuda.is_available():

@@ -1,0 +1,18 @@
+{
+  "id": "clean_outline",
+  "name": "Clean Outline (Podcast / Phỏng vấn nét)",
+  "font": "Arial",
+  "size": 44,
+  "weight": "normal",
+  "standard_color": "#FFFFFF",
+  "highlight_color": "#FFFFFF",
+  "outline_color": "#000000",
+  "outline_width": 0.15,
+  "animation": "static",
+  "timing_curve": "linear",
+  "position_y_16_9": 0.12,
+  "position_y_9_16": 0.25,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

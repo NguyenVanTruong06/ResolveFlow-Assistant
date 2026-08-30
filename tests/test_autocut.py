@@ -108,7 +108,7 @@ def test_edl_generation(tmp_path) -> None:
         content = f.read()
         
     assert "TITLE: Silence Cut" in content
-    assert "001  AX       V     C        00:00:01:00 00:00:03:15 00:00:00:00 00:00:02:15" in content
+    assert "00:00:01:00 00:00:03:15 00:00:00:00 00:00:02:15" in content
     assert "* FROM CLIP NAME: dummy.mp4" in content
 
 def test_multi_clip_edl(tmp_path) -> None:
@@ -139,9 +139,9 @@ def test_multi_clip_edl(tmp_path) -> None:
         content = f.read()
     
     assert "TITLE: Silence Cut Multi-Clip" in content
-    assert "001  AX       V     C        00:00:01:00 00:00:04:00 00:00:00:00 00:00:03:00" in content
+    assert "00:00:01:00 00:00:04:00 00:00:00:00 00:00:03:00" in content
     assert "* FROM CLIP NAME: clip1.mp4" in content
-    assert "002  AX       V     C        00:00:02:00 00:00:05:00 00:00:03:00 00:00:06:00" in content
+    assert "00:00:02:00 00:00:05:00 00:00:03:00 00:00:06:00" in content
     assert "* FROM CLIP NAME: clip2.mp4" in content
 
 def test_detect_intervals_with_speedup():
@@ -154,4 +154,52 @@ def test_detect_intervals_with_speedup():
             speedup_segs = [s for s in segments if s["type"] == "speedup"]
             assert len(speedup_segs) >= 1
             assert speedup_segs[0]["speed"] == 8.0
+
+def test_parse_timecode_to_seconds():
+    from src.core.autocut import parse_timecode_to_seconds
+    assert parse_timecode_to_seconds("00:00:00:00", 30.0) == 0.0
+    assert parse_timecode_to_seconds("01:00:00:00", 30.0) == 3600.0
+    assert parse_timecode_to_seconds("01:00:05:15", 30.0) == 3605.5
+    assert parse_timecode_to_seconds("invalid", 30.0) == 0.0
+
+def test_seconds_to_timecode_with_offset():
+    from src.core.autocut import seconds_to_timecode
+    # Base 0s offset with 3605.5s (01:00:05:15)
+    tc = seconds_to_timecode(5.0, fps=30.0, start_tc_offset_seconds=3600.0)
+    assert tc == "01:00:05:00"
+
+def test_edl_with_camera_start_timecode(tmp_path):
+    from src.core.autocut import EDLGenerator
+    from unittest.mock import patch
+    
+    events = [
+        {
+            "video_path": "C0387.MP4",
+            "src_in": 5.0,
+            "src_out": 8.0,
+            "rec_in": 0.0,
+            "rec_out": 3.0,
+            "fps": 30.0
+        }
+    ]
+    output_edl = os.path.join(tmp_path, "c0387_test.edl")
+    
+    mock_meta = {
+        "fps": 30.0,
+        "start_timecode": "01:00:00:00",
+        "start_seconds": 3600.0,
+        "duration": 60.0,
+        "width": 1920,
+        "height": 1080
+    }
+    with patch('src.core.autocut.get_media_metadata', return_value=mock_meta):
+        EDLGenerator.create_multi_clip_edl(events, output_edl)
+        
+    assert os.path.exists(output_edl)
+    with open(output_edl, "r", encoding="utf-8") as f:
+        content = f.read()
+        
+    assert "01:00:05:00 01:00:08:00 00:00:00:00 00:00:03:00" in content
+    assert "* FROM CLIP NAME: C0387.MP4" in content
+
 

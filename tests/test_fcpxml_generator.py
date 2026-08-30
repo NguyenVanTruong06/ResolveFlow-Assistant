@@ -31,3 +31,31 @@ def test_generate_karaoke_fcpxml(tmp_path) -> None:
     assert 'fontSize="48"' in content  # 40 * 1.2 = 48
     assert 'ts_highlight' in content
     assert 'ts_normal' in content
+
+def test_generate_timeline_fcpxml(tmp_path) -> None:
+    events = [
+        {
+            "video_path": os.path.join(tmp_path, "clip1.mp4"),
+            "src_in": 1.0,
+            "src_out": 4.0,
+            "rec_in": 0.0,
+            "rec_out": 3.0,
+            "fps": 30.0
+        }
+    ]
+    output_xml = os.path.join(tmp_path, "cut_timeline.fcpxml")
+    FCPXMLGenerator.generate_timeline_fcpxml(
+        events=events,
+        output_xml_path=output_xml,
+        timeline_name="Test Timeline"
+    )
+    
+    assert os.path.exists(output_xml)
+    with open(output_xml, "r", encoding="utf-8") as f:
+        content = f.read()
+        
+    assert '<fcpxml version="1.9">' in content
+    assert '<asset id="r_asset_1"' in content
+    assert '<asset-clip name="clip1.mp4"' in content
+    assert 'project name="Test Timeline"' in content
+

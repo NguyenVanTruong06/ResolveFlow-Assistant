@@ -1,0 +1,18 @@
+{
+  "id": "karaoke_pop",
+  "name": "Karaoke Pop (Word Highlight)",
+  "font": "Arial",
+  "size": 48,
+  "weight": "bold",
+  "standard_color": "#FFFFFF",
+  "highlight_color": "#FFD700",
+  "outline_color": "#000000",
+  "outline_width": 0.12,
+  "animation": "pop",
+  "timing_curve": "spring",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

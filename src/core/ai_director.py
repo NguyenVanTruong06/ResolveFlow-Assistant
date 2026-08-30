@@ -5,6 +5,19 @@ import difflib
 from typing import List, Dict, Any, Tuple, Optional
 from pydantic import BaseModel, Field
 
+class ProposedSegment(BaseModel):
+    """
+    Biểu diễn phân đoạn đề xuất cắt/giữ bởi AI Director để người dùng phê duyệt.
+    """
+    id: int
+    start: float
+    end: float
+    text: str
+    decision: str  # "keep" hoặc "cut"
+    confidence: float
+    reason: str
+    approved: bool = True
+
 class AIDirectorConfig(BaseModel):
     """
     Cấu hình bộ Đạo Diễn AI (AI Director) phiên bản v3.0.
@@ -128,30 +141,99 @@ class AIDirector:
     def __init__(self, config: Optional[AIDirectorConfig] = None):
         self.config = config or AIDirectorConfig()
 
-    def process_semantic_cut(
+    def generate_proposed_segments(
         self,
         subtitles: List[Dict[str, Any]],
+        language: str = "vi"
+    ) -> List[ProposedSegment]:
+        """
+        Phân tích danh sách phụ đề và sinh các đề xuất cắt/giữ trước khi áp dụng FCPXML.
+        """
+        proposed = []
+        if not subtitles:
+            return proposed
+
+        # 1. Phát hiện Bad Takes
+        bad_take_indices = set()
+        if self.config.remove_bad_takes:
+            bad_take_indices = set(BadTakeDetector.detect_bad_takes(subtitles))
+
+        # 2. Tạo danh sách các câu hợp lệ sau khi loại bỏ Bad Takes
+        valid_subtitles = []
+        for idx, sub in enumerate(subtitles):
+            if idx not in bad_take_indices:
+                valid_subtitles.append(sub)
+
+        # 3. Chạy thuật toán trích xuất của presets (nếu có)
+        viral_subs = []
+        summary_subs = []
+        if self.config.mode == "viral_shorts":
+            viral_subs, _ = self._extract_viral_shorts_segments(valid_subtitles, target_duration=self.config.target_duration_seconds or 60.0)
+        elif self.config.mode == "podcast_summary":
+            summary_subs, _ = self._extract_summary_segments(valid_subtitles, target_duration=self.config.target_duration_seconds or 180.0)
+
+        for idx, sub in enumerate(subtitles):
+            # Tính điểm tin cậy trung bình của các từ
+            words = sub.get("words", [])
+            avg_prob = sum(w.get("probability", 1.0) for w in words) / len(words) if words else 1.0
+
+            # Xác định quyết định và lý do
+            if idx in bad_take_indices:
+                decision = "cut"
+                reason = "Nói vấp (Bad Take)"
+                confidence = 0.85
+            else:
+                if self.config.mode == "viral_shorts":
+                    is_kept = any(s["start"] == sub["start"] and s["end"] == sub["end"] for s in viral_subs)
+                    if is_kept:
+                        decision = "keep"
+                        reason = "Giữ làm Viral Hook/Ý chính"
+                        confidence = avg_prob
+                    else:
+                        decision = "cut"
+                        reason = "Bị loại (Viral Shorts)"
+                        confidence = 1.0
+                elif self.config.mode == "podcast_summary":
+                    is_kept = any(s["start"] == sub["start"] and s["end"] == sub["end"] for s in summary_subs)
+                    if is_kept:
+                        decision = "keep"
+                        reason = "Giữ làm AI Summary"
+                        confidence = avg_prob
+                    else:
+                        decision = "cut"
+                        reason = "Bị loại (Podcast Summary)"
+                        confidence = 1.0
+                else:
+                    decision = "keep"
+                    reason = "Giữ lại thoại chuẩn"
+                    confidence = avg_prob
+
+            proposed.append(ProposedSegment(
+                id=idx,
+                start=sub["start"],
+                end=sub["end"],
+                text=sub.get("text", ""),
+                decision=decision,
+                confidence=round(confidence, 3),
+                reason=reason,
+                approved=(decision == "keep")
+            ))
+
+        return proposed
+
+    def apply_approved_segments(
+        self,
+        subtitles: List[Dict[str, Any]],
+        proposed_segments: List[ProposedSegment],
         silence_keep_intervals: List[Tuple[float, float]],
         total_duration: float,
         language: str = "vi"
     ) -> Dict[str, Any]:
         """
-        Xử lý toàn bộ quy trình biên tập thông minh:
-        1. Lọc bỏ các đoạn Bad Takes (nói vấp, nói thử).
-        2. Lọc bỏ các từ đệm (Filler words).
-        3. Áp dụng kịch bản biên tập (Clean Talk, Viral Shorts 60s, Summary).
-        4. Tính toán Punch-in (Zoom luân phiên).
-        5. Sinh danh sách Markers ghi chú cho DaVinci Resolve.
-
-        Returns:
-            Dict chứa:
-              - 'keep_intervals': List[(start, end)]
-              - 'subtitles': List[Dict]
-              - 'punch_in_events': List[Dict] (các phân đoạn cần zoom)
-              - 'markers': List[Dict] (các ghi chú màu sắc trên timeline)
-              - 'stats': Thống kê chi tiết
+        Nhận vào danh sách proposed_segments đã được người dùng chỉnh sửa/duyệt trên GUI.
+        Tính toán keep_intervals, punch_in_events, markers và stats cuối cùng.
         """
-        if not subtitles:
+        if not subtitles or not proposed_segments:
             return {
                 "keep_intervals": silence_keep_intervals,
                 "subtitles": subtitles,
@@ -160,75 +242,68 @@ class AIDirector:
                 "stats": {"original_count": 0, "kept_count": 0, "removed_bad_takes": 0}
             }
 
-        # 1. Phát hiện và loại bỏ Bad Takes
-        bad_take_indices = set()
-        if self.config.remove_bad_takes:
-            bad_take_indices = set(BadTakeDetector.detect_bad_takes(subtitles))
-
-        # 2. Lọc danh sách phụ đề hợp lệ
-        valid_subtitles = []
+        decision_map = {p.id: p for p in proposed_segments}
+        
+        final_subs = []
         markers = []
+        removed_bad_takes_count = 0
 
         for idx, sub in enumerate(subtitles):
-            if idx in bad_take_indices:
-                markers.append({
-                    "time": sub["start"],
-                    "duration": sub["end"] - sub["start"],
-                    "name": "✂ Bad Take",
-                    "note": f"Đã loại bỏ đoạn nói vấp: '{sub.get('text', '')}'",
-                    "color": "Red"
-                })
+            p = decision_map.get(idx)
+            if not p:
                 continue
 
-            # Lọc từ đệm trong từ đơn nếu có
-            if self.config.remove_filler_words and "words" in sub:
-                filtered_words = [
-                    w for w in sub["words"]
-                    if not BadTakeDetector.is_filler_word(w.get("word", ""), language)
-                ]
-                if filtered_words:
-                    sub["words"] = filtered_words
-                    sub["start"] = filtered_words[0]["start"]
-                    sub["end"] = filtered_words[-1]["end"]
-                    sub["text"] = " ".join(w["word"].strip() for w in filtered_words)
-                    valid_subtitles.append(sub)
+            if p.approved:
+                if self.config.remove_filler_words and "words" in sub:
+                    filtered_words = [
+                        w for w in sub["words"]
+                        if not BadTakeDetector.is_filler_word(w.get("word", ""), language)
+                    ]
+                    if filtered_words:
+                        sub["words"] = filtered_words
+                        sub["start"] = filtered_words[0]["start"]
+                        sub["end"] = filtered_words[-1]["end"]
+                        sub["text"] = " ".join(w["word"].strip() for w in filtered_words)
+                        final_subs.append(sub)
+                else:
+                    final_subs.append(sub)
             else:
-                valid_subtitles.append(sub)
+                if "bad take" in p.reason.lower() or "vấp" in p.reason.lower():
+                    removed_bad_takes_count += 1
+                    markers.append({
+                        "time": sub["start"],
+                        "duration": sub["end"] - sub["start"],
+                        "name": "✂ Bad Take",
+                        "note": f"Đã loại bỏ đoạn nói vấp: '{sub.get('text', '')}'",
+                        "color": "Red"
+                    })
+                else:
+                    markers.append({
+                        "time": sub["start"],
+                        "duration": sub["end"] - sub["start"],
+                        "name": "✂ AI Cut",
+                        "note": f"Đã cắt bỏ phân đoạn: '{sub.get('text', '')}' ({p.reason})",
+                        "color": "Red"
+                    })
 
-        # 3. Áp dụng chế độ kịch bản (Presets)
-        final_subs = valid_subtitles
-        if self.config.mode == "viral_shorts":
-            final_subs, shorts_markers = self._extract_viral_shorts_segments(valid_subtitles, target_duration=self.config.target_duration_seconds or 60.0)
-            markers.extend(shorts_markers)
-        elif self.config.mode == "podcast_summary":
-            final_subs, summary_markers = self._extract_summary_segments(valid_subtitles, target_duration=self.config.target_duration_seconds or 180.0)
-            markers.extend(summary_markers)
-
-        # 4. Hợp nhất mốc thời gian giữ lại (keep_intervals)
         raw_intervals = []
         for sub in final_subs:
-            # Lấy mốc thời gian có đệm nhẹ 0.15s
             s_start = max(0.0, sub["start"] - 0.15)
             s_end = min(total_duration, sub["end"] + 0.15)
             raw_intervals.append((s_start, s_end))
 
-        # Gộp các khoảng thời gian bị chồng chập
         merged_intervals = []
         for s_start, s_end in sorted(raw_intervals, key=lambda x: x[0]):
             if merged_intervals and s_start <= merged_intervals[-1][1] + 0.2:
-                # Gộp hai đoạn liền kề nhau
                 merged_intervals[-1] = (merged_intervals[-1][0], max(merged_intervals[-1][1], s_end))
             else:
                 merged_intervals.append((s_start, s_end))
 
-        # Nếu không có đoạn thoại nào được giữ lại, dự phòng về silence intervals
         if not merged_intervals:
             merged_intervals = silence_keep_intervals
 
-        # 5. Tính toán hiệu ứng Auto Punch-in (Zoom luân phiên)
         punch_in_events = []
         if self.config.enable_punch_in and len(merged_intervals) > 1:
-            # Cứ mỗi đoạn jump-cut kế tiếp, đổi trạng thái Zoom (1.0x -> 1.15x -> 1.0x -> 1.15x)
             is_zoomed = False
             for idx, (k_start, k_end) in enumerate(merged_intervals):
                 if is_zoomed:
@@ -248,7 +323,6 @@ class AIDirector:
                     })
                 is_zoomed = not is_zoomed
 
-        # Ghi nhận Marker cho các ý chính
         for sub in final_subs[:5]:
             markers.append({
                 "time": sub["start"],
@@ -266,10 +340,22 @@ class AIDirector:
             "stats": {
                 "original_count": len(subtitles),
                 "kept_count": len(final_subs),
-                "removed_bad_takes": len(bad_take_indices),
+                "removed_bad_takes": removed_bad_takes_count,
                 "punch_ins_created": len(punch_in_events)
             }
         }
+
+    def process_semantic_cut(
+        self,
+        subtitles: List[Dict[str, Any]],
+        silence_keep_intervals: List[Tuple[float, float]],
+        total_duration: float,
+        language: str = "vi"
+    ) -> Dict[str, Any]:
+        proposed = self.generate_proposed_segments(subtitles, language)
+        for p in proposed:
+            p.approved = (p.decision == "keep")
+        return self.apply_approved_segments(subtitles, proposed, silence_keep_intervals, total_duration, language)
 
     def _extract_viral_shorts_segments(
         self,

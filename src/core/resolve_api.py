@@ -212,23 +212,46 @@ class ResolveAutomation:
             str: Đường dẫn tệp SRT đã được tạo.
         """
         def format_time(seconds: float) -> str:
-            # Chuyển đổi giây sang định dạng giờ:phút:giây,mili-giây của SRT (HH:MM:SS,mmm)
+            seconds = max(0.0, seconds)
             hrs = int(seconds // 3600)
             mins = int((seconds % 3600) // 60)
             secs = int(seconds % 60)
             ms = int(round((seconds % 1) * 1000))
-            if ms == 1000:
-                ms = 999
+            if ms >= 1000:
+                secs += 1
+                ms = 0
+            if secs >= 60:
+                mins += 1
+                secs = 0
+            if mins >= 60:
+                hrs += 1
+                mins = 0
             return f"{hrs:02d}:{mins:02d}:{secs:02d},{ms:03d}"
 
         lines = []
+        last_end = 0.0
         for idx, sub in enumerate(subtitles, 1):
-            start_str = format_time(sub["start"])
-            end_str = format_time(sub["end"])
-            text = sub["text"]
+            s = sub["start"]
+            e = sub["end"]
+            if e <= s:
+                e = s + 0.3
+            if s < last_end:
+                s = last_end + 0.01
+                if e <= s:
+                    e = s + 0.3
+            last_end = e
+            start_str = format_time(s)
+            end_str = format_time(e)
+            text = sub["text"].strip()
+            if not text:
+                continue
             lines.append(f"{idx}")
             lines.append(f"{start_str} --> {end_str}")
             lines.append(f"{text}\n")
+
+        parent_dir = os.path.dirname(output_path)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
@@ -296,10 +319,10 @@ class ResolveAutomation:
         log_callback: Optional[Any] = None
     ) -> bool:
         """
-        Import tệp EDL để tạo Timeline mới đã được cắt khoảng lặng trong DaVinci Resolve.
+        Import tệp EDL / FCPXML để tạo Timeline mới trong DaVinci Resolve.
 
         Args:
-            edl_path (str): Đường dẫn tệp EDL (.edl).
+            edl_path (str): Đường dẫn tệp EDL (.edl) hoặc FCPXML (.fcpxml / .xml).
             video_path (str): Đường dẫn tệp video gốc.
             timeline_name (str): Tên Timeline mới muốn tạo.
             log_callback (callable, optional): Hàm ghi log.
@@ -315,7 +338,7 @@ class ResolveAutomation:
 
         if not self.resolve or not self.current_project:
             if not self.connect():
-                log(" ❌ Không thể kết nối tới ứng dụng DaVinci Resolve để import EDL.")
+                log(" ❌ Không thể kết nối tới ứng dụng DaVinci Resolve để import timeline.")
                 return False
 
         media_pool = self.current_project.GetMediaPool()
@@ -323,21 +346,27 @@ class ResolveAutomation:
             log(" ❌ Không tìm thấy Media Pool trong dự án DaVinci Resolve hiện tại.")
             return False
 
+        file_ext = os.path.splitext(edl_path)[1].lower()
         import_options = {
             "timelineName": timeline_name,
-            "importSourceClips": True,
+            "importSourceClips": False,  # Không bắt buộc re-import nếu clip đã có trong Media Pool
             "sourceClipsPath": os.path.abspath(os.path.dirname(video_path))
         }
 
         try:
             timeline = media_pool.ImportTimelineFromFile(os.path.abspath(edl_path), import_options)
+            if not timeline and file_ext in [".edl", ".txt"]:
+                # Thử lại với importSourceClips = True cho EDL
+                import_options["importSourceClips"] = True
+                timeline = media_pool.ImportTimelineFromFile(os.path.abspath(edl_path), import_options)
+
             if timeline:
-                log(f" 🎉 Đã tự động import EDL và tạo Timeline '{timeline_name}' thành công trong DaVinci Resolve!")
+                log(f" 🎉 Đã tự động import Timeline '{timeline_name}' thành công trong DaVinci Resolve!")
                 return True
         except Exception as e:
             log(f" ⚠️ Lỗi khi gọi API ImportTimelineFromFile: {str(e)}")
 
-        log(" ➖ Cần import thủ công tệp EDL vào DaVinci Resolve.")
+        log(" ➖ Cần import thủ công tệp Timeline (.fcpxml / .edl) vào DaVinci Resolve.")
         return False
 
 def is_vertical_video(video_path: str) -> bool:
@@ -469,6 +498,69 @@ def map_time_to_timeline(t_src: float, keep_intervals: List[Tuple[float, float]]
             current_rec += (e_i - s_i)
 
     return current_rec
+
+def map_time_with_speedup_segments(t_src: float, speedup_segments: List[Dict[str, Any]], base_rec_time: float = 0.0) -> float:
+    """
+    Ánh xạ mốc thời gian nguồn sang record time khi có áp dụng tua nhanh khoảng lặng (Speed-Ramp).
+    """
+    if not speedup_segments:
+        return base_rec_time + t_src
+
+    current_rec = base_rec_time
+    for seg in speedup_segments:
+        s_start = seg["start"]
+        s_end = seg["end"]
+        s_rec_dur = seg["rec_duration"]
+        speed = seg.get("speed", 1.0)
+
+        if t_src < s_start:
+            return current_rec
+        elif s_start <= t_src <= s_end:
+            return current_rec + (t_src - s_start) / speed
+        else:
+            current_rec += s_rec_dur
+
+    return current_rec
+
+def map_subtitles_with_speedup_segments(
+    subtitles: List[Dict[str, Any]],
+    speedup_segments: List[Dict[str, Any]],
+    base_rec_time: float = 0.0
+) -> List[Dict[str, Any]]:
+    """
+    Chuyển đổi mốc thời gian phụ đề sang record time khi có áp dụng tua nhanh (Speed-Ramp/Timelapse).
+    """
+    if not speedup_segments:
+        return subtitles
+
+    mapped_subs = []
+    for sub in subtitles:
+        new_start = map_time_with_speedup_segments(sub["start"], speedup_segments, base_rec_time)
+        new_end = map_time_with_speedup_segments(sub["end"], speedup_segments, base_rec_time)
+
+        if new_end <= new_start:
+            new_end = new_start + 0.2
+
+        mapped_words = []
+        for w in sub.get("words", []):
+            w_start = map_time_with_speedup_segments(w["start"], speedup_segments, base_rec_time)
+            w_end = map_time_with_speedup_segments(w["end"], speedup_segments, base_rec_time)
+            if w_end <= w_start:
+                w_end = w_start + 0.1
+            mapped_words.append({
+                "word": w["word"],
+                "start": w_start,
+                "end": w_end
+            })
+
+        mapped_subs.append({
+            "start": new_start,
+            "end": new_end,
+            "text": sub["text"],
+            "words": mapped_words
+        })
+
+    return mapped_subs
 
 def map_subtitles_to_timeline(
     subtitles: List[Dict[str, Any]], 

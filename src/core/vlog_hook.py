@@ -269,29 +269,39 @@ class VlogHookGenerator:
 
         events = []
         cumulative_record_time = 0.0
+        from src.core.autocut import get_media_metadata, get_reel_name
+
+        meta_cache = {}
 
         for idx, seg in enumerate(segments, 1):
             clip_name = os.path.basename(seg.video_path)
-            fps = get_video_fps(seg.video_path)
+            reel_id = get_reel_name(clip_name).ljust(8)
+            if seg.video_path not in meta_cache:
+                meta_cache[seg.video_path] = get_media_metadata(seg.video_path)
+            meta = meta_cache[seg.video_path]
+            fps = meta["fps"]
+            start_tc_sec = meta["start_seconds"]
 
             rec_in = cumulative_record_time
             rec_out = rec_in + seg.duration
             cumulative_record_time = rec_out
 
-            src_in_tc = seconds_to_timecode(seg.src_in, fps)
-            src_out_tc = seconds_to_timecode(seg.src_out, fps)
+            src_in_tc = seconds_to_timecode(seg.src_in, fps, start_tc_offset_seconds=start_tc_sec)
+            src_out_tc = seconds_to_timecode(seg.src_out, fps, start_tc_offset_seconds=start_tc_sec)
             rec_in_tc = seconds_to_timecode(rec_in, fps)
             rec_out_tc = seconds_to_timecode(rec_out, fps)
 
             event_num = f"{idx:03d}"
 
             # Video Event
-            lines.append(f"{event_num}  AX       V     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            lines.append(f"{event_num}  {reel_id} V     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
             lines.append(f"* FROM CLIP NAME: {clip_name}")
             lines.append(f"* COMMENT: TEASER_HOOK_CLIP_{idx} - {seg.reason}")
 
-            # Audio Event
-            lines.append(f"{event_num}  AX       A     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            # Audio Event (Track 1 & Track 2 - Stereo)
+            lines.append(f"{event_num}  {reel_id} A     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            lines.append(f"* FROM CLIP NAME: {clip_name}")
+            lines.append(f"{event_num}  {reel_id} A2    C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
             lines.append(f"* FROM CLIP NAME: {clip_name}")
 
             # Phân loại màu Marker thông minh trên Timeline DaVinci Resolve

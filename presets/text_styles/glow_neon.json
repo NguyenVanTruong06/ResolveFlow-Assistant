@@ -1,0 +1,18 @@
+{
+  "id": "glow_neon",
+  "name": "Glow / Neon (Chữ phát sáng hiện đại)",
+  "font": "Arial",
+  "size": 50,
+  "weight": "bold",
+  "standard_color": "#E0FFFF",
+  "highlight_color": "#00FFFF",
+  "outline_color": "#008B8B",
+  "outline_width": 0.1,
+  "animation": "glow",
+  "timing_curve": "ease-in-out",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": null,
+  "glow_color": "#00FFFF",
+  "gradient_colors": null
+}

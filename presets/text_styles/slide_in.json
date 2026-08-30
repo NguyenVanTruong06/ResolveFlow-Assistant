@@ -1,0 +1,18 @@
+{
+  "id": "slide_in",
+  "name": "Slide-in (Trượt mượt mà từng từ)",
+  "font": "Arial",
+  "size": 48,
+  "weight": "bold",
+  "standard_color": "#F0F0F0",
+  "highlight_color": "#FFEA00",
+  "outline_color": "#000000",
+  "outline_width": 0.12,
+  "animation": "slide",
+  "timing_curve": "ease-in-out",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

@@ -77,6 +77,13 @@ class ExecutionAuditReporter:
         self.output_files: List[OutputFileManifest] = []
         self.timelines: List[TimelineManifest] = []
         self.fps: float = 30.0
+        self.validation_warnings: List[str] = []
+
+    def record_validation_warnings(self, warnings: List[str]):
+        """
+        Ghi nhận danh sách cảnh báo tương thích từ bước Dry-run Validate.
+        """
+        self.validation_warnings.extend(warnings)
 
     @staticmethod
     def format_duration(seconds: float) -> str:
@@ -295,7 +302,21 @@ class ExecutionAuditReporter:
             "",
             "> [!NOTE]",
             f"> Báo cáo được tạo tự động bởi **ResolveFlow Assistant v4.1** nhằm kiểm toán và minh bạch hóa 100% dữ liệu đã xử lý.",
-            "",
+            ""
+        ]
+
+        if self.validation_warnings:
+            lines.extend([
+                "## ⚠️ Nhật Ký Cảnh Báo Tương Thích (Dry-run Validation)",
+                "",
+                "Phát hiện các vấn đề tương thích định dạng file nguồn:",
+                ""
+            ])
+            for warn in self.validation_warnings:
+                lines.append(f"- [⚠️ Cảnh báo] {warn}")
+            lines.append("")
+
+        lines.extend([
             "## 1. 📈 Tổng quan Toàn bộ Dự án",
             "",
             "| Chỉ số | Trước xử lý | Sau xử lý | Mức độ tối ưu / Tiết kiệm |",
@@ -308,7 +329,7 @@ class ExecutionAuditReporter:
             "",
             "## 2. ✂ Chi tiết Cắt Khoảng Lặng (Silent Cut Audit)",
             ""
-        ]
+        ])
 
         for cr in self.clip_records:
             lines.append(f"### 🎬 Clip {cr.clip_index}: `{cr.clip_name}`")

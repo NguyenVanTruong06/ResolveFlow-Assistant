@@ -1,0 +1,22 @@
+{
+  "id": "gradient_fill",
+  "name": "Gradient Fill (Chuyển sắc phong cách)",
+  "font": "Arial",
+  "size": 50,
+  "weight": "extra_bold",
+  "standard_color": "#FFFFFF",
+  "highlight_color": "#FF5E36",
+  "outline_color": "#222222",
+  "outline_width": 0.1,
+  "animation": "slide",
+  "timing_curve": "ease-in-out",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": [
+    "#FFA07A",
+    "#FF4500",
+    "#FF1493"
+  ]
+}

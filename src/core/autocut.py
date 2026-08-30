@@ -1,5 +1,8 @@
 import os
+import re
 import wave
+import subprocess
+import json
 import numpy as np
 from typing import List, Tuple, Dict, Any, Optional
 from pydantic import BaseModel, Field
@@ -47,11 +50,12 @@ class SilenceDetector:
         Returns:
             List[Tuple[float, float]]: Mảng các tuple (start_time, end_time) của các đoạn giữ lại.
         """
-        if not os.path.exists(wav_path):
-            raise FileNotFoundError(f"Không tìm thấy tệp âm thanh tại: {wav_path}")
+        norm_wav = os.path.normpath(os.path.abspath(wav_path))
+        if not os.path.exists(norm_wav):
+            raise FileNotFoundError(f"Không tìm thấy tệp âm thanh tại: {norm_wav}")
 
         # 1. Đọc tệp WAV PCM sử dụng thư viện wave tiêu chuẩn
-        with wave.open(wav_path, 'rb') as wav:
+        with wave.open(norm_wav, 'rb') as wav:
             params = wav.getparams()
             sample_rate = params.framerate
             sample_width = params.sampwidth
@@ -234,36 +238,164 @@ class SilenceDetector:
 
         return timeline_segments
 
+def parse_timecode_to_seconds(tc_str: str, fps: float = 30.0) -> float:
+    """
+    Chuyển đổi chuỗi Timecode (HH:MM:SS:FF hoặc HH:MM:SS;FF) thành số giây (float).
+    """
+    if not tc_str or not isinstance(tc_str, str):
+        return 0.0
+    import re
+    parts = re.split(r'[:;.]', tc_str.strip())
+    if len(parts) != 4:
+        return 0.0
+    try:
+        hrs, mins, secs, frames = [int(p) for p in parts]
+        total_seconds = (hrs * 3600) + (mins * 60) + secs + (frames / fps)
+        return total_seconds
+    except ValueError:
+        return 0.0
+
+def get_media_metadata(video_path: str) -> Dict[str, Any]:
+    """
+    Trích xuất toàn bộ metadata gốc của tệp video:
+    - FPS thực tế
+    - Embedded Start Timecode (từ tags.timecode của video stream, tmcd hoặc format)
+    - Start time offset (giây)
+    - Tổng thời lượng (duration)
+    """
+    default_meta = {
+        "fps": 30.0,
+        "start_timecode": "00:00:00:00",
+        "start_seconds": 0.0,
+        "duration": 0.0,
+        "width": 1920,
+        "height": 1080
+    }
+    if not os.path.exists(video_path) or os.path.getsize(video_path) == 0:
+        return default_meta
+
+    probe = None
+    try:
+        import ffmpeg
+        probe = ffmpeg.probe(video_path)
+    except Exception:
+        import subprocess
+        import json
+        cmd = [
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_format", "-show_streams", video_path
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=5)
+            probe = json.loads(res.stdout)
+        except Exception:
+            return default_meta
+
+    if not probe:
+        return default_meta
+
+    video_stream = next((s for s in probe.get('streams', []) if s.get('codec_type') == 'video'), None)
+    format_data = probe.get('format', {})
+
+    fps = 30.0
+    if video_stream:
+        avg_frame_rate = video_stream.get('avg_frame_rate', video_stream.get('r_frame_rate', '30/1'))
+        if '/' in avg_frame_rate:
+            num, den = map(float, avg_frame_rate.split('/'))
+            fps = num / den if den != 0 else 30.0
+        else:
+            try:
+                fps = float(avg_frame_rate)
+            except (ValueError, TypeError):
+                fps = 30.0
+
+    start_tc = None
+    if video_stream and 'tags' in video_stream:
+        v_tags = video_stream['tags']
+        start_tc = v_tags.get('timecode') or v_tags.get('TIMECODE') or v_tags.get('time_code')
+
+    if not start_tc:
+        tmcd_stream = next((s for s in probe.get('streams', []) if s.get('codec_tag_string') == 'tmcd'), None)
+        if tmcd_stream and 'tags' in tmcd_stream:
+            start_tc = tmcd_stream['tags'].get('timecode')
+
+    if not start_tc and 'tags' in format_data:
+        f_tags = format_data['tags']
+        start_tc = f_tags.get('timecode') or f_tags.get('TIMECODE') or f_tags.get('time_code')
+
+    start_sec = 0.0
+    if start_tc:
+        start_sec = parse_timecode_to_seconds(start_tc, fps)
+    else:
+        raw_start_time = video_stream.get('start_time') if video_stream else format_data.get('start_time')
+        if raw_start_time is not None:
+            try:
+                start_sec = float(raw_start_time)
+                start_tc = seconds_to_timecode(0.0, fps, start_tc_offset_seconds=start_sec)
+            except ValueError:
+                start_sec = 0.0
+                start_tc = "00:00:00:00"
+        else:
+            start_tc = "00:00:00:00"
+            start_sec = 0.0
+
+    duration = 0.0
+    try:
+        duration = float(format_data.get('duration', 0.0))
+    except (ValueError, TypeError):
+        pass
+
+    width = int(video_stream.get('width', 1920)) if video_stream else 1920
+    height = int(video_stream.get('height', 1080)) if video_stream else 1080
+
+    has_audio = any(s.get('codec_type') == 'audio' for s in probe.get('streams', [])) if probe else True
+
+    return {
+        "fps": fps,
+        "start_timecode": start_tc,
+        "start_seconds": start_sec,
+        "duration": duration,
+        "width": width,
+        "height": height,
+        "has_audio": has_audio
+    }
+
 def get_video_fps(video_path: str) -> float:
     """
     Lấy tốc độ khung hình (FPS) của tệp video sử dụng ffprobe.
     """
-    try:
-        import ffmpeg
-        probe = ffmpeg.probe(video_path)
-        video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
-        if video_stream:
-            avg_frame_rate = video_stream.get('avg_frame_rate', '30/1')
-            if '/' in avg_frame_rate:
-                num, den = map(float, avg_frame_rate.split('/'))
-                return num / den if den != 0 else 30.0
-            return float(avg_frame_rate)
-    except Exception:
-        pass
-    return 30.0
+    return get_media_metadata(video_path)["fps"]
 
-def seconds_to_timecode(seconds: float, fps: float) -> str:
+def seconds_to_timecode(
+    seconds: float, 
+    fps: float = 30.0, 
+    start_tc_offset_seconds: float = 0.0
+) -> str:
     """
     Chuyển đổi số giây thành định dạng Timecode CMX3600 (HH:MM:SS:FF).
+    Hỗ trợ cộng offset Start Timecode gốc của camera (Sony, Canon, ARRI...).
     """
-    seconds = max(0.0, seconds)
-    hrs = int(seconds // 3600)
-    mins = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    frames = int(round((seconds % 1) * fps))
-    if frames >= int(fps):
-        frames = int(fps) - 1
+    total_sec = max(0.0, seconds + start_tc_offset_seconds)
+    hrs = int(total_sec // 3600)
+    mins = int((total_sec % 3600) // 60)
+    secs = int(total_sec % 60)
+    sub_sec = total_sec - int(total_sec)
+    frames = int(round(sub_sec * fps))
+    if frames >= int(round(fps)):
+        frames = int(round(fps)) - 1
+    hrs = hrs % 24
     return f"{hrs:02d}:{mins:02d}:{secs:02d}:{frames:02d}"
+
+def get_reel_name(video_path: str) -> str:
+    """
+    Sinh Reel Name chuẩn CMX3600 (tối đa 8 ký tự chữ số/chữ cái) từ tên file video.
+    Ví dụ: 'C0387.MP4' -> 'C0387', 'Clip_12.mp4' -> 'CLIP12'
+    """
+    base = os.path.splitext(os.path.basename(video_path))[0]
+    cleaned = re.sub(r'[^A-Za-z0-9]', '', base).upper()
+    if not cleaned:
+        return "AX"
+    return cleaned[:8]
 
 class EDLGenerator:
     """
@@ -276,10 +408,20 @@ class EDLGenerator:
         return get_video_fps(video_path)
 
     @staticmethod
-    def generate_edl_content(video_path: str, keep_intervals: List[Tuple[float, float]], fps: float = 30.0) -> str:
+    def generate_edl_content(
+        video_path: str, 
+        keep_intervals: List[Tuple[float, float]], 
+        fps: Optional[float] = None,
+        title: str = "Silence Cut"
+    ) -> str:
+        meta = get_media_metadata(video_path)
+        fps_val = fps or meta["fps"]
+        start_tc_sec = meta["start_seconds"]
         clip_name = os.path.basename(video_path)
+        reel_id = get_reel_name(clip_name).ljust(8)
+
         lines = [
-            "TITLE: Silence Cut",
+            f"TITLE: {title}",
             "FCM: NON-DROP FRAME",
             ""
         ]
@@ -290,29 +432,28 @@ class EDLGenerator:
             if duration <= 0:
                 continue
 
-            src_in_tc = seconds_to_timecode(start, fps)
-            src_out_tc = seconds_to_timecode(end, fps)
+            src_in_tc = seconds_to_timecode(start, fps_val, start_tc_offset_seconds=start_tc_sec)
+            src_out_tc = seconds_to_timecode(end, fps_val, start_tc_offset_seconds=start_tc_sec)
 
-            rec_in_tc = seconds_to_timecode(current_record_time, fps)
+            rec_in_tc = seconds_to_timecode(current_record_time, fps_val)
             current_record_time += duration
-            rec_out_tc = seconds_to_timecode(current_record_time, fps)
+            rec_out_tc = seconds_to_timecode(current_record_time, fps_val)
 
             event_num = f"{idx:03d}"
 
             # Event cho luồng Video
-            lines.append(f"{event_num}  AX       V     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            lines.append(f"{event_num}  {reel_id} V     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
             lines.append(f"* FROM CLIP NAME: {clip_name}")
 
-            # Event cho luồng Audio (Track 1)
-            lines.append(f"{event_num}  AX       A     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            # Event cho luồng Audio (Track 1 & Track 2)
+            lines.append(f"{event_num}  {reel_id} A     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
             lines.append(f"* FROM CLIP NAME: {clip_name}")
 
         return "\n".join(lines)
 
     @staticmethod
     def create_edl(video_path: str, keep_intervals: List[Tuple[float, float]], output_edl_path: str) -> str:
-        fps = get_video_fps(video_path)
-        content = EDLGenerator.generate_edl_content(video_path, keep_intervals, fps)
+        content = EDLGenerator.generate_edl_content(video_path, keep_intervals)
 
         parent_dir = os.path.dirname(output_edl_path)
         if parent_dir and not os.path.exists(parent_dir):
@@ -327,31 +468,42 @@ class EDLGenerator:
     def create_multi_clip_edl(
         events: List[Dict[str, Any]], 
         output_edl_path: str,
-        markers: Optional[List[Dict[str, Any]]] = None
+        markers: Optional[List[Dict[str, Any]]] = None,
+        title: str = "Silence Cut Multi-Clip"
     ) -> str:
         """
         Tạo tệp EDL ghép nối nhiều nguồn clip khác nhau (hỗ trợ Markers & Punch-in Tags).
         Mỗi phần tử trong events chứa: video_path, src_in, src_out, rec_in, rec_out, fps, punch_in (tùy chọn)
+        Tự động bù đắp Start Timecode gốc của từng video.
         """
         lines = [
-            "TITLE: Silence Cut Multi-Clip",
+            f"TITLE: {title}",
             "FCM: NON-DROP FRAME",
             ""
         ]
 
+        metadata_cache = {}
+
         for idx, ev in enumerate(events, 1):
-            clip_name = os.path.basename(ev["video_path"])
-            fps = ev["fps"]
+            v_path = ev["video_path"]
+            if v_path not in metadata_cache:
+                metadata_cache[v_path] = get_media_metadata(v_path)
+            meta = metadata_cache[v_path]
+
+            clip_name = os.path.basename(v_path)
+            reel_id = get_reel_name(clip_name).ljust(8)
+            fps = ev.get("fps") or meta["fps"]
+            start_tc_sec = meta["start_seconds"]
             
-            src_in_tc = seconds_to_timecode(ev["src_in"], fps)
-            src_out_tc = seconds_to_timecode(ev["src_out"], fps)
+            src_in_tc = seconds_to_timecode(ev["src_in"], fps, start_tc_offset_seconds=start_tc_sec)
+            src_out_tc = seconds_to_timecode(ev["src_out"], fps, start_tc_offset_seconds=start_tc_sec)
             rec_in_tc = seconds_to_timecode(ev["rec_in"], fps)
             rec_out_tc = seconds_to_timecode(ev["rec_out"], fps)
             
             event_num = f"{idx:03d}"
             
             # Event cho luồng Video
-            lines.append(f"{event_num}  AX       V     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            lines.append(f"{event_num}  {reel_id} V     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
             lines.append(f"* FROM CLIP NAME: {clip_name}")
             
             if ev.get("punch_in"):
@@ -361,8 +513,10 @@ class EDLGenerator:
                 speed_val = ev.get("speed", 8.0)
                 lines.append(f"* COMMENT: SPEED_RAMP_{speed_val}X")
 
-            # Event cho luồng Audio (Track 1)
-            lines.append(f"{event_num}  AX       A     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            # Event cho luồng Audio (Track 1 & Track 2 - Stereo)
+            lines.append(f"{event_num}  {reel_id} A     C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
+            lines.append(f"* FROM CLIP NAME: {clip_name}")
+            lines.append(f"{event_num}  {reel_id} A2    C        {src_in_tc} {src_out_tc} {rec_in_tc} {rec_out_tc}")
             lines.append(f"* FROM CLIP NAME: {clip_name}")
 
         # Thêm danh sách Markers nếu có (Chuẩn CMX3600 Locator của DaVinci Resolve)
