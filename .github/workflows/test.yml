@@ -12,6 +12,8 @@ jobs:
     runs-on: windows-latest
     env:
       QT_QPA_PLATFORM: offscreen
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -35,7 +37,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install PySide6 pytest pillow pyinstaller
+        pip install pyinstaller
 
     - name: Run Test Suite with Pytest
       run: |
@@ -47,6 +49,8 @@ jobs:
     needs: test
     env:
       QT_QPA_PLATFORM: offscreen
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
@@ -61,7 +65,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install PySide6 pytest pillow pyinstaller
+        pip install pyinstaller
 
     - name: Build Standalone Executable Check
       run: |

@@ -1,4 +1,7 @@
-﻿faster-whisper
-ffmpeg-python
-numpy
-pydantic
+faster-whisper==1.2.1
+ffmpeg-python==0.2.0
+numpy>=1.24.0,<3.0.0
+pydantic>=2.0.0,<3.0.0
+PySide6>=6.5.0
+pillow>=10.0.0
+pytest>=7.0.0

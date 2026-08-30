@@ -18,6 +18,9 @@ coverage.xml
 *.cover
 *.log
 .pytest_cache/
+build/
+dist/
+installer_output/
 
 # ==========================================
 # ResolveFlow Specific / Media Files
