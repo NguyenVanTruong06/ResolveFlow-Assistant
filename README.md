@@ -47,11 +47,23 @@ Hệ thống cho phép lựa chọn hoặc tự tạo các kiểu dáng phụ đ
 
 ---
 
-## 🛠️ Yêu Cầu Hệ Thống & Cài Đặt
+## ⚡ Tải Bản Đóng Gói Sẵn (.exe Standalone)
 
-### 1. Chuẩn bị môi trường
-* **Hệ điều hành:** Windows 10/11 (64-bit). *(Xem thêm: [Báo cáo hỗ trợ macOS](docs/MACOS_COMPATIBILITY_ANALYSIS.md))*
-* **Python:** Phiên bản `3.10` trở lên.
+> **Dành cho Người Dùng Cuối (Không cần cài đặt Python hay cấu hình dòng lệnh):**
+
+1. Truy cập trang **[GitHub Releases](https://github.com/NguyenVanTruong06/ResolveFlow-Assistant/releases)** của repository.
+2. Tải về tệp nén mới nhất: **`ResolveFlow-Assistant-v4.1.0-windows-x64.zip`**.
+3. Giải nén tệp `.zip` vào bất kỳ thư mục nào trên máy tính (ví dụ: `D:\ResolveFlow\`).
+4. Nhấp đúp chuột vào file **`ResolveFlow-Assistant.exe`** để mở ứng dụng.
+5. *Lưu ý khởi chạy lần đầu:* Khi bạn chọn một mô hình Whisper AI mới (ví dụ: `small` hoặc `medium`), ứng dụng sẽ tự động tải mô hình về bộ nhớ đệm máy tính kèm thanh thông báo tiến trình rõ ràng (chỉ diễn ra 1 lần duy nhất).
+
+---
+
+## 🛠️ Cài Đặt Dành Cho Lập Trình Viên (Từ Mã Nguồn)
+
+### 1. Yêu cầu hệ thống
+* **Hệ điều hành:** Windows 10/11 (64-bit). *(Xem thêm: [Báo cáo tương thích macOS](docs/MACOS_COMPATIBILITY_ANALYSIS.md))*
+* **Python:** Phiên bản `3.10` hoặc `3.11`.
 * **GPU (Khuyên dùng):** NVIDIA (hỗ trợ CUDA) để tăng tốc độ nhận diện Whisper AI.
 * **Công cụ bắt buộc:** [FFmpeg](https://ffmpeg.org/) (đã thêm vào biến môi trường `PATH`).
 
@@ -65,15 +77,15 @@ cd ResolveFlow-Assistant
 powershell -ExecutionPolicy Bypass -File setup_project.ps1
 ```
 
-Hoặc cài đặt thủ công:
+Hoặc cài đặt thủ công bằng virtualenv:
 ```powershell
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-pip install PySide6 pytest pillow pyinstaller
+pip install pyinstaller
 ```
 
-### 3. Đóng gói Standalone Executable (.exe)
+### 3. Tự đóng gói Standalone Executable (.exe)
 ```powershell
 python build_standalone.py
 ```
