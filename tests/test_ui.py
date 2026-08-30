@@ -10,7 +10,15 @@ def qapp():
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
-    return app
+    yield app
+
+@pytest.fixture
+def app_window(qapp):
+    window = ResolveFlowApp()
+    yield window
+    window.close()
+    window.deleteLater()
+    qapp.processEvents()
 
 def test_ui_imports():
     assert PipelineWorker is not None
@@ -39,8 +47,8 @@ def test_worker_stop():
     worker.stop()
     assert worker.is_interrupted is True
 
-def test_user_customized_limit_protection(qapp):
-    window = ResolveFlowApp()
+def test_user_customized_limit_protection(app_window):
+    window = app_window
     
     assert window.user_customized_limit is False
     
@@ -65,8 +73,8 @@ def test_user_customized_limit_protection(qapp):
         window._update_default_chars_limit("portrait.mp4")
         assert window.txt_split_limit.text() == "30"
 
-def test_workflow_modes_switch(qapp):
-    window = ResolveFlowApp()
+def test_workflow_modes_switch(app_window):
+    window = app_window
     
     # 1. Chuyển sang Podcast
     idx_podcast = window.combo_workflow.findData("podcast")
@@ -91,8 +99,8 @@ def test_workflow_modes_switch(qapp):
     assert window.check_vlog_hook.isChecked() is True
     assert window.check_speedup.isChecked() is True
 
-def test_master_intensity_slider(qapp):
-    window = ResolveFlowApp()
+def test_master_intensity_slider(app_window):
+    window = app_window
     
     # Cường độ Nhẹ (1)
     window.slide_master_intensity.setValue(1)
@@ -106,8 +114,8 @@ def test_master_intensity_slider(qapp):
     assert window.slide_dur.value() == 3
     assert window.txt_confidence_threshold.text() == "0.85"
 
-def test_recipe_and_presets_ui(qapp):
-    window = ResolveFlowApp()
+def test_recipe_and_presets_ui(app_window):
+    window = app_window
     
     # Presets combobox populated
     assert window.combo_text_preset.count() >= 7
