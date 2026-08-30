@@ -1,18 +1,28 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
 import sys
+from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
+
+# Thu thập đầy đủ dữ liệu, nhị phân và hidden imports cho faster_whisper, ctranslate2, onnxruntime
+# Đặc biệt bao gồm silero_vad_v6.onnx và các tài nguyên VAD nằm trong faster_whisper/assets/
+datas_fw, binaries_fw, hidden_fw = collect_all('faster_whisper')
+datas_ct2, binaries_ct2, hidden_ct2 = collect_all('ctranslate2')
+datas_ort, binaries_ort, hidden_ort = collect_all('onnxruntime')
 
 added_files = [
     ('presets', 'presets'),
     ('recipes', 'recipes'),
     ('assets', 'assets'),
-]
+] + datas_fw + datas_ct2 + datas_ort
+
+all_binaries = binaries_fw + binaries_ct2 + binaries_ort
 
 hidden_imports = [
     'faster_whisper',
     'ctranslate2',
+    'onnxruntime',
     'pydantic',
     'pydantic_core',
     'ffmpeg',
@@ -41,12 +51,12 @@ hidden_imports = [
     'src.core.vision_reframer',
     'src.core.vlog_hook',
     'src.ui.app'
-]
+] + hidden_fw + hidden_ct2 + hidden_ort
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=all_binaries,
     datas=added_files,
     hiddenimports=hidden_imports,
     hookspath=[],
