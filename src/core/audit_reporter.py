@@ -37,7 +37,7 @@ class ClipAuditRecord(BaseModel):
     video_path: str
     original_duration: float
     silent_intervals_detected: int = 0
-    kept_intervals: List[KeptIntervalAudit] = []
+    kept_intervals: List[KeptIntervalAudit] = Field(default_factory=list)
     final_duration: float = 0.0
     duration_saved: float = 0.0
     percentage_reduced: float = 0.0

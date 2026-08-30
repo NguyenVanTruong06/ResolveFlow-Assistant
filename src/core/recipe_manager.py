@@ -4,6 +4,15 @@ import re
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
+def pydantic_dump(model: BaseModel) -> Dict[str, Any]:
+    """Hỗ trợ serialize Pydantic model trên cả v1 (Python 3.10) và v2 (Python 3.11+)."""
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    elif hasattr(model, "dict"):
+        return model.dict()
+    return vars(model)
+
+
 class Recipe(BaseModel):
     """
     Schema định nghĩa một Recipe - gói cấu hình hoàn chỉnh lưu trữ toàn bộ
@@ -135,7 +144,7 @@ class RecipeManager:
             fpath = os.path.join(self.base_dir, f"{r.id}.json")
             if not os.path.exists(fpath):
                 with open(fpath, "w", encoding="utf-8") as f:
-                    json.dump(r.model_dump(), f, indent=2, ensure_ascii=False)
+                    json.dump(pydantic_dump(r), f, indent=2, ensure_ascii=False)
 
     def list_recipes(self) -> List[Recipe]:
         """Tải toàn bộ danh sách recipe hiện có."""
@@ -165,7 +174,7 @@ class RecipeManager:
         recipe.id = safe_id
         file_path = os.path.join(self.base_dir, f"{safe_id}.json")
         with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(recipe.model_dump(), f, indent=2, ensure_ascii=False)
+            json.dump(pydantic_dump(recipe), f, indent=2, ensure_ascii=False)
         return file_path
 
     def delete_recipe(self, recipe_id: str) -> bool:

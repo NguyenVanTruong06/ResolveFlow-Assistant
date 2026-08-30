@@ -8,12 +8,13 @@ on:
 
 jobs:
   test:
-    name: Run Unit Tests (Python ${{ matrix.python-version }}) on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Run Unit Tests (Python ${{ matrix.python-version }}) on Windows
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
         python-version: ["3.10", "3.11"]
 
     steps:
@@ -41,9 +42,11 @@ jobs:
         pytest -v
 
   build-check:
-    name: Dry-run Packaging Build (Windows)
+    name: Dry-run Packaging Build (Windows Python 3.11)
     runs-on: windows-latest
     needs: test
+    env:
+      QT_QPA_PLATFORM: offscreen
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4

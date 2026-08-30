@@ -58,6 +58,15 @@ def hex_to_rgb_tuple(hex_color: str) -> Tuple[int, int, int, int]:
         return (255, 255, 255, 255)
 
 
+def pydantic_dump(model: BaseModel) -> Dict[str, Any]:
+    """Hỗ trợ serialize Pydantic model trên cả v1 (Python 3.10) và v2 (Python 3.11+)."""
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    elif hasattr(model, "dict"):
+        return model.dict()
+    return vars(model)
+
+
 class TextStylePreset(BaseModel):
     """
     Schema định nghĩa một Preset kiểu chữ và hiệu ứng phụ đề động (Text+/Fusion Text)
@@ -228,7 +237,7 @@ class PresetManager:
             file_path = os.path.join(self.base_dir, f"{preset.id}.json")
             if not os.path.exists(file_path):
                 with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(preset.model_dump(), f, indent=2, ensure_ascii=False)
+                    json.dump(pydantic_dump(preset), f, indent=2, ensure_ascii=False)
 
     def list_presets(self) -> List[TextStylePreset]:
         """Tải toàn bộ danh sách preset (cả mặc định và tùy chỉnh)."""
@@ -284,7 +293,7 @@ class PresetManager:
         preset.id = safe_id
         file_path = os.path.join(self.custom_dir, f"{safe_id}.json")
         with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(preset.model_dump(), f, indent=2, ensure_ascii=False)
+            json.dump(pydantic_dump(preset), f, indent=2, ensure_ascii=False)
         return file_path
 
     def delete_custom_preset(self, preset_id: str) -> bool:
