@@ -1,5 +1,6 @@
 import gc
 import re
+import os
 from typing import Literal, Optional, List, Dict, Any, Callable
 from pydantic import BaseModel, Field
 
@@ -58,12 +59,28 @@ def is_whisper_hallucination(text: str) -> bool:
 class ResolveTranscriber:
     """
     Lớp điều khiển tải mô hình và dịch âm thanh ngoại tuyến sử dụng faster-whisper.
+    Hỗ trợ báo tiến trình tải mô hình lần đầu rõ ràng tránh cảm giác app bị treo.
     """
     def __init__(self, config: ModelConfig):
         self.config = config
         self.model = None
 
-    def load_model(self) -> None:
+    def is_model_cached(self) -> bool:
+        """Kiểm tra xem mô hình Whisper đã được tải về máy trước đó chưa."""
+        try:
+            from faster_whisper.utils import _download_model
+            # Kiểm tra trong thư mục cache huggingface mặc định
+            cache_dir = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
+            model_tag = self.config.model_size
+            if os.path.exists(cache_dir):
+                for d in os.listdir(cache_dir):
+                    if model_tag in d.lower():
+                        return True
+        except Exception:
+            pass
+        return False
+
+    def load_model(self, log_callback: Optional[Callable[[str], None]] = None) -> None:
         """
         Tải mô hình Whisper lên thiết bị chỉ định (GPU CUDA hoặc CPU).
         Tự động kiểm tra và chuyển về CPU nếu GPU không hỗ trợ CUDA.
@@ -78,17 +95,31 @@ class ResolveTranscriber:
             try:
                 import torch
                 if not torch.cuda.is_available():
-                    print(" Warn: CUDA is not available. Falling back to CPU execution.")
+                    msg = "⚠️ CUDA không khả dụng trên thiết bị. Tự động chuyển sang xử lý bằng CPU (float32)."
+                    if log_callback:
+                        log_callback(msg)
+                    else:
+                        print(f" Warn: {msg}")
                     device = "cpu"
                     compute_type = "float32"
             except ImportError:
-                print(" Warn: PyTorch/CUDA not configured properly. Falling back to CPU.")
+                msg = "⚠️ Không tìm thấy PyTorch CUDA. Tự động chuyển sang CPU."
+                if log_callback:
+                    log_callback(msg)
+                else:
+                    print(f" Warn: {msg}")
                 device = "cpu"
                 compute_type = "float32"
 
-        # Nếu chạy trên CPU, bắt buộc dùng float32 để tránh lỗi tương thích kiểu dữ liệu
         if device == "cpu":
             compute_type = "float32"
+
+        # Báo log tải mô hình lần đầu nếu cần
+        if log_callback:
+            if not self.is_model_cached():
+                log_callback(f"⏳ Đang tải mô hình Whisper '{self.config.model_size}' lần đầu về máy (dung lượng ~150MB - 1.5GB)... Quá trình này chỉ diễn ra 1 lần duy nhất.")
+            else:
+                log_callback(f"🤖 Đang nạp mô hình Whisper '{self.config.model_size}' ({device.upper()} - {compute_type})...")
 
         # Khởi tạo mô hình cTranslate2 của faster-whisper
         self.model = WhisperModel(
@@ -96,6 +127,9 @@ class ResolveTranscriber:
             device=device,
             compute_type=compute_type
         )
+
+        if log_callback:
+            log_callback(f"✔ Đã nạp thành công mô hình Whisper AI '{self.config.model_size}'.")
 
     def transcribe(
         self,
