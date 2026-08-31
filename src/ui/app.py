@@ -733,7 +733,7 @@ class PipelineWorker(QThread):
                 
                 resolve_auto.import_edl_to_timeline(
                     edl_path=output_teaser_fcpxml,
-                    video_path=first_video,
+                    video_path=self.video_paths,
                     timeline_name=teaser_timeline_name,
                     log_callback=self.log_signal.emit
                 )
@@ -770,9 +770,13 @@ class PipelineWorker(QThread):
                 self.log_signal.emit(f"\n📝 Đang tạo tệp Timeline DaVinci Resolve:\n      👉 FCPXML (Khuyên dùng): {os.path.abspath(output_timeline_fcpxml)}\n      👉 EDL (Dự phòng): {os.path.abspath(output_edl)}")
                 self.log_signal.emit("🤖 Đang gửi yêu cầu import Timeline sang DaVinci Resolve...")
                 
+                val_res = DryRunValidator.validate_fcpxml_integrity(output_timeline_fcpxml, expected_media_paths=self.video_paths)
+                if not val_res.is_valid:
+                    self.log_signal.emit(f"   ⚠️ Cảnh báo kiểm tra FCPXML: {'; '.join(val_res.errors)}")
+
                 resolve_auto.import_edl_to_timeline(
                     edl_path=output_timeline_fcpxml,
-                    video_path=first_video,
+                    video_path=self.video_paths,
                     timeline_name=timeline_name,
                     log_callback=self.log_signal.emit
                 )

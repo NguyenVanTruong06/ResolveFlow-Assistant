@@ -1,6 +1,6 @@
 import os
 import sys
-from typing import Optional, Dict, Any, List, Tuple, Literal
+from typing import Optional, Dict, Any, List, Tuple, Literal, Union
 from pydantic import BaseModel, Field
 
 class SubtitleConfig(BaseModel):
@@ -314,16 +314,16 @@ class ResolveAutomation:
     def import_edl_to_timeline(
         self,
         edl_path: str,
-        video_path: str,
-        timeline_name: str,
+        video_path: Optional[Union[str, List[str]]] = None,
+        timeline_name: str = "ResolveFlow Timeline",
         log_callback: Optional[Any] = None
     ) -> bool:
         """
-        Import tệp EDL / FCPXML để tạo Timeline mới trong DaVinci Resolve.
+        Import tệp EDL / FCPXML để tạo Timeline mới trong DaVinci Resolve và tự động liên kết Media.
 
         Args:
             edl_path (str): Đường dẫn tệp EDL (.edl) hoặc FCPXML (.fcpxml / .xml).
-            video_path (str): Đường dẫn tệp video gốc.
+            video_path (str | List[str], optional): Đường dẫn tệp video nguồn.
             timeline_name (str): Tên Timeline mới muốn tạo.
             log_callback (callable, optional): Hàm ghi log.
 
@@ -346,22 +346,31 @@ class ResolveAutomation:
             log(" ❌ Không tìm thấy Media Pool trong dự án DaVinci Resolve hiện tại.")
             return False
 
+        # Chuẩn hóa danh sách video nguồn và nạp sẵn vào Media Pool của Resolve để chống lỗi Media Offline
+        v_list = []
+        if isinstance(video_path, list):
+            v_list = [os.path.abspath(p) for p in video_path if os.path.exists(p)]
+        elif isinstance(video_path, str) and video_path and os.path.exists(video_path):
+            v_list = [os.path.abspath(video_path)]
+
+        if v_list:
+            try:
+                media_pool.ImportMedia(v_list)
+            except Exception as e:
+                log(f" ℹ Thông báo Media Pool: {str(e)}")
+
+        first_dir = os.path.dirname(v_list[0]) if v_list else ""
         file_ext = os.path.splitext(edl_path)[1].lower()
         import_options = {
             "timelineName": timeline_name,
-            "importSourceClips": False,  # Không bắt buộc re-import nếu clip đã có trong Media Pool
-            "sourceClipsPath": os.path.abspath(os.path.dirname(video_path))
+            "importSourceClips": True,  # Luôn kích hoạt True để Resolve tự liên kết tệp nguồn
+            "sourceClipsPath": first_dir
         }
 
         try:
             timeline = media_pool.ImportTimelineFromFile(os.path.abspath(edl_path), import_options)
-            if not timeline and file_ext in [".edl", ".txt"]:
-                # Thử lại với importSourceClips = True cho EDL
-                import_options["importSourceClips"] = True
-                timeline = media_pool.ImportTimelineFromFile(os.path.abspath(edl_path), import_options)
-
             if timeline:
-                log(f" 🎉 Đã tự động import Timeline '{timeline_name}' thành công trong DaVinci Resolve!")
+                log(f" 🎉 Đã tự động import Timeline '{timeline_name}' thành công trong DaVinci Resolve (Media đã liên kết)!")
                 return True
         except Exception as e:
             log(f" ⚠️ Lỗi khi gọi API ImportTimelineFromFile: {str(e)}")

@@ -319,7 +319,7 @@ class FCPXMLGenerator:
             has_audio_val = "1" if meta.get("has_audio", True) else "0"
 
             resources_xml.append(
-                f'    <asset id="{asset_id}" name="{clip_name}" src="{file_url}" start="0s" duration="{dur_ms}/1000s" hasVideo="1" hasAudio="{has_audio_val}"/>'
+                f'    <asset id="{asset_id}" name="{clip_name}" src="{file_url}" start="0s" duration="{dur_ms}/1000s" hasVideo="1" format="r_fmt" hasAudio="{has_audio_val}"/>'
             )
 
         spine_elements = []
@@ -339,7 +339,7 @@ class FCPXMLGenerator:
             dur_ms = int(duration_sec * 1000)
 
             clip_xml = f"""
-            <asset-clip name="{clip_name}" ref="{asset_id}" offset="{offset_ms}/1000s" start="{src_start_ms}/1000s" duration="{dur_ms}/1000s">
+            <asset-clip name="{clip_name}" ref="{asset_id}" offset="{offset_ms}/1000s" start="{src_start_ms}/1000s" duration="{dur_ms}/1000s" format="r_fmt" audioRole="dialogue">
             </asset-clip>"""
             spine_elements.append(clip_xml)
 
