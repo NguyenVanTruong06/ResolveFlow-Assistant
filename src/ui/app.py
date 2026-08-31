@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QThread, Signal as pyqtSignal, Slot as pyqtSlot, Qt
 from PySide6.QtGui import QFont, QColor, QPixmap, QIcon
 
+from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS, MODULE_DESCRIPTIONS, get_application_stylesheet
+
 class PreviewDialog(QDialog):
     """Hộp thoại hiển thị xem trước nhanh (Quick Preview) kiểu chữ phụ đề Text+."""
     def __init__(self, preset: TextStylePreset, aspect_ratio: str = "16:9", parent=None):
@@ -300,7 +302,7 @@ class PipelineWorker(QThread):
                     if self.use_cache and needs_transcription:
                         cached_data = cache_mgr.get_cached_scan(video_path, self.model_size, self.language)
                         if cached_data:
-                            self.log_signal.emit("   ⚡ [Scan Cache Hit] Nạp nhanh dữ liệu nhận diện giọng nói từ bộ nhớ đệm (0.05s)!")
+                            self.log_signal.emit("   ⚡ [Scan Cache Hit] Đã tìm thấy dữ liệu đệm từ trước, nạp hoàn tất trong 0.05s (Không tốn thời gian dịch lại)!")
 
                     clip_base_name = os.path.splitext(os.path.basename(video_path))[0]
                     unique_id = uuid.uuid4().hex[:8]
@@ -894,6 +896,7 @@ class ResolveFlowApp(QMainWindow):
 
         self.preset_mgr = PresetManager()
         self.recipe_mgr = RecipeManager()
+        self.setAcceptDrops(True)
 
         self._init_ui()
         self._apply_stylesheet()
@@ -931,10 +934,38 @@ class ResolveFlowApp(QMainWindow):
         left_panel.addWidget(subtitle_label)
         left_panel.addSpacing(6)
 
+        # Onboarding / Quick Start Banner
+        self.banner_onboarding = QFrame()
+        self.banner_onboarding.setObjectName("banner_onboarding")
+        self.banner_onboarding.setStyleSheet(f"""
+            QFrame#banner_onboarding {{
+                background-color: #121A26;
+                border: 1px solid #1E3A5F;
+                border-left: 4px solid {ThemeColors.PRIMARY};
+                border-radius: 6px;
+                padding: 6px 8px;
+            }}
+        """)
+        banner_layout = QVBoxLayout(self.banner_onboarding)
+        banner_layout.setContentsMargins(8, 6, 8, 6)
+        lbl_welcome = QLabel("👋 <b>Bắt đầu nhanh (Quick Start):</b>")
+        lbl_welcome.setStyleSheet(f"color: {ThemeColors.TEXT_ACCENT}; font-size: 12px;")
+        lbl_guide = QLabel("Chọn mục tiêu của bạn bên dưới để bắt đầu nhanh, hoặc mở <b>Tùy chỉnh nâng cao</b> để tự cấu hình.")
+        lbl_guide.setWordWrap(True)
+        lbl_guide.setStyleSheet(f"color: {ThemeColors.TEXT_SECONDARY}; font-size: 11px;")
+        banner_layout.addWidget(lbl_welcome)
+        banner_layout.addWidget(lbl_guide)
+        left_panel.addWidget(self.banner_onboarding)
+        left_panel.addSpacing(4)
+
         # --- TOP LEVEL 1: WORKFLOW MODE SELECTOR ---
-        group_wf = QGroupBox("🎯 CHẾ ĐỘ DỰNG TỰ ĐỘNG (WORKFLOW MODE)")
-        group_wf.setStyleSheet("QGroupBox { border-color: #1976D2; color: #42A5F5; }")
-        form_wf = QFormLayout(group_wf)
+        self.group_wf = QGroupBox("🎯 CHẾ ĐỘ DỰNG TỰ ĐỘNG (WORKFLOW MODE)")
+        self.group_wf.setObjectName("group_wf")
+        form_wf = QFormLayout(self.group_wf)
+        
+        desc_wf = QLabel("Chọn mục tiêu dựng để app tự động kích hoạt tổ hợp tính năng tối ưu nhất.")
+        desc_wf.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 2px;")
+        form_wf.addRow(desc_wf)
 
         self.combo_workflow = QComboBox()
         self.combo_workflow.addItem("🎙 Dựng Podcast / Phỏng vấn dài (Silence Cut + Clean Talk + Sub)", "podcast")
@@ -944,12 +975,18 @@ class ResolveFlowApp(QMainWindow):
         self.combo_workflow.currentIndexChanged.connect(self._on_workflow_mode_changed)
         form_wf.addRow("Mục tiêu:", self.combo_workflow)
 
-        left_panel.addWidget(group_wf)
+        left_panel.addWidget(self.group_wf)
 
         # --- TOP LEVEL 2: RECIPE SELECTOR & MANAGER ---
-        group_recipe = QGroupBox("📋 HỆ THỐNG RECIPE (TỔ HỢP CẤU HÌNH ĐÃ LƯU)")
-        form_recipe = QHBoxLayout(group_recipe)
+        self.group_recipe = QGroupBox("📋 HỆ THỐNG RECIPE (TỔ HỢP CẤU HÌNH ĐÃ LƯU)")
+        self.group_recipe.setObjectName("group_recipe")
+        vbox_recipe = QVBoxLayout(self.group_recipe)
+        
+        desc_recipe = QLabel("Lưu và tái sử dụng nhanh toàn bộ cấu hình riêng của bạn cho các dự án sau.")
+        desc_recipe.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 2px;")
+        vbox_recipe.addWidget(desc_recipe)
 
+        form_recipe = QHBoxLayout()
         self.combo_recipes = QComboBox()
         self.combo_recipes.currentIndexChanged.connect(self._on_recipe_selected)
         
@@ -962,11 +999,17 @@ class ResolveFlowApp(QMainWindow):
         form_recipe.addWidget(self.combo_recipes, stretch=3)
         form_recipe.addWidget(btn_save_recipe, stretch=2)
         form_recipe.addWidget(btn_delete_recipe, stretch=1)
-        left_panel.addWidget(group_recipe)
+        vbox_recipe.addLayout(form_recipe)
+        left_panel.addWidget(self.group_recipe)
 
         # --- LỚP CƠ BẢN: MASTER INTENSITY SLIDER ---
-        group_master = QGroupBox("🎛 CƯỜNG ĐỘ CẮT LỌC TỔNG (BASIC LAYER)")
-        form_master = QVBoxLayout(group_master)
+        self.group_master = QGroupBox("🎛 CƯỜNG ĐỘ CẮT LỌC TỔNG (BASIC LAYER)")
+        self.group_master.setObjectName("group_master")
+        form_master = QVBoxLayout(self.group_master)
+
+        desc_master = QLabel("Thanh trượt điều khiển tổng thể mức độ cắt gọt và độ nhạy của AI.")
+        desc_master.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 2px;")
+        form_master.addWidget(desc_master)
 
         self.lbl_master_intensity = QLabel("Mức độ cắt vấp & im lặng: VỪA (Cân bằng)")
         self.lbl_master_intensity.setStyleSheet("color: #81C784; font-weight: bold;")
@@ -977,11 +1020,11 @@ class ResolveFlowApp(QMainWindow):
         
         form_master.addWidget(self.lbl_master_intensity)
         form_master.addWidget(self.slide_master_intensity)
-        left_panel.addWidget(group_master)
+        left_panel.addWidget(self.group_master)
 
         # Toggle Button: Xem / Ẩn Tùy Chỉnh Nâng Cao
         self.btn_toggle_advanced = QPushButton("⚙ Tùy chỉnh nâng cao (Chi tiết Module) ▾")
-        self.btn_toggle_advanced.setStyleSheet("background-color: #2A2A35; color: #90CAF9; text-align: left; padding: 8px;")
+        self.btn_toggle_advanced.setObjectName("btn_toggle_advanced")
         self.btn_toggle_advanced.clicked.connect(self._toggle_advanced_panel)
         left_panel.addWidget(self.btn_toggle_advanced)
 
@@ -991,8 +1034,12 @@ class ResolveFlowApp(QMainWindow):
         adv_layout.setContentsMargins(0, 0, 0, 0)
 
         # Group 1: AI Model Configuration
-        group_ai = QGroupBox("1. CẤU HÌNH AI WHISPER & CACHE")
-        form_ai = QFormLayout(group_ai)
+        self.group_ai = QGroupBox("1. 🤖 NHẬN DIỆN GIỌNG NÓI & CACHE")
+        form_ai = QFormLayout(self.group_ai)
+        
+        desc_ai = QLabel(MODULE_DESCRIPTIONS["whisper"])
+        desc_ai.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
+        form_ai.addRow(desc_ai)
         
         self.combo_model = QComboBox()
         self.combo_model.addItems(["tiny", "base", "small", "medium", "large-v3"])
@@ -1007,11 +1054,15 @@ class ResolveFlowApp(QMainWindow):
         self.check_cache.setChecked(True)
         form_ai.addRow(self.check_cache)
         
-        adv_layout.addWidget(group_ai)
+        adv_layout.addWidget(self.group_ai)
 
         # Group 2: AI Director & Semantic Cutting
-        group_director = QGroupBox("2. 🎬 ĐẠO DIỄN AI (AI DIRECTOR)")
-        form_director = QFormLayout(group_director)
+        self.group_director = QGroupBox("2. 🎬 ĐẠO DIỄN AI (AI DIRECTOR)")
+        form_director = QFormLayout(self.group_director)
+
+        desc_dir = QLabel(MODULE_DESCRIPTIONS["director"])
+        desc_dir.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
+        form_director.addRow(desc_dir)
 
         self.combo_ai_mode = QComboBox()
         self.combo_ai_mode.addItem("Lọc sạch nói vấp & từ đệm (Clean Talk)", "clean_talk")
@@ -1031,11 +1082,15 @@ class ResolveFlowApp(QMainWindow):
         self.txt_confidence_threshold = QLineEdit("0.70")
         form_director.addRow("Ngưỡng tin cậy AI (0-1):", self.txt_confidence_threshold)
 
-        adv_layout.addWidget(group_director)
+        adv_layout.addWidget(self.group_director)
 
         # Group 3: Smart Vlog Hook / Intro Generator
-        group_vlog_hook = QGroupBox("3. 🔥 VLOG HOOK / INTRO TEASER")
-        form_vlog_hook = QFormLayout(group_vlog_hook)
+        self.group_vlog_hook = QGroupBox("3. 🔥 VLOG HOOK / INTRO TEASER")
+        form_vlog_hook = QFormLayout(self.group_vlog_hook)
+
+        desc_vlog = QLabel(MODULE_DESCRIPTIONS["vlog_hook"])
+        desc_vlog.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
+        form_vlog_hook.addRow(desc_vlog)
 
         self.check_vlog_hook = QCheckBox("Tự động tạo Teaser/Hook mở đầu (10-30s)")
         self.check_vlog_hook.setChecked(False)
@@ -1049,11 +1104,15 @@ class ResolveFlowApp(QMainWindow):
         self.combo_hook_dur.setCurrentIndex(1)
         form_vlog_hook.addRow("Thời lượng mỗi clip:", self.combo_hook_dur)
 
-        adv_layout.addWidget(group_vlog_hook)
+        adv_layout.addWidget(self.group_vlog_hook)
 
         # Group 4: AI Visual & Multi-Track Audio
-        group_v4 = QGroupBox("4. 👑 THỊ GIÁC & ĐA TẦNG MEDIA")
-        form_v4 = QFormLayout(group_v4)
+        self.group_v4 = QGroupBox("4. 👑 THỊ GIÁC & ĐA TẦNG MEDIA")
+        form_v4 = QFormLayout(self.group_v4)
+
+        desc_v4 = QLabel(MODULE_DESCRIPTIONS["visual_audio"])
+        desc_v4.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
+        form_v4.addRow(desc_v4)
 
         self.check_reframe = QCheckBox("Auto Re-framing (Bám mặt sang video dọc 9:16)")
         self.check_reframe.setChecked(False)
@@ -1067,11 +1126,15 @@ class ResolveFlowApp(QMainWindow):
         self.check_sfx.setChecked(True)
         form_v4.addRow(self.check_sfx)
 
-        adv_layout.addWidget(group_v4)
+        adv_layout.addWidget(self.group_v4)
 
         # Group 5: Text Style Preset & Subtitles (v4.1 NÂNG CẤP)
-        group_sub = QGroupBox("5. ✨ KIỂU DÁNG PHỤ ĐỀ (TEXT+ PRESETS)")
-        form_sub = QFormLayout(group_sub)
+        self.group_sub = QGroupBox("5. ✨ KIỂU DÁNG PHỤ ĐỀ (TEXT+ PRESETS)")
+        form_sub = QFormLayout(self.group_sub)
+
+        desc_sub = QLabel(MODULE_DESCRIPTIONS["subtitles"])
+        desc_sub.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
+        form_sub.addRow(desc_sub)
 
         self.check_subtitle = QCheckBox("Kích hoạt tạo phụ đề (Subtitles)")
         self.check_subtitle.setChecked(True)
@@ -1112,6 +1175,13 @@ class ResolveFlowApp(QMainWindow):
         self.txt_color = QLineEdit("#FFFFFF")
         form_sub.addRow("Màu chữ (Hex):", self.txt_color)
 
+        # Embedded Real-time Live Preview
+        self.preview_lbl = QLabel("Đang tải xem trước...")
+        self.preview_lbl.setAlignment(Qt.AlignCenter)
+        self.preview_lbl.setFixedHeight(105)
+        self.preview_lbl.setStyleSheet("background-color: #0B0E14; border: 1px solid #1E2638; border-radius: 6px; padding: 2px;")
+        form_sub.addRow("Xem trước Realtime:", self.preview_lbl)
+
         self.check_subtitle.toggled.connect(self.combo_text_preset.setEnabled)
         self.check_subtitle.toggled.connect(self.combo_split_mode.setEnabled)
         self.check_subtitle.toggled.connect(self.txt_split_limit.setEnabled)
@@ -1119,11 +1189,15 @@ class ResolveFlowApp(QMainWindow):
         self.check_subtitle.toggled.connect(self.txt_size.setEnabled)
         self.check_subtitle.toggled.connect(self.txt_color.setEnabled)
         
-        adv_layout.addWidget(group_sub)
+        adv_layout.addWidget(self.group_sub)
 
         # Group 6: Smart Silent Cut Parameters & Speed-Ramp
-        group_cut = QGroupBox("6. CẮT KHOẢNG LẶNG & SPEED-RAMP")
-        form_cut = QFormLayout(group_cut)
+        self.group_cut = QGroupBox("6. ✂ CẮT KHOẢNG LẶNG & SPEED-RAMP")
+        form_cut = QFormLayout(self.group_cut)
+
+        desc_cut = QLabel(MODULE_DESCRIPTIONS["silence_cut"])
+        desc_cut.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
+        form_cut.addRow(desc_cut)
         
         self.check_cut = QCheckBox("Kích hoạt xử lý khoảng lặng")
         self.check_cut.setChecked(True)
@@ -1153,8 +1227,30 @@ class ResolveFlowApp(QMainWindow):
         h_dur_layout.addWidget(self.lbl_dur)
         form_cut.addRow("Thời lượng tối thiểu:", h_dur_layout)
 
-        adv_layout.addWidget(group_cut)
+        adv_layout.addWidget(self.group_cut)
         left_panel.addWidget(self.advanced_container)
+
+        # Kết nối cập nhật viền màu trực quan khi bật/tắt module
+        self.check_cache.toggled.connect(self._update_card_active_states)
+        self.check_bad_takes.toggled.connect(self._update_card_active_states)
+        self.check_punch_in.toggled.connect(self._update_card_active_states)
+        self.combo_ai_mode.currentIndexChanged.connect(self._update_card_active_states)
+        self.check_vlog_hook.toggled.connect(self._update_card_active_states)
+        self.check_reframe.toggled.connect(self._update_card_active_states)
+        self.check_broll.toggled.connect(self._update_card_active_states)
+        self.check_sfx.toggled.connect(self._update_card_active_states)
+        self.check_subtitle.toggled.connect(self._update_card_active_states)
+        self.check_cut.toggled.connect(self._update_card_active_states)
+
+        # Kết nối cập nhật realtime cho Live Preview
+        self.combo_text_preset.currentIndexChanged.connect(self._update_live_preview)
+        self.txt_font.textChanged.connect(self._update_live_preview)
+        self.txt_size.textChanged.connect(self._update_live_preview)
+        self.txt_color.textChanged.connect(self._update_live_preview)
+        self.check_reframe.toggled.connect(self._update_live_preview)
+        
+        # Cập nhật trạng thái viền ban đầu
+        self._update_card_active_states()
         
         # -------------------------------------------------------------
         # Cột phải: Log Console & Action Buttons (Right Panel)
@@ -1165,7 +1261,7 @@ class ResolveFlowApp(QMainWindow):
         # File selection header
         file_layout = QHBoxLayout()
         self.lbl_file = QLineEdit()
-        self.lbl_file.setPlaceholderText("Vui lòng chọn tệp video nguồn...")
+        self.lbl_file.setPlaceholderText("Kéo-thả tệp video vào đây hoặc bấm 'Chọn Video'...")
         self.lbl_file.setReadOnly(True)
         
         btn_auto = QPushButton("Tự lấy từ Resolve")
@@ -1199,7 +1295,11 @@ class ResolveFlowApp(QMainWindow):
         self.txt_console.appendPlainText("🌟 ResolveFlow Assistant v4.1 (Text Presets & Auto Performance Suite) sẵn sàng làm việc.")
         right_panel.addWidget(self.txt_console)
 
-        # Progress bar
+        # Progress info & bar
+        self.lbl_progress_status = QLabel("Trạng thái: Sẵn sàng làm việc.")
+        self.lbl_progress_status.setStyleSheet(f"color: {ThemeColors.TEXT_ACCENT}; font-size: 11px; font-weight: bold;")
+        right_panel.addWidget(self.lbl_progress_status)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         right_panel.addWidget(self.progress_bar)
@@ -1214,84 +1314,135 @@ class ResolveFlowApp(QMainWindow):
         self.btn_run.clicked.connect(self._toggle_pipeline_execution)
         right_panel.addWidget(self.btn_run)
 
+        # --- GẮN TOOLTIPS THÂN THIỆN VỚI NGƯỜI DÙNG (ONBOARDING & ACCESSIBILITY) ---
+        self.combo_workflow.setToolTip(TOOLTIPS["workflow_mode"])
+        self.combo_recipes.setToolTip(TOOLTIPS["recipe"])
+        self.slide_master_intensity.setToolTip(TOOLTIPS["master_intensity"])
+        self.combo_model.setToolTip(TOOLTIPS["whisper_model"])
+        self.combo_lang.setToolTip(TOOLTIPS["language"])
+        self.check_cache.setToolTip(TOOLTIPS["scan_cache"])
+        self.combo_ai_mode.setToolTip(TOOLTIPS["ai_mode"])
+        self.check_bad_takes.setToolTip(TOOLTIPS["bad_takes"])
+        self.check_punch_in.setToolTip(TOOLTIPS["punch_in"])
+        self.txt_confidence_threshold.setToolTip(TOOLTIPS["confidence_threshold"])
+        self.check_vlog_hook.setToolTip(TOOLTIPS["vlog_hook"])
+        self.combo_hook_dur.setToolTip(TOOLTIPS["hook_duration"])
+        self.check_reframe.setToolTip(TOOLTIPS["reframe"])
+        self.check_broll.setToolTip(TOOLTIPS["broll"])
+        self.check_sfx.setToolTip(TOOLTIPS["sfx"])
+        self.check_subtitle.setToolTip(TOOLTIPS["subtitles"])
+        self.combo_text_preset.setToolTip(TOOLTIPS["text_preset"])
+        self.combo_split_mode.setToolTip(TOOLTIPS["split_mode"])
+        self.txt_split_limit.setToolTip(TOOLTIPS["split_limit"])
+        self.txt_font.setToolTip(TOOLTIPS["font_name"])
+        self.txt_size.setToolTip(TOOLTIPS["font_size"])
+        self.txt_color.setToolTip(TOOLTIPS["font_color"])
+        self.check_cut.setToolTip(TOOLTIPS["silence_cut"])
+        self.check_speedup.setToolTip(TOOLTIPS["speedup_silence"])
+        self.slide_db.setToolTip(TOOLTIPS["silence_db"])
+        self.slide_dur.setToolTip(TOOLTIPS["min_duration"])
+        self.lbl_file.setToolTip("Đường dẫn tệp video nguồn được chọn.")
+        self.btn_run.setToolTip("Bắt đầu quy trình xử lý tự động và xuất bản sang DaVinci Resolve.")
+
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        event.accept()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        valid_exts = {".mp4", ".mov", ".mkv", ".avi", ".wav", ".mp3"}
+        dropped_files = [u.toLocalFile() for u in urls if os.path.splitext(u.toLocalFile())[1].lower() in valid_exts]
+        
+        if dropped_files:
+            event.acceptProposedAction()
+            self.selected_files = dropped_files
+            if len(dropped_files) == 1:
+                self.lbl_file.setText(dropped_files[0])
+                self.txt_console.appendPlainText(f"📁 [Kéo-thả] Đã chọn tệp: {dropped_files[0]}")
+            else:
+                self.lbl_file.setText("; ".join(dropped_files))
+                self.txt_console.appendPlainText(f"📁 [Kéo-thả] Đã chọn hàng loạt {len(dropped_files)} tệp video.")
+            self._update_default_chars_limit(dropped_files[0])
+            self._suggest_whisper_model_for_file(dropped_files[0])
+
+    def _update_live_preview(self):
+        """Cập nhật ảnh xem trước thời gian thực (Real-time Live Preview) của Text Style Preset."""
+        if not hasattr(self, "preview_lbl") or not hasattr(self, "combo_text_preset"):
+            return
+        preset_id = self.combo_text_preset.currentData() or "karaoke_pop"
+        preset = self.preset_mgr.get_preset(preset_id)
+        if not preset:
+            return
+
+        aspect = "9:16" if (hasattr(self, "check_reframe") and self.check_reframe.isChecked()) else "16:9"
+        
+        try:
+            sz = int(self.txt_size.text())
+        except (ValueError, AttributeError):
+            sz = preset.size
+            
+        font_name = self.txt_font.text() if hasattr(self, "txt_font") and self.txt_font.text().strip() else preset.font
+        color_val = self.txt_color.text() if hasattr(self, "txt_color") and self.txt_color.text().strip() else preset.standard_color
+        
+        render_preset = TextStylePreset(
+            id=preset.id,
+            name=preset.name,
+            font=font_name,
+            size=sz,
+            weight=preset.weight,
+            standard_color=color_val,
+            highlight_color=preset.highlight_color,
+            outline_color=preset.outline_color,
+            outline_width=preset.outline_width,
+            animation=preset.animation,
+            timing_curve=preset.timing_curve,
+            position_y_16_9=preset.position_y_16_9,
+            position_y_9_16=preset.position_y_9_16,
+            box_color=preset.box_color,
+            glow_color=preset.glow_color,
+            gradient_colors=preset.gradient_colors
+        )
+
+        temp_img = os.path.join(tempfile.gettempdir(), f"rf_live_prev_{preset.id}_{aspect}.png")
+        try:
+            TextPreviewRenderer.render_preview_to_file(
+                preset=render_preset,
+                output_image_path=temp_img,
+                sample_words=["ResolveFlow", "AI", "Text+", "Subtitle"],
+                active_index=2,
+                aspect_ratio=aspect
+            )
+            pix = QPixmap(temp_img)
+            self.preview_lbl.setPixmap(pix.scaled(280, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except Exception:
+            self.preview_lbl.setText(f"Preset: {preset.name} | {font_name} {sz}px")
+
+    def _set_card_active(self, card_widget: QGroupBox, is_active: bool):
+        card_widget.setProperty("active", "true" if is_active else "false")
+        card_widget.style().unpolish(card_widget)
+        card_widget.style().polish(card_widget)
+
+    def _update_card_active_states(self):
+        if not hasattr(self, "group_ai"):
+            return
+        self._set_card_active(self.group_ai, self.check_cache.isChecked())
+        is_director_active = self.check_bad_takes.isChecked() or self.check_punch_in.isChecked() or (self.combo_ai_mode.currentData() != "silence_only")
+        self._set_card_active(self.group_director, is_director_active)
+        self._set_card_active(self.group_vlog_hook, self.check_vlog_hook.isChecked())
+        is_v4_active = self.check_reframe.isChecked() or self.check_broll.isChecked() or self.check_sfx.isChecked()
+        self._set_card_active(self.group_v4, is_v4_active)
+        self._set_card_active(self.group_sub, self.check_subtitle.isChecked())
+        self._set_card_active(self.group_cut, self.check_cut.isChecked())
+
     def _apply_stylesheet(self):
-        stylesheet = """
-        QWidget {
-            background-color: #121214;
-            color: #E0E0E6;
-            font-family: 'Segoe UI', Arial, sans-serif;
-        }
-        QLabel {
-            font-size: 13px;
-        }
-        QGroupBox {
-            border: 2px solid #2A2A35;
-            border-radius: 8px;
-            margin-top: 10px;
-            font-weight: bold;
-            color: #1976D2;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 10px;
-            padding: 0 5px 0 5px;
-        }
-        QLineEdit, QComboBox {
-            background-color: #1E1E24;
-            border: 1px solid #3A3A4A;
-            border-radius: 4px;
-            padding: 5px;
-            color: #E0E0E6;
-        }
-        QLineEdit:focus, QComboBox:focus {
-            border: 1px solid #1976D2;
-        }
-        QPushButton {
-            background-color: #1976D2;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            padding: 8px 14px;
-            font-weight: bold;
-        }
-        QPushButton:hover {
-            background-color: #2196F3;
-        }
-        QPushButton:pressed {
-            background-color: #0D47A1;
-        }
-        QPushButton#btn_run {
-            background-color: #2E7D32;
-            padding: 12px;
-            border-radius: 6px;
-        }
-        QPushButton#btn_run:hover {
-            background-color: #388E3C;
-        }
-        QPushButton#btn_run:pressed {
-            background-color: #1B5E20;
-        }
-        QProgressBar {
-            border: 1px solid #3A3A4A;
-            border-radius: 4px;
-            text-align: center;
-            background-color: #1E1E24;
-            height: 18px;
-        }
-        QProgressBar::chunk {
-            background-color: #2E7D32;
-            width: 10px;
-        }
-        QPlainTextEdit {
-            background-color: #0B0B0C;
-            border: 1px solid #2A2A35;
-            border-radius: 4px;
-            font-family: 'Courier New', monospace;
-            color: #81C784;
-            font-size: 12px;
-        }
-        """
-        self.setStyleSheet(stylesheet)
+        self.setStyleSheet(get_application_stylesheet())
 
     # --- HỆ THỐNG PRESET KIỂU CHỮ ---
     def _load_presets_to_combo(self):
@@ -1410,6 +1561,7 @@ class ResolveFlowApp(QMainWindow):
         self.check_speedup.setChecked(recipe.speed_up_silence)
         self.slide_db.setValue(int(recipe.silence_db))
         self.slide_dur.setValue(int(recipe.min_duration * 10))
+        self._update_card_active_states()
 
     def _save_current_as_recipe(self):
         name, ok = QInputDialog.getText(self, "Lưu Recipe Cấu Hình", "Nhập tên cho Recipe của bạn (vd: Kênh Podcast A):")
@@ -1523,6 +1675,7 @@ class ResolveFlowApp(QMainWindow):
             self.txt_console.appendPlainText("🎯 Chế độ [Vlog Hook/Intro]: Tự bật Intro Teaser + Speed-Ramp Timelapse + Punch-in + B-Roll.")
         elif mode == "advanced":
             self.txt_console.appendPlainText("🎯 Chế độ [Advanced]: Đã mở toàn bộ 6 nhóm chức năng chi tiết.")
+        self._update_card_active_states()
 
     # --- 2 LỚP UX: MASTER INTENSITY & TOGGLE ADVANCED ---
     def _on_master_intensity_changed(self, val):
@@ -1788,9 +1941,84 @@ class ResolveFlowApp(QMainWindow):
 
         self.worker.start()
 
+    def _format_user_friendly_error(self, err_msg: str) -> str:
+        """Chuyển đổi lỗi kỹ thuật thô thành hướng dẫn khắc phục thân thiện cho creator."""
+        err_lower = err_msg.lower()
+        if "ffmpeg" in err_lower:
+            return (
+                "❌ Không tìm thấy công cụ FFmpeg trong hệ thống.\n\n"
+                "👉 Cách khắc phục:\n"
+                "1. Tải FFmpeg từ https://ffmpeg.org/download.html (hoặc bản build sẵn).\n"
+                "2. Thêm thư mục chứa ffmpeg.exe vào biến môi trường PATH của Windows hoặc đặt file ffmpeg.exe cạnh tệp main.py."
+            )
+        elif "resolve" in err_lower or "davinci" in err_lower or "scripting" in err_lower:
+            return (
+                "❌ Không thể kết nối với DaVinci Resolve.\n\n"
+                "👉 Cách khắc phục:\n"
+                "1. Mở phần mềm DaVinci Resolve (bản Studio hoặc Free).\n"
+                "2. Vào menu DaVinci Resolve -> Preferences -> General -> Bật 'External scripting using: Local/Network'.\n"
+                "3. Mở sẵn một Project và Timeline trong Resolve rồi chạy lại."
+            )
+        elif "cuda" in err_lower or "out of memory" in err_lower:
+            return (
+                "❌ Tràn bộ nhớ GPU hoặc không tìm thấy CUDA tương thích.\n\n"
+                "👉 Cách khắc phục:\n"
+                "1. Chọn kích thước mô hình AI nhỏ hơn (ví dụ 'tiny' hoặc 'base') trong Cấu hình AI Whisper.\n"
+                "2. Đóng bớt các ứng dụng nặng đang chiếm GPU rồi thử lại."
+            )
+        elif "no such file" in err_lower or "not found" in err_lower or "chọn tệp" in err_lower:
+            return (
+                "❌ Không tìm thấy tệp video nguồn.\n\n"
+                "👉 Cách khắc phục:\n"
+                "Kiểm tra lại đường dẫn video, đảm bảo tệp chưa bị xóa hoặc đổi tên."
+            )
+        elif "fcpxml" in err_lower or "xml" in err_lower:
+            return (
+                "❌ Lỗi định dạng FCPXML khi gửi sang DaVinci Resolve.\n\n"
+                "👉 Cách khắc phục:\n"
+                "Kiểm tra tên tệp video không chứa các ký tự đặc biệt lạ, hoặc thử nhập thủ công tệp .fcpxml đã được tạo trong thư mục dự án."
+            )
+        else:
+            clean_err = err_msg.splitlines()[-1] if err_msg.splitlines() else err_msg
+            return (
+                f"❌ Gặp sự cố trong quá trình xử lý: {clean_err}\n\n"
+                "👉 Gợi ý: Kiểm tra lại định dạng tệp video nguồn hoặc thử chạy với mô hình AI 'tiny'."
+            )
+
     @pyqtSlot(str)
     def _log_message(self, message):
         self.txt_console.appendPlainText(message)
+        msg_l = message.lower()
+        if "khởi động" in msg_l:
+            self.lbl_progress_status.setText("🚀 Đang khởi động hệ thống...")
+        elif "dry-run" in msg_l or "tương thích" in msg_l:
+            self.lbl_progress_status.setText("🔍 Đang kiểm tra định dạng tệp...")
+        elif "tải mô hình" in msg_l:
+            self.lbl_progress_status.setText("🤖 Đang nạp mô hình Whisper AI...")
+        elif "trích xuất audio" in msg_l:
+            self.lbl_progress_status.setText("🔊 Đang trích xuất âm thanh mono...")
+        elif "quét giọng nói" in msg_l or "dịch giọng nói" in msg_l:
+            self.lbl_progress_status.setText("🎙 Đang nhận diện giọng nói (Speech-to-Text)...")
+        elif "scan cache hit" in msg_l:
+            self.lbl_progress_status.setText("⚡ Nạp dữ liệu từ Scan Cache siêu tốc (0.05s)!")
+        elif "lọc khoảng lặng" in msg_l or "phân tích khoảng lặng" in msg_l or "speed-ramp" in msg_l:
+            self.lbl_progress_status.setText("✂ Đang phân tích và xử lý khoảng lặng âm thanh...")
+        elif "ai director" in msg_l:
+            self.lbl_progress_status.setText("🎬 Đạo diễn AI đang xử lý ngữ nghĩa và nhịp cắt...")
+        elif "vlog hook" in msg_l:
+            self.lbl_progress_status.setText("🔥 Đang trích xuất phân đoạn Teaser/Hook mở đầu...")
+        elif "reframe" in msg_l:
+            self.lbl_progress_status.setText("👁 Đang tính toán bám mặt video dọc 9:16...")
+        elif "b-roll" in msg_l:
+            self.lbl_progress_status.setText("🎞 Đang tạo gợi ý cảnh minh họa B-Roll...")
+        elif "sfx" in msg_l:
+            self.lbl_progress_status.setText("🔊 Đang bố trí âm thanh hiệu ứng SFX...")
+        elif "tạo tệp timeline" in msg_l or "fcpxml" in msg_l:
+            self.lbl_progress_status.setText("📝 Đang tạo Timeline FCPXML & EDL...")
+        elif "import timeline" in msg_l or "gửi yêu cầu" in msg_l:
+            self.lbl_progress_status.setText("🤖 Đang kết nối và gửi sang DaVinci Resolve...")
+        elif "hoàn tất" in msg_l or "xong" in msg_l:
+            self.lbl_progress_status.setText("🏁 Hoàn tất thành công!")
 
     @pyqtSlot(bool, str)
     def _pipeline_finished(self, success, message):
@@ -1800,6 +2028,7 @@ class ResolveFlowApp(QMainWindow):
         
         if success:
             if message == "phase1_done":
+                self.lbl_progress_status.setText("✔ Đã phân tích xong kịch bản, vui lòng duyệt bảng bên trên.")
                 self.proposed_segments = self.worker.proposed_segments
                 self.clip_data_cache = self.worker.clip_data_out_cache
                 self.validation_warnings = self.worker.validation_warnings
@@ -1834,6 +2063,7 @@ class ResolveFlowApp(QMainWindow):
                     }
                 """)
             elif message == "phase2_done" or message == "Hoàn thành!":
+                self.lbl_progress_status.setText("🏁 Khởi chạy hoàn tất. Đã xuất bản lên DaVinci Resolve!")
                 self.txt_console.appendPlainText("🏁 Khởi chạy hoàn tất. Đã xuất bản hoàn chỉnh lên DaVinci Resolve!")
                 self.table_review.hide()
                 self.current_phase = 1
@@ -1841,9 +2071,13 @@ class ResolveFlowApp(QMainWindow):
                 self.proposed_segments = []
         else:
             if "dừng" in message.lower() or "cancel" in message.lower():
+                self.lbl_progress_status.setText("🛑 Đã dừng tiến trình theo yêu cầu.")
                 self.txt_console.appendPlainText(f"🛑 {message}")
             else:
-                self.txt_console.appendPlainText(f"❌ Tiến trình bị lỗi dừng lại: {message}")
+                self.lbl_progress_status.setText("❌ Tiến trình gặp sự cố.")
+                friendly_msg = self._format_user_friendly_error(message)
+                self.txt_console.appendPlainText(f"\n{friendly_msg}\n")
+                QMessageBox.critical(self, "Thông báo sự cố", friendly_msg)
 
     def _populate_review_table(self):
         try:
