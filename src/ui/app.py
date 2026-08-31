@@ -3,10 +3,26 @@ import sys
 import json
 import tempfile
 import uuid
+import traceback
 from typing import List, Dict, Any, Optional
 
 from src.core.validator import DryRunValidator
-from src.core.ai_director import ProposedSegment
+from src.core.transcriber import ModelConfig, ResolveTranscriber
+from src.core import resolve_api
+from src.core.resolve_api import (
+    SubtitleConfig, ResolveAutomation, split_subtitles,
+    map_subtitles_to_timeline, map_time_to_timeline,
+    map_time_with_speedup_segments, map_subtitles_with_speedup_segments,
+    is_vertical_video
+)
+from src.core.autocut import AudioCutConfig, SilenceDetector, EDLGenerator, get_media_metadata
+from src.core.ai_director import AIDirector, AIDirectorConfig, ProposedSegment
+from src.core.vision_reframer import VisionReframer, ReframeConfig
+from src.core.broll_sfx import BRollAnalyzer, SFXEngine
+from src.core.vlog_hook import VlogHookGenerator, HookSegment
+from src.core.audio import AudioExtractor
+from src.core.fcpxml_generator import FCPXMLGenerator
+from src.core.audit_reporter import ExecutionAuditReporter
 from src.core.text_preset import TextStylePreset, PresetManager, TextPreviewRenderer
 from src.core.recipe_manager import Recipe, RecipeManager
 from src.core.cache_manager import ScanCacheManager, compute_file_checksum
@@ -161,7 +177,6 @@ class PipelineWorker(QThread):
 
             # --- GIAI ĐOẠN DRY-RUN VALIDATION ---
             if self.phase in [0, 1]:
-                from src.core.validator import DryRunValidator
                 self.log_signal.emit("🔍 [Dry-Run] Đang kiểm tra khả năng tương thích định dạng file nguồn...")
                 val_res = DryRunValidator.validate_media_files(self.video_paths)
                 
@@ -199,8 +214,6 @@ class PipelineWorker(QThread):
 
             if self.phase in [0, 1] and needs_transcription:
                 self.log_signal.emit(f"🤖 Tải mô hình Whisper AI '{self.model_size}'...")
-                from src.core.transcriber import ModelConfig, ResolveTranscriber
-                
                 model_config = ModelConfig(
                     model_size=self.model_size,
                     device="cuda",
@@ -221,25 +234,12 @@ class PipelineWorker(QThread):
                 return
             
             # Kết nối DaVinci Resolve
-            from src.core.resolve_api import (
-                SubtitleConfig, ResolveAutomation, split_subtitles,
-                map_subtitles_to_timeline, map_time_to_timeline,
-                map_time_with_speedup_segments, map_subtitles_with_speedup_segments
-            )
             resolve_auto = ResolveAutomation()
             
             if self.phase in [0, 2]:
                 resolve_auto.ensure_resolve_running(log_callback=self.log_signal.emit)
 
             # Cấu hình các bộ xử lý
-            from src.core.autocut import AudioCutConfig, SilenceDetector, EDLGenerator
-            from src.core.ai_director import AIDirector, AIDirectorConfig, ProposedSegment
-            from src.core.vision_reframer import VisionReframer, ReframeConfig
-            from src.core.broll_sfx import BRollAnalyzer, SFXEngine
-            from src.core.vlog_hook import VlogHookGenerator, HookSegment
-            from src.core.audio import AudioExtractor
-            from src.core.fcpxml_generator import FCPXMLGenerator
-
             cut_config = AudioCutConfig(
                 min_silent_duration=self.min_duration,
                 silence_threshold_db=self.silence_db,
@@ -280,7 +280,6 @@ class PipelineWorker(QThread):
             else:
                 stamped_name = f"ResolveFlow_Merged_{len(self.video_paths)}clips"
 
-            from src.core.audit_reporter import ExecutionAuditReporter
             audit_reporter = ExecutionAuditReporter(project_name=stamped_name)
             audit_reporter.record_validation_warnings(self.validation_warnings)
 
@@ -355,27 +354,72 @@ class PipelineWorker(QThread):
 
                     keep_intervals = []
                     speedup_segments = []
+                    cut_segments = []
 
                     if self.run_cut:
                         if not os.path.exists(temp_wav) or os.path.getsize(temp_wav) == 0:
                             AudioExtractor.extract_audio(video_path, temp_wav)
 
+                        from src.core.autocut import CutSegment
                         if self.speed_up_silence:
                             self.log_signal.emit(f"   ⚡ [Speed-Ramp] Phân tích khoảng lặng để tua nhanh ({self.silence_speed}x)...")
-                            speedup_segments = SilenceDetector.detect_intervals_with_speedup(temp_wav, cut_config, self.silence_speed)
-                            keep_intervals = [(s["start"], s["end"]) for s in speedup_segments if s["type"] == "voice"]
+                            raw_speedup_segs = SilenceDetector.detect_intervals_with_speedup(temp_wav, cut_config, self.silence_speed)
+                            
+                            cut_segments = []
+                            for s in raw_speedup_segs:
+                                action = "keep" if s["type"] == "voice" else "speedup"
+                                cut_segments.append(CutSegment(
+                                    start=s["start"],
+                                    end=s["end"],
+                                    action=action,
+                                    speed=s.get("speed", 1.0)
+                                ))
                         else:
                             self.log_signal.emit("   ✂ Lọc khoảng lặng âm lượng...")
-                            keep_intervals = SilenceDetector.detect_silence_from_wav(temp_wav, cut_config)
+                            raw_segments = SilenceDetector.detect_silence_from_wav(temp_wav, cut_config)
+                            
+                            # Chuẩn hóa nếu bị unit tests patch trả về List[Tuple]
+                            if raw_segments and not isinstance(raw_segments[0], CutSegment):
+                                raw_keep = sorted(raw_segments, key=lambda x: x[0])
+                                dur = clip_dur if clip_dur > 0 else (raw_keep[-1][1] if raw_keep else 10.0)
+                                
+                                cut_segments = []
+                                current_time = 0.0
+                                for start, end in raw_keep:
+                                    if start > current_time:
+                                        cut_segments.append(CutSegment(start=current_time, end=start, action="cut", speed=1.0))
+                                    cut_segments.append(CutSegment(start=start, end=end, action="keep", speed=1.0))
+                                    current_time = end
+                                if current_time < dur:
+                                    cut_segments.append(CutSegment(start=current_time, end=dur, action="cut", speed=1.0))
+                            else:
+                                cut_segments = raw_segments
+
+                        keep_intervals = [(seg.start, seg.end) for seg in cut_segments if seg.action == "keep"]
+                        
+                        # Điền speedup_segments để tương thích ngược
+                        for seg in cut_segments:
+                            rec_dur = seg.timeline_duration
+                            note = f"⚡ Tua nhanh Timelapse ({seg.speed}x)" if seg.action == "speedup" else ("Thoại chính" if seg.action == "keep" else "Khoảng nghỉ ngắn")
+                            speedup_segments.append({
+                                "type": "voice" if seg.action == "keep" else "speedup",
+                                "start": seg.start,
+                                "end": seg.end,
+                                "duration": seg.duration,
+                                "speed": seg.speed,
+                                "rec_duration": rec_dur,
+                                "note": note
+                            })
                     else:
                         if clip_dur <= 0:
                             try:
-                                from src.core.autocut import get_media_metadata
                                 meta = get_media_metadata(video_path)
                                 clip_dur = meta.get("duration", 0.0)
                             except Exception:
                                 clip_dur = 0.0
                         if clip_dur > 0:
+                            from src.core.autocut import CutSegment
+                            cut_segments = [CutSegment(start=0.0, end=clip_dur, action="keep", speed=1.0)]
                             keep_intervals = [(0.0, clip_dur)]
 
                     # Lưu vào Cache nếu vừa mới quét
@@ -397,7 +441,8 @@ class PipelineWorker(QThread):
                         "raw_subtitles": raw_subtitles,
                         "clip_subs": clip_subs,
                         "silence_keep_intervals": keep_intervals,
-                        "speedup_segments": speedup_segments
+                        "speedup_segments": speedup_segments,
+                        "cut_segments": cut_segments
                     })
 
                     try:
@@ -441,9 +486,31 @@ class PipelineWorker(QThread):
                 clip_subs = cdata["clip_subs"]
                 keep_intervals = cdata["silence_keep_intervals"]
                 speedup_segments = cdata["speedup_segments"]
+                cut_segments = cdata.get("cut_segments", [])
+                
+                if not cut_segments:
+                    from src.core.autocut import CutSegment
+                    if self.speed_up_silence and speedup_segments:
+                        for s in speedup_segments:
+                            action = "keep" if s["type"] == "voice" else "speedup"
+                            cut_segments.append(CutSegment(
+                                start=s["start"],
+                                end=s["end"],
+                                action=action,
+                                speed=s.get("speed", 1.0)
+                            ))
+                    else:
+                        raw_keep = sorted(keep_intervals, key=lambda x: x[0])
+                        current_time = 0.0
+                        for start, end in raw_keep:
+                            if start > current_time:
+                                cut_segments.append(CutSegment(start=current_time, end=start, action="cut", speed=1.0))
+                            cut_segments.append(CutSegment(start=start, end=end, action="keep", speed=1.0))
+                            current_time = end
+                        if current_time < clip_dur:
+                            cut_segments.append(CutSegment(start=current_time, end=clip_dur, action="cut", speed=1.0))
                 
                 try:
-                    from src.core.autocut import EDLGenerator
                     fps = EDLGenerator.get_video_fps(video_path)
                 except Exception:
                     fps = 30.0
@@ -507,11 +574,12 @@ class PipelineWorker(QThread):
                     ai_res = director.apply_approved_segments(
                         subtitles=clip_subs,
                         proposed_segments=clip_props,
-                        silence_keep_intervals=keep_intervals,
+                        silence_keep_intervals=cut_segments,
                         total_duration=clip_dur,
                         language="vi" if self.language == "Tiếng Việt" else "en"
                     )
                     
+                    cut_segments = ai_res["segments"]
                     keep_intervals = ai_res["keep_intervals"]
                     clip_subs = ai_res["subtitles"]
                     ai_punch_events = ai_res.get("punch_in_events", [])
@@ -538,10 +606,7 @@ class PipelineWorker(QThread):
                         all_broll_cues.extend(broll_cues)
                         self.log_signal.emit(f"   🎞 [AI B-Roll] Gợi ý {len(broll_cues)} cảnh minh họa trên Video Track 2.")
                         for bc in broll_cues:
-                            if self.speed_up_silence and speedup_segments:
-                                bc_time_mapped = map_time_with_speedup_segments(bc.start, speedup_segments, cumulative_record_seconds)
-                            else:
-                                bc_time_mapped = map_time_to_timeline(bc.start, keep_intervals, cumulative_record_seconds)
+                            bc_time_mapped = map_time_to_timeline(bc.start, cut_segments, cumulative_record_seconds)
                             merged_markers.append({
                                 "time": bc_time_mapped,
                                 "duration": bc.duration,
@@ -561,10 +626,7 @@ class PipelineWorker(QThread):
                         all_sfx_cues.extend(sfx_cues)
                         self.log_signal.emit(f"   🔊 [SFX Engine] Đã bố trí {len(sfx_cues)} điểm âm thanh hiệu ứng trên Audio Track 2.")
                         for sc in sfx_cues:
-                            if self.speed_up_silence and speedup_segments:
-                                sc_time_mapped = map_time_with_speedup_segments(sc.time, speedup_segments, cumulative_record_seconds)
-                            else:
-                                sc_time_mapped = map_time_to_timeline(sc.time, keep_intervals, cumulative_record_seconds)
+                            sc_time_mapped = map_time_to_timeline(sc.time, cut_segments, cumulative_record_seconds)
                             merged_markers.append({
                                 "time": sc_time_mapped,
                                 "duration": sc.duration,
@@ -573,91 +635,44 @@ class PipelineWorker(QThread):
                                 "color": "Cyan"
                             })
 
-                # Stitching
+                # Stitching (Unified CutSegment Architecture)
                 clip_start_rec = cumulative_record_seconds
-                if self.speed_up_silence and speedup_segments:
-                    for seg in speedup_segments:
-                        is_speed = (seg["type"] == "speedup")
-                        rec_dur = seg["rec_duration"]
-                        rec_start = cumulative_record_seconds
-                        rec_end = rec_start + rec_dur
+                for seg in cut_segments:
+                    if seg.action == "cut":
+                        continue
 
-                        merged_edl_events.append({
-                            "video_path": video_path,
-                            "src_in": seg["start"],
-                            "src_out": seg["end"],
-                            "rec_in": rec_start,
-                            "rec_out": rec_end,
-                            "fps": fps,
-                            "is_speedup": is_speed,
-                            "speed": seg.get("speed", 1.0)
+                    is_speed = (seg.action == "speedup")
+                    rec_dur = seg.timeline_duration
+                    rec_start = cumulative_record_seconds
+                    rec_end = rec_start + rec_dur
+
+                    is_punch = seg.punch_in
+                    merged_edl_events.append({
+                        "video_path": video_path,
+                        "src_in": seg.start,
+                        "src_out": seg.end,
+                        "rec_in": rec_start,
+                        "rec_out": rec_end,
+                        "fps": fps,
+                        "punch_in": is_punch,
+                        "punch_in_scale": seg.punch_in_scale,
+                        "is_speedup": is_speed,
+                        "speed": seg.speed
+                    })
+
+                    if is_speed:
+                        merged_markers.append({
+                            "time": rec_start,
+                            "duration": rec_dur,
+                            "name": f"⚡ Fast-Forward ({seg.speed}x)",
+                            "note": "Cú chuyển cảnh tua nhanh Timelapse",
+                            "color": "Purple"
                         })
 
-                        if is_speed:
-                            merged_markers.append({
-                                "time": rec_start,
-                                "duration": rec_dur,
-                                "name": f"⚡ Fast-Forward ({self.silence_speed}x)",
-                                "note": "Cú chuyển cảnh tua nhanh Timelapse",
-                                "color": "Purple"
-                            })
+                    cumulative_record_seconds = rec_end
 
-                        cumulative_record_seconds = rec_end
-
-                    mapped_clip_subs = map_subtitles_with_speedup_segments(clip_subs, speedup_segments, clip_start_rec)
-                    merged_cut_subtitles.extend(mapped_clip_subs)
-
-                elif keep_intervals:
-                    for k_idx, (k_start, k_end) in enumerate(keep_intervals):
-                        dur = k_end - k_start
-                        rec_start = cumulative_record_seconds
-                        rec_end = rec_start + dur
-                        
-                        is_punch = self.enable_punch_in and (k_idx % 2 == 1)
-                        merged_edl_events.append({
-                            "video_path": video_path,
-                            "src_in": k_start,
-                            "src_out": k_end,
-                            "rec_in": rec_start,
-                            "rec_out": rec_end,
-                            "fps": fps,
-                            "punch_in": is_punch,
-                            "punch_in_scale": self.punch_in_scale
-                        })
-                        cumulative_record_seconds = rec_end
-                        
-                    mapped_clip_subs = map_subtitles_to_timeline(clip_subs, keep_intervals, clip_start_rec)
-                    merged_cut_subtitles.extend(mapped_clip_subs)
-                else:
-                    if clip_dur > 0:
-                        rec_start = cumulative_record_seconds
-                        rec_end = rec_start + clip_dur
-                        merged_edl_events.append({
-                            "video_path": video_path,
-                            "src_in": 0.0,
-                            "src_out": clip_dur,
-                            "rec_in": rec_start,
-                            "rec_out": rec_end,
-                            "fps": fps
-                        })
-                        cumulative_record_seconds = rec_end
-                        
-                    offset_subs = []
-                    for sub in clip_subs:
-                        s_words = []
-                        for w in sub.get("words", []):
-                            s_words.append({
-                                "word": w["word"],
-                                "start": w["start"] + clip_start_rec,
-                                "end": w["end"] + clip_start_rec
-                            })
-                        offset_subs.append({
-                            "start": sub["start"] + clip_start_rec,
-                            "end": sub["end"] + clip_start_rec,
-                            "text": sub["text"],
-                            "words": s_words
-                        })
-                    merged_cut_subtitles.extend(offset_subs)
+                mapped_clip_subs = map_subtitles_to_timeline(clip_subs, cut_segments, clip_start_rec)
+                merged_cut_subtitles.extend(mapped_clip_subs)
 
                 # Record clip audit
                 audit_reporter.record_clip_audit(
@@ -768,11 +783,16 @@ class PipelineWorker(QThread):
                 EDLGenerator.create_multi_clip_edl(merged_edl_events, output_edl, markers=merged_markers)
                 
                 self.log_signal.emit(f"\n📝 Đang tạo tệp Timeline DaVinci Resolve:\n      👉 FCPXML (Khuyên dùng): {os.path.abspath(output_timeline_fcpxml)}\n      👉 EDL (Dự phòng): {os.path.abspath(output_edl)}")
-                self.log_signal.emit("🤖 Đang gửi yêu cầu import Timeline sang DaVinci Resolve...")
-                
-                val_res = DryRunValidator.validate_fcpxml_integrity(output_timeline_fcpxml, expected_media_paths=self.video_paths)
+                val_res = DryRunValidator.validate_fcpxml_integrity(
+                    output_timeline_fcpxml,
+                    expected_media_paths=self.video_paths,
+                    resolve_automation=resolve_auto
+                )
                 if not val_res.is_valid:
-                    self.log_signal.emit(f"   ⚠️ Cảnh báo kiểm tra FCPXML: {'; '.join(val_res.errors)}")
+                    self.log_signal.emit(f"   ❌ Lỗi kiểm tra FCPXML: {'; '.join(val_res.errors)}")
+                if val_res.warnings:
+                    for warn_msg in val_res.warnings:
+                        self.log_signal.emit(f"   ⚠️ {warn_msg}")
 
                 resolve_auto.import_edl_to_timeline(
                     edl_path=output_timeline_fcpxml,
@@ -858,8 +878,17 @@ class PipelineWorker(QThread):
             if self.is_interrupted:
                 self._handle_interrupted()
             else:
+                tb_str = traceback.format_exc()
                 self.log_signal.emit(f"❌ Gặp lỗi nghiêm trọng: {str(e)}")
-                self.finished_signal.emit(False, str(e))
+                self.log_signal.emit(f"📋 Chi tiết lỗi hệ thống:\n{tb_str}")
+                if 'audit_reporter' in locals() and audit_reporter:
+                    try:
+                        output_report_md = os.path.join(base_dir, f"{stamped_name}_BaoCao_NhatKyXuLy.md")
+                        with open(output_report_md, "a", encoding="utf-8") as rf:
+                            rf.write(f"\n\n## ⚠️ NHẬT KÝ LỖI HỆ THỐNG (ERROR LOG)\n```text\n{tb_str}\n```\n")
+                    except Exception:
+                        pass
+                self.finished_signal.emit(False, f"{type(e).__name__}: {str(e)}")
         finally:
             for temp_f in temp_files_to_clean:
                 try:
@@ -1366,6 +1395,7 @@ class ResolveFlowApp(QMainWindow):
         
         if dropped_files:
             event.acceptProposedAction()
+            self._reset_workflow_phase()
             self.selected_files = dropped_files
             if len(dropped_files) == 1:
                 self.lbl_file.setText(dropped_files[0])
@@ -1721,11 +1751,23 @@ class ResolveFlowApp(QMainWindow):
         else:
             self.txt_split_limit.setText("42")
 
+    def _reset_workflow_phase(self):
+        """Đặt lại trạng thái kịch bản và xóa sạch cache phân đoạn cũ khi chọn video mới."""
+        self.current_phase = 1
+        self.clip_data_cache = []
+        self.proposed_segments = []
+        if hasattr(self, "table_review"):
+            self.table_review.setRowCount(0)
+            self.table_review.hide()
+        if hasattr(self, "btn_run"):
+            self._update_run_button_state(running=False)
+
     def _browse_file(self):
         file_paths, _ = QFileDialog.getOpenFileNames(
             self, "Chọn Tệp Video nguồn", "", "Video files (*.mp4 *.mov *.mkv *.avi *.wav *.mp3);;All files (*.*)"
         )
         if file_paths:
+            self._reset_workflow_phase()
             self.selected_files = file_paths
             if len(file_paths) == 1:
                 self.lbl_file.setText(file_paths[0])
@@ -1737,7 +1779,6 @@ class ResolveFlowApp(QMainWindow):
             self._suggest_whisper_model_for_file(file_paths[0])
 
     def _auto_detect_video(self):
-        from src.core.resolve_api import ResolveAutomation
         resolve_auto = ResolveAutomation()
         self.txt_console.appendPlainText("🔍 Đang kết nối DaVinci Resolve để tự động tìm video...")
         
@@ -1747,6 +1788,7 @@ class ResolveFlowApp(QMainWindow):
             
         file_paths = resolve_auto.auto_detect_video_paths()
         if file_paths:
+            self._reset_workflow_phase()
             self.selected_files = file_paths
             if len(file_paths) == 1:
                 self.lbl_file.setText(file_paths[0])
@@ -1762,7 +1804,6 @@ class ResolveFlowApp(QMainWindow):
     def _suggest_whisper_model_for_file(self, video_path: str):
         """Tự động gợi ý kích thước model Whisper tối ưu theo thời lượng video."""
         try:
-            from src.core.audio import AudioExtractor
             dur = AudioExtractor.get_audio_duration(video_path)
             sugg = suggest_whisper_model(dur)
             self.txt_console.appendPlainText(f"💡 [AI Suggestion] {sugg['reason']}")
@@ -1778,9 +1819,8 @@ class ResolveFlowApp(QMainWindow):
             return
 
         try:
-            from src.core.resolve_api import is_vertical_video
             mode = self.combo_split_mode.currentData() or "characters"
-            is_vert = is_vertical_video(video_path)
+            is_vert = resolve_api.is_vertical_video(video_path)
             
             if mode == "characters":
                 if is_vert:
@@ -1849,15 +1889,24 @@ class ResolveFlowApp(QMainWindow):
             """)
 
     def _run_pipeline(self):
-        video_paths = getattr(self, "selected_files", [])
-        if not video_paths:
-            video_path = self.lbl_file.text()
-            if video_path:
-                video_paths = [video_path]
+        # Ưu tiên lấy từ self.selected_files nếu hợp lệ, nếu không lấy từ text trên giao diện
+        raw_paths = getattr(self, "selected_files", [])
+        if not raw_paths:
+            t_path = self.lbl_file.text().strip()
+            if t_path:
+                raw_paths = [p.strip() for p in t_path.split(";") if p.strip()]
+
+        video_paths = [os.path.abspath(p) for p in raw_paths if os.path.exists(p)]
+        video_paths = list(dict.fromkeys(video_paths))
 
         if not video_paths:
-            self.txt_console.appendPlainText("❌ Lỗi: Vui lòng chọn tệp video trước khi khởi chạy!")
+            self.txt_console.appendPlainText("❌ Lỗi: Vui lòng chọn tệp video hợp lệ trước khi khởi chạy!")
             return
+
+        if len(video_paths) == 1:
+            self.txt_console.appendPlainText(f"🎬 Video nguồn đang xử lý: {os.path.basename(video_paths[0])}")
+        else:
+            self.txt_console.appendPlainText(f"🎬 Danh sách {len(video_paths)} video nguồn: {', '.join(os.path.basename(p) for p in video_paths)}")
 
         self.is_processing = True
         self.progress_bar.setValue(0)
@@ -1896,6 +1945,11 @@ class ResolveFlowApp(QMainWindow):
         is_semantic_ai = run_cut and (ai_mode != "silence_only")
         if is_semantic_ai:
             phase_to_run = self.current_phase
+            # Đảm bảo nếu người dùng đổi tệp video, cache Phase 1 của clip cũ sẽ bị hủy bỏ ngay
+            cached_paths = [os.path.abspath(c.get("video_path", "")) for c in (self.clip_data_cache or [])]
+            if phase_to_run == 2 and cached_paths != video_paths:
+                self._reset_workflow_phase()
+                phase_to_run = 1
         else:
             phase_to_run = 0
 
@@ -1948,6 +2002,22 @@ class ResolveFlowApp(QMainWindow):
     def _format_user_friendly_error(self, err_msg: str) -> str:
         """Chuyển đổi lỗi kỹ thuật thô thành hướng dẫn khắc phục thân thiện cho creator."""
         err_lower = err_msg.lower()
+
+        # Kiểm tra lỗi nội bộ mã nguồn / hệ thống (UnboundLocalError, ImportError, AttributeError...)
+        is_system_error = any(
+            err_type in err_msg for err_type in [
+                "UnboundLocalError", "NameError", "ImportError", "AttributeError",
+                "TypeError", "SyntaxError", "IndexError", "KeyError", "ZeroDivisionError"
+            ]
+        )
+        if is_system_error:
+            clean_err = err_msg.strip()
+            return (
+                f"❌ Đã xảy ra lỗi nội bộ trong hệ thống xử lý:\n👉 {clean_err}\n\n"
+                "ℹ️ Đây là lỗi mã nguồn / nội bộ của ứng dụng, không phải do dữ liệu video của bạn.\n"
+                "👉 Vui lòng sao chép thông báo này kèm tệp nhật ký '_BaoCao_NhatKyXuLy.md' hoặc log console gửi cho nhà phát triển để được hỗ trợ xử lý."
+            )
+
         if "ffmpeg" in err_lower:
             return (
                 "❌ Không tìm thấy công cụ FFmpeg trong hệ thống.\n\n"
@@ -2126,6 +2196,8 @@ class ResolveFlowApp(QMainWindow):
 
 def start_gui():
     app = QApplication(sys.argv)
+    default_font = QFont("Segoe UI", 10)
+    app.setFont(default_font)
     window = ResolveFlowApp()
     window.show()
     sys.exit(app.exec())

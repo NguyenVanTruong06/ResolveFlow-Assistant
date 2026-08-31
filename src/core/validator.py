@@ -173,16 +173,18 @@ class DryRunValidator:
 
     @classmethod
     def validate_fcpxml_integrity(
-        cls, 
-        fcpxml_path: str, 
-        expected_media_paths: Optional[List[str]] = None
+        cls,
+        fcpxml_path: str,
+        expected_media_paths: Optional[List[str]] = None,
+        resolve_automation: Optional[Any] = None
     ) -> ValidationResult:
         """
-        Chẩn đoán tính toàn vẹn của tệp FCPXML (XML v1.9):
-        1. Cấu trúc XML hợp lệ, encoding UTF-8 chuẩn.
-        2. Tất cả thẻ <asset> có thuộc tính src hợp lệ và tệp nguồn tương ứng tồn tại trên đĩa.
-        3. Các thẻ <text-style> và <title> không bị lỗi parse ký tự tiếng Việt hoặc ký tự đặc biệt XML (&, <, >).
-        4. Định dạng sequence duration và format frameDuration khớp chuẩn FCPXML.
+        Kiểm tra tính toàn vẹn của tệp FCPXML trước khi import vào DaVinci Resolve:
+        - Cú pháp XML hợp lệ
+        - Các tệp media trong thẻ <asset> và <asset-clip> tồn tại trên đĩa và có Reel Name
+        - Tệp nguồn đã có trong Media Pool của DaVinci Resolve (nếu resolve_automation kết nối)
+        - Toàn bộ danh sách tệp mong đợi có mặt đầy đủ
+        - Các thẻ <title> Text+ không bị rỗng
         """
         result = ValidationResult()
 
@@ -191,12 +193,7 @@ class DryRunValidator:
             result.errors.append(f"Tệp FCPXML không tồn tại: {fcpxml_path}")
             return result
 
-        if os.path.getsize(fcpxml_path) == 0:
-            result.is_valid = False
-            result.errors.append(f"Tệp FCPXML rỗng (0 bytes): {fcpxml_path}")
-            return result
-
-        # 1. Parse XML
+        # 1. Kiểm tra cú pháp XML
         try:
             tree = ET.parse(fcpxml_path)
             root = tree.getroot()
@@ -214,16 +211,28 @@ class DryRunValidator:
         if version not in ["1.8", "1.9", "1.10", "1.11"]:
             result.warnings.append(f"Phiên bản FCPXML '{version}' có thể không tương thích tối ưu với DaVinci Resolve (Khuyên dùng v1.9).")
 
-        # 2. Kiểm tra các tài nguyên Media Asset (<asset>)
+        # 2. Kiểm tra các tài nguyên Media Asset (<asset>) và Reel Name
         resources = root.find("resources")
         if resources is not None:
             assets = resources.findall("asset")
             for asset in assets:
                 asset_id = asset.attrib.get("id", "unknown")
+                clip_name = asset.attrib.get("name", "unknown")
                 src_uri = asset.attrib.get("src", "")
                 if not src_uri:
                     result.warnings.append(f"Asset ID '{asset_id}' không có đường dẫn 'src'.")
                     continue
+
+                # Kiểm tra Reel Name trong metadata của <asset>
+                reel_found = False
+                for md in asset.findall(".//md"):
+                    if md.attrib.get("key") == "com.apple.proapps.studio.reel" and md.attrib.get("value", "").strip():
+                        reel_found = True
+                        break
+                if not reel_found:
+                    result.warnings.append(
+                        f"Tài nguyên '{clip_name}' (Asset ID: '{asset_id}') thiếu Reel Name trong FCPXML (có thể khiến DaVinci Resolve báo lỗi 'Không tìm thấy tệp trong mục lục tìm kiếm')."
+                    )
 
                 # Giải mã URI sang đường dẫn file thật trên đĩa
                 real_path = cls._uri_to_local_path(src_uri)
@@ -236,16 +245,29 @@ class DryRunValidator:
                 else:
                     result.warnings.append(f"Không thể chuyển đổi URI sang đường dẫn cục bộ: '{src_uri}'")
 
-        # 3. Kiểm tra danh sách media mong đợi (nếu có truyền vào)
-        if expected_media_paths:
-            found_paths = []
-            if resources is not None:
-                for asset in resources.findall("asset"):
-                    src = asset.attrib.get("src", "")
-                    p = cls._uri_to_local_path(src)
-                    if p:
-                        found_paths.append(os.path.normcase(os.path.abspath(p)))
+        # Kiểm tra Reel Name trong các <asset-clip>
+        for clip in root.findall(".//asset-clip"):
+            clip_name = clip.attrib.get("name", "unknown")
+            reel_found = False
+            for md in clip.findall(".//md"):
+                if md.attrib.get("key") == "com.apple.proapps.studio.reel" and md.attrib.get("value", "").strip():
+                    reel_found = True
+                    break
+            if not reel_found:
+                result.warnings.append(
+                    f"Đoạn clip '{clip_name}' trên timeline thiếu Reel Name trong FCPXML."
+                )
 
+        # 3. Kiểm tra danh sách media mong đợi (nếu có truyền vào)
+        found_paths = []
+        if resources is not None:
+            for asset in resources.findall("asset"):
+                src = asset.attrib.get("src", "")
+                p = cls._uri_to_local_path(src)
+                if p:
+                    found_paths.append(os.path.normcase(os.path.abspath(p)))
+
+        if expected_media_paths:
             for exp in expected_media_paths:
                 exp_norm = os.path.normcase(os.path.abspath(exp))
                 if exp_norm not in found_paths:
@@ -253,7 +275,24 @@ class DryRunValidator:
                         f"Tệp nguồn '{os.path.basename(exp)}' không tìm thấy trong danh sách tài nguyên FCPXML."
                     )
 
-        # 4. Kiểm tra Text Style Elements & Unicode
+        # 4. Kiểm tra Media Pool trong DaVinci Resolve (nếu có resolve_automation)
+        if resolve_automation:
+            try:
+                if hasattr(resolve_automation, "is_connected") and resolve_automation.is_connected():
+                    check_paths = expected_media_paths or found_paths
+                    if check_paths and hasattr(resolve_automation, "check_clips_in_media_pool"):
+                        pool_check = resolve_automation.check_clips_in_media_pool(check_paths)
+                        missing_in_pool = [p for p, in_p in pool_check.items() if not in_p]
+                        if missing_in_pool:
+                            for mp in missing_in_pool:
+                                result.warnings.append(
+                                    f"File '{os.path.basename(mp)}' chưa có trong Media Pool của DaVinci Resolve. Hệ thống sẽ tự động nạp trước khi tạo Timeline để tránh lỗi Offline Media."
+                                )
+                            result.details["missing_in_media_pool"] = missing_in_pool
+            except Exception:
+                pass
+
+        # 5. Kiểm tra Text Style Elements & Unicode
         titles = root.findall(".//title")
         for title in titles:
             text_elem = title.find("text")

@@ -4,6 +4,7 @@ import json
 import difflib
 from typing import List, Dict, Any, Tuple, Optional
 from pydantic import BaseModel, Field
+from src.core.autocut import CutSegment
 
 class ProposedSegment(BaseModel):
     """
@@ -78,11 +79,11 @@ class BadTakeDetector:
         return clean_w in fillers
 
     @classmethod
-    def detect_bad_takes(cls, subtitles: List[Dict[str, Any]], similarity_threshold: float = 0.75) -> List[int]:
+    def detect_bad_takes(cls, subtitles: List[Dict[str, Any]], similarity_threshold: float = 0.88) -> List[int]:
         """
         Duyệt qua danh sách các đoạn phụ đề và phát hiện các index bị coi là "nói thử / nói vấp" (False Starts).
-        Chỉ loại bỏ khi có căn cứ rõ ràng (lặp lại phần lớn câu hoặc tương đồng rất cao kèm khoảng dừng ngắn).
-        Tránh cắt nhầm các câu bình thường hoặc các thẻ phụ đề liên tiếp bị chia nhỏ.
+        Chỉ loại bỏ khi có căn cứ rõ ràng (người nói bỏ dở câu hoặc thử lại ngay câu tương tự trong vòng < 2.5 giây).
+        Tránh tuyệt đối việc cắt nhầm các câu bình thường có phần mở đầu giống nhau (ví dụ: 'Bước 1...', 'Bước 2...').
 
         Returns:
             List[int]: Danh sách index của các đoạn sub cần bị loại bỏ do là Bad Take.
@@ -105,35 +106,43 @@ class BadTakeDetector:
             if not curr_words or not next_words:
                 continue
 
-            # Không coi đoạn quá ngắn (1-2 từ) là bad take trừ khi lặp lại y hệt
-            if len(curr_words) < 3:
-                if curr_words == next_words[:len(curr_words)] and len(curr_words) == len(next_words):
+            gap = subtitles[i + 1]["start"] - subtitles[i]["end"]
+            # Nếu khoảng cách giữa 2 câu quá 2.5 giây, đây là 2 ý riêng biệt, không phải nói vấp thử lại ngay
+            if gap > 2.5:
+                continue
+
+            # Trường hợp 1: Nói lặp lại y hệt 1-2 từ (ví dụ: "xin chào" -> "xin chào các bạn")
+            if len(curr_words) <= 2:
+                if curr_words == next_words[:len(curr_words)] and gap < 1.8:
                     bad_take_indices.add(i)
                 continue
 
-            # 1. Kiểm tra sự trùng lặp phần đầu câu (Prefix match)
-            # Yêu cầu trùng ít nhất 3 từ VÀ chiếm hơn 50% số từ của câu trước đó
-            min_len = min(len(curr_words), len(next_words))
-            matched_prefix_count = 0
-            for w1, w2 in zip(curr_words, next_words):
-                if w1 == w2:
-                    matched_prefix_count += 1
-                else:
-                    break
-
-            if matched_prefix_count >= 3 and (matched_prefix_count / len(curr_words)) >= 0.5:
-                gap = subtitles[i + 1]["start"] - subtitles[i]["end"]
-                if gap < 4.0:
+            # Trường hợp 2: Câu trước là phần đầu dở dang của câu sau (False start: câu trước nằm gọn trong câu sau)
+            # Ví dụ: "Hôm nay mình sẽ cùng" (5 từ) -> "Hôm nay mình sẽ cùng các bạn tìm hiểu..."
+            if len(curr_words) >= 3 and len(next_words) > len(curr_words):
+                if curr_words == next_words[:len(curr_words)] and gap < 2.0:
                     bad_take_indices.add(i)
                     continue
 
-            # 2. Sử dụng SequenceMatcher để tính độ tương đồng cao (>= 0.75)
-            matcher = difflib.SequenceMatcher(None, curr_words, next_words)
-            ratio = matcher.ratio()
+            # Trường hợp 3: Hai câu có độ tương đồng cực cao (>= 0.88) và số từ xấp xỉ nhau (nói vấp rồi sửa lại từ)
+            if len(curr_words) >= 4 and len(next_words) >= 4:
+                matcher = difflib.SequenceMatcher(None, curr_words, next_words)
+                ratio = matcher.ratio()
 
-            gap = subtitles[i + 1]["start"] - subtitles[i]["end"]
-            if ratio >= similarity_threshold and gap < 3.5:
-                bad_take_indices.add(i)
+                # Kiểm tra xem từ cuối cùng có phải là từ đếm/liệt kê không (ví dụ: một/hai, 1/2, a/b, đầu/tiếp...)
+                last_w1 = curr_words[-1]
+                last_w2 = next_words[-1]
+                contrast_words = [
+                    "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín", "mười",
+                    "1", "2", "3", "4", "5", "first", "second", "third", "one", "two", "three",
+                    "trước", "sau", "đầu", "cuối", "này", "kia", "đây", "đó"
+                ]
+                if last_w1 in contrast_words or last_w2 in contrast_words:
+                    # Nếu là câu liệt kê thì không coi là bad take trừ khi trùng lặp 100%
+                    if ratio >= 0.98 and gap < 1.5:
+                        bad_take_indices.add(i)
+                elif ratio >= similarity_threshold and gap < 2.0:
+                    bad_take_indices.add(i)
 
         return sorted(list(bad_take_indices))
 
@@ -161,7 +170,7 @@ class AIDirector:
 
         # 1. Phát hiện Bad Takes
         bad_take_indices = set()
-        if self.config.remove_bad_takes:
+        if self.config.remove_bad_takes and self.config.mode != "silence_only":
             bad_take_indices = set(BadTakeDetector.detect_bad_takes(subtitles))
 
         # 2. Tạo danh sách các câu hợp lệ sau khi loại bỏ Bad Takes
@@ -229,22 +238,39 @@ class AIDirector:
         self,
         subtitles: List[Dict[str, Any]],
         proposed_segments: List[ProposedSegment],
-        silence_keep_intervals: List[Tuple[float, float]],
+        silence_keep_intervals: List[Any],
         total_duration: float,
         language: str = "vi"
     ) -> Dict[str, Any]:
         """
         Nhận vào danh sách proposed_segments đã được người dùng chỉnh sửa/duyệt trên GUI.
-        Tính toán keep_intervals, punch_in_events, markers và stats cuối cùng.
-        Bảo toàn trọn vẹn dải âm thanh và khoảng đệm (padding) của SilenceDetector.
+        Tính toán segments (CutSegment), keep_intervals, punch_in_events, markers và stats cuối cùng.
         """
+        # 1. Chuẩn hóa silence_keep_intervals về danh sách CutSegment
+        if silence_keep_intervals and isinstance(silence_keep_intervals[0], CutSegment):
+            segments = [seg.copy() for seg in silence_keep_intervals]
+        else:
+            raw_keep = silence_keep_intervals or [(0.0, total_duration)]
+            raw_keep = sorted(raw_keep, key=lambda x: x[0])
+            segments = []
+            current_time = 0.0
+            for start, end in raw_keep:
+                if start > current_time:
+                    segments.append(CutSegment(start=current_time, end=start, action="cut", speed=1.0))
+                segments.append(CutSegment(start=start, end=end, action="keep", speed=1.0))
+                current_time = end
+            if current_time < total_duration:
+                segments.append(CutSegment(start=current_time, end=total_duration, action="cut", speed=1.0))
+
         if not subtitles or not proposed_segments:
+            keep_intervals = [(seg.start, seg.end) for seg in segments if seg.action == "keep"]
             return {
-                "keep_intervals": silence_keep_intervals,
+                "segments": segments,
+                "keep_intervals": keep_intervals,
                 "subtitles": subtitles,
                 "punch_in_events": [],
                 "markers": [],
-                "stats": {"original_count": 0, "kept_count": 0, "removed_bad_takes": 0}
+                "stats": {"original_count": 0, "kept_count": 0, "removed_bad_takes": 0, "punch_ins_created": 0}
             }
 
         decision_map = {p.id: p for p in proposed_segments}
@@ -293,58 +319,93 @@ class AIDirector:
                         "color": "Red"
                     })
 
-        # Giữ nguyên mốc cắt âm thanh chuẩn từ SilenceDetector và chỉ loại trừ đúng các đoạn cut_ranges
-        if silence_keep_intervals:
-            current_intervals = list(silence_keep_intervals)
-            for c_start, c_end in cut_ranges:
-                new_intervals = []
-                for k_start, k_end in current_intervals:
-                    if c_end <= k_start or c_start >= k_end:
-                        new_intervals.append((k_start, k_end))
-                    else:
-                        if c_start > k_start:
-                            new_intervals.append((k_start, c_start))
-                        if c_end < k_end:
-                            new_intervals.append((c_end, k_end))
-                current_intervals = new_intervals
-            merged_intervals = [(s, e) for (s, e) in current_intervals if (e - s) >= 0.05]
-        else:
-            raw_intervals = []
-            for sub in final_subs:
-                s_start = max(0.0, sub["start"] - 0.30)
-                s_end = min(total_duration, sub["end"] + 0.30)
-                raw_intervals.append((s_start, s_end))
-
-            merged_intervals = []
-            for s_start, s_end in sorted(raw_intervals, key=lambda x: x[0]):
-                if merged_intervals and s_start <= merged_intervals[-1][1] + 0.2:
-                    merged_intervals[-1] = (merged_intervals[-1][0], max(merged_intervals[-1][1], s_end))
+        # Áp dụng các khoảng cut_ranges
+        for c_start, c_end in cut_ranges:
+            new_segments = []
+            for seg in segments:
+                if c_end <= seg.start or c_start >= seg.end:
+                    new_segments.append(seg)
                 else:
-                    merged_intervals.append((s_start, s_end))
+                    # Có chồng chập
+                    if c_start > seg.start:
+                        new_segments.append(CutSegment(
+                            start=seg.start,
+                            end=c_start,
+                            action=seg.action,
+                            speed=seg.speed,
+                            punch_in=seg.punch_in,
+                            punch_in_scale=seg.punch_in_scale
+                        ))
+                    overlap_start = max(seg.start, c_start)
+                    overlap_end = min(seg.end, c_end)
+                    if overlap_end > overlap_start:
+                        new_segments.append(CutSegment(
+                            start=overlap_start,
+                            end=overlap_end,
+                            action="cut",
+                            speed=1.0
+                        ))
+                    if c_end < seg.end:
+                        new_segments.append(CutSegment(
+                            start=c_end,
+                            end=seg.end,
+                            action=seg.action,
+                            speed=seg.speed,
+                            punch_in=seg.punch_in,
+                            punch_in_scale=seg.punch_in_scale
+                        ))
+            segments = new_segments
 
-        if not merged_intervals:
-            merged_intervals = silence_keep_intervals or [(0.0, total_duration)]
+        # Gộp các đoạn liền kề cùng action/speed/punch
+        def merge_adjacent(segs: List[CutSegment]) -> List[CutSegment]:
+            if not segs:
+                return []
+            sorted_segs = sorted(segs, key=lambda x: x.start)
+            merged_list = []
+            curr = sorted_segs[0]
+            for next_seg in sorted_segs[1:]:
+                if (curr.action == next_seg.action and 
+                    curr.speed == next_seg.speed and 
+                    curr.punch_in == next_seg.punch_in and 
+                    curr.punch_in_scale == next_seg.punch_in_scale and 
+                    abs(curr.end - next_seg.start) < 0.001):
+                    curr.end = next_seg.end
+                else:
+                    if curr.duration >= 0.001:
+                        merged_list.append(curr)
+                    curr = next_seg
+            if curr.duration >= 0.001:
+                merged_list.append(curr)
+            return merged_list
+
+        merged_segments = merge_adjacent(segments)
+        keep_intervals = [(seg.start, seg.end) for seg in merged_segments if seg.action == "keep"]
 
         punch_in_events = []
-        if self.config.enable_punch_in and len(merged_intervals) > 1:
+        if self.config.enable_punch_in:
             is_zoomed = False
-            for idx, (k_start, k_end) in enumerate(merged_intervals):
-                if is_zoomed:
-                    punch_in_events.append({
-                        "interval_index": idx,
-                        "start": k_start,
-                        "end": k_end,
-                        "scale": self.config.punch_in_scale,
-                        "description": f"Punch-in {self.config.punch_in_scale}x"
-                    })
-                    markers.append({
-                        "time": k_start,
-                        "duration": k_end - k_start,
-                        "name": f"🔍 Punch-In ({self.config.punch_in_scale}x)",
-                        "note": "Góc quay phóng to cận cảnh tự động",
-                        "color": "Cyan"
-                    })
-                is_zoomed = not is_zoomed
+            keep_idx = 0
+            for seg in merged_segments:
+                if seg.action == "keep":
+                    if is_zoomed:
+                        seg.punch_in = True
+                        seg.punch_in_scale = self.config.punch_in_scale
+                        punch_in_events.append({
+                            "interval_index": keep_idx,
+                            "start": seg.start,
+                            "end": seg.end,
+                            "scale": seg.punch_in_scale,
+                            "description": f"Punch-in {seg.punch_in_scale}x"
+                        })
+                        markers.append({
+                            "time": seg.start,
+                            "duration": seg.duration,
+                            "name": f"🔍 Punch-In ({seg.punch_in_scale}x)",
+                            "note": "Góc quay phóng to cận cảnh tự động",
+                            "color": "Cyan"
+                        })
+                    is_zoomed = not is_zoomed
+                    keep_idx += 1
 
         for sub in final_subs[:5]:
             markers.append({
@@ -356,7 +417,8 @@ class AIDirector:
             })
 
         return {
-            "keep_intervals": merged_intervals,
+            "segments": merged_segments,
+            "keep_intervals": keep_intervals,
             "subtitles": final_subs,
             "punch_in_events": punch_in_events,
             "markers": markers,
@@ -371,7 +433,7 @@ class AIDirector:
     def process_semantic_cut(
         self,
         subtitles: List[Dict[str, Any]],
-        silence_keep_intervals: List[Tuple[float, float]],
+        silence_keep_intervals: List[Any],
         total_duration: float,
         language: str = "vi"
     ) -> Dict[str, Any]:

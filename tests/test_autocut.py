@@ -62,19 +62,20 @@ def test_detect_silence(tmp_path) -> None:
         padding_seconds=0.0
     )
 
-    keep_intervals = SilenceDetector.detect_silence_from_wav(wav_path, config)
+    segments = SilenceDetector.detect_silence_from_wav(wav_path, config)
+    keep_segments = [seg for seg in segments if seg.action == "keep"]
 
     # Hệ thống phải trả về đúng 2 phân đoạn có tiếng nói
-    assert len(keep_intervals) == 2
+    assert len(keep_segments) == 2
     
     # Kiểm tra biên độ thời gian của đoạn 1 (0.0s - 1.0s)
     # Cho phép sai số nhỏ do kích thước cửa sổ 50ms (0.05s)
-    assert abs(keep_intervals[0][0] - 0.0) < 0.06
-    assert abs(keep_intervals[0][1] - 1.0) < 0.06
+    assert abs(keep_segments[0].start - 0.0) < 0.06
+    assert abs(keep_segments[0].end - 1.0) < 0.06
 
     # Kiểm tra biên độ thời gian của đoạn 2 (2.0s - 3.0s)
-    assert abs(keep_intervals[1][0] - 2.0) < 0.06
-    assert abs(keep_intervals[1][1] - 3.0) < 0.06
+    assert abs(keep_segments[1].start - 2.0) < 0.06
+    assert abs(keep_segments[1].end - 3.0) < 0.06
 
 def test_detect_silence_file_not_found() -> None:
     """
@@ -201,5 +202,28 @@ def test_edl_with_camera_start_timecode(tmp_path):
         
     assert "01:00:05:00 01:00:08:00 00:00:00:00 00:00:03:00" in content
     assert "* FROM CLIP NAME: C0387.MP4" in content
+
+def test_merge_speech_with_silence_intervals():
+    # Giả sử SilenceDetector chỉ bắt được đoạn âm lượng to [1.0, 3.0] và [8.0, 10.0]
+    # Nhưng Whisper STT nhận diện được câu nói nhỏ ở [4.5, 6.0]
+    silence_intervals = [(1.0, 3.0), (8.0, 10.0)]
+    speech_subs = [
+        {"start": 1.2, "end": 2.8, "text": "Câu nói to"},
+        {"start": 4.5, "end": 6.0, "text": "Câu nói thì thầm nhỏ"}
+    ]
+    
+    merged = SilenceDetector.merge_speech_with_silence_intervals(
+        silence_keep_intervals=silence_intervals,
+        speech_subtitles=speech_subs,
+        padding_seconds=0.30,
+        total_duration=15.0
+    )
+    
+    # Kết quả phải bảo tồn trọn vẹn cả câu nói nhỏ [4.2, 6.3]
+    assert len(merged) == 3
+    # Đoạn nói nhỏ phải nằm trong danh sách giữ lại
+    quiet_kept = any(s <= 4.5 and e >= 6.0 for s, e in merged)
+    assert quiet_kept is True
+
 
 

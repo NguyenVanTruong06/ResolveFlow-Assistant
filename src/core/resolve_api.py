@@ -113,6 +113,103 @@ class ResolveAutomation:
             log(" ❌ Không tìm thấy đường dẫn cài đặt mặc định của DaVinci Resolve tại C:\\Program Files\\...")
         return False
 
+    def is_connected(self) -> bool:
+        """Kiểm tra xem kết nối tới DaVinci Resolve và Project hiện tại có hợp lệ hay không."""
+        return bool(self.resolve and self.current_project)
+
+    def get_media_pool_clips(self, folder=None) -> List[Any]:
+        """Lấy toàn bộ các clips trong Media Pool (đệ quy qua các thư mục)."""
+        if not self.is_connected():
+            if not self.connect():
+                return []
+        
+        media_pool = self.current_project.GetMediaPool()
+        if not media_pool:
+            return []
+
+        target_folder = folder if folder else media_pool.GetRootFolder()
+        if not target_folder:
+            return []
+
+        clips = []
+        try:
+            folder_clips = target_folder.GetClipList() or []
+            clips.extend(folder_clips)
+            subfolders = target_folder.GetSubFolderList() or []
+            for sub in subfolders:
+                clips.extend(self.get_media_pool_clips(folder=sub))
+        except Exception:
+            pass
+        return clips
+
+    def get_media_pool_file_paths(self) -> List[str]:
+        """Lấy danh sách tất cả đường dẫn tệp file hoặc tên clip trong Media Pool."""
+        clips = self.get_media_pool_clips()
+        paths = []
+        for clip in clips:
+            try:
+                fp = clip.GetClipProperty("File Path")
+                if fp:
+                    paths.append(os.path.normcase(os.path.abspath(fp)))
+                else:
+                    name = clip.GetName()
+                    if name:
+                        paths.append(name.lower())
+            except Exception:
+                pass
+        return paths
+
+    def check_clips_in_media_pool(self, paths: List[str]) -> Dict[str, bool]:
+        """Kiểm tra từng tệp trong danh sách đã có trong Media Pool hay chưa."""
+        pool_paths = self.get_media_pool_file_paths()
+        result = {}
+        for p in paths:
+            norm_p = os.path.normcase(os.path.abspath(p))
+            fname = os.path.basename(p).lower()
+            exists = (norm_p in pool_paths) or any(fname == os.path.basename(pp) or fname in pp for pp in pool_paths)
+            result[p] = exists
+        return result
+
+    def import_media_to_media_pool(self, paths: List[str], log_callback: Optional[Any] = None) -> bool:
+        """Tự động nạp danh sách tệp video vào Media Pool của DaVinci Resolve."""
+        def log(msg: str):
+            if log_callback:
+                log_callback(msg)
+            else:
+                print(msg)
+
+        if not self.is_connected():
+            if not self.connect():
+                return False
+
+        valid_paths = [os.path.abspath(p) for p in paths if os.path.exists(p)]
+        if not valid_paths:
+            return False
+
+        media_pool = self.current_project.GetMediaPool()
+        media_storage = self.resolve.GetMediaStorage() if hasattr(self.resolve, "GetMediaStorage") else None
+
+        imported = False
+        if media_pool:
+            try:
+                res = media_pool.ImportMedia(valid_paths)
+                if res:
+                    imported = True
+            except Exception as e:
+                log(f" ℹ MediaPool ImportMedia: {str(e)}")
+
+        if not imported and media_storage:
+            try:
+                res = media_storage.AddFileListToMediaPool(valid_paths)
+                if res:
+                    imported = True
+            except Exception as e:
+                log(f" ℹ MediaStorage AddFileList: {str(e)}")
+
+        if imported:
+            log(f" ✔ Đã tự động nạp {len(valid_paths)} tệp video nguồn vào Media Pool của Resolve!")
+        return imported
+
     def auto_detect_video_paths(self) -> List[str]:
         """
         Tự động phát hiện danh sách đường dẫn các tệp video đang hoạt động trong DaVinci Resolve.
@@ -354,23 +451,27 @@ class ResolveAutomation:
             v_list = [os.path.abspath(video_path)]
 
         if v_list:
-            try:
-                media_pool.ImportMedia(v_list)
-            except Exception as e:
-                log(f" ℹ Thông báo Media Pool: {str(e)}")
+            self.import_media_to_media_pool(v_list, log_callback=log)
 
         first_dir = os.path.dirname(v_list[0]) if v_list else ""
         file_ext = os.path.splitext(edl_path)[1].lower()
+        # Ưu tiên liên kết chính xác với Media Pool Item vừa nạp (importSourceClips = False)
+        # để tránh việc Resolve tự quét cả thư mục và liên kết nhầm sang video khác trong cùng folder
         import_options = {
             "timelineName": timeline_name,
-            "importSourceClips": True,  # Luôn kích hoạt True để Resolve tự liên kết tệp nguồn
+            "importSourceClips": False,
             "sourceClipsPath": first_dir
         }
 
         try:
             timeline = media_pool.ImportTimelineFromFile(os.path.abspath(edl_path), import_options)
+            if not timeline:
+                # Nếu importSourceClips = False không tìm thấy, thử lại với importSourceClips = True
+                import_options["importSourceClips"] = True
+                timeline = media_pool.ImportTimelineFromFile(os.path.abspath(edl_path), import_options)
+
             if timeline:
-                log(f" 🎉 Đã tự động import Timeline '{timeline_name}' thành công trong DaVinci Resolve (Media đã liên kết)!")
+                log(f" 🎉 Đã tự động import Timeline '{timeline_name}' thành công trong DaVinci Resolve (Media đã liên kết đúng tệp nguồn)!")
                 return True
         except Exception as e:
             log(f" ⚠️ Lỗi khi gọi API ImportTimelineFromFile: {str(e)}")
@@ -490,46 +591,59 @@ def split_subtitles(
         
     return new_subtitles
 
-def map_time_to_timeline(t_src: float, keep_intervals: List[Tuple[float, float]], base_rec_time: float = 0.0) -> float:
+def map_time_to_timeline(t_src: float, keep_intervals: List[Any], base_rec_time: float = 0.0) -> float:
     """
     Ánh xạ mốc thời gian nguồn (source time) sang mốc thời gian trên timeline đã cắt (record time).
+    Hỗ trợ cả List[CutSegment] và List[Tuple[float, float]].
     """
+    from src.core.autocut import CutSegment
     if not keep_intervals:
         return base_rec_time + t_src
 
-    current_rec = base_rec_time
-    for s_i, e_i in keep_intervals:
-        if t_src < s_i:
-            return current_rec
-        elif s_i <= t_src <= e_i:
-            return current_rec + (t_src - s_i)
-        else:
-            current_rec += (e_i - s_i)
+    # Chuẩn hóa về danh sách CutSegment
+    if isinstance(keep_intervals[0], CutSegment):
+        segments = keep_intervals
+    else:
+        raw_keep = sorted(keep_intervals, key=lambda x: x[0])
+        segments = []
+        current_time = 0.0
+        max_val = max(t_src, max(x[1] for x in raw_keep) if raw_keep else t_src)
+        for start, end in raw_keep:
+            if start > current_time:
+                segments.append(CutSegment(start=current_time, end=start, action="cut", speed=1.0))
+            segments.append(CutSegment(start=start, end=end, action="keep", speed=1.0))
+            current_time = end
+        if current_time < max_val + 1.0:
+            segments.append(CutSegment(start=current_time, end=max_val + 1.0, action="cut", speed=1.0))
 
-    return current_rec
+    rec_time = base_rec_time
+    for seg in segments:
+        if t_src < seg.start:
+            return rec_time
+        elif seg.start <= t_src <= seg.end:
+            if seg.action == "cut":
+                return rec_time
+            return rec_time + (t_src - seg.start) / seg.speed
+        else:
+            rec_time += seg.timeline_duration
+
+    return rec_time
 
 def map_time_with_speedup_segments(t_src: float, speedup_segments: List[Dict[str, Any]], base_rec_time: float = 0.0) -> float:
     """
     Ánh xạ mốc thời gian nguồn sang record time khi có áp dụng tua nhanh khoảng lặng (Speed-Ramp).
     """
-    if not speedup_segments:
-        return base_rec_time + t_src
-
-    current_rec = base_rec_time
-    for seg in speedup_segments:
-        s_start = seg["start"]
-        s_end = seg["end"]
-        s_rec_dur = seg["rec_duration"]
-        speed = seg.get("speed", 1.0)
-
-        if t_src < s_start:
-            return current_rec
-        elif s_start <= t_src <= s_end:
-            return current_rec + (t_src - s_start) / speed
-        else:
-            current_rec += s_rec_dur
-
-    return current_rec
+    from src.core.autocut import CutSegment
+    segs = []
+    for s in speedup_segments:
+        action = "keep" if s["type"] == "voice" else "speedup"
+        segs.append(CutSegment(
+            start=s["start"],
+            end=s["end"],
+            action=action,
+            speed=s.get("speed", 1.0)
+        ))
+    return map_time_to_timeline(t_src, segs, base_rec_time)
 
 def map_subtitles_with_speedup_segments(
     subtitles: List[Dict[str, Any]],
@@ -539,76 +653,123 @@ def map_subtitles_with_speedup_segments(
     """
     Chuyển đổi mốc thời gian phụ đề sang record time khi có áp dụng tua nhanh (Speed-Ramp/Timelapse).
     """
-    if not speedup_segments:
-        return subtitles
-
-    mapped_subs = []
-    for sub in subtitles:
-        new_start = map_time_with_speedup_segments(sub["start"], speedup_segments, base_rec_time)
-        new_end = map_time_with_speedup_segments(sub["end"], speedup_segments, base_rec_time)
-
-        if new_end <= new_start:
-            new_end = new_start + 0.2
-
-        mapped_words = []
-        for w in sub.get("words", []):
-            w_start = map_time_with_speedup_segments(w["start"], speedup_segments, base_rec_time)
-            w_end = map_time_with_speedup_segments(w["end"], speedup_segments, base_rec_time)
-            if w_end <= w_start:
-                w_end = w_start + 0.1
-            mapped_words.append({
-                "word": w["word"],
-                "start": w_start,
-                "end": w_end
-            })
-
-        mapped_subs.append({
-            "start": new_start,
-            "end": new_end,
-            "text": sub["text"],
-            "words": mapped_words
-        })
-
-    return mapped_subs
+    from src.core.autocut import CutSegment
+    segs = []
+    for s in speedup_segments:
+        action = "keep" if s["type"] == "voice" else "speedup"
+        segs.append(CutSegment(
+            start=s["start"],
+            end=s["end"],
+            action=action,
+            speed=s.get("speed", 1.0)
+        ))
+    return map_subtitles_to_timeline(subtitles, segs, base_rec_time)
 
 def map_subtitles_to_timeline(
     subtitles: List[Dict[str, Any]], 
-    keep_intervals: List[Tuple[float, float]], 
+    keep_intervals: List[Any], 
     base_rec_time: float = 0.0
 ) -> List[Dict[str, Any]]:
     """
     Chuyển đổi toàn bộ mốc thời gian của phụ đề và các từ đơn sang mốc thời gian tương ứng trên timeline đã cắt khoảng lặng.
-    Đảm bảo 100% không bị mất phụ đề ở đầu/cuối và khớp tuyệt đối với video đã cắt.
+    Loại bỏ hoàn toàn bất kỳ phụ đề hoặc từ ngữ nào thuộc phân đoạn đã bị cắt bỏ (Silence Cut / Bad Takes).
     """
+    from src.core.autocut import CutSegment
     if not keep_intervals:
         return subtitles
 
+    # Chuẩn hóa keep_intervals thành List[CutSegment]
+    if isinstance(keep_intervals[0], CutSegment):
+        segments = keep_intervals
+    else:
+        raw_keep = sorted(keep_intervals, key=lambda x: x[0])
+        segments = []
+        current_time = 0.0
+        max_val = 0.0
+        if subtitles:
+            max_val = max(sub["end"] for sub in subtitles)
+        if raw_keep:
+            max_val = max(max_val, max(x[1] for x in raw_keep))
+            
+        for start, end in raw_keep:
+            if start > current_time:
+                segments.append(CutSegment(start=current_time, end=start, action="cut", speed=1.0))
+            segments.append(CutSegment(start=start, end=end, action="keep", speed=1.0))
+            current_time = end
+        if current_time < max_val + 1.0:
+            segments.append(CutSegment(start=current_time, end=max_val + 1.0, action="cut", speed=1.0))
+
     mapped_subs = []
     for sub in subtitles:
-        new_start = map_time_to_timeline(sub["start"], keep_intervals, base_rec_time)
-        new_end = map_time_to_timeline(sub["end"], keep_intervals, base_rec_time)
+        sub_start = sub["start"]
+        sub_end = sub["end"]
         
-        # Nếu thời lượng quá ngắn, giữ lại thời lượng tối thiểu 0.2s để chữ không bị nháy biến mất
-        if new_end <= new_start:
-            new_end = new_start + 0.2
-            
-        mapped_words = []
-        for w in sub.get("words", []):
-            w_start = map_time_to_timeline(w["start"], keep_intervals, base_rec_time)
-            w_end = map_time_to_timeline(w["end"], keep_intervals, base_rec_time)
-            if w_end <= w_start:
-                w_end = w_start + 0.1
-            mapped_words.append({
-                "word": w["word"],
-                "start": w_start,
-                "end": w_end
-            })
+        words = sub.get("words", [])
+        if words:
+            mapped_words = []
+            for w in words:
+                w_s = w.get("start", sub_start)
+                w_e = w.get("end", sub_end)
+                w_mid = (w_s + w_e) / 2.0
+                
+                # Tìm segment chứa w_mid (không dùng dung sai tùy tiện nữa)
+                target_seg = None
+                for seg in segments:
+                    if seg.start <= w_mid <= seg.end:
+                        target_seg = seg
+                        break
+                
+                # Nếu từ này nằm trong đoạn bị cắt (cut), loại bỏ hoàn toàn!
+                if target_seg is None or target_seg.action == "cut":
+                    continue
+                
+                new_w_start = map_time_to_timeline(w_s, segments, base_rec_time)
+                new_w_end = map_time_to_timeline(w_e, segments, base_rec_time)
+                if new_w_end <= new_w_start:
+                    new_w_end = new_w_start + max(0.05, w_e - w_s)
+                mapped_words.append({
+                    "word": w["word"],
+                    "start": new_w_start,
+                    "end": new_w_end
+                })
 
-        mapped_subs.append({
-            "start": new_start,
-            "end": new_end,
-            "text": sub["text"],
-            "words": mapped_words
-        })
+            if not mapped_words:
+                continue
+
+            new_start = mapped_words[0]["start"]
+            new_end = mapped_words[-1]["end"]
+            if new_end <= new_start:
+                new_end = new_start + 0.2
+
+            mapped_subs.append({
+                "start": new_start,
+                "end": new_end,
+                "text": " ".join(w["word"].strip() for w in mapped_words),
+                "words": mapped_words
+            })
+        else:
+            # Không có word timestamps: tính overlap với các keep/speedup segments
+            total_overlap = 0.0
+            for seg in segments:
+                if seg.action != "cut":
+                    ov_s = max(sub_start, seg.start)
+                    ov_e = min(sub_end, seg.end)
+                    if ov_e > ov_s:
+                        total_overlap += (ov_e - ov_s)
+
+            if total_overlap < 0.1:
+                continue
+
+            new_start = map_time_to_timeline(sub_start, segments, base_rec_time)
+            new_end = map_time_to_timeline(sub_end, segments, base_rec_time)
+            if new_end <= new_start:
+                new_end = new_start + max(0.2, total_overlap)
+
+            mapped_subs.append({
+                "start": new_start,
+                "end": new_end,
+                "text": sub["text"],
+                "words": []
+            })
 
     return mapped_subs

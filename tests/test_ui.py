@@ -272,3 +272,182 @@ def test_pipeline_worker_phases_mocked(tmp_path):
             worker2.run()
 
     assert os.path.exists(os.path.join(tmp_path, "phase_clip_Timeline_CatLoc.fcpxml"))
+
+def test_export_timeline_phase2_dryrun_validator_no_unbound_local_error(tmp_path):
+    """
+    Kiểm tra luồng Phase 2 (Xuất Timeline sang DaVinci Resolve) có kích hoạt
+    DryRunValidator.validate_fcpxml_integrity mà KHÔNG gặp UnboundLocalError.
+    """
+    import os
+    from unittest.mock import patch, MagicMock
+    from src.core.ai_director import ProposedSegment
+    from src.core.validator import DryRunValidator
+
+    dummy_video = os.path.join(tmp_path, "phase2_clip.mp4")
+    with open(dummy_video, "w", encoding="utf-8") as f:
+        f.write("mock_video_content")
+
+    # Giả lập dữ liệu clip_data_cache từ Phase 1
+    mock_clip_data = [{
+        "video_path": dummy_video,
+        "clip_dur": 10.0,
+        "raw_subtitles": [{"start": 0.0, "end": 4.0, "text": "Đoạn test xuất timeline", "words": [{"word": "Đoạn", "start": 0.0, "end": 1.0}]}],
+        "clip_subs": [{"start": 0.0, "end": 4.0, "text": "Đoạn test xuất timeline", "words": [{"word": "Đoạn", "start": 0.0, "end": 1.0}]}],
+        "silence_keep_intervals": [(0.0, 4.0), (5.0, 10.0)],
+        "speedup_segments": []
+    }]
+
+    mock_props = [
+        ProposedSegment(
+            id=0,
+            start=0.0,
+            end=4.0,
+            text="Đoạn test xuất timeline",
+            decision="keep",
+            reason="good take",
+            confidence=0.9,
+            approved=True
+        )
+    ]
+
+    worker_phase2 = PipelineWorker(
+        video_paths=[dummy_video],
+        model_size="tiny",
+        language="Tiếng Việt",
+        run_cut=True,
+        silence_db=-35.0,
+        min_duration=0.5,
+        ai_mode="clean_talk",
+        enable_subtitles=True,
+        phase=2,
+        proposed_segments_override=mock_props,
+        clip_data_cache=mock_clip_data,
+        use_cache=False
+    )
+
+    validator_called = []
+    original_validate = DryRunValidator.validate_fcpxml_integrity
+
+    def tracked_validate(xml_path, expected_media_paths=None, resolve_automation=None):
+        validator_called.append(xml_path)
+        return original_validate(xml_path, expected_media_paths=expected_media_paths, resolve_automation=resolve_automation)
+
+    finished_results = []
+    worker_phase2.finished_signal.connect(lambda ok, msg: finished_results.append((ok, msg)))
+
+    with patch("src.ui.app.DryRunValidator.validate_fcpxml_integrity", side_effect=tracked_validate):
+        with patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False):
+            with patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=True):
+                worker_phase2.run()
+
+    # Xác nhận DryRunValidator thực sự được gọi
+    assert len(validator_called) == 1
+    assert os.path.exists(validator_called[0])
+    # Xác nhận Phase 2 hoàn tất thành công mà không có UnboundLocalError
+    assert len(finished_results) == 1
+    assert finished_results[0][0] is True
+    assert finished_results[0][1] == "phase2_done"
+
+def test_user_friendly_error_system_exceptions(app_window):
+    """Kiểm tra việc định dạng lỗi hệ thống (UnboundLocalError, NameError...) trung thực và không gợi ý sai lệch."""
+    window = app_window
+    
+    # 1. Lỗi hệ thống: UnboundLocalError
+    system_err = "UnboundLocalError: cannot access local variable 'DryRunValidator' where it is not associated with a value"
+    friendly_msg = window._format_user_friendly_error(system_err)
+    assert "lỗi nội bộ trong hệ thống xử lý" in friendly_msg
+    assert "DryRunValidator" in friendly_msg
+    assert "không phải do dữ liệu video" in friendly_msg
+    assert "model 'tiny'" not in friendly_msg
+
+    # 2. Lỗi hệ thống: ImportError
+    import_err = "ImportError: No module named 'fake_module'"
+    friendly_msg_import = window._format_user_friendly_error(import_err)
+    assert "lỗi nội bộ trong hệ thống xử lý" in friendly_msg_import
+    assert "model 'tiny'" not in friendly_msg_import
+
+    # 3. Lỗi thông thường: CUDA
+    cuda_err = "torch.cuda.OutOfMemoryError: CUDA out of memory"
+    friendly_cuda = window._format_user_friendly_error(cuda_err)
+    assert "Tràn bộ nhớ GPU" in friendly_cuda
+
+def test_pipeline_worker_cut_beginning_greeting_no_phantom_sub(tmp_path):
+    """
+    Kiểm tra luồng PipelineWorker: khi đoạn đầu (chứa câu chào) bị cắt bỏ (qua keep_intervals hoặc AI Director),
+    tệp phụ đề đã cắt (_PhuDe_VideoDaCat.srt) và tệp FCPXML KHÔNG CÒN CHỨA câu chào đó.
+    """
+    import os
+    from unittest.mock import patch
+
+    dummy_video = os.path.join(tmp_path, "clip_with_greeting.mp4")
+    with open(dummy_video, "w", encoding="utf-8") as f:
+        f.write("mock")
+
+    worker = PipelineWorker(
+        video_paths=[dummy_video],
+        model_size="tiny",
+        language="Tiếng Việt",
+        run_cut=True,
+        silence_db=-35.0,
+        min_duration=0.5,
+        ai_mode="clean_talk",
+        enable_subtitles=True,
+        phase=0,
+        use_cache=False
+    )
+
+    # Đoạn đầu 0.0s đến 3.0s là câu chào "Xin chào các bạn"
+    # Đoạn sau 3.5s đến 7.0s là "Hôm nay tôi sẽ hướng dẫn các bạn"
+    mock_subs = [
+        {"start": 0.5, "end": 2.5, "text": "Xin chào các bạn đã đến kênh", "words": [{"word": "Xin", "start": 0.5, "end": 1.0}, {"word": "chào", "start": 1.1, "end": 1.5}, {"word": "các", "start": 1.6, "end": 2.0}, {"word": "bạn", "start": 2.1, "end": 2.5}]},
+        {"start": 3.5, "end": 6.0, "text": "Hôm nay tôi hướng dẫn", "words": [{"word": "Hôm", "start": 3.5, "end": 4.0}, {"word": "nay", "start": 4.1, "end": 4.5}, {"word": "tôi", "start": 4.6, "end": 5.0}, {"word": "hướng", "start": 5.1, "end": 5.5}, {"word": "dẫn", "start": 5.6, "end": 6.0}]}
+    ]
+    # SilenceDetector chỉ giữ từ 3.0s đến 7.0s (đoạn 0.0s - 3.0s bị cắt)
+    mock_keep = [(3.0, 7.0)]
+
+    with patch("src.core.audio.AudioExtractor.extract_audio"):
+        with patch("src.core.audio.AudioExtractor.get_audio_duration", return_value=7.0):
+            with patch("src.core.transcriber.ResolveTranscriber.load_model"):
+                with patch("src.core.transcriber.ResolveTranscriber.transcribe", return_value=mock_subs):
+                    with patch("src.core.autocut.SilenceDetector.detect_silence_from_wav", return_value=mock_keep):
+                        with patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False):
+                            with patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
+                                worker.run()
+
+    srt_path = os.path.join(tmp_path, "clip_with_greeting_PhuDe_VideoDaCat.srt")
+    fcpxml_path = os.path.join(tmp_path, "clip_with_greeting_Timeline_CatLoc.fcpxml")
+
+    assert os.path.exists(srt_path)
+    assert os.path.exists(fcpxml_path)
+
+    with open(srt_path, "r", encoding="utf-8") as sf:
+        srt_content = sf.read()
+    with open(fcpxml_path, "r", encoding="utf-8") as xf:
+        fcpxml_content = xf.read()
+
+    # Xác nhận câu chào 0.0s-3.0s đã bị xóa sạch khỏi phụ đề đã cắt
+    assert "Xin chào các bạn" not in srt_content
+    assert "Xin" not in fcpxml_content and "chào" not in fcpxml_content
+    # Nhưng câu nội dung chính (3.5s - 6.0s) thì vẫn còn nguyên
+    assert "Hôm nay tôi hướng dẫn" in srt_content
+    assert "Hôm" in fcpxml_content and "hướng" in fcpxml_content
+
+def test_app_reset_workflow_phase_on_file_change(qapp):
+    from src.ui.app import ResolveFlowApp
+    app_window = ResolveFlowApp()
+    
+    # Giả lập app đang ở Phase 2 với dữ liệu cache của video2.mp4
+    app_window.current_phase = 2
+    app_window.clip_data_cache = [{"video_path": "d:/video2.mp4"}]
+    app_window.proposed_segments = [{"id": 1, "text": "test"}]
+    
+    # Khi reset phase (hoặc người dùng chọn video1.mp4)
+    app_window._reset_workflow_phase()
+    
+    assert app_window.current_phase == 1
+    assert app_window.clip_data_cache == []
+    assert app_window.proposed_segments == []
+    assert app_window.table_review.isHidden() is True
+
+
+

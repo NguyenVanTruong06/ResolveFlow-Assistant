@@ -230,3 +230,83 @@ def test_uri_to_local_path():
     local_p = DryRunValidator._uri_to_local_path(uri_win)
     assert "D:" in local_p
     assert "My Video Dự Án.mp4" in local_p
+
+def test_validate_fcpxml_integrity_reel_name_warning(tmp_path):
+    media_file = tmp_path / "valid_clip.mp4"
+    media_file.write_bytes(b"content")
+
+    # XML thiếu thẻ metadata reel name
+    no_reel_xml = tmp_path / "no_reel.fcpxml"
+    no_reel_xml.write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.9">
+  <resources>
+    <format id="r_fmt" name="FFVideoFormat1080p" frameDuration="1/30s"/>
+    <asset id="r_asset_1" name="valid_clip.mp4" src="{media_file.as_uri()}" start="0s" duration="10s" hasVideo="1" format="r_fmt" hasAudio="1"/>
+  </resources>
+  <library>
+    <event name="Test">
+      <project name="Test Project">
+        <sequence format="r_fmt">
+          <spine>
+            <asset-clip name="valid_clip.mp4" ref="r_asset_1" offset="0s" start="0s" duration="10s" format="r_fmt" audioRole="dialogue"/>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>""", encoding="utf-8")
+
+    val_res = DryRunValidator.validate_fcpxml_integrity(str(no_reel_xml))
+    assert val_res.is_valid is True
+    # Phải có cảnh báo thiếu Reel Name
+    assert any("thiếu Reel Name" in w for w in val_res.warnings)
+
+def test_validate_fcpxml_integrity_resolve_media_pool_check(tmp_path):
+    from unittest.mock import MagicMock
+    media_file = tmp_path / "1.mp4"
+    media_file.write_bytes(b"video content")
+
+    out_xml = tmp_path / "test_pool.fcpxml"
+    out_xml.write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.9">
+  <resources>
+    <format id="r_fmt" name="FFVideoFormat1080p" frameDuration="1/30s"/>
+    <asset id="r_asset_1" name="1.mp4" src="{media_file.as_uri()}" start="0s" duration="10s" hasVideo="1" format="r_fmt" hasAudio="1">
+      <metadata>
+        <md key="com.apple.proapps.studio.reel" value="1"/>
+      </metadata>
+    </asset>
+  </resources>
+  <library>
+    <event name="Test">
+      <project name="Test Project">
+        <sequence format="r_fmt">
+          <spine>
+            <asset-clip name="1.mp4" ref="r_asset_1" offset="0s" start="0s" duration="10s" format="r_fmt" audioRole="dialogue">
+              <metadata>
+                <md key="com.apple.proapps.studio.reel" value="1"/>
+              </metadata>
+            </asset-clip>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>""", encoding="utf-8")
+
+    mock_resolve = MagicMock()
+    mock_resolve.is_connected.return_value = True
+    # Giả lập file 1.mp4 chưa có trong Media Pool
+    mock_resolve.check_clips_in_media_pool.return_value = {str(media_file): False}
+
+    val_res = DryRunValidator.validate_fcpxml_integrity(
+        str(out_xml),
+        expected_media_paths=[str(media_file)],
+        resolve_automation=mock_resolve
+    )
+    assert val_res.is_valid is True
+    assert any("chưa có trong Media Pool của DaVinci Resolve" in w for w in val_res.warnings)
+    assert str(media_file) in val_res.details.get("missing_in_media_pool", [])
+

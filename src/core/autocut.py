@@ -32,23 +32,45 @@ class AudioCutConfig(BaseModel):
         description="Hệ số tốc độ tua nhanh khoảng lặng (ví dụ 8.0x)"
     )
 
+class CutSegment(BaseModel):
+    """
+    Biểu diễn một phân đoạn chỉnh sửa video (keep, cut, hoặc speedup).
+    Đây là Single Source of Truth cho toàn bộ pipeline.
+    """
+    start: float
+    end: float
+    action: str  # "keep" | "cut" | "speedup"
+    speed: float = 1.0
+    punch_in: bool = False
+    punch_in_scale: float = 1.15
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
+
+    @property
+    def timeline_duration(self) -> float:
+        if self.action == "cut":
+            return 0.0
+        return self.duration / self.speed
+
 class SilenceDetector:
     """
     Lớp xử lý tín hiệu âm thanh thô bằng numpy để phát hiện các khoảng lặng và khoảng tiếng nói.
     """
     
     @staticmethod
-    def detect_silence_from_wav(wav_path: str, config: AudioCutConfig) -> List[Tuple[float, float]]:
+    def detect_silence_from_wav(wav_path: str, config: AudioCutConfig) -> List[CutSegment]:
         """
         Đọc tệp âm thanh WAV và phân tích cường độ âm lượng theo từng cửa sổ thời gian.
-        Trả về danh sách các khoảng thời gian có tiếng nói (khoảng cần giữ lại).
+        Trả về danh sách các khoảng thời gian chỉnh sửa CutSegment (keep, cut, speedup).
 
         Args:
             wav_path (str): Đường dẫn tới tệp WAV đầu vào (yêu cầu WAV PCM).
             config (AudioCutConfig): Cấu hình ngưỡng cắt.
 
         Returns:
-            List[Tuple[float, float]]: Mảng các tuple (start_time, end_time) của các đoạn giữ lại.
+            List[CutSegment]: Mảng các đối tượng CutSegment phân bổ liên tục toàn bộ video.
         """
         norm_wav = os.path.normpath(os.path.abspath(wav_path))
         if not os.path.exists(norm_wav):
@@ -86,7 +108,7 @@ class SilenceDetector:
         
         if len(audio_data) < window_size:
             # Tệp quá ngắn, giữ lại toàn bộ
-            return [(0.0, duration)]
+            return [CutSegment(start=0.0, end=duration, action="keep", speed=1.0)]
 
         # Chia tín hiệu thành các cửa sổ không chồng chập
         num_windows = len(audio_data) // window_size
@@ -160,7 +182,78 @@ class SilenceDetector:
             else:
                 padded_keep_intervals.append((new_start, new_end))
 
-        return padded_keep_intervals
+        # Ánh xạ padded_keep_intervals thành danh sách CutSegment liên tục phủ kín 0.0 -> duration
+        segments = []
+        current_time = 0.0
+        for start, end in padded_keep_intervals:
+            if start > current_time:
+                action = "speedup" if config.speed_up_silence else "cut"
+                speed = config.silence_speed_multiplier if config.speed_up_silence else 1.0
+                segments.append(CutSegment(
+                    start=current_time,
+                    end=start,
+                    action=action,
+                    speed=speed
+                ))
+            segments.append(CutSegment(
+                start=start,
+                end=end,
+                action="keep",
+                speed=1.0
+            ))
+            current_time = end
+
+        if current_time < duration:
+            action = "speedup" if config.speed_up_silence else "cut"
+            speed = config.silence_speed_multiplier if config.speed_up_silence else 1.0
+            segments.append(CutSegment(
+                start=current_time,
+                end=duration,
+                action=action,
+                speed=speed
+            ))
+
+        return segments
+
+    @staticmethod
+    def merge_speech_with_silence_intervals(
+        silence_keep_intervals: List[Tuple[float, float]],
+        speech_subtitles: List[Dict[str, Any]],
+        padding_seconds: float = 0.30,
+        total_duration: Optional[float] = None
+    ) -> List[Tuple[float, float]]:
+        """
+        Cơ chế Hybrid Speech-Aware Protection:
+        Hợp nhất các mốc thời gian thoại được phát hiện bởi Whisper AI (Speech-to-Text)
+        với các khoảng giữ lại từ SilenceDetector để bảo vệ 100% mọi đoạn có tiếng nói,
+        loại bỏ triệt để hiện tượng câu nói nhỏ bị cắt nhầm khỏi video.
+        """
+        raw_intervals = list(silence_keep_intervals or [])
+        
+        # Thêm toàn bộ các dải thời gian có phụ đề thoại kèm padding
+        for sub in speech_subtitles:
+            s_start = max(0.0, sub["start"] - padding_seconds)
+            s_end = sub["end"] + padding_seconds
+            if total_duration is not None and total_duration > 0:
+                s_end = min(total_duration, s_end)
+            if s_end > s_start:
+                raw_intervals.append((s_start, s_end))
+
+        if not raw_intervals:
+            return []
+
+        # Sắp xếp và gộp các khoảng chồng chập hoặc gần nhau (< 0.15s)
+        sorted_intervals = sorted(raw_intervals, key=lambda x: x[0])
+        merged = [sorted_intervals[0]]
+        
+        for s_start, s_end in sorted_intervals[1:]:
+            prev_start, prev_end = merged[-1]
+            if s_start <= prev_end + 0.15:
+                merged[-1] = (prev_start, max(prev_end, s_end))
+            else:
+                merged.append((s_start, s_end))
+
+        return merged
 
     @staticmethod
     def detect_intervals_with_speedup(
@@ -173,69 +266,44 @@ class SilenceDetector:
         - Các đoạn thoại bình thường (speed = 1.0x).
         - Các đoạn im lặng được gán hiệu ứng tua nhanh (speed = speed_multiplier).
         """
-        keep_intervals = SilenceDetector.detect_silence_from_wav(wav_path, config)
-        try:
-            from src.core.audio import AudioExtractor
-            duration = AudioExtractor.get_audio_duration(wav_path)
-        except Exception:
-            duration = keep_intervals[-1][1] if keep_intervals else 0.0
+        # Đảm bảo dùng đúng cấu hình speedup
+        config_speedup = config.copy(update={"speed_up_silence": True, "silence_speed_multiplier": speed_multiplier})
+        segments = SilenceDetector.detect_silence_from_wav(wav_path, config_speedup)
+        
+        # Phòng hờ trường hợp bị patch trả về Tuple thay vì CutSegment trong unit tests cũ
+        from src.core.autocut import CutSegment
+        normalized_segments = []
+        if segments and not isinstance(segments[0], CutSegment):
+            raw_keep = sorted(segments, key=lambda x: x[0])
+            current_time = 0.0
+            try:
+                from src.core.audio import AudioExtractor
+                duration = AudioExtractor.get_audio_duration(wav_path)
+            except Exception:
+                duration = raw_keep[-1][1] if raw_keep else 0.0
+            
+            for start, end in raw_keep:
+                if start > current_time:
+                    normalized_segments.append(CutSegment(start=current_time, end=start, action="speedup", speed=speed_multiplier))
+                normalized_segments.append(CutSegment(start=start, end=end, action="keep", speed=1.0))
+                current_time = end
+            if current_time < duration:
+                normalized_segments.append(CutSegment(start=current_time, end=duration, action="speedup", speed=speed_multiplier))
+            segments = normalized_segments
 
         timeline_segments = []
-        current_time = 0.0
-
-        for start, end in keep_intervals:
-            # Nếu có khoảng lặng trước đoạn thoại này
-            if start > current_time:
-                silence_dur = start - current_time
-                if silence_dur >= config.min_silent_duration:
-                    timeline_segments.append({
-                        "type": "speedup",
-                        "start": current_time,
-                        "end": start,
-                        "duration": silence_dur,
-                        "speed": speed_multiplier,
-                        "rec_duration": silence_dur / speed_multiplier,
-                        "note": f"⚡ Tua nhanh Timelapse ({speed_multiplier}x)"
-                    })
-                else:
-                    # Khoảng lặng quá ngắn, giữ nguyên 1.0x
-                    timeline_segments.append({
-                        "type": "voice",
-                        "start": current_time,
-                        "end": start,
-                        "duration": silence_dur,
-                        "speed": 1.0,
-                        "rec_duration": silence_dur,
-                        "note": "Khoảng nghỉ ngắn"
-                    })
-
-            # Đoạn thoại chính
-            voice_dur = end - start
+        for seg in segments:
+            rec_dur = seg.timeline_duration
+            note = f"⚡ Tua nhanh Timelapse ({seg.speed}x)" if seg.action == "speedup" else ("Thoại chính" if seg.action == "keep" else "Khoảng nghỉ ngắn")
             timeline_segments.append({
-                "type": "voice",
-                "start": start,
-                "end": end,
-                "duration": voice_dur,
-                "speed": 1.0,
-                "rec_duration": voice_dur,
-                "note": "Thoại chính"
+                "type": "voice" if seg.action == "keep" else "speedup",
+                "start": seg.start,
+                "end": seg.end,
+                "duration": seg.duration,
+                "speed": seg.speed,
+                "rec_duration": rec_dur,
+                "note": note
             })
-            current_time = end
-
-        # Xử lý khoảng lặng cuối cùng
-        if current_time < duration:
-            silence_dur = duration - current_time
-            if silence_dur >= config.min_silent_duration:
-                timeline_segments.append({
-                    "type": "speedup",
-                    "start": current_time,
-                    "end": duration,
-                    "duration": silence_dur,
-                    "speed": speed_multiplier,
-                    "rec_duration": silence_dur / speed_multiplier,
-                    "note": f"⚡ Tua nhanh Timelapse ({speed_multiplier}x)"
-                })
-
         return timeline_segments
 
 def parse_timecode_to_seconds(tc_str: str, fps: float = 30.0) -> float:
@@ -392,13 +460,16 @@ def seconds_to_timecode(
 def get_reel_name(video_path: str) -> str:
     """
     Sinh Reel Name chuẩn CMX3600 (tối đa 8 ký tự chữ số/chữ cái) từ tên file video.
-    Ví dụ: 'C0387.MP4' -> 'C0387', 'Clip_12.mp4' -> 'CLIP12'
+    Bảo toàn cả phần đầu và phần đuôi (hậu tố / số thứ tự clip) để chống trùng lặp tên Reel giữa các file.
+    Ví dụ: 'C0387.MP4' -> 'C0387', 'Clip_12.mp4' -> 'CLIP12', 'recording_1.mp4' -> 'RECOING1'
     """
     base = os.path.splitext(os.path.basename(video_path))[0]
     cleaned = re.sub(r'[^A-Za-z0-9]', '', base).upper()
     if not cleaned:
         return "AX"
-    return cleaned[:8]
+    if len(cleaned) <= 8:
+        return cleaned
+    return f"{cleaned[:4]}{cleaned[-4:]}"
 
 class EDLGenerator:
     """

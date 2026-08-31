@@ -189,3 +189,105 @@ def test_map_subtitles_to_timeline() -> None:
     assert abs(mapped[0]["start"] - 0.2) < 0.001
     assert abs(mapped[0]["end"] - 1.5) < 0.001
     assert abs(mapped[0]["words"][0]["start"] - 0.2) < 0.001
+
+def test_map_subtitles_removes_deleted_initial_greeting() -> None:
+    """
+    Test bắt lỗi: Khi đoạn đầu video (0.0s - 3.0s chứa câu chào) bị cắt bỏ khỏi video (Silence Cut hoặc Bad Takes),
+    phụ đề của bản đã cắt KHÔNG ĐƯỢC PHÉP chứa câu chào đó.
+    """
+    from src.core.resolve_api import map_subtitles_to_timeline
+
+    # Đoạn đầu 0.0s đến 3.0s bị cắt bỏ, video chỉ giữ từ 3.0s đến 10.0s
+    keep_intervals = [(3.0, 10.0)]
+
+    subs = [
+        {
+            "start": 0.5,
+            "end": 2.5,
+            "text": "Xin chào các bạn đã đến với video hôm nay",
+            "words": [
+                {"word": "Xin", "start": 0.5, "end": 0.9},
+                {"word": "chào", "start": 1.0, "end": 1.4},
+                {"word": "các", "start": 1.5, "end": 1.7},
+                {"word": "bạn", "start": 1.8, "end": 2.1},
+                {"word": "đã", "start": 2.2, "end": 2.5}
+            ]
+        },
+        {
+            "start": 3.5,
+            "end": 6.0,
+            "text": "Nội dung chính bắt đầu từ đây",
+            "words": [
+                {"word": "Nội", "start": 3.5, "end": 4.0},
+                {"word": "dung", "start": 4.1, "end": 4.5},
+                {"word": "chính", "start": 4.6, "end": 5.0},
+                {"word": "bắt", "start": 5.1, "end": 5.5},
+                {"word": "đầu", "start": 5.6, "end": 6.0}
+            ]
+        }
+    ]
+
+    mapped = map_subtitles_to_timeline(subs, keep_intervals, base_rec_time=0.0)
+
+    # Xác nhận: Chỉ còn đúng 1 phân đoạn phụ đề (câu nội dung chính), câu chào đã bị loại bỏ 100%
+    assert len(mapped) == 1
+    assert "Xin chào" not in mapped[0]["text"]
+    assert "Nội dung chính" in mapped[0]["text"]
+    # Mốc thời gian mới trên timeline đã cắt: 3.5s - 3.0s = 0.5s
+    assert abs(mapped[0]["start"] - 0.5) < 0.001
+    assert abs(mapped[0]["end"] - 3.0) < 0.001
+
+
+def test_resolve_media_pool_operations(tmp_path):
+    from unittest.mock import MagicMock
+    automator = ResolveAutomation()
+    
+    # 1. Khi chưa kết nối
+    automator.resolve = None
+    automator.current_project = None
+    assert automator.is_connected() is False
+    assert automator.check_clips_in_media_pool([]) == {}
+    
+    # 2. Giả lập kết nối thành công với Resolve Media Pool
+    mock_resolve = MagicMock()
+    mock_proj = MagicMock()
+    mock_pool = MagicMock()
+    mock_root = MagicMock()
+    
+    mock_clip = MagicMock()
+    mock_clip.GetClipProperty.return_value = os.path.join(tmp_path, "1.mp4")
+    mock_clip.GetName.return_value = "1.mp4"
+    
+    mock_root.GetClipList.return_value = [mock_clip]
+    mock_root.GetSubFolderList.return_value = []
+    mock_pool.GetRootFolder.return_value = mock_root
+    mock_proj.GetMediaPool.return_value = mock_pool
+    
+    automator.resolve = mock_resolve
+    automator.current_project = mock_proj
+    assert automator.is_connected() is True
+    
+    # Kiểm tra get_media_pool_file_paths
+    paths = automator.get_media_pool_file_paths()
+    assert len(paths) == 1
+    assert "1.mp4" in paths[0]
+    
+    # Kiểm tra check_clips_in_media_pool
+    check_res = automator.check_clips_in_media_pool([
+        str(tmp_path / "1.mp4"),
+        str(tmp_path / "missing_clip.mp4")
+    ])
+    assert check_res[str(tmp_path / "1.mp4")] is True
+    assert check_res[str(tmp_path / "missing_clip.mp4")] is False
+    
+    # Kiểm tra import_media_to_media_pool
+    test_file = tmp_path / "2.mp4"
+    test_file.write_bytes(b"content")
+    mock_pool.ImportMedia.return_value = True
+    
+    logs = []
+    imp_res = automator.import_media_to_media_pool([str(test_file)], log_callback=logs.append)
+    assert imp_res is True
+    mock_pool.ImportMedia.assert_called_once()
+    assert any("Đã tự động nạp" in l for l in logs)
+

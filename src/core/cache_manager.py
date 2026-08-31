@@ -22,7 +22,7 @@ def compute_file_checksum(file_path: str) -> str:
     mtime = stat.st_mtime
 
     hasher = hashlib.sha256()
-    hasher.update(f"{file_size}_{mtime}_".encode("utf-8"))
+    hasher.update(f"{norm_path.lower()}_{file_size}_{mtime}_".encode("utf-8"))
 
     sample_size = 2 * 1024 * 1024  # 2MB
     try:

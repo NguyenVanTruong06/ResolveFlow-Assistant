@@ -74,3 +74,13 @@ def test_ai_director_preserves_silence_lead_in_padding():
     # Đoạn giữ lại phải giữ nguyên vẹn mốc 0.7s không bị cắt cụt đầu câu
     assert result["keep_intervals"] == [(0.7, 3.3)]
 
+def test_bad_take_detector_sequential_steps_not_bad_takes():
+    # Các câu liệt kê như "Bước 1...", "Bước 2..." không được bị coi là nói vấp
+    subtitles = [
+        {"start": 1.0, "end": 3.0, "text": "Và tiếp theo chúng ta làm bước một."},
+        {"start": 4.0, "end": 6.0, "text": "Và tiếp theo chúng ta làm bước hai."}
+    ]
+    bad_takes = BadTakeDetector.detect_bad_takes(subtitles)
+    assert len(bad_takes) == 0
+
+
