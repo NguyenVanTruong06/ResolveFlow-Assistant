@@ -432,10 +432,7 @@ def test_pipeline_worker_cut_beginning_greeting_no_phantom_sub(tmp_path):
     assert "Hôm nay tôi hướng dẫn" in srt_content
     assert "Hôm" in fcpxml_content and "hướng" in fcpxml_content
 
-def test_app_reset_workflow_phase_on_file_change(qapp):
-    from src.ui.app import ResolveFlowApp
-    app_window = ResolveFlowApp()
-    
+def test_app_reset_workflow_phase_on_file_change(app_window):
     # Giả lập app đang ở Phase 2 với dữ liệu cache của video2.mp4
     app_window.current_phase = 2
     app_window.clip_data_cache = [{"video_path": "d:/video2.mp4"}]
