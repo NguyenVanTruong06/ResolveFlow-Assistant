@@ -1,6 +1,16 @@
 {
   "id": "glow_neon",
-  "name": "Glow / Neon (Chữ phát sáng hiện đại)",
+  "name": "Glow Neon Cyan (Phát Sáng Xanh)",
+  "category": "glitch_cyber",
+  "badge_icon": "💡",
+  "tags": [
+    "Cyan",
+    "Glow",
+    "Tech",
+    "Future",
+    "Neon"
+  ],
+  "description": "Hào quang xanh lam công nghệ tỏa bóng mềm mại hiện đại.",
   "font": "Arial",
   "size": 50,
   "weight": "bold",

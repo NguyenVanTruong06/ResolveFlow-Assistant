@@ -1,0 +1,29 @@
+{
+  "id": "paper_cutout",
+  "name": "Paper Cutout (Xé Giấy Vintage)",
+  "category": "highlighter_paper",
+  "badge_icon": "📄",
+  "tags": [
+    "Scrapbook",
+    "Collage",
+    "StopMotion",
+    "Retro",
+    "PaperCut",
+    "Vintage"
+  ],
+  "description": "Phong cách nhãn dán xé giấy thủ công Stop-motion, nền giấy ngà cổ điển tạo cảm giác mộc mạc và chân thực.",
+  "font": "Courier New",
+  "size": 46,
+  "weight": "bold",
+  "standard_color": "#1A1A1A",
+  "highlight_color": "#C62828",
+  "outline_color": "#333333",
+  "outline_width": 0.06,
+  "animation": "pop",
+  "timing_curve": "spring",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": "#FBF9F1",
+  "glow_color": null,
+  "gradient_colors": null
+}

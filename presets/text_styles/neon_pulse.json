@@ -1,0 +1,29 @@
+{
+  "id": "neon_pulse",
+  "name": "Neon Pulse Glow (Đèn Neon Đêm)",
+  "category": "glitch_cyber",
+  "badge_icon": "🟣",
+  "tags": [
+    "Neon",
+    "Glow",
+    "Synthwave",
+    "Nightclub",
+    "Cyber",
+    "Purple"
+  ],
+  "description": "Ánh sáng ống đèn Neon huỳnh quang phát sáng tỏa bóng mờ ảo đa lớp rực rỡ trong không gian tối.",
+  "font": "Arial",
+  "size": 50,
+  "weight": "bold",
+  "standard_color": "#F3E5F5",
+  "highlight_color": "#E040FB",
+  "outline_color": "#6A1B9A",
+  "outline_width": 0.08,
+  "animation": "glow",
+  "timing_curve": "ease-in-out",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": null,
+  "glow_color": "#00E5FF",
+  "gradient_colors": null
+}

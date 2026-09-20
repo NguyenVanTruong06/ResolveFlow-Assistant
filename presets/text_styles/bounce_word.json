@@ -1,6 +1,16 @@
 {
   "id": "bounce_word",
-  "name": "Bounce Word (Nhảy chữ Spring)",
+  "name": "Bounce Word (Nhảy Chữ Spring)",
+  "category": "kinetic",
+  "badge_icon": "🏀",
+  "tags": [
+    "Bounce",
+    "Motion",
+    "Spring",
+    "Energy",
+    "Cyan"
+  ],
+  "description": "Chữ nhảy nảy bật spring vui tươi thu hút ánh mắt người xem trên từng nhịp thoại.",
   "font": "Arial",
   "size": 52,
   "weight": "extra_bold",

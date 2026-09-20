@@ -1,6 +1,6 @@
 import os
 import pytest
-from src.core.text_preset import TextStylePreset, PresetManager, TextPreviewRenderer, hex_to_fcpxml_rgba
+from src.core.text_preset import TextStylePreset, PresetManager, TextPreviewRenderer, FusionSettingGenerator, hex_to_fcpxml_rgba
 from src.core.fcpxml_generator import FCPXMLGenerator
 
 def test_hex_to_fcpxml_rgba():
@@ -11,9 +11,16 @@ def test_hex_to_fcpxml_rgba():
 def test_builtin_presets_and_manager(tmp_path):
     mgr = PresetManager(base_dir=str(tmp_path / "presets"))
     presets = mgr.list_presets()
-    assert len(presets) >= 7
+    assert len(presets) >= 12
     
     preset_ids = [p.id for p in presets]
+    assert "kinetic_hormozi" in preset_ids
+    assert "highlighter_swipe" in preset_ids
+    assert "paper_cutout" in preset_ids
+    assert "rgb_glitch" in preset_ids
+    assert "neon_pulse" in preset_ids
+    assert "vhs_retro" in preset_ids
+    assert "clean_minimal" in preset_ids
     assert "karaoke_pop" in preset_ids
     assert "bounce_word" in preset_ids
     assert "box_highlight" in preset_ids
@@ -21,6 +28,20 @@ def test_builtin_presets_and_manager(tmp_path):
     assert "clean_outline" in preset_ids
     assert "gradient_fill" in preset_ids
     assert "slide_in" in preset_ids
+
+    # Kiểm tra tags và categories
+    hormozi = mgr.get_preset("kinetic_hormozi")
+    assert hormozi.category == "kinetic"
+    assert "Hormozi" in hormozi.tags
+    assert hormozi.badge_icon == "💥"
+
+    highlighter = mgr.get_preset("highlighter_swipe")
+    assert highlighter.category == "highlighter_paper"
+    assert highlighter.box_color == "#FFE600"
+
+    paper = mgr.get_preset("paper_cutout")
+    assert paper.category == "highlighter_paper"
+    assert "StopMotion" in paper.tags
 
 def test_custom_preset_save_and_delete(tmp_path):
     mgr = PresetManager(base_dir=str(tmp_path / "presets"))
@@ -89,3 +110,31 @@ def test_quick_preview_render(tmp_path):
     )
     assert os.path.exists(res)
     assert os.path.getsize(res) > 0
+
+def test_fusion_setting_generator(tmp_path):
+    mgr = PresetManager()
+    preset = mgr.get_preset("karaoke_pop")
+    
+    # 1. Sinh content
+    content = FusionSettingGenerator.generate_setting_content(preset, sample_text="ResolveFlow Title")
+    assert "Tools = ordered()" in content
+    assert "TextPlus" in content
+    assert "StyledText = Input { Value = \"ResolveFlow Title\", }" in content
+    
+    # 2. Xuất file .setting
+    setting_file = os.path.join(tmp_path, "test_title.setting")
+    FusionSettingGenerator.export_setting_file(preset, setting_file, sample_text="Custom Title")
+    assert os.path.exists(setting_file)
+    with open(setting_file, "r", encoding="utf-8") as f:
+        saved_content = f.read()
+    assert "Custom Title" in saved_content
+
+def test_install_presets_to_davinci_resolve(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    count, target_dir = FusionSettingGenerator.install_presets_to_davinci_resolve()
+    assert count >= 7
+    assert os.path.exists(target_dir)
+    files = os.listdir(target_dir)
+    assert len(files) >= 7
+    assert any(f.endswith(".setting") for f in files)
+

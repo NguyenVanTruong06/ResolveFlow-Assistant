@@ -1,6 +1,15 @@
 {
   "id": "clean_outline",
-  "name": "Clean Outline (Podcast / Phỏng vấn nét)",
+  "name": "Clean Outline (Podcast Nét)",
+  "category": "clean_minimal",
+  "badge_icon": "🎙️",
+  "tags": [
+    "Podcast",
+    "Outline",
+    "Subtitle",
+    "Crisp"
+  ],
+  "description": "Chữ trắng viền đen chuẩn mực cho mọi chương trình podcast và trò chuyện chuyên sâu.",
   "font": "Arial",
   "size": 44,
   "weight": "normal",

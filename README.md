@@ -9,7 +9,11 @@
 
 **ResolveFlow Assistant v4.1** là bộ công cụ trợ lý AI toàn năng tự động hóa quy trình hậu kỳ video 100% cục bộ (Local / On-Premise) dành cho **DaVinci Resolve** (Hỗ trợ cả bản **Free** và bản **Studio**).
 
-Hệ thống tích hợp công nghệ AI nhận dạng giọng nói ngoại tuyến (Whisper AI), bộ não **Đạo Diễn AI (AI Director)** tự động phân tích kịch bản lời thoại, lọc sạch nói vấp (Bad Takes), thị giác máy tính **Auto Dynamic Re-framing 9:16 (Bám mặt chuyển video dọc)**, **AI B-Roll Inserter (Tự động gợi ý cảnh minh họa Track Video 2)**, **Auto SFX Engine (Hiệu ứng âm thanh Track Audio 2)**, **Auto Speed-Ramp 8x (Tua nhanh khoảng lặng thành cú chuyển cảnh Timelapse)**, hiệu ứng **Auto Punch-in (Zoom luân phiên 1.15x)**, **Hệ thống Text Style Presets đa phong cách (Karaoke Pop, Bounce Word, Box Highlight, Glow/Neon, Clean Outline, Gradient Fill, Slide-in)**, **Bộ chọn Workflow Mode 1-click & Hệ thống Recipe**, cùng cơ chế **Scan Cache siêu tốc (<0.05s)** và **Video Proxy 480p**.
+Hệ thống được tái cấu trúc sang **Giao diện 4 Tab Chức Năng (Workflow Tabs)** chuyên nghiệp:
+- **Tab 1: ✂ Auto Cut & Rough Cut:** Quét khoảng lặng (VAD), Đạo diễn AI lọc sạch câu nói vấp (Bad Takes), Tua nhanh Timelapse (Speed-Ramp 8x), Bám mặt chuyển dọc 9:16 (Auto Reframe) và Vlog Hook Teaser.
+- **Tab 2: 📝 Titles, Captions & Text Presets:** 7 Kiểu dáng phụ đề Text+/Fusion Text động chuẩn CapCut (Karaoke Pop, Bounce Word, Box Highlight...), Real-time Live Preview & chèn Text+ tại Playhead.
+- **Tab 3: 🔊 SFX & Soundboard Studio:** Lưới 8 SFX Pad (Whoosh, Pop, Ding, Click, Camera, Glitch, Riser, Sub Drop) nghe thử độ trễ cực thấp, tự động hạ volume offset (-12dB) và chèn vào Playhead trên Timeline.
+- **Tab 4: 🚀 Polish & Quick Export:** Bộ màu / LUTs chuẩn (Rec.709, Warm Vlog, Cinematic Teal-Orange) và 1-Click Export Presets (TikTok 9:16, YouTube 4K, Podcast MP3).
 
 ---
 
@@ -17,17 +21,18 @@ Hệ thống tích hợp công nghệ AI nhận dạng giọng nói ngoại tuy�
 
 | Tính năng | Bản v1.0 - v3.0 | Bản v4.0 | Bản v4.1 (Hiện tại - Nâng cấp Toàn diện) |
 | :--- | :---: | :---: | :---: |
-| **Mục tiêu sử dụng** | Cắt thô & Lọc nói vấp | Đa tầng thị giác & Speed-Ramp | **Workflow Mode 1-click (Podcast, Shorts, Vlog, Advanced)** |
-| **Text Style Presets** | Phụ đề cơ bản | Karaoke chữ nhảy đơn giản | **7 Preset CapCut-like Text+ (Pop, Bounce, Box, Glow, Outline...) + Quick Preview** |
-| **UX & Cấu hình** | 1 Lớp cài đặt | Giao diện cơ bản | **2 Lớp (Cơ bản + Master Slider / Nâng cao ▾) & Hệ thống Recipe 1-click** |
+| **Kiến trúc Giao diện** | Cuộn dọc 1 trang | Giao diện cơ bản | **Hệ thống 4 Workflow Tabs (Auto Cut, Titles, SFX Studio, Polish/Export)** |
+| **SFX & Soundboard** | ❌ | Gợi ý Markers | **Lưới 8 SFX Pad nghe thử tức thì + Auto -12dB Volume + Chèn Playhead** |
+| **Text Style Presets** | Phụ đề cơ bản | Karaoke chữ nhảy đơn giản | **7 Preset CapCut-like Text+ + Quick Preview + Chèn Text tại Playhead** |
+| **Polish & Render** | ❌ | Xuất thủ công | **1-Click Export Presets (TikTok 9:16, YouTube 4K) & Điều khiển Render Queue** |
 | **Tốc độ Quét (Scanning)** | Chạy trực tiếp file gốc | Quét tuần tự | **Scan Cache theo Checksum (<0.05s) + Proxy 480p & Pipeline song song** |
 | **Gợi ý Whisper Model** | Người dùng tự chọn | Người dùng tự chọn | **Tự động gợi ý model tối ưu theo thời lượng video** |
 | **Kiểm tra chẩn đoán (Dry-run)** | Kiểm tra cơ bản | Kiểm tra cơ bản | **Dry-run FCPXML Integrity, kiểm tra Media Offline & tiếng Việt UTF-8** |
-| **Cắt khoảng lặng & Speed-Ramp** | Cắt thô | Speed-Ramp 8x | **Speed-Ramp 8x kết hợp Master Intensity Slider** |
+| **Cắt khoảng lặng & Speed-Ramp** | Cắt thô | Speed-Ramp 8x | **Speed-Ramp 8x kết hợp Master Intensity Slider & Chọn Audio Track** |
 | **Lọc nói vấp & Đạo diễn AI** | Cơ bản | Gợi ý 2 Pha duyệt cắt | **Quy trình 2 Pha (Phase 1 AI Review / Phase 2 Xuất bản)** |
 | **Auto Re-framing (16:9 ➔ 9:16)** | ❌ | Bám mặt chuyển dọc | **Tự động bám mặt & căn chỉnh vị trí Text+ theo tỷ lệ** |
-| **Gợi ý B-Roll & SFX Audio 2** | ❌ | Xuất Markers & Cues | **Tự động chèn Markers & Cues B-Roll, SFX, Timelapse** |
-| **Tương thích DaVinci Resolve** | Free & Studio | Free & Studio | **100% Resolve Free & Studio (FCPXML v1.9 + EDL CMX3600)** |
+| **Tương thích DaVinci Resolve** | Free & Studio | Free & Studio | **100% Resolve Free & Studio (FCPXML v1.9 + EDL CMX3600 + DVR Scripting)** |
+
 
 ---
 

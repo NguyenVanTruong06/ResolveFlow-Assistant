@@ -1,0 +1,30 @@
+{
+  "id": "vhs_retro",
+  "name": "90s VHS Camcorder (Thước Phim Băng)",
+  "category": "retro_film",
+  "badge_icon": "📺",
+  "tags": [
+    "VHS",
+    "Camcorder",
+    "90s",
+    "Retro",
+    "Tape",
+    "Nostalgia",
+    "Y2K"
+  ],
+  "description": "Phông chữ monospaced màu vàng cam viền đen đặc trưng máy quay băng gia đình thập niên 90 kèm cảm giác hoài niệm.",
+  "font": "Consolas",
+  "size": 44,
+  "weight": "bold",
+  "standard_color": "#FFF59D",
+  "highlight_color": "#FFEB3B",
+  "outline_color": "#000000",
+  "outline_width": 0.15,
+  "animation": "typewriter",
+  "timing_curve": "linear",
+  "position_y_16_9": 0.12,
+  "position_y_9_16": 0.25,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

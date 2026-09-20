@@ -1,0 +1,29 @@
+{
+  "id": "clean_minimal",
+  "name": "Clean Minimal (Podcast & Phỏng Vấn)",
+  "category": "clean_minimal",
+  "badge_icon": "🧊",
+  "tags": [
+    "Minimal",
+    "Interview",
+    "Podcast",
+    "Documentary",
+    "Clean",
+    "Modern"
+  ],
+  "description": "Thiết kế tối giản thanh lịch, đường nét sạch sẽ với viền mờ tinh tế giúp khán giả tập trung 100% vào nội dung.",
+  "font": "Arial",
+  "size": 44,
+  "weight": "normal",
+  "standard_color": "#FFFFFF",
+  "highlight_color": "#64B5F6",
+  "outline_color": "#000000",
+  "outline_width": 0.12,
+  "animation": "static",
+  "timing_curve": "linear",
+  "position_y_16_9": 0.12,
+  "position_y_9_16": 0.25,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

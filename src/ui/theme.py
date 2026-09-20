@@ -402,6 +402,119 @@ def get_application_stylesheet() -> str:
         color: #FFFFFF;
     }}
 
+    /* --- TAB WIDGET & TAB BAR --- */
+    QTabWidget::pane {{
+        border: 1.5px solid {ThemeColors.BORDER_DEFAULT};
+        background-color: {ThemeColors.BG_MAIN};
+        border-radius: 8px;
+        top: -1px;
+    }}
+    QTabBar::tab {{
+        background-color: #15151D;
+        color: {ThemeColors.TEXT_SECONDARY};
+        border: 1px solid {ThemeColors.BORDER_DEFAULT};
+        border-bottom: none;
+        border-top-left-radius: 8px;
+        border-top-right-radius: 8px;
+        padding: 9px 16px;
+        margin-right: 4px;
+        font-weight: bold;
+        font-size: 12px;
+    }}
+    QTabBar::tab:hover {{
+        background-color: #1C1C28;
+        color: {ThemeColors.TEXT_PRIMARY};
+        border-color: {ThemeColors.BORDER_HOVER};
+    }}
+    QTabBar::tab:selected {{
+        background-color: {ThemeColors.BG_CARD};
+        color: {ThemeColors.TEXT_ACCENT};
+        border: 1.5px solid {ThemeColors.BORDER_DEFAULT};
+        border-bottom: 2px solid {ThemeColors.PRIMARY};
+    }}
+
+    /* --- SPLITTER --- */
+    QSplitter::handle {{
+        background-color: #20202C;
+        width: 6px;
+        margin: 2px;
+        border-radius: 3px;
+    }}
+    QSplitter::handle:hover {{
+        background-color: #3B82F6;
+    }}
+
+    /* --- SFX PAD & PRESET CARDS --- */
+    QPushButton.sfx_pad_btn {{
+        background-color: #181B26;
+        border: 1.5px solid #282E40;
+        border-radius: 8px;
+        color: #E2E8F0;
+        font-size: 12px;
+        font-weight: bold;
+        padding: 10px 8px;
+        text-align: center;
+    }}
+    QPushButton.sfx_pad_btn:hover {{
+        background-color: #22293A;
+        border-color: #3B82F6;
+        color: #93C5FD;
+    }}
+    QPushButton.sfx_pad_btn:pressed {{
+        background-color: #1E3A8A;
+        border-color: #60A5FA;
+    }}
+    QPushButton.sfx_pad_btn[playing="true"] {{
+        background-color: #14532D;
+        border-color: #22C55E;
+        color: #86EFAC;
+    }}
+
+    /* --- VISUAL TECHNIQUE CARDS (EYECANDY / MIXKIT STYLE) --- */
+    QFrame.technique_card {{
+        background-color: #12151F;
+        border: 1.5px solid #232A3B;
+        border-radius: 10px;
+        padding: 10px;
+    }}
+    QFrame.technique_card:hover {{
+        border: 1.5px solid #3B82F6;
+        background-color: #181E2C;
+    }}
+    QFrame.technique_card[selected="true"] {{
+        border: 2px solid #60A5FA;
+        background-color: #1A2234;
+    }}
+
+    QPushButton.category_pill {{
+        background-color: #161A26;
+        border: 1px solid #283144;
+        border-radius: 14px;
+        color: #94A3B8;
+        font-size: 11px;
+        font-weight: bold;
+        padding: 5px 12px;
+    }}
+    QPushButton.category_pill:hover {{
+        background-color: #202738;
+        border-color: #475569;
+        color: #F8FAFC;
+    }}
+    QPushButton.category_pill[active="true"] {{
+        background-color: #2563EB;
+        border-color: #60A5FA;
+        color: #FFFFFF;
+    }}
+
+    QLabel.tag_chip {{
+        background-color: #1E2433;
+        border: 1px solid #2D3748;
+        border-radius: 4px;
+        color: #94A3B8;
+        font-size: 10px;
+        padding: 2px 6px;
+    }}
+
     /* --- TOOLTIPS --- */
     QToolTip {{
         background-color: #1F1F2B;

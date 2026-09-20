@@ -1,6 +1,16 @@
 {
   "id": "box_highlight",
-  "name": "Box Highlight (Hộp màu bám từ)",
+  "name": "Box Highlight (Hộp Màu Đỏ Bám Từ)",
+  "category": "highlighter_paper",
+  "badge_icon": "📦",
+  "tags": [
+    "Box",
+    "RedBox",
+    "CapCut",
+    "News",
+    "HighlightBox"
+  ],
+  "description": "Đóng hộp chữ nhật màu đỏ bám sát từ khóa đang đọc, tăng độ tương phản tuyệt đối trên nền video phức tạp.",
   "font": "Arial",
   "size": 46,
   "weight": "bold",

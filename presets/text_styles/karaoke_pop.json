@@ -1,6 +1,16 @@
 {
   "id": "karaoke_pop",
   "name": "Karaoke Pop (Word Highlight)",
+  "category": "kinetic",
+  "badge_icon": "🎤",
+  "tags": [
+    "Karaoke",
+    "Subtitles",
+    "Classic",
+    "WordByWord",
+    "YellowGold"
+  ],
+  "description": "Đổi màu vàng kim rực rỡ theo từng từ đang phát âm, phong cách TV show và Karaoke chuyên nghiệp.",
   "font": "Arial",
   "size": 48,
   "weight": "bold",

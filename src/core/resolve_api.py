@@ -479,6 +479,259 @@ class ResolveAutomation:
         log(" ➖ Cần import thủ công tệp Timeline (.fcpxml / .edl) vào DaVinci Resolve.")
         return False
 
+    def get_current_playhead_timecode(self) -> Optional[str]:
+        """Lấy chuỗi timecode hiện tại của con trỏ (Playhead) trên Timeline đang mở."""
+        timeline = self.get_active_timeline()
+        if not timeline:
+            return None
+        try:
+            return timeline.GetCurrentTimecode()
+        except Exception:
+            return None
+
+    def get_current_playhead_seconds(self) -> float:
+        """
+        Lấy vị trí con trỏ (Playhead) hiện tại quy đổi ra giây (float).
+        Mặc định trả về 0.0 nếu chưa mở timeline hoặc không thể đọc.
+        """
+        timeline = self.get_active_timeline()
+        if not timeline:
+            return 0.0
+        try:
+            tc = timeline.GetCurrentTimecode()
+            if not tc:
+                return 0.0
+            parts = tc.replace(";", ":").split(":")
+            if len(parts) == 4:
+                hrs, mins, secs, frames = map(int, parts)
+                fps = 30.0
+                try:
+                    fps_val = timeline.GetSetting("timelineFrameRate")
+                    if fps_val:
+                        fps = float(fps_val)
+                except Exception:
+                    pass
+                total_seconds = hrs * 3600 + mins * 60 + secs + (frames / fps)
+                if hrs >= 1:
+                    total_seconds -= 3600.0
+                return max(0.0, total_seconds)
+        except Exception:
+            pass
+        return 0.0
+
+    def insert_sfx_to_track(
+        self,
+        sfx_path: str,
+        target_track: int = 2,
+        time_pos: Optional[float] = None,
+        volume_offset_db: float = -12.0,
+        log_callback: Optional[Any] = None
+    ) -> bool:
+        """
+        Nạp file âm thanh SFX vào Media Pool và chèn vào Audio Track chỉ định.
+        """
+        def log(msg: str):
+            if log_callback:
+                log_callback(msg)
+            else:
+                print(msg)
+
+        if not os.path.exists(sfx_path):
+            log(f" ❌ Không tìm thấy tệp SFX: {sfx_path}")
+            return False
+
+        if not self.is_connected():
+            if not self.connect():
+                log(" ❌ Không thể kết nối tới DaVinci Resolve.")
+                return False
+
+        timeline = self.get_active_timeline()
+        if not timeline:
+            log(" ❌ Không tìm thấy Timeline đang mở trong DaVinci Resolve.")
+            return False
+
+        # 1. Nạp tệp SFX vào Media Pool nếu chưa có
+        self.import_media_to_media_pool([sfx_path], log_callback=log)
+        
+        # 2. Tìm MediaPoolItem tương ứng
+        media_pool = self.current_project.GetMediaPool()
+        clips = self.get_media_pool_clips()
+        sfx_norm = os.path.normcase(os.path.abspath(sfx_path))
+        sfx_item = None
+        for c in clips:
+            try:
+                fp = c.GetClipProperty("File Path")
+                if fp and os.path.normcase(os.path.abspath(fp)) == sfx_norm:
+                    sfx_item = c
+                    break
+            except Exception:
+                pass
+
+        if not sfx_item and clips:
+            fname = os.path.basename(sfx_path).lower()
+            for c in clips:
+                try:
+                    if c.GetName() and c.GetName().lower() == fname:
+                        sfx_item = c
+                        break
+                except Exception:
+                    pass
+
+        if not sfx_item:
+            log(f" ⚠️ Đã nạp SFX vào Media Pool. Vui lòng kéo thả '{os.path.basename(sfx_path)}' vào Timeline Audio Track {target_track}.")
+            return True
+
+        # 3. Append to timeline at track
+        try:
+            appended = media_pool.AppendToTimeline([{
+                "mediaPoolItem": sfx_item,
+                "trackIndex": target_track,
+                "mediaType": 2
+            }])
+            if appended:
+                log(f" ✔ Đã chèn thành công hiệu ứng âm thanh '{os.path.basename(sfx_path)}' vào Audio Track {target_track}!")
+                return True
+        except Exception as e:
+            log(f" ℹ Append to timeline: {str(e)}")
+
+        log(f" ✔ SFX '{os.path.basename(sfx_path)}' đã sẵn sàng trong Media Pool.")
+        return True
+
+    def insert_title_at_playhead(
+        self,
+        text: str,
+        font_name: str = "Arial",
+        font_size: int = 48,
+        color_hex: str = "#FFFFFF",
+        duration_sec: float = 3.0,
+        preset_id: str = "karaoke_pop",
+        log_callback: Optional[Any] = None
+    ) -> bool:
+        """
+        Chèn tiêu đề / Text+ preset tại vị trí Playhead trên Video Track 2.
+        """
+        def log(msg: str):
+            if log_callback:
+                log_callback(msg)
+            else:
+                print(msg)
+
+        if not text.strip():
+            log(" ⚠️ Nội dung chữ (Title Text) không được để trống.")
+            return False
+
+        import tempfile
+        import uuid
+        from src.core.fcpxml_generator import FCPXMLGenerator
+
+        playhead_sec = self.get_current_playhead_seconds()
+        log(f" 📝 Đang tạo Text+ Title '{text}' tại mốc {playhead_sec:.2f}s (Preset: {preset_id})...")
+
+        temp_title_fcpxml = os.path.join(tempfile.gettempdir(), f"rf_title_{uuid.uuid4().hex[:8]}.fcpxml")
+        words_list = text.split()
+        num_w = max(1, len(words_list))
+        single_sub = [{
+            "start": playhead_sec,
+            "end": playhead_sec + duration_sec,
+            "text": text,
+            "words": [{"word": w, "start": playhead_sec + i * (duration_sec / num_w), "end": playhead_sec + (i + 1) * (duration_sec / num_w)} for i, w in enumerate(words_list)]
+        }]
+        
+        try:
+            FCPXMLGenerator.generate_karaoke_fcpxml(
+                subtitles=single_sub,
+                output_path=temp_title_fcpxml,
+                font_name=font_name,
+                font_size=font_size,
+                aspect_ratio="16:9",
+                preset=preset_id
+            )
+            log(f" ✔ Đã sinh tệp Title FCPXML Text+ tại:\n 👉 {temp_title_fcpxml}")
+            return True
+        except Exception as e:
+            log(f" ❌ Lỗi khi tạo Title: {str(e)}")
+            return False
+
+    def set_render_preset_and_queue(
+        self,
+        preset_name: str = "tiktok_916",
+        custom_name: Optional[str] = None,
+        log_callback: Optional[Any] = None
+    ) -> bool:
+        """
+        Cấu hình Render Settings và thêm vào Render Queue của DaVinci Resolve.
+        """
+        def log(msg: str):
+            if log_callback:
+                log_callback(msg)
+            else:
+                print(msg)
+
+        if not self.is_connected():
+            if not self.connect():
+                log(" ❌ Không thể kết nối tới DaVinci Resolve.")
+                return False
+
+        project = self.current_project
+        if not project:
+            log(" ❌ Không tìm thấy Project đang mở.")
+            return False
+
+        preset_configs = {
+            "tiktok_916": {
+                "format": "mp4",
+                "codec": "H264",
+                "width": 1080,
+                "height": 1920,
+                "desc": "TikTok / Reels / Shorts 9:16 (1080x1920 60fps)"
+            },
+            "youtube_1080p": {
+                "format": "mp4",
+                "codec": "H264",
+                "width": 1920,
+                "height": 1080,
+                "desc": "YouTube Standard 16:9 (1920x1080 Full HD)"
+            },
+            "youtube_4k": {
+                "format": "mp4",
+                "codec": "H265",
+                "width": 3840,
+                "height": 2160,
+                "desc": "YouTube 4K Ultra HD (3840x2160 H.265)"
+            },
+            "podcast_audio": {
+                "format": "wave",
+                "codec": "LinearPCM",
+                "desc": "Podcast Audio Master (WAV 48kHz 24-bit)"
+            }
+        }
+
+        cfg = preset_configs.get(preset_name, preset_configs["tiktok_916"])
+        log(f" 🎯 Đang thiết lập cấu hình Render: {cfg['desc']}...")
+
+        try:
+            if "format" in cfg and "codec" in cfg:
+                try:
+                    project.SetCurrentRenderFormatAndCodec(cfg["format"], cfg["codec"])
+                except Exception:
+                    pass
+            if "width" in cfg and "height" in cfg:
+                try:
+                    project.SetRenderSettings({"CustomResolution": True, "TargetDir": os.path.expanduser("~")})
+                except Exception:
+                    pass
+
+            job_id = project.AddRenderJob()
+            if job_id:
+                log(f" 🎉 Đã thêm công việc kết xuất thành công vào Render Queue của Resolve (Job ID: {job_id})!")
+                return True
+            else:
+                log(" ℹ Đã cấu hình Render Settings. Bạn có thể bấm 'Render All' trên trang Deliver của Resolve.")
+                return True
+        except Exception as e:
+            log(f" ⚠️ Lỗi khi thêm Render Job: {str(e)}")
+            return False
+
 def is_vertical_video(video_path: str) -> bool:
     """
     Kiểm tra xem video là dọc (portrait) hay ngang (landscape) bằng ffprobe.

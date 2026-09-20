@@ -1,0 +1,29 @@
+{
+  "id": "kinetic_hormozi",
+  "name": "Alex Hormozi Pop (Kinetic Bounce)",
+  "category": "kinetic",
+  "badge_icon": "💥",
+  "tags": [
+    "Viral",
+    "Hormozi",
+    "TikTok",
+    "Shorts",
+    "SpringPop",
+    "HighEnergy"
+  ],
+  "description": "Chữ nảy lò xo (Spring curve) bám từng từ khóa chính, màu vàng neon/xanh chuối viền đen dày tương phản cao cho Shorts/Reels triệu view.",
+  "font": "Arial",
+  "size": 54,
+  "weight": "extra_bold",
+  "standard_color": "#FFFFFF",
+  "highlight_color": "#FFE600",
+  "outline_color": "#000000",
+  "outline_width": 0.18,
+  "animation": "bounce",
+  "timing_curve": "spring",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

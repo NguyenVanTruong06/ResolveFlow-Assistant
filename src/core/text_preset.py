@@ -71,9 +71,16 @@ class TextStylePreset(BaseModel):
     """
     Schema định nghĩa một Preset kiểu chữ và hiệu ứng phụ đề động (Text+/Fusion Text)
     tương thích hoàn toàn với DaVinci Resolve và FCPXML v1.9.
+    Được thiết kế theo tiêu chuẩn Visual Technique Library (Eyecandy, Mixkit & Shotdeck).
     """
     id: str = Field(..., description="ID định danh duy nhất của preset")
     name: str = Field(..., description="Tên hiển thị người dùng")
+    category: Literal["kinetic", "highlighter_paper", "glitch_cyber", "retro_film", "clean_minimal"] = Field(
+        default="kinetic", description="Danh mục phân loại kỹ xảo thị giác"
+    )
+    badge_icon: str = Field(default="✨", description="Biểu tượng Emoji đại diện")
+    tags: List[str] = Field(default_factory=list, description="Danh sách từ khóa tìm kiếm & phong cách")
+    description: str = Field(default="", description="Mô tả kỹ thuật hoạt ảnh và cấu trúc visual")
     font: str = Field(default="Arial", description="Tên phông chữ")
     size: int = Field(default=48, description="Kích cỡ chữ cơ bản (pt)")
     weight: Literal["normal", "bold", "extra_bold"] = Field(default="bold", description="Độ đậm phông chữ")
@@ -105,8 +112,149 @@ class TextStylePreset(BaseModel):
 
 BUILTIN_PRESETS: List[TextStylePreset] = [
     TextStylePreset(
+        id="kinetic_hormozi",
+        name="Alex Hormozi Pop (Kinetic Bounce)",
+        category="kinetic",
+        badge_icon="💥",
+        tags=["Viral", "Hormozi", "TikTok", "Shorts", "SpringPop", "HighEnergy"],
+        description="Chữ nảy lò xo (Spring curve) bám từng từ khóa chính, màu vàng neon/xanh chuối viền đen dày tương phản cao cho Shorts/Reels triệu view.",
+        font="Arial",
+        size=54,
+        weight="extra_bold",
+        standard_color="#FFFFFF",
+        highlight_color="#FFE600",
+        outline_color="#000000",
+        outline_width=0.18,
+        animation="bounce",
+        timing_curve="spring",
+        position_y_16_9=0.15,
+        position_y_9_16=0.35
+    ),
+    TextStylePreset(
+        id="highlighter_swipe",
+        name="Highlighter Marker (Bút Dạ Quang)",
+        category="highlighter_paper",
+        badge_icon="🖍️",
+        tags=["Marker", "Highlighter", "Documentary", "Study", "Focus", "YellowBar"],
+        description="Khung màu vàng dạ quang quét sau lưng từ khóa như đánh dấu bút nhớ dòng tài liệu nghiên cứu.",
+        font="Arial",
+        size=48,
+        weight="bold",
+        standard_color="#000000",
+        highlight_color="#1A1A1A",
+        outline_color="#000000",
+        outline_width=0.0,
+        box_color="#FFE600",
+        animation="box_highlight",
+        timing_curve="ease-in-out",
+        position_y_16_9=0.15,
+        position_y_9_16=0.35
+    ),
+    TextStylePreset(
+        id="paper_cutout",
+        name="Paper Cutout (Xé Giấy Vintage)",
+        category="highlighter_paper",
+        badge_icon="📄",
+        tags=["Scrapbook", "Collage", "StopMotion", "Retro", "PaperCut", "Vintage"],
+        description="Phong cách nhãn dán xé giấy thủ công Stop-motion, nền giấy ngà cổ điển tạo cảm giác mộc mạc và chân thực.",
+        font="Courier New",
+        size=46,
+        weight="bold",
+        standard_color="#1A1A1A",
+        highlight_color="#C62828",
+        outline_color="#333333",
+        outline_width=0.06,
+        box_color="#FBF9F1",
+        animation="pop",
+        timing_curve="spring",
+        position_y_16_9=0.15,
+        position_y_9_16=0.35
+    ),
+    TextStylePreset(
+        id="rgb_glitch",
+        name="RGB Split Glitch (Nhiễu Sóng Số)",
+        category="glitch_cyber",
+        badge_icon="⚡",
+        tags=["Cyberpunk", "Glitch", "Gaming", "SciFi", "RGB", "Aberration"],
+        description="Tách kênh màu quang sai (Chromatic Aberration) đỏ-xanh kèm viền phát quang điện tử sắc nét phong cách Cyberpunk.",
+        font="Arial",
+        size=52,
+        weight="extra_bold",
+        standard_color="#E0F7FA",
+        highlight_color="#00E5FF",
+        outline_color="#D500F9",
+        outline_width=0.12,
+        glow_color="#FF0055",
+        animation="bounce",
+        timing_curve="spring",
+        position_y_16_9=0.15,
+        position_y_9_16=0.35
+    ),
+    TextStylePreset(
+        id="neon_pulse",
+        name="Neon Pulse Glow (Đèn Neon Đêm)",
+        category="glitch_cyber",
+        badge_icon="🟣",
+        tags=["Neon", "Glow", "Synthwave", "Nightclub", "Cyber", "Purple"],
+        description="Ánh sáng ống đèn Neon huỳnh quang phát sáng tỏa bóng mờ ảo đa lớp rực rỡ trong không gian tối.",
+        font="Arial",
+        size=50,
+        weight="bold",
+        standard_color="#F3E5F5",
+        highlight_color="#E040FB",
+        outline_color="#6A1B9A",
+        outline_width=0.08,
+        glow_color="#00E5FF",
+        animation="glow",
+        timing_curve="ease-in-out",
+        position_y_16_9=0.15,
+        position_y_9_16=0.35
+    ),
+    TextStylePreset(
+        id="vhs_retro",
+        name="90s VHS Camcorder (Thước Phim Băng)",
+        category="retro_film",
+        badge_icon="📺",
+        tags=["VHS", "Camcorder", "90s", "Retro", "Tape", "Nostalgia", "Y2K"],
+        description="Phông chữ monospaced màu vàng cam viền đen đặc trưng máy quay băng gia đình thập niên 90 kèm cảm giác hoài niệm.",
+        font="Consolas",
+        size=44,
+        weight="bold",
+        standard_color="#FFF59D",
+        highlight_color="#FFEB3B",
+        outline_color="#000000",
+        outline_width=0.15,
+        animation="typewriter",
+        timing_curve="linear",
+        position_y_16_9=0.12,
+        position_y_9_16=0.25
+    ),
+    TextStylePreset(
+        id="clean_minimal",
+        name="Clean Minimal (Podcast & Phỏng Vấn)",
+        category="clean_minimal",
+        badge_icon="🧊",
+        tags=["Minimal", "Interview", "Podcast", "Documentary", "Clean", "Modern"],
+        description="Thiết kế tối giản thanh lịch, đường nét sạch sẽ với viền mờ tinh tế giúp khán giả tập trung 100% vào nội dung.",
+        font="Arial",
+        size=44,
+        weight="normal",
+        standard_color="#FFFFFF",
+        highlight_color="#64B5F6",
+        outline_color="#000000",
+        outline_width=0.12,
+        animation="static",
+        timing_curve="linear",
+        position_y_16_9=0.12,
+        position_y_9_16=0.25
+    ),
+    TextStylePreset(
         id="karaoke_pop",
         name="Karaoke Pop (Word Highlight)",
+        category="kinetic",
+        badge_icon="🎤",
+        tags=["Karaoke", "Subtitles", "Classic", "WordByWord", "YellowGold"],
+        description="Đổi màu vàng kim rực rỡ theo từng từ đang phát âm, phong cách TV show và Karaoke chuyên nghiệp.",
         font="Arial",
         size=48,
         weight="bold",
@@ -121,7 +269,11 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
     ),
     TextStylePreset(
         id="bounce_word",
-        name="Bounce Word (Nhảy chữ Spring)",
+        name="Bounce Word (Nhảy Chữ Spring)",
+        category="kinetic",
+        badge_icon="🏀",
+        tags=["Bounce", "Motion", "Spring", "Energy", "Cyan"],
+        description="Chữ nhảy nảy bật spring vui tươi thu hút ánh mắt người xem trên từng nhịp thoại.",
         font="Arial",
         size=52,
         weight="extra_bold",
@@ -136,7 +288,11 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
     ),
     TextStylePreset(
         id="box_highlight",
-        name="Box Highlight (Hộp màu bám từ)",
+        name="Box Highlight (Hộp Màu Đỏ Bám Từ)",
+        category="highlighter_paper",
+        badge_icon="📦",
+        tags=["Box", "RedBox", "CapCut", "News", "HighlightBox"],
+        description="Đóng hộp chữ nhật màu đỏ bám sát từ khóa đang đọc, tăng độ tương phản tuyệt đối trên nền video phức tạp.",
         font="Arial",
         size=46,
         weight="bold",
@@ -152,7 +308,11 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
     ),
     TextStylePreset(
         id="glow_neon",
-        name="Glow / Neon (Chữ phát sáng hiện đại)",
+        name="Glow Neon Cyan (Phát Sáng Xanh)",
+        category="glitch_cyber",
+        badge_icon="💡",
+        tags=["Cyan", "Glow", "Tech", "Future", "Neon"],
+        description="Hào quang xanh lam công nghệ tỏa bóng mềm mại hiện đại.",
         font="Arial",
         size=50,
         weight="bold",
@@ -168,7 +328,11 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
     ),
     TextStylePreset(
         id="clean_outline",
-        name="Clean Outline (Podcast / Phỏng vấn nét)",
+        name="Clean Outline (Podcast Nét)",
+        category="clean_minimal",
+        badge_icon="🎙️",
+        tags=["Podcast", "Outline", "Subtitle", "Crisp"],
+        description="Chữ trắng viền đen chuẩn mực cho mọi chương trình podcast và trò chuyện chuyên sâu.",
         font="Arial",
         size=44,
         weight="normal",
@@ -183,7 +347,11 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
     ),
     TextStylePreset(
         id="gradient_fill",
-        name="Gradient Fill (Chuyển sắc phong cách)",
+        name="Gradient Sunset (Chuyển Sắc Hoàng Hôn)",
+        category="clean_minimal",
+        badge_icon="🌅",
+        tags=["Gradient", "Sunset", "Vibrant", "Creative", "Modern"],
+        description="Dải màu hoàng hôn chuyển tiếp từ cam san hô sang hồng tím đầy tính nghệ thuật.",
         font="Arial",
         size=50,
         weight="extra_bold",
@@ -199,7 +367,11 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
     ),
     TextStylePreset(
         id="slide_in",
-        name="Slide-in (Trượt mượt mà từng từ)",
+        name="Slide-in (Trượt Mượt Mà)",
+        category="kinetic",
+        badge_icon="🚀",
+        tags=["Slide", "Smooth", "Intro", "Fluid", "Motion"],
+        description="Chữ trượt vào từ cạnh dưới êm ái tạo cảm giác thanh thoát và lôi cuốn.",
         font="Arial",
         size=48,
         weight="bold",
@@ -232,12 +404,11 @@ class PresetManager:
         os.makedirs(self.custom_dir, exist_ok=True)
 
     def ensure_default_presets(self):
-        """Khởi tạo các file JSON preset mặc định nếu chưa tồn tại."""
+        """Khởi tạo hoặc đồng bộ các file JSON preset mặc định."""
         for preset in BUILTIN_PRESETS:
             file_path = os.path.join(self.base_dir, f"{preset.id}.json")
-            if not os.path.exists(file_path):
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(pydantic_dump(preset), f, indent=2, ensure_ascii=False)
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(pydantic_dump(preset), f, indent=2, ensure_ascii=False)
 
     def list_presets(self) -> List[TextStylePreset]:
         """Tải toàn bộ danh sách preset (cả mặc định và tùy chỉnh)."""
@@ -443,3 +614,112 @@ class TextPreviewRenderer:
             
         img.save(output_image_path, "PNG")
         return output_image_path
+
+
+class FusionSettingGenerator:
+    """
+    Tạo và xuất các tệp mẫu Fusion Text+ Macro (.setting) tương thích hoàn toàn
+    với DaVinci Resolve Free và Studio.
+    Cho phép kéo thả trực tiếp (Drag & Drop) hoặc cài sẵn vào thư mục Titles của Resolve.
+    """
+    @staticmethod
+    def generate_setting_content(preset: TextStylePreset, sample_text: str = "ResolveFlow Title") -> str:
+        """Sinh chuỗi cú pháp Lua (.setting) của Fusion Text+ tool."""
+        r_hl, g_hl, b_hl, _ = hex_to_rgb_tuple(preset.highlight_color or preset.standard_color)
+        r_out, g_out, b_out, _ = hex_to_rgb_tuple(preset.outline_color)
+        
+        fusion_size = round(max(0.04, min(0.25, preset.size / 600.0)), 4)
+        out_thickness = round(max(0.01, min(0.15, preset.outline_width * 0.3)), 3)
+        
+        outline_block = f"""
+                Enabled2 = Input {{ Value = 1, }},
+                ElementShape2 = Input {{ Value = 1, }}, -- Outline
+                Red2 = Input {{ Value = {r_out / 255.0:.3f}, }},
+                Green2 = Input {{ Value = {g_out / 255.0:.3f}, }},
+                Blue2 = Input {{ Value = {b_out / 255.0:.3f}, }},
+                Thickness2 = Input {{ Value = {out_thickness}, }},
+                JoinStyle2 = Input {{ Value = 2, }}, -- Round""" if preset.outline_width > 0 else ""
+
+        extra_shading = ""
+        if preset.glow_color:
+            r_g, g_g, b_g, _ = hex_to_rgb_tuple(preset.glow_color)
+            extra_shading += f"""
+                Enabled3 = Input {{ Value = 1, }},
+                ElementShape3 = Input {{ Value = 3, }}, -- Glow
+                Red3 = Input {{ Value = {r_g / 255.0:.3f}, }},
+                Green3 = Input {{ Value = {g_g / 255.0:.3f}, }},
+                Blue3 = Input {{ Value = {b_g / 255.0:.3f}, }},
+                Softness3 = Input {{ Value = 10, }},"""
+        elif preset.box_color:
+            r_bx, g_bx, b_bx, _ = hex_to_rgb_tuple(preset.box_color)
+            extra_shading += f"""
+                Enabled4 = Input {{ Value = 1, }},
+                ElementShape4 = Input {{ Value = 2, }}, -- Bounding Box
+                Red4 = Input {{ Value = {r_bx / 255.0:.3f}, }},
+                Green4 = Input {{ Value = {g_bx / 255.0:.3f}, }},
+                Blue4 = Input {{ Value = {b_bx / 255.0:.3f}, }},"""
+
+        clean_tool_name = re.sub(r'[^a-zA-Z0-9_]', '', f"RF_{preset.id.title()}")
+
+        setting_str = f"""{{
+    Tools = ordered() {{
+        {clean_tool_name} = TextPlus {{
+            Inputs = {{
+                Width = Input {{ Value = 1920, }},
+                Height = Input {{ Value = 1080, }},
+                UseFrameFormatSettings = Input {{ Value = 1, }},
+                Font = Input {{ Value = "{preset.font}", }},
+                Style = Input {{ Value = "{preset.weight.title() if preset.weight != 'normal' else 'Regular'}", }},
+                Size = Input {{ Value = {fusion_size}, }},
+                VerticalTopCenterBottom = Input {{ Value = 1, }},
+                HorizontalLeftCenterRight = Input {{ Value = 0, }},
+                Center = Input {{ Value = {{ 0.5, {preset.position_y_16_9:.2f} }}, }},
+                StyledText = Input {{ Value = "{sample_text}", }},
+                Red1 = Input {{ Value = {r_hl / 255.0:.3f}, }},
+                Green1 = Input {{ Value = {g_hl / 255.0:.3f}, }},
+                Blue1 = Input {{ Value = {b_hl / 255.0:.3f}, }},{outline_block}{extra_shading}
+            }},
+            ViewInfo = OperatorInfo {{ Pos = {{ 220, 36.3 }} }},
+        }}
+    }}
+}}"""
+        return setting_str
+
+    @staticmethod
+    def export_setting_file(preset: TextStylePreset, output_path: str, sample_text: str = "ResolveFlow Title") -> str:
+        """Xuất preset ra file .setting."""
+        content = FusionSettingGenerator.generate_setting_content(preset, sample_text)
+        parent_dir = os.path.dirname(output_path)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return output_path
+
+    @staticmethod
+    def get_davinci_resolve_titles_dir() -> str:
+        """Lấy đường dẫn thư mục Fusion Titles Template của DaVinci Resolve trên Windows."""
+        app_data = os.environ.get("APPDATA", "")
+        if app_data:
+            return os.path.join(app_data, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Titles", "ResolveFlow")
+        return os.path.join(os.path.expanduser("~"), "ResolveFlow_Titles")
+
+    @classmethod
+    def install_presets_to_davinci_resolve(cls, presets: Optional[List[TextStylePreset]] = None) -> Tuple[int, str]:
+        """Tự động cài đặt danh sách Presets vào thư mục Effects Library của DaVinci Resolve."""
+        if presets is None:
+            presets = BUILTIN_PRESETS
+        
+        target_dir = cls.get_davinci_resolve_titles_dir()
+        os.makedirs(target_dir, exist_ok=True)
+        
+        installed_count = 0
+        for p in presets:
+            clean_name = re.sub(r'[^\w\s-]', '', p.name).strip().replace(' ', '_')
+            filename = f"ResolveFlow_{clean_name}.setting"
+            dest_path = os.path.join(target_dir, filename)
+            cls.export_setting_file(p, dest_path, sample_text=f"{p.name}")
+            installed_count += 1
+            
+        return installed_count, target_dir
+

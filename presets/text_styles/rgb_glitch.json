@@ -1,0 +1,29 @@
+{
+  "id": "rgb_glitch",
+  "name": "RGB Split Glitch (Nhiễu Sóng Số)",
+  "category": "glitch_cyber",
+  "badge_icon": "⚡",
+  "tags": [
+    "Cyberpunk",
+    "Glitch",
+    "Gaming",
+    "SciFi",
+    "RGB",
+    "Aberration"
+  ],
+  "description": "Tách kênh màu quang sai (Chromatic Aberration) đỏ-xanh kèm viền phát quang điện tử sắc nét phong cách Cyberpunk.",
+  "font": "Arial",
+  "size": 52,
+  "weight": "extra_bold",
+  "standard_color": "#E0F7FA",
+  "highlight_color": "#00E5FF",
+  "outline_color": "#D500F9",
+  "outline_width": 0.12,
+  "animation": "bounce",
+  "timing_curve": "spring",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": null,
+  "glow_color": "#FF0055",
+  "gradient_colors": null
+}

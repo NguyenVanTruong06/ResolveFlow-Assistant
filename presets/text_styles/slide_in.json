@@ -1,6 +1,16 @@
 {
   "id": "slide_in",
-  "name": "Slide-in (Trượt mượt mà từng từ)",
+  "name": "Slide-in (Trượt Mượt Mà)",
+  "category": "kinetic",
+  "badge_icon": "🚀",
+  "tags": [
+    "Slide",
+    "Smooth",
+    "Intro",
+    "Fluid",
+    "Motion"
+  ],
+  "description": "Chữ trượt vào từ cạnh dưới êm ái tạo cảm giác thanh thoát và lôi cuốn.",
   "font": "Arial",
   "size": 48,
   "weight": "bold",

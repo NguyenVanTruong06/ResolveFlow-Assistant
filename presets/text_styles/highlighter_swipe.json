@@ -1,0 +1,29 @@
+{
+  "id": "highlighter_swipe",
+  "name": "Highlighter Marker (Bút Dạ Quang)",
+  "category": "highlighter_paper",
+  "badge_icon": "🖍️",
+  "tags": [
+    "Marker",
+    "Highlighter",
+    "Documentary",
+    "Study",
+    "Focus",
+    "YellowBar"
+  ],
+  "description": "Khung màu vàng dạ quang quét sau lưng từ khóa như đánh dấu bút nhớ dòng tài liệu nghiên cứu.",
+  "font": "Arial",
+  "size": 48,
+  "weight": "bold",
+  "standard_color": "#000000",
+  "highlight_color": "#1A1A1A",
+  "outline_color": "#000000",
+  "outline_width": 0.0,
+  "animation": "box_highlight",
+  "timing_curve": "ease-in-out",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": "#FFE600",
+  "glow_color": null,
+  "gradient_colors": null
+}
