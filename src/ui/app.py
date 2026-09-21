@@ -87,6 +87,7 @@ class PipelineWorker(QThread):
     Hỗ trợ cơ chế ngắt an toàn (Interruptible Threading), Scan Cache theo checksum và Proxy 480p tối ưu.
     """
     log_signal = pyqtSignal(str)
+    step_signal = pyqtSignal(str, str)
     progress_signal = pyqtSignal(int)
     finished_signal = pyqtSignal(bool, str)
 
@@ -178,10 +179,12 @@ class PipelineWorker(QThread):
 
             # --- GIAI ĐOẠN DRY-RUN VALIDATION ---
             if self.phase in [0, 1]:
+                self.step_signal.emit("validate", "running")
                 self.log_signal.emit("🔍 [Dry-Run] Đang kiểm tra khả năng tương thích định dạng file nguồn...")
                 val_res = DryRunValidator.validate_media_files(self.video_paths)
                 
                 if val_res.errors:
+                    self.step_signal.emit("validate", "error")
                     self.log_signal.emit("❌ Lỗi tương thích nguồn (Quá trình dừng lại):")
                     for err in val_res.errors:
                         self.log_signal.emit(f"   - {err}")
@@ -193,6 +196,7 @@ class PipelineWorker(QThread):
                     self.log_signal.emit("⚠️ Cảnh báo tương thích nguồn:")
                     for warn in val_res.warnings:
                         self.log_signal.emit(f"   - {warn}")
+                self.step_signal.emit("validate", "done")
 
             if self.phase == 2:
                 clip_data_list = self.clip_data_cache or []
@@ -214,6 +218,7 @@ class PipelineWorker(QThread):
             )
 
             if self.phase in [0, 1] and needs_transcription:
+                self.step_signal.emit("load_model", "running")
                 self.log_signal.emit(f"🤖 Tải mô hình Whisper AI '{self.model_size}'...")
                 model_config = ModelConfig(
                     model_size=self.model_size,
@@ -222,6 +227,7 @@ class PipelineWorker(QThread):
                 )
                 transcriber = ResolveTranscriber(model_config)
                 transcriber.load_model()
+                self.step_signal.emit("load_model", "done")
             elif self.phase in [0, 1]:
                 self.log_signal.emit("⚡ Bỏ qua việc tải mô hình Whisper AI do không có tính năng nào yêu cầu dịch giọng nói.")
 
@@ -290,6 +296,7 @@ class PipelineWorker(QThread):
 
             # --- VÒNG LẶP XỬ LÝ TỪNG CLIP (PHASE 1 HOẶC END-TO-END) ---
             if self.phase in [0, 1]:
+                self.step_signal.emit("speech_to_text", "running")
                 for idx, video_path in enumerate(self.video_paths):
                     if self.is_interrupted:
                         self._handle_interrupted()
@@ -455,9 +462,11 @@ class PipelineWorker(QThread):
                     self.progress_signal.emit(int((idx + 1) / total_clips * 40))
 
                 self.clip_data_out_cache = clip_data_list
+                self.step_signal.emit("speech_to_text", "done")
 
             # --- PHÂN TÍCH & ĐỀ XUẤT CỦA AI DIRECTOR (CHỈ Ở PHASE 1) ---
             if self.phase == 1:
+                self.step_signal.emit("ai_director", "running")
                 self.log_signal.emit("\n🎬 [AI Director] Đang phân tích ngữ nghĩa và chuẩn bị đề xuất duyệt cắt...")
                 proposed_all = []
                 segment_offset = 0
@@ -481,8 +490,10 @@ class PipelineWorker(QThread):
                 self.proposed_segments_override = proposed_all
                 if not resolve_auto.is_connected():
                     resolve_auto.ensure_resolve_running(log_callback=self.log_signal.emit)
+                self.step_signal.emit("ai_director", "done")
 
             # --- GIAI ĐOẠN 2 HOẶC END-TO-END: ÁP DỤNG CẮT & XUẤT BẢN ---
+            self.step_signal.emit("apply_cut", "running")
             segment_offset = 0
             for idx, cdata in enumerate(clip_data_list):
                 if self.is_interrupted:
@@ -711,7 +722,9 @@ class PipelineWorker(QThread):
 
                 self.progress_signal.emit(int(40 + (idx + 1) / total_clips * 40))
 
+            self.step_signal.emit("apply_cut", "done")
             # --- XUẤT TIMELINES INTRO & CHÍNH ---
+            self.step_signal.emit("export", "running")
             target_aspect = "9:16" if self.enable_reframe else "16:9"
             output_teaser_edl = None
             output_teaser_fcpxml = None
@@ -882,6 +895,7 @@ class PipelineWorker(QThread):
                 self.finished_signal.emit(True, "phase2_done")
             else:
                 self.finished_signal.emit(True, "Hoàn thành!")
+            self.step_signal.emit("export", "done")
 
         except Exception as e:
             if self.is_interrupted:
@@ -898,6 +912,7 @@ class PipelineWorker(QThread):
                     except Exception:
                         pass
                 self.finished_signal.emit(False, f"{type(e).__name__}: {str(e)}")
+                self.step_signal.emit("export", "error")  # Mark last known step as error, widget will ignore if invalid
         finally:
             for temp_f in temp_files_to_clean:
                 try:
@@ -1102,6 +1117,19 @@ class ResolveFlowApp(QMainWindow):
         self.progress_bar.setValue(0)
         vbox_exec.addWidget(self.progress_bar)
         right_panel.addWidget(self.group_exec)
+
+        # 3.5 Visual Step Progress
+        from src.ui.widgets.step_progress_widget import StepProgressWidget
+        STEPS = [
+            ("validate", "Kiểm tra"),
+            ("load_model", "Tải AI"),
+            ("speech_to_text", "Nhận diện"),
+            ("ai_director", "Đạo diễn AI"),
+            ("apply_cut", "Biên tập"),
+            ("export", "Xuất bản")
+        ]
+        self.step_progress = StepProgressWidget(STEPS)
+        right_panel.addWidget(self.step_progress)
 
         # 4. Card Nhật Ký Xử Lý (AI Console Logs)
         self.group_console = QGroupBox("📋 NHẬT KÝ XỬ LÝ (AI CONSOLE)")
@@ -1349,7 +1377,7 @@ class ResolveFlowApp(QMainWindow):
         except Exception:
             self.preview_lbl.setText(f"Preset: {preset.name} | {font_name} {sz}px")
 
-    def _set_card_active(self, card_widget: QGroupBox, is_active: bool):
+    def _set_card_active(self, card_widget: QWidget, is_active: bool):
         card_widget.setProperty("active", "true" if is_active else "false")
         card_widget.style().unpolish(card_widget)
         card_widget.style().polish(card_widget)
@@ -1857,6 +1885,7 @@ class ResolveFlowApp(QMainWindow):
                         self.proposed_segments[row].approved = cb.isChecked()
 
         self._update_run_button_state(running=True)
+        self.step_progress.reset()
 
         self.worker = PipelineWorker(
             video_paths=video_paths,
@@ -1889,6 +1918,7 @@ class ResolveFlowApp(QMainWindow):
         )
 
         self.worker.log_signal.connect(self._log_message)
+        self.worker.step_signal.connect(self.step_progress.set_step_status)
         self.worker.progress_signal.connect(self.progress_bar.setValue)
         self.worker.finished_signal.connect(self._pipeline_finished)
 

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QSlider, QFrame, QScrollArea, QGridLayout, QApplication, QMessageBox,
     QSizePolicy
 )
-from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl
+from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer
 from PySide6.QtGui import QDrag, QPixmap, QCursor
 from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS, MODULE_DESCRIPTIONS
 from src.core.text_preset import TextStylePreset, BUILTIN_PRESETS, FusionSettingGenerator, TextPreviewRenderer
@@ -38,6 +38,32 @@ class DraggablePreviewLabel(QLabel):
         self.drag_start_pos = None
         self.setCursor(Qt.OpenHandCursor)
         self.setToolTip("🖱️ NHẤN GIỮ VÀ KÉO THẢ sang DaVinci Resolve Timeline để chèn kiểu chữ này ngay lập tức!")
+        
+        self.frames_paths: List[str] = []
+        self.pixmap_cache: List[QPixmap] = []
+        self.current_frame = 0
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._next_frame)
+
+    def set_frames(self, frame_paths: List[str], width: int, height: int):
+        self.frames_paths = frame_paths
+        self.current_frame = 0
+        self.pixmap_cache = []
+        for path in frame_paths:
+            pix = QPixmap(path)
+            self.pixmap_cache.append(pix.scaled(width, height, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            
+        if self.pixmap_cache:
+            self.setPixmap(self.pixmap_cache[0])
+            self.timer.start(200) # 5fps
+        else:
+            self.timer.stop()
+
+    def _next_frame(self):
+        if not self.isVisible() or not self.pixmap_cache:
+            return
+        self.current_frame = (self.current_frame + 1) % len(self.pixmap_cache)
+        self.setPixmap(self.pixmap_cache[self.current_frame])
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -210,6 +236,7 @@ class VisualTechniqueCard(QFrame):
         self.btn_copy.clicked.connect(lambda: self.copy_node_signal.emit(self.preset.id))
 
         lbl_drag_hint = QLabel("🖱️ Kéo vào Resolve ➔")
+        lbl_drag_hint.setMinimumWidth(110)
         lbl_drag_hint.setStyleSheet("color: #60A5FA; font-size: 10px; font-style: italic;")
 
         h_act.addWidget(self.btn_insert)
@@ -221,18 +248,15 @@ class VisualTechniqueCard(QFrame):
     def _refresh_preview_pixmap(self):
         """Sinh ảnh xem trước cho Card."""
         try:
-            temp_img = os.path.join(tempfile.gettempdir(), f"rf_card_{self.preset.id}.png")
-            TextPreviewRenderer.render_preview_to_file(
+            paths = TextPreviewRenderer.render_preview_frames(
                 preset=self.preset,
-                output_image_path=temp_img,
                 sample_words=[self.preset.name.split()[0], "Motion", "FX"],
-                active_index=0,
                 aspect_ratio="16:9",
                 width=320,
-                height=120
+                height=120,
+                num_frames=4
             )
-            pix = QPixmap(temp_img)
-            self.preview_box.setPixmap(pix.scaled(280, 70, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            self.preview_box.set_frames(paths, 280, 70)
         except Exception:
             self.preview_box.setText(f"🎨 {self.preset.name}")
 
@@ -500,6 +524,7 @@ class TabTitles(QWidget):
 
         # Connect combo change to highlight card
         self.combo_text_preset.currentIndexChanged.connect(self._on_combo_preset_changed)
+        self.txt_single_title.textChanged.connect(self._refresh_master_preview)
 
         # Tooltips
         self.combo_text_preset.setToolTip(TOOLTIPS["text_preset"])
@@ -591,6 +616,7 @@ class TabTitles(QWidget):
         preset_id = self.combo_text_preset.currentData()
         if preset_id:
             self._highlight_selected_card(preset_id)
+        self._refresh_master_preview()
 
     def _highlight_selected_card(self, preset_id: str):
         for card in self.card_widgets:
@@ -598,6 +624,30 @@ class TabTitles(QWidget):
                 card.set_selected(True)
             else:
                 card.set_selected(False)
+
+    def _refresh_master_preview(self):
+        preset_id = self.combo_text_preset.currentData()
+        p = next((x for x in self.all_presets if x.id == preset_id), None)
+        if not p:
+            return
+            
+        sample_txt = self.txt_single_title.text().strip() or "ResolveFlow Title"
+        words = sample_txt.split()
+        if len(words) > 4:
+            words = words[:4]
+            
+        try:
+            paths = TextPreviewRenderer.render_preview_frames(
+                preset=p,
+                sample_words=words,
+                aspect_ratio="16:9",
+                width=640,
+                height=180,
+                num_frames=4
+            )
+            self.preview_lbl.set_frames(paths, 580, 95)
+        except Exception:
+            self.preview_lbl.setText("Live Preview Error")
 
     def _on_card_insert_playhead(self, preset_id: str):
         text = self.txt_single_title.text().strip()

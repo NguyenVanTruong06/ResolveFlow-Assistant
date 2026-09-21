@@ -138,3 +138,23 @@ def test_install_presets_to_davinci_resolve(tmp_path, monkeypatch):
     assert len(files) >= 7
     assert any(f.endswith(".setting") for f in files)
 
+def test_render_preview_frames():
+    preset = TextStylePreset(
+        id="test_anim",
+        name="Test",
+        animation="pop"
+    )
+    # Lần đầu render
+    paths1 = TextPreviewRenderer.render_preview_frames(preset, num_frames=2)
+    assert len(paths1) == 2
+    for p in paths1:
+        assert os.path.exists(p)
+        
+    # Lần 2 (cache hit)
+    paths2 = TextPreviewRenderer.render_preview_frames(preset, num_frames=2)
+    assert paths1 == paths2 # should return identical cached paths
+    
+    # Dọn dẹp
+    for p in paths1:
+        if os.path.exists(p):
+            os.remove(p)

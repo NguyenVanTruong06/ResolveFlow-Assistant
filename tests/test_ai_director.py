@@ -1,5 +1,7 @@
 import pytest
+from unittest.mock import patch
 from src.core.ai_director import AIDirector, AIDirectorConfig, BadTakeDetector
+from src.core.llm_director import LLMSelectionError
 
 def test_bad_take_detector_basic():
     # Giả lập người nói thử 2 lần câu chào
@@ -83,4 +85,31 @@ def test_bad_take_detector_sequential_steps_not_bad_takes():
     bad_takes = BadTakeDetector.detect_bad_takes(subtitles)
     assert len(bad_takes) == 0
 
-
+@patch("src.core.ai_director.LLMSemanticSelector.select_segments")
+def test_ai_director_fallback_to_heuristic(mock_select_segments):
+    mock_select_segments.side_effect = LLMSelectionError("Fake error")
+    
+    config = AIDirectorConfig(
+        mode="viral_shorts",
+        target_duration_seconds=60.0,
+        api_key="fake-key"
+    )
+    director = AIDirector(config)
+    subtitles = [
+        {"start": 1.0, "end": 2.5, "text": "Câu 1"},
+        {"start": 3.0, "end": 7.0, "text": "Câu 2"}
+    ]
+    
+    proposed = director.generate_proposed_segments(subtitles)
+    
+    # Verify fallback to heuristic logic without crashing
+    assert len(proposed) == 2
+    assert getattr(director, "last_selection_method", "") == "heuristic"
+    
+    result = director.apply_approved_segments(
+        subtitles=subtitles,
+        proposed_segments=proposed,
+        silence_keep_intervals=[],
+        total_duration=10.0
+    )
+    assert result["stats"]["selection_method"] == "heuristic"

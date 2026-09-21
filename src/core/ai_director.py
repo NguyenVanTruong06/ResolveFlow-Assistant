@@ -2,9 +2,11 @@ import os
 import re
 import json
 import difflib
+import logging
 from typing import List, Dict, Any, Tuple, Optional
 from pydantic import BaseModel, Field
 from src.core.autocut import CutSegment
+from src.core.llm_director import LLMSemanticSelector, LLMSelectionError
 
 class ProposedSegment(BaseModel):
     """
@@ -155,6 +157,7 @@ class AIDirector:
 
     def __init__(self, config: Optional[AIDirectorConfig] = None):
         self.config = config or AIDirectorConfig()
+        self.last_selection_method = "heuristic"
 
     def generate_proposed_segments(
         self,
@@ -182,10 +185,42 @@ class AIDirector:
         # 3. Chạy thuật toán trích xuất của presets (nếu có)
         viral_subs = []
         summary_subs = []
+        self.last_selection_method = "heuristic"
+        
+        target_duration = 0.0
         if self.config.mode == "viral_shorts":
-            viral_subs, _ = self._extract_viral_shorts_segments(valid_subtitles, target_duration=self.config.target_duration_seconds or 60.0)
+            target_duration = self.config.target_duration_seconds or 60.0
         elif self.config.mode == "podcast_summary":
-            summary_subs, _ = self._extract_summary_segments(valid_subtitles, target_duration=self.config.target_duration_seconds or 180.0)
+            target_duration = self.config.target_duration_seconds or 180.0
+            
+        use_llm = False
+        if self.config.api_key and self.config.mode in ["viral_shorts", "podcast_summary"]:
+            try:
+                llm_selector = LLMSemanticSelector(api_key=self.config.api_key)
+                kept_indices, reason = llm_selector.select_segments(
+                    subtitles=valid_subtitles,
+                    target_duration=target_duration,
+                    mode=self.config.mode
+                )
+                if kept_indices:
+                    selected_subs = [valid_subtitles[i] for i in kept_indices]
+                    if self.config.mode == "viral_shorts":
+                        viral_subs = selected_subs
+                    else:
+                        summary_subs = selected_subs
+                    use_llm = True
+                    self.last_selection_method = "llm"
+                    logging.info(f"[AIDirector] LLM chọn thành công {len(kept_indices)} segments. Lý do: {reason}")
+            except LLMSelectionError as e:
+                logging.warning(f"[AIDirector] Lỗi LLM Semantic Selector, fallback về heuristic: {e}")
+            except Exception as e:
+                logging.warning(f"[AIDirector] Lỗi không xác định khi gọi LLM, fallback về heuristic: {e}")
+                
+        if not use_llm:
+            if self.config.mode == "viral_shorts":
+                viral_subs, _ = self._extract_viral_shorts_segments(valid_subtitles, target_duration=target_duration)
+            elif self.config.mode == "podcast_summary":
+                summary_subs, _ = self._extract_summary_segments(valid_subtitles, target_duration=target_duration)
 
         for idx, sub in enumerate(subtitles):
             words = sub.get("words", [])
@@ -426,7 +461,8 @@ class AIDirector:
                 "original_count": len(subtitles),
                 "kept_count": len(final_subs),
                 "removed_bad_takes": removed_bad_takes_count,
-                "punch_ins_created": len(punch_in_events)
+                "punch_ins_created": len(punch_in_events),
+                "selection_method": getattr(self, "last_selection_method", "heuristic")
             }
         }
 

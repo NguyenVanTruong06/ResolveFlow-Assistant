@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal as pyqtSignal
 from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS, MODULE_DESCRIPTIONS
+from src.ui.widgets.section_card import SectionCard
 
 class TabAutoCut(QWidget):
     """
@@ -67,9 +68,10 @@ class TabAutoCut(QWidget):
         panel.addSpacing(4)
 
         # 1. WORKFLOW MODE
-        self.group_wf = QGroupBox("🎯 CHẾ ĐỘ DỰNG TỰ ĐỘNG (WORKFLOW MODE)")
+        self.group_wf = SectionCard("🎯 CHẾ ĐỘ DỰNG TỰ ĐỘNG (WORKFLOW MODE)", accent_color=ThemeColors.PRIMARY)
         self.group_wf.setObjectName("group_wf")
-        form_wf = QFormLayout(self.group_wf)
+        form_wf = QFormLayout()
+        self.group_wf.set_body_layout(form_wf)
         desc_wf = QLabel("Chọn mục tiêu dựng để app tự động kích hoạt tổ hợp tính năng tối ưu nhất.")
         desc_wf.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 2px;")
         form_wf.addRow(desc_wf)
@@ -83,9 +85,10 @@ class TabAutoCut(QWidget):
         panel.addWidget(self.group_wf)
 
         # 2. RECIPE SELECTOR & MANAGER
-        self.group_recipe = QGroupBox("📋 HỆ THỐNG RECIPE (TỔ HỢP CẤU HÌNH ĐÃ LƯU)")
+        self.group_recipe = SectionCard("📋 HỆ THỐNG RECIPE (TỔ HỢP CẤU HÌNH ĐÃ LƯU)", accent_color=ThemeColors.WARNING)
         self.group_recipe.setObjectName("group_recipe")
-        vbox_recipe = QVBoxLayout(self.group_recipe)
+        vbox_recipe = QVBoxLayout()
+        self.group_recipe.set_body_layout(vbox_recipe)
         desc_recipe = QLabel("Lưu và tái sử dụng nhanh toàn bộ cấu hình riêng của bạn cho các dự án sau.")
         desc_recipe.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 2px;")
         vbox_recipe.addWidget(desc_recipe)
@@ -101,9 +104,10 @@ class TabAutoCut(QWidget):
         panel.addWidget(self.group_recipe)
 
         # 3. MASTER INTENSITY SLIDER
-        self.group_master = QGroupBox("🎛 CƯỜNG ĐỘ CẮT LỌC TỔNG (BASIC LAYER)")
+        self.group_master = SectionCard("🎛 CƯỜNG ĐỘ CẮT LỌC TỔNG (BASIC LAYER)", accent_color=ThemeColors.SUCCESS)
         self.group_master.setObjectName("group_master")
-        form_master = QVBoxLayout(self.group_master)
+        form_master = QVBoxLayout()
+        self.group_master.set_body_layout(form_master)
         desc_master = QLabel("Thanh trượt điều khiển tổng thể mức độ cắt gọt và độ nhạy của AI.")
         desc_master.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 2px;")
         form_master.addWidget(desc_master)
@@ -128,8 +132,9 @@ class TabAutoCut(QWidget):
         adv_layout.setContentsMargins(0, 0, 0, 0)
 
         # Group 1: Whisper & Cache
-        self.group_ai = QGroupBox("1. 🤖 NHẬN DIỆN GIỌNG NÓI & CACHE")
-        form_ai = QFormLayout(self.group_ai)
+        self.group_ai = SectionCard("1. 🤖 NHẬN DIỆN GIỌNG NÓI & CACHE", accent_color=ThemeColors.TEXT_ACCENT)
+        form_ai = QFormLayout()
+        self.group_ai.set_body_layout(form_ai)
         desc_ai = QLabel(MODULE_DESCRIPTIONS["whisper"])
         desc_ai.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
         form_ai.addRow(desc_ai)
@@ -149,8 +154,9 @@ class TabAutoCut(QWidget):
         adv_layout.addWidget(self.group_ai)
 
         # Group 2: AI Director & Semantic Cutting
-        self.group_director = QGroupBox("2. 🎬 ĐẠO DIỄN AI (AI DIRECTOR)")
-        form_director = QFormLayout(self.group_director)
+        self.group_director = SectionCard("2. 🎬 ĐẠO DIỄN AI (AI DIRECTOR)", accent_color=ThemeColors.SUCCESS_LIGHT)
+        form_director = QFormLayout()
+        self.group_director.set_body_layout(form_director)
         desc_dir = QLabel(MODULE_DESCRIPTIONS["director"])
         desc_dir.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
         form_director.addRow(desc_dir)
@@ -175,8 +181,9 @@ class TabAutoCut(QWidget):
         adv_layout.addWidget(self.group_director)
 
         # Group 3: Vlog Hook
-        self.group_vlog_hook = QGroupBox("3. 🔥 VLOG HOOK / INTRO TEASER")
-        form_vlog_hook = QFormLayout(self.group_vlog_hook)
+        self.group_vlog_hook = SectionCard("3. 🔥 VLOG HOOK / INTRO TEASER", accent_color=ThemeColors.WARNING_HOVER)
+        form_vlog_hook = QFormLayout()
+        self.group_vlog_hook.set_body_layout(form_vlog_hook)
         desc_vlog = QLabel(MODULE_DESCRIPTIONS["vlog_hook"])
         desc_vlog.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
         form_vlog_hook.addRow(desc_vlog)
@@ -195,8 +202,9 @@ class TabAutoCut(QWidget):
         adv_layout.addWidget(self.group_vlog_hook)
 
         # Group 4: Visual Reframing & Multi-Track Media
-        self.group_v4 = QGroupBox("4. 👑 THỊ GIÁC & ĐA TẦNG MEDIA")
-        form_v4 = QFormLayout(self.group_v4)
+        self.group_v4 = SectionCard("4. 👑 THỊ GIÁC & ĐA TẦNG MEDIA", accent_color=ThemeColors.PRIMARY_HOVER)
+        form_v4 = QFormLayout()
+        self.group_v4.set_body_layout(form_v4)
         desc_v4 = QLabel(MODULE_DESCRIPTIONS["visual_audio"])
         desc_v4.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
         form_v4.addRow(desc_v4)
@@ -215,8 +223,9 @@ class TabAutoCut(QWidget):
         adv_layout.addWidget(self.group_v4)
 
         # Group 5: Silence Cut & Speed-Ramp
-        self.group_cut = QGroupBox("5. ✂ CẮT KHOẢNG LẶNG & SPEED-RAMP")
-        form_cut = QFormLayout(self.group_cut)
+        self.group_cut = SectionCard("5. ✂ CẮT KHOẢNG LẶNG & SPEED-RAMP", accent_color=ThemeColors.DANGER)
+        form_cut = QFormLayout()
+        self.group_cut.set_body_layout(form_cut)
         desc_cut = QLabel(MODULE_DESCRIPTIONS["silence_cut"])
         desc_cut.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
         form_cut.addRow(desc_cut)

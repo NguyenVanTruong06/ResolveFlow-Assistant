@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import hashlib
 from typing import List, Dict, Any, Optional, Literal, Tuple
 from pydantic import BaseModel, Field
 
@@ -481,9 +482,61 @@ class PresetManager:
 
 class TextPreviewRenderer:
     """
-    Tạo hình ảnh hoặc khung xem trước nhanh (Quick Preview) cho Preset phụ đề
+    Tạo hình ảnh hoặc danh sách khung hình xem trước (Live Preview Animation) cho Preset phụ đề
     trên khung nền video giả lập (16:9 hoặc 9:16) mà không cần mở DaVinci Resolve.
     """
+    
+    @classmethod
+    def render_preview_frames(
+        cls,
+        preset: TextStylePreset,
+        sample_words: Optional[List[str]] = None,
+        aspect_ratio: str = "16:9",
+        width: int = 640,
+        height: int = 360,
+        num_frames: int = 4
+    ) -> List[str]:
+        """
+        Sinh danh sách các file ảnh PNG (đường dẫn tạm) để tạo thành một Animation Live Preview.
+        Sử dụng cơ chế cache MD5 hash (dựa trên preset content và parameters) để tránh phải dùng PIL vẽ lại.
+        """
+        if sample_words is None:
+            sample_words = ["ResolveFlow", "Assistant", "v4.1", "Studio"]
+
+        import tempfile
+        
+        # Build cache key
+        preset_dump = pydantic_dump(preset)
+        cache_str = json.dumps(preset_dump, sort_keys=True) + f"{aspect_ratio}_{width}_{height}_{num_frames}_" + "_".join(sample_words)
+        version_hash = hashlib.md5(cache_str.encode("utf-8")).hexdigest()[:10]
+        
+        temp_dir = tempfile.gettempdir()
+        frames_paths = []
+        all_exist = True
+        
+        for i in range(num_frames):
+            frame_path = os.path.join(temp_dir, f"rf_preview_{preset.id}_{version_hash}_f{i}.png")
+            frames_paths.append(frame_path)
+            if not os.path.exists(frame_path):
+                all_exist = False
+                
+        if all_exist:
+            return frames_paths
+            
+        # Render if not cached
+        for i, fpath in enumerate(frames_paths):
+            cls.render_preview_to_file(
+                preset=preset,
+                output_image_path=fpath,
+                sample_words=sample_words,
+                active_index=i % len(sample_words) if sample_words else i,
+                aspect_ratio=aspect_ratio,
+                width=width,
+                height=height
+            )
+            
+        return frames_paths
+
     @staticmethod
     def render_preview_to_file(
         preset: TextStylePreset,
