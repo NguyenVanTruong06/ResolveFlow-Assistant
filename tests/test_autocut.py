@@ -227,3 +227,19 @@ def test_merge_speech_with_silence_intervals():
 
 
 
+
+
+def test_edl_writes_m2_motion_effect_for_speedup(tmp_path):
+    import os
+    from src.core.autocut import EDLGenerator
+    ev = [
+        {"video_path": "clip.mp4", "src_in": 0.0, "src_out": 8.0, "rec_in": 0.0, "rec_out": 1.0, "fps": 30.0,
+         "speed": 8.0, "is_speedup": True},
+        {"video_path": "clip.mp4", "src_in": 8.0, "src_out": 10.0, "rec_in": 1.0, "rec_out": 3.0, "fps": 30.0,
+         "speed": 1.0},
+    ]
+    out = os.path.join(tmp_path, "s.edl")
+    EDLGenerator.create_multi_clip_edl(ev, out)
+    lines = open(out, encoding="utf-8").read().splitlines()
+    m2 = [ln for ln in lines if ln.startswith("M2")]
+    assert len(m2) == 1 and "240.0" in m2[0] and m2[0].split()[-1] == "00:00:00:00"   # 30fps x 8 = 240 fps

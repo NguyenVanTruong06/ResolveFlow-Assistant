@@ -45,6 +45,32 @@ class ResolveAutomation:
         self.project_manager = None
         self.current_project = None
 
+    last_connect_error: str = ""
+
+    @staticmethod
+    def _locate_fusionscript() -> Optional[str]:
+        """
+        Tìm fusionscript.dll: biến môi trường RESOLVE_SCRIPT_LIB, thư mục cài mặc định, hoặc thư mục của tiến trình
+        Resolve.exe đang chạy (trường hợp cài ở ổ/thư mục khác như E:\\APP).
+        """
+        candidates = []
+        env = os.environ.get("RESOLVE_SCRIPT_LIB")
+        if env:
+            candidates.append(env)
+        candidates.append(r"C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll")
+        try:
+            import subprocess
+            out = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command",
+                 "(Get-Process Resolve -ErrorAction SilentlyContinue | Select-Object -First 1).Path"],
+                capture_output=True, text=True, timeout=10
+            ).stdout.strip()
+            if out:
+                candidates.append(os.path.join(os.path.dirname(out), "fusionscript.dll"))
+        except Exception:
+            pass
+        return next((c for c in candidates if c and os.path.exists(c)), None)
+
     def connect(self) -> bool:
         """
         Kết nối tới ứng dụng DaVinci Resolve đang chạy.
@@ -58,6 +84,10 @@ class ResolveAutomation:
         if os.path.exists(resolve_script_path) and resolve_script_path not in sys.path:
             sys.path.append(resolve_script_path)
 
+        self.last_connect_error = ""
+        lib = self._locate_fusionscript()
+        if lib and not os.environ.get("RESOLVE_SCRIPT_LIB"):
+            os.environ["RESOLVE_SCRIPT_LIB"] = lib
         try:
             import DaVinciResolveScript as dvr_script
             # Gọi ứng dụng Resolve thông qua cổng FusionScript
@@ -66,9 +96,17 @@ class ResolveAutomation:
                 self.project_manager = self.resolve.GetProjectManager()
                 self.current_project = self.project_manager.GetCurrentProject()
                 return True
-        except (ImportError, AttributeError):
+            self.last_connect_error = "Resolve không phản hồi. Mở Resolve và bật Preferences > General > External scripting using = Local."
+        except (ImportError, AttributeError) as e:
             # Không tìm thấy thư viện SDK hoặc Resolve chưa được khởi chạy
-            pass
+            self.last_connect_error = f"Không nạp được thư viện kết nối Resolve ({str(e)[:80]})."
+        except Exception as e:
+            # vd SystemError "initialization of fusionscript failed": scripting ngoài bị tắt, hoặc Resolve bản Free
+            self.last_connect_error = (
+                "Resolve từ chối kết nối scripting ngoài. Hãy bật Preferences > General > External scripting using = Local; "
+                "lưu ý bản DaVinci Resolve Free thường không hỗ trợ scripting ngoài (cần Studio). "
+                "Bạn vẫn có thể import file .fcpxml thủ công bằng File > Import > Timeline."
+            )
         return False
 
     def ensure_resolve_running(self, log_callback: Optional[Any] = None) -> bool:
@@ -436,6 +474,8 @@ class ResolveAutomation:
         if not self.resolve or not self.current_project:
             if not self.connect():
                 log(" ❌ Không thể kết nối tới ứng dụng DaVinci Resolve để import timeline.")
+                if self.last_connect_error:
+                    log(f" ℹ {self.last_connect_error}")
                 return False
 
         media_pool = self.current_project.GetMediaPool()
@@ -479,6 +519,162 @@ class ResolveAutomation:
         log(" ➖ Cần import thủ công tệp Timeline (.fcpxml / .edl) vào DaVinci Resolve.")
         return False
 
+    # ------------------------------------------------------------------
+    # LUT / Color: phát hiện LUT đã gắn sẵn và áp dụng không ghi đè
+    # ------------------------------------------------------------------
+    RESOLVE_LUT_DIR = r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\LUT"
+
+    @staticmethod
+    def _graph_luts(graph: Any) -> List[str]:
+        """Danh sách LUT (khác rỗng) đang gắn trên các node của một Graph; [] nếu không có hoặc API không hỗ trợ."""
+        if graph is None:
+            return []
+        try:
+            count = int(graph.GetNumNodes() or 0)
+        except Exception:
+            return []
+        found = []
+        for idx in range(1, count + 1):
+            try:
+                lut = graph.GetLUT(idx)
+            except Exception:
+                lut = ""
+            if lut:
+                found.append(str(lut))
+        return found
+
+    def _iter_video_items(self, timeline: Any):
+        try:
+            track_count = int(timeline.GetTrackCount("video") or 0)
+        except Exception:
+            track_count = 0
+        for track in range(1, track_count + 1):
+            try:
+                for item in timeline.GetItemListInTrack("video", track) or []:
+                    yield track, item
+            except Exception:
+                continue
+
+    def scan_existing_luts(self) -> Dict[str, Any]:
+        """
+        Kiểm tra LUT người dùng đã gắn trong timeline hiện tại (cấp timeline và từng clip).
+        Returns: {"timeline": [lut...], "clips": [(tên clip, [lut...]), ...], "total_clips": n}
+        """
+        timeline = self.get_active_timeline()
+        result: Dict[str, Any] = {"timeline": [], "clips": [], "total_clips": 0}
+        if not timeline:
+            return result
+        try:
+            result["timeline"] = self._graph_luts(timeline.GetNodeGraph())
+        except Exception:
+            pass
+        for _, item in self._iter_video_items(timeline):
+            result["total_clips"] += 1
+            try:
+                luts = self._graph_luts(item.GetNodeGraph())
+            except Exception:
+                luts = []
+            if luts:
+                try:
+                    name = item.GetName()
+                except Exception:
+                    name = "?"
+                result["clips"].append((name, luts))
+        return result
+
+    def _set_lut(self, graph: Any, lut_path: str) -> bool:
+        """Gắn LUT vào node 1 của Graph. Nếu Resolve chưa biết đường dẫn, chép vào thư mục LUT của Resolve rồi thử lại."""
+        try:
+            if graph.SetLUT(1, lut_path):
+                return True
+        except Exception:
+            pass
+        import shutil
+        try:
+            target_dir = os.path.join(self.RESOLVE_LUT_DIR, "ResolveFlow")
+            os.makedirs(target_dir, exist_ok=True)
+            shutil.copy2(lut_path, os.path.join(target_dir, os.path.basename(lut_path)))
+            if self.current_project:
+                self.current_project.RefreshLUTList()
+            return bool(graph.SetLUT(1, os.path.join("ResolveFlow", os.path.basename(lut_path))))
+        except Exception:
+            return False
+
+    def apply_look_lut(
+        self,
+        lut_path: str,
+        scope: str = "timeline",
+        skip_existing: bool = True,
+        log_callback: Optional[Any] = None
+    ) -> Dict[str, int]:
+        """
+        Áp dụng một LUT (.cube) vào DaVinci Resolve mà KHÔNG phá màu đã chỉnh sẵn.
+        - scope="timeline": gắn vào node của TIMELINE (nằm trên mọi grade của từng clip, không đụng vào grade clip).
+        - scope="clips": gắn vào node 1 của từng clip.
+        - skip_existing=True: bỏ qua timeline/clip đã có LUT (LUT của bạn được giữ nguyên, tránh chồng hai LUT).
+        Returns: {"applied": n, "skipped": n, "failed": n}
+        """
+        def log(msg: str):
+            if log_callback:
+                log_callback(msg)
+            else:
+                print(msg)
+
+        stats = {"applied": 0, "skipped": 0, "failed": 0}
+        if not os.path.exists(lut_path):
+            log(f" ❌ Không tìm thấy file LUT: {lut_path}")
+            stats["failed"] += 1
+            return stats
+        timeline = self.get_active_timeline()
+        if not timeline:
+            log(" ❌ Không có Timeline nào đang mở trong DaVinci Resolve.")
+            stats["failed"] += 1
+            return stats
+        lut_path = os.path.abspath(lut_path)
+        try:
+            if self.current_project:
+                self.current_project.RefreshLUTList()
+        except Exception:
+            pass
+
+        if scope == "timeline":
+            try:
+                graph = timeline.GetNodeGraph()
+            except Exception:
+                graph = None
+            if graph is None:
+                log(" ⚠ Phiên bản Resolve này không cho truy cập node của timeline. Hãy chọn phạm vi 'Từng clip'.")
+                stats["failed"] += 1
+                return stats
+            existing = self._graph_luts(graph)
+            if existing and skip_existing:
+                log(f" ⏭ Timeline đã có LUT ({os.path.basename(existing[0])}). Giữ nguyên, không chồng thêm LUT.")
+                stats["skipped"] += 1
+            elif self._set_lut(graph, lut_path):
+                log(f" ✔ Đã gắn '{os.path.basename(lut_path)}' lên node Timeline (không ảnh hưởng grade từng clip).")
+                stats["applied"] += 1
+            else:
+                log(" ❌ Resolve không nhận LUT. Hãy chép file .cube vào thư mục LUT của Resolve rồi bấm lại.")
+                stats["failed"] += 1
+            return stats
+
+        for _, item in self._iter_video_items(timeline):
+            try:
+                graph = item.GetNodeGraph()
+            except Exception:
+                graph = None
+            if graph is None:
+                stats["failed"] += 1
+                continue
+            if skip_existing and self._graph_luts(graph):
+                stats["skipped"] += 1
+            elif self._set_lut(graph, lut_path):
+                stats["applied"] += 1
+            else:
+                stats["failed"] += 1
+        log(f" ✔ LUT từng clip: gắn {stats['applied']}, bỏ qua {stats['skipped']} (đã có LUT), lỗi {stats['failed']}.")
+        return stats
+
     def get_current_playhead_timecode(self) -> Optional[str]:
         """Lấy chuỗi timecode hiện tại của con trỏ (Playhead) trên Timeline đang mở."""
         timeline = self.get_active_timeline()
@@ -491,7 +687,7 @@ class ResolveAutomation:
 
     def get_current_playhead_seconds(self) -> float:
         """
-        Lấy vị trí con trỏ (Playhead) hiện tại quy đổi ra giây (float).
+        Lấy vị trí con trỏ (Playhead) hiện tại quy đổi ra giây (float) tương đối từ đầu timeline.
         Mặc định trả về 0.0 nếu chưa mở timeline hoặc không thể đọc.
         """
         timeline = self.get_active_timeline()
@@ -501,20 +697,34 @@ class ResolveAutomation:
             tc = timeline.GetCurrentTimecode()
             if not tc:
                 return 0.0
+            fps = 30.0
+            try:
+                fps_val = timeline.GetSetting("timelineFrameRate")
+                if fps_val:
+                    fps = float(fps_val)
+            except Exception:
+                pass
+
+            start_tc = None
+            try:
+                start_tc = timeline.GetSetting("timelineStartTimecode")
+            except Exception:
+                pass
+
             parts = tc.replace(";", ":").split(":")
             if len(parts) == 4:
                 hrs, mins, secs, frames = map(int, parts)
-                fps = 30.0
-                try:
-                    fps_val = timeline.GetSetting("timelineFrameRate")
-                    if fps_val:
-                        fps = float(fps_val)
-                except Exception:
-                    pass
-                total_seconds = hrs * 3600 + mins * 60 + secs + (frames / fps)
+                current_total_seconds = hrs * 3600 + mins * 60 + secs + (frames / fps)
+                if start_tc:
+                    start_parts = start_tc.replace(";", ":").split(":")
+                    if len(start_parts) == 4:
+                        s_hrs, s_mins, s_secs, s_frames = map(int, start_parts)
+                        start_total_seconds = s_hrs * 3600 + s_mins * 60 + s_secs + (s_frames / fps)
+                        return max(0.0, current_total_seconds - start_total_seconds)
+
                 if hrs >= 1:
-                    total_seconds -= 3600.0
-                return max(0.0, total_seconds)
+                    current_total_seconds -= 3600.0
+                return max(0.0, current_total_seconds)
         except Exception:
             pass
         return 0.0

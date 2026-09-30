@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from pydantic import BaseModel, Field
 from src.core.autocut import CutSegment
 from src.core.llm_director import LLMSemanticSelector, LLMSelectionError
+from src.core import story_planner
 
 class ProposedSegment(BaseModel):
     """
@@ -53,6 +54,22 @@ class AIDirectorConfig(BaseModel):
         default=None,
         description="API Key (Google Gemini hoặc OpenAI) để phân tích ngữ nghĩa sâu"
     )
+    remove_repeated_phrases: bool = Field(
+        default=True,
+        description="Phát hiện câu nói lặp lại (không liền kề) trong cửa sổ thời gian và chỉ giữ lần nói cuối"
+    )
+    min_cut_gap: float = Field(
+        default=0.35, ge=0.0, le=2.0,
+        description="Nhát cắt ngắn hơn ngưỡng này (giây) giữa hai đoạn giữ sẽ được nối lại để nhịp cắt không giật"
+    )
+    max_static_shot: float = Field(
+        default=12.0, ge=0.0, le=60.0,
+        description="Cảnh tĩnh dài hơn ngưỡng này (giây) sẽ được tách tại ranh giới câu để đổi khung hình (0 = tắt)"
+    )
+    min_punch_in_duration: float = Field(
+        default=1.5, ge=0.0, le=10.0,
+        description="Chỉ Punch-in với đoạn dài tối thiểu (giây), tránh zoom chớp nháy trên đoạn quá ngắn"
+    )
 
 
 class BadTakeDetector:
@@ -81,6 +98,16 @@ class BadTakeDetector:
         return clean_w in fillers
 
     @classmethod
+    def is_sparse_span(cls, sub: Dict[str, Any], max_seconds_per_word: float = 3.0, min_seconds: float = 8.0) -> bool:
+        """
+        Đoạn dài nhưng có rất ít từ (vd 3 từ trải trên 46 giây) thường do Whisper kéo giãn timestamp,
+        bên trong có thể còn tiếng nói thật chưa được nhận dạng. Không tự động cắt loại đoạn này.
+        """
+        dur = sub["end"] - sub["start"]
+        n_words = max(1, len(cls.clean_text(sub.get("text", "")).split()))
+        return dur >= min_seconds and dur / n_words > max_seconds_per_word
+
+    @classmethod
     def detect_bad_takes(cls, subtitles: List[Dict[str, Any]], similarity_threshold: float = 0.88) -> List[int]:
         """
         Duyệt qua danh sách các đoạn phụ đề và phát hiện các index bị coi là "nói thử / nói vấp" (False Starts).
@@ -100,6 +127,8 @@ class BadTakeDetector:
             next_text = cls.clean_text(subtitles[i + 1].get("text", ""))
             
             if not curr_text or not next_text:
+                continue
+            if cls.is_sparse_span(subtitles[i]):
                 continue
 
             curr_words = curr_text.split()
@@ -149,6 +178,38 @@ class BadTakeDetector:
         return sorted(list(bad_take_indices))
 
 
+    @classmethod
+    def detect_repeated_phrases(
+        cls,
+        subtitles: List[Dict[str, Any]],
+        window_seconds: float = 45.0,
+        threshold: float = 0.85,
+        min_words: int = 5,
+        skip: Optional[set] = None
+    ) -> List[int]:
+        """
+        Phát hiện câu nói lặp lại không liền kề (người nói quay lại nói lại đúng ý đó sau vài câu).
+        Giữ lần nói CUỐI (take cuối thường tốt nhất), đánh dấu các lần trước đó để cắt.
+        Chỉ xét câu đủ dài (>= min_words) để tránh cắt nhầm những cụm ngắn lặp tự nhiên như "đúng rồi".
+        """
+        skip = skip or set()
+        cleaned = [cls.clean_text(s.get("text", "")).split() for s in subtitles]
+        repeated = set()
+        n = len(subtitles)
+        for i in range(n):
+            if i in skip or len(cleaned[i]) < min_words or cls.is_sparse_span(subtitles[i]):
+                continue
+            for j in range(i + 1, n):
+                if subtitles[j]["start"] - subtitles[i]["end"] > window_seconds:
+                    break
+                if j in skip or len(cleaned[j]) < min_words:
+                    continue
+                if difflib.SequenceMatcher(None, cleaned[i], cleaned[j]).ratio() >= threshold:
+                    repeated.add(i)
+                    break
+        return sorted(repeated)
+
+
 class AIDirector:
     """
     Bộ não Đạo Diễn AI (AI Director) chịu trách nhiệm đưa ra quyết định cắt dựng thông minh
@@ -158,6 +219,7 @@ class AIDirector:
     def __init__(self, config: Optional[AIDirectorConfig] = None):
         self.config = config or AIDirectorConfig()
         self.last_selection_method = "heuristic"
+        self.last_roles: Dict[Any, str] = {}
 
     def generate_proposed_segments(
         self,
@@ -176,6 +238,11 @@ class AIDirector:
         if self.config.remove_bad_takes and self.config.mode != "silence_only":
             bad_take_indices = set(BadTakeDetector.detect_bad_takes(subtitles))
 
+        repeated_indices = set()
+        if self.config.remove_repeated_phrases and self.config.mode != "silence_only":
+            repeated_indices = set(BadTakeDetector.detect_repeated_phrases(subtitles, skip=bad_take_indices))
+        bad_take_indices |= repeated_indices
+
         # 2. Tạo danh sách các câu hợp lệ sau khi loại bỏ Bad Takes
         valid_subtitles = []
         for idx, sub in enumerate(subtitles):
@@ -186,6 +253,7 @@ class AIDirector:
         viral_subs = []
         summary_subs = []
         self.last_selection_method = "heuristic"
+        self.last_roles = {}
         
         target_duration = 0.0
         if self.config.mode == "viral_shorts":
@@ -228,14 +296,19 @@ class AIDirector:
 
             if idx in bad_take_indices:
                 decision = "cut"
-                reason = "Nói vấp (Bad Take)"
-                confidence = 0.85
+                if idx in repeated_indices:
+                    reason = "Câu lặp lại (giữ lần nói cuối)"
+                    confidence = 0.75
+                else:
+                    reason = "Nói vấp (Bad Take)"
+                    confidence = 0.85
             else:
                 if self.config.mode == "viral_shorts":
                     is_kept = any(s["start"] == sub["start"] and s["end"] == sub["end"] for s in viral_subs)
                     if is_kept:
                         decision = "keep"
-                        reason = "Giữ làm Viral Hook/Ý chính"
+                        role = self.last_roles.get((sub["start"], sub["end"]), "body")
+                        reason = {"hook": "Giữ làm Viral Hook", "payoff": "Giữ làm câu chốt (Payoff)"}.get(role, "Giữ làm Ý chính")
                         confidence = avg_prob
                     else:
                         decision = "cut"
@@ -245,7 +318,8 @@ class AIDirector:
                     is_kept = any(s["start"] == sub["start"] and s["end"] == sub["end"] for s in summary_subs)
                     if is_kept:
                         decision = "keep"
-                        reason = "Giữ làm AI Summary"
+                        role = self.last_roles.get((sub["start"], sub["end"]), "body")
+                        reason = {"hook": "Giữ làm Mở bài (Intro)", "payoff": "Giữ làm Kết bài (Outro)"}.get(role, "Giữ làm AI Summary")
                         confidence = avg_prob
                     else:
                         decision = "cut"
@@ -283,7 +357,7 @@ class AIDirector:
         """
         # 1. Chuẩn hóa silence_keep_intervals về danh sách CutSegment
         if silence_keep_intervals and isinstance(silence_keep_intervals[0], CutSegment):
-            segments = [seg.copy() for seg in silence_keep_intervals]
+            segments = [seg.model_copy() if hasattr(seg, "model_copy") else seg.copy() for seg in silence_keep_intervals]
         else:
             raw_keep = silence_keep_intervals or [(0.0, total_duration)]
             raw_keep = sorted(raw_keep, key=lambda x: x[0])
@@ -332,6 +406,9 @@ class AIDirector:
                         sub["end"] = filtered_words[-1]["end"]
                         sub["text"] = " ".join(w["word"].strip() for w in filtered_words)
                         final_subs.append(sub)
+                    else:
+                        # Câu chỉ toàn từ đệm: bỏ luôn cả tiếng, không chỉ bỏ chữ
+                        cut_ranges.append((sub["start"], sub["end"]))
                 else:
                     final_subs.append(sub)
             else:
@@ -413,7 +490,13 @@ class AIDirector:
                 merged_list.append(curr)
             return merged_list
 
+        # Nhịp cắt: nối các nhát cắt quá vụn (trừ đoạn bị chủ động loại), rồi tách cảnh tĩnh quá dài
+        segments = story_planner.bridge_tiny_cuts(segments, cut_ranges, self.config.min_cut_gap)
         merged_segments = merge_adjacent(segments)
+        merged_segments = merge_adjacent(story_planner.drop_orphan_slivers(merged_segments, final_subs))
+        merged_segments, long_takes_split = story_planner.split_long_takes(
+            merged_segments, final_subs, self.config.max_static_shot
+        )
         keep_intervals = [(seg.start, seg.end) for seg in merged_segments if seg.action == "keep"]
 
         punch_in_events = []
@@ -422,7 +505,7 @@ class AIDirector:
             keep_idx = 0
             for seg in merged_segments:
                 if seg.action == "keep":
-                    if is_zoomed:
+                    if is_zoomed and seg.duration >= self.config.min_punch_in_duration:
                         seg.punch_in = True
                         seg.punch_in_scale = self.config.punch_in_scale
                         punch_in_events.append({
@@ -442,7 +525,8 @@ class AIDirector:
                     is_zoomed = not is_zoomed
                     keep_idx += 1
 
-        for sub in final_subs[:5]:
+        top_subs = sorted(final_subs, key=story_planner.score_subtitle, reverse=True)[:5]
+        for sub in sorted(top_subs, key=lambda x: x["start"]):
             markers.append({
                 "time": sub["start"],
                 "duration": sub["end"] - sub["start"],
@@ -462,7 +546,9 @@ class AIDirector:
                 "kept_count": len(final_subs),
                 "removed_bad_takes": removed_bad_takes_count,
                 "punch_ins_created": len(punch_in_events),
-                "selection_method": getattr(self, "last_selection_method", "heuristic")
+                "selection_method": getattr(self, "last_selection_method", "heuristic"),
+                "long_takes_split": long_takes_split,
+                **story_planner.pacing_stats(merged_segments)
             }
         }
 
@@ -484,51 +570,10 @@ class AIDirector:
         target_duration: float = 60.0
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
-        Trích xuất phân đoạn Viral Shorts (30s - 60s):
-        - Giữ câu Hook mở đầu (10s đầu).
-        - Chọn cụm nội dung có mật độ nói cao trào và mạch lạc nhất đạt đủ thời lượng mục tiêu.
+        Viral Shorts: Hook mạnh nhất + ý chính điểm cao + câu chốt (Payoff), giữ thứ tự thời gian.
         """
-        if not subtitles:
-            return [], []
-
-        total_available_duration = subtitles[-1]["end"] - subtitles[0]["start"]
-        if total_available_duration <= target_duration:
-            return subtitles, []
-
-        selected = []
-        current_dur = 0.0
-        markers = []
-
-        # 1. Giữ câu Hook mở đầu (tối đa 15s)
-        hook_subs = []
-        for sub in subtitles:
-            dur = sub["end"] - sub["start"]
-            if current_dur + dur <= min(15.0, target_duration * 0.3):
-                hook_subs.append(sub)
-                current_dur += dur
-            else:
-                break
-        selected.extend(hook_subs)
-
-        if hook_subs:
-            markers.append({
-                "time": hook_subs[0]["start"],
-                "duration": current_dur,
-                "name": "🔥 Viral Hook",
-                "note": "Phần mở đầu thu hút người xem của video ngắn",
-                "color": "Green"
-            })
-
-        # 2. Tìm khối nội dung tiếp theo tốt nhất (giữa hoặc cuối) để lấp đầy target_duration
-        remaining_subs = subtitles[len(hook_subs):]
-        for sub in remaining_subs:
-            dur = sub["end"] - sub["start"]
-            if current_dur + dur <= target_duration:
-                selected.append(sub)
-                current_dur += dur
-            else:
-                break
-
+        selected, markers, roles = story_planner.plan_viral(subtitles, target_duration)
+        self.last_roles = roles
         return selected, markers
 
     def _extract_summary_segments(
@@ -537,33 +582,8 @@ class AIDirector:
         target_duration: float = 180.0
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
-        Trích xuất tóm tắt nội dung chính (Podcast / Presentation Summary).
+        Podcast / Presentation Summary theo cấu trúc 3 hồi (mở - thân - kết).
         """
-        if not subtitles:
-            return [], []
-
-        total_available = subtitles[-1]["end"] - subtitles[0]["start"]
-        if total_available <= target_duration:
-            return subtitles, []
-
-        # Lấy mẫu phân bố đều các ý mở đầu, thân bài và kết bài
-        step = max(1, len(subtitles) // int(target_duration / 5.0))
-        selected = []
-        current_dur = 0.0
-
-        for i in range(0, len(subtitles), step):
-            sub = subtitles[i]
-            dur = sub["end"] - sub["start"]
-            if current_dur + dur <= target_duration:
-                selected.append(sub)
-                current_dur += dur
-
-        markers = [{
-            "time": selected[0]["start"] if selected else 0.0,
-            "duration": current_dur,
-            "name": "📊 AI Summary",
-            "note": "Bản tóm tắt ý chính được chọn lọc bởi AI Director",
-            "color": "Blue"
-        }]
-
+        selected, markers, roles = story_planner.plan_summary(subtitles, target_duration)
+        self.last_roles = roles
         return selected, markers

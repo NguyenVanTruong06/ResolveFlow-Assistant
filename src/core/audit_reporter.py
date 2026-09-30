@@ -28,6 +28,30 @@ class HookTeaserItemAudit(BaseModel):
     score: float
     hook_text: str = ""
 
+class ThumbnailItemAudit(BaseModel):
+    """
+    Thông tin khung hình vàng trích xuất làm Thumbnail.
+    """
+    index: int
+    clip_name: str
+    timestamp_sec: float
+    timecode: str
+    overall_score: float
+    sharpness_score: float
+    file_path: str
+
+class AudioNormalizationAudit(BaseModel):
+    """
+    Thông tin kiểm toán chuẩn hóa âm lượng EBU R128 / YouTube Loudnorm.
+    """
+    clip_name: str
+    input_i: float
+    input_tp: float
+    output_i: float
+    output_tp: float
+    preset_name: str
+    gain_adjustment_db: float
+
 class ClipAuditRecord(BaseModel):
     """
     Hồ sơ kiểm toán chi tiết cho từng video nguồn.
@@ -74,6 +98,8 @@ class ExecutionAuditReporter:
         self.project_name = project_name
         self.clip_records: List[ClipAuditRecord] = []
         self.teaser_items: List[HookTeaserItemAudit] = []
+        self.thumbnail_items: List[ThumbnailItemAudit] = []
+        self.audio_normalizations: List[AudioNormalizationAudit] = []
         self.output_files: List[OutputFileManifest] = []
         self.timelines: List[TimelineManifest] = []
         self.fps: float = 30.0
@@ -201,6 +227,58 @@ class ExecutionAuditReporter:
         )
         self.teaser_items.append(item)
 
+    def record_thumbnail(
+        self,
+        index: int,
+        clip_name: str,
+        timestamp_sec: float,
+        timecode: str,
+        overall_score: float,
+        sharpness_score: float,
+        file_path: str
+    ):
+        """
+        Ghi nhận một khung hình Thumbnail đã trích xuất.
+        """
+        self.thumbnail_items.append(ThumbnailItemAudit(
+            index=index,
+            clip_name=clip_name,
+            timestamp_sec=round(timestamp_sec, 3),
+            timecode=timecode,
+            overall_score=round(overall_score, 2),
+            sharpness_score=round(sharpness_score, 2),
+            file_path=os.path.abspath(file_path) if os.path.exists(file_path) else file_path
+        ))
+        # Đồng thời ghi nhận vào danh sách file đầu ra
+        self.add_output_file(
+            category="🖼 Thumbnail",
+            file_path=file_path,
+            description=f"Khung hình vàng #{index} ({timecode}, Điểm chất lượng: {overall_score:.1f})"
+        )
+
+    def record_audio_normalization(
+        self,
+        clip_name: str,
+        input_i: float,
+        input_tp: float,
+        output_i: float,
+        output_tp: float,
+        preset_name: str = "youtube_tiktok"
+    ):
+        """
+        Ghi nhận kết quả chuẩn hóa âm lượng giọng nói (Loudness Normalization).
+        """
+        gain_diff = output_i - input_i
+        self.audio_normalizations.append(AudioNormalizationAudit(
+            clip_name=clip_name,
+            input_i=round(input_i, 1),
+            input_tp=round(input_tp, 1),
+            output_i=round(output_i, 1),
+            output_tp=round(output_tp, 1),
+            preset_name=preset_name,
+            gain_adjustment_db=round(gain_diff, 1)
+        ))
+
     def add_output_file(self, category: str, file_path: str, description: str):
         """
         Ghi nhận tệp đầu ra đã tạo.
@@ -272,8 +350,20 @@ class ExecutionAuditReporter:
             for ti in self.teaser_items:
                 lines.append(f"   {ti.order:02d}. {ti.clip_name} ➔ Cắt từ {ti.timecode_range} [{ti.reason}]")
 
-        # 4. Danh mục Tệp Đầu Ra & Timeline
-        lines.append("\n📁 [4. DANH MỤC TỆP ĐẦU RA & TIMELINE RESOLVE]")
+        # 4. Thống kê Khung hình Thumbnail (nếu có)
+        if self.thumbnail_items:
+            lines.append("\n🖼 [4. KHUNG HÌNH VÀNG ĐỀ XUẤT LÀM THUMBNAIL]")
+            for th in self.thumbnail_items:
+                lines.append(f"   Thumb #{th.index:02d} ({th.clip_name}): Mốc {th.timecode} | Điểm chất lượng: {th.overall_score:.1f} (Độ nét: {th.sharpness_score:.1f})")
+
+        # 5. Thống kê Chuẩn hóa Âm lượng (nếu có)
+        if self.audio_normalizations:
+            lines.append("\n🔊 [5. CHUẨN HÓA ÂM LƯỢNG (EBU R128 / LOUDNORM)]")
+            for an in self.audio_normalizations:
+                lines.append(f"   🎬 {an.clip_name}: {an.input_i:.1f} LUFS (TP: {an.input_tp:.1f}dB) ➔ {an.output_i:.1f} LUFS (Bù Gain: {an.gain_adjustment_db:+.1f}dB) [{an.preset_name}]")
+
+        # 6. Danh mục Tệp Đầu Ra & Timeline
+        lines.append("\n📁 [6. DANH MỤC TỆP ĐẦU RA & TIMELINE RESOLVE]")
         if self.timelines:
             for tl in self.timelines:
                 lines.append(f" 🎬 Timeline: {tl.timeline_name} ({tl.description})")
@@ -375,10 +465,41 @@ class ExecutionAuditReporter:
             lines.append(f"| `{cr.clip_name}` | {cr.raw_sentences_count} | {cr.raw_words_count} | **{cr.subtitle_lines_count}** | {mode_lbl} | `{cr.split_limit}` |")
         lines.append("")
 
-        # 5. Danh mục Tệp & Timeline DaVinci Resolve
+        # 5. Khung hình Thumbnail
+        if self.thumbnail_items:
+            lines.append("---")
+            lines.append("")
+            lines.append("## 5. 🖼 Khung Hình Vàng Đề Xuất Làm Thumbnail")
+            lines.append("")
+            lines.append("| Khung hình | Video nguồn | Mốc thời gian | Timecode | Độ nét (Laplacian) | Điểm tổng hợp | Tệp ảnh |")
+            lines.append("| :---: | :--- | :---: | :---: | :---: | :---: | :--- |")
+            for th in self.thumbnail_items:
+                thumb_file = os.path.basename(th.file_path)
+                lines.append(f"| **Thumb #{th.index:02d}** | `{th.clip_name}` | `{th.timestamp_sec:.2f}s` | `{th.timecode}` | `{th.sharpness_score:.1f}` | **`{th.overall_score:.1f}`** | `{thumb_file}` |")
+            lines.append("")
+
+        # 6. Chuẩn hóa Âm lượng (Loudness Normalization)
+        if self.audio_normalizations:
+            sec_aud = "6" if self.thumbnail_items else "5"
+            lines.append("---")
+            lines.append("")
+            lines.append(f"## {sec_aud}. 🔊 Chuẩn Hóa Âm Lượng Giọng Nói (EBU R128 Loudness Normalization)")
+            lines.append("")
+            lines.append("| Clip | Độ to gốc (Input I) | Đỉnh thực gốc (Input TP) | Mục tiêu (Target I) | Bù Gain (Adjustment) | Preset |")
+            lines.append("| :--- | :---: | :---: | :---: | :---: | :--- |")
+            for an in self.audio_normalizations:
+                lines.append(f"| `{an.clip_name}` | `{an.input_i:.1f} LUFS` | `{an.input_tp:.1f} dBFS` | **`{an.output_i:.1f} LUFS`** | `{an.gain_adjustment_db:+.1f} dB` | `{an.preset_name}` |")
+            lines.append("")
+
+        # Danh mục Tệp & Timeline DaVinci Resolve
         lines.append("---")
         lines.append("")
-        lines.append("## 5. 📁 Danh mục Tệp Đầu Ra & Timeline DaVinci Resolve")
+        sec_num = 5
+        if self.thumbnail_items:
+            sec_num += 1
+        if self.audio_normalizations:
+            sec_num += 1
+        lines.append(f"## {sec_num}. 📁 Danh mục Tệp Đầu Ra & Timeline DaVinci Resolve")
         lines.append("")
         if self.timelines:
             lines.append("### 🎬 Timeline trên DaVinci Resolve:")

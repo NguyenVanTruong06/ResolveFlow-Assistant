@@ -80,7 +80,15 @@ class LLMSemanticSelector:
 
         # Parse response: nếu JSON không parse được -> raise LLMSelectionError
         try:
-            data = json.loads(response_text)
+            clean_resp = response_text.strip()
+            if clean_resp.startswith("```"):
+                lines = clean_resp.splitlines()
+                if lines and lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip().startswith("```"):
+                    lines = lines[:-1]
+                clean_resp = "\n".join(lines).strip()
+            data = json.loads(clean_resp)
         except json.JSONDecodeError as e:
             raise LLMSelectionError(f"Không thể parse JSON từ LLM: {str(e)}")
             
@@ -149,6 +157,27 @@ Input transcript:
 {transcript_json}
 """
         return system_prompt
+
+    def complete_json(self, prompt: str) -> Dict[str, Any]:
+        """Gửi prompt tự do và trả về dict JSON đã parse. Lỗi gọi/parse -> LLMSelectionError."""
+        if not self.api_key and self.provider != "ollama":
+            raise LLMSelectionError("API Key is not provided.")
+        try:
+            text = self._call_api(prompt).strip()
+        except Exception as e:
+            raise LLMSelectionError(f"Lỗi khi gọi API {self.provider}: {str(e)}")
+        if text.startswith("```"):
+            lines = text.splitlines()[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise LLMSelectionError(f"Không thể parse JSON từ LLM: {str(e)}")
+        if not isinstance(data, dict):
+            raise LLMSelectionError("Kết quả LLM không phải là dict.")
+        return data
 
     def _call_api(self, prompt: str) -> str:
         if self.provider == "gemini":

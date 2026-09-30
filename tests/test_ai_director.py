@@ -113,3 +113,39 @@ def test_ai_director_fallback_to_heuristic(mock_select_segments):
         total_duration=10.0
     )
     assert result["stats"]["selection_method"] == "heuristic"
+
+
+def test_detect_repeated_phrases_keeps_last_take():
+    subs = [
+        {"start": 0.0, "end": 4.0, "text": "Bước đầu tiên là chọn đúng độ phân giải cho video"},
+        {"start": 5.0, "end": 8.0, "text": "Ví dụ như video dọc thì dùng chín trên mười sáu"},
+        {"start": 12.0, "end": 16.0, "text": "Bước đầu tiên là chọn đúng độ phân giải cho video."},
+        {"start": 17.0, "end": 19.0, "text": "Đúng rồi"},
+        {"start": 20.0, "end": 21.0, "text": "Đúng rồi"},
+    ]
+    assert BadTakeDetector.detect_repeated_phrases(subs) == [0]  # câu ngắn lặp không bị coi là lặp
+    assert BadTakeDetector.detect_repeated_phrases(subs, window_seconds=5.0) == []  # ngoài cửa sổ
+
+
+def test_director_flags_repeats_and_can_disable():
+    subs = [
+        {"start": 0.0, "end": 4.0, "text": "Bước đầu tiên là chọn đúng độ phân giải cho video"},
+        {"start": 6.0, "end": 9.0, "text": "Ví dụ như video dọc thì dùng chín trên mười sáu"},
+        {"start": 12.0, "end": 16.0, "text": "Bước đầu tiên là chọn đúng độ phân giải cho video."},
+    ]
+    on = AIDirector(AIDirectorConfig(mode="clean_talk", remove_bad_takes=False)).generate_proposed_segments(subs)
+    assert on[0].decision == "cut" and "lặp" in on[0].reason and on[2].decision == "keep"
+    off = AIDirector(AIDirectorConfig(mode="clean_talk", remove_bad_takes=False,
+                                      remove_repeated_phrases=False)).generate_proposed_segments(subs)
+    assert all(p.decision == "keep" for p in off)
+
+
+def test_sparse_long_span_is_not_auto_cut():
+    # 3 từ trải trên 46s: timestamp Whisper bị kéo giãn, không được tự động coi là nói vấp
+    subs = [
+        {"start": 1510.5, "end": 1556.8, "text": "Một con cà mượn"},
+        {"start": 1557.4, "end": 1563.3, "text": "Một con cà mượn"},
+    ]
+    assert BadTakeDetector.detect_bad_takes(subs) == []
+    normal = [{"start": 0.0, "end": 2.0, "text": "Một con cà mượn"}, {"start": 2.5, "end": 4.5, "text": "Một con cà mượn"}]
+    assert BadTakeDetector.detect_bad_takes(normal) == [0]

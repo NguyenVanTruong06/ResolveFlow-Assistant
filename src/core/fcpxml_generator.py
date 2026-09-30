@@ -358,8 +358,9 @@ class FCPXMLGenerator:
             dur_ms = int(total_dur_sec * 1000)
             has_audio_val = "1" if meta.get("has_audio", True) else "0"
 
+            escaped_file_url = html.escape(file_url)
             resources_xml.append(
-                f"""    <asset id="{asset_id}" name="{clip_name}" src="{file_url}" start="0s" duration="{dur_ms}/1000s" hasVideo="1" format="r_fmt" hasAudio="{has_audio_val}">
+                f"""    <asset id="{asset_id}" name="{clip_name}" src="{escaped_file_url}" start="0s" duration="{dur_ms}/1000s" hasVideo="1" format="r_fmt" hasAudio="{has_audio_val}">
       <metadata>
         <md key="com.apple.proapps.studio.reel" value="{reel_name}"/>
         <md key="com.apple.proapps.spotlight.kMDItemContentType" value="public.movie"/>
@@ -367,7 +368,53 @@ class FCPXMLGenerator:
     </asset>"""
             )
 
-        # Nhóm các title phụ đề theo từng event clip trên timeline để neo (anchor) đúng chuẩn FCPXML v1.9
+        # ---- Lưới khung hình: mọi mốc offset/start/duration là bội số nguyên của 1 khung hình ----
+        # (làm tròn mili-giây từng clip gây khe hở/chồng lấn 1 khung và lệch hình-tiếng khi có hàng nghìn clip)
+        fd_num, fd_den = [int(x) for x in frame_dur_str.rstrip("s").split("/")]
+        real_fps = fd_den / fd_num
+
+        def fr(n_frames: int) -> str:
+            return "0s" if n_frames == 0 else f"{n_frames * fd_num}/{fd_den}s"
+
+        def to_f(sec: float) -> int:
+            return int(round(sec * real_fps))
+
+        # Kế hoạch từng clip: vị trí trên timeline được CỘNG DỒN từ thời lượng ĐẦU RA (đã tính tốc độ),
+        # nên các clip luôn nối liền nhau, không bao giờ chồng lấn, kể cả đoạn tua nhanh.
+        plan: List[Optional[Dict[str, Any]]] = []
+        cursor_f = 0
+        for ev in events:
+            max_file_dur = meta_map.get(ev["video_path"], {}).get("duration", 0.0)
+            src_out_sec = ev["src_out"]
+            if max_file_dur > 0:
+                # Giới hạn src_out không vượt quá thời lượng vật lý của tệp video để chống Media Offline ở đuôi clip
+                src_out_sec = min(src_out_sec, max_file_dur)
+            src_in_f = to_f(max(0.0, ev["src_in"]))
+            src_out_f = to_f(src_out_sec)
+            src_dur_f = src_out_f - src_in_f
+            if src_dur_f < 1:
+                plan.append(None)
+                continue
+            speed = float(ev.get("speed", 1.0) or 1.0)
+            retimed = abs(speed - 1.0) > 1e-3
+            out_dur_f = max(1, int(round(src_dur_f / speed)))
+            plan.append({"src_in_f": src_in_f, "src_out_f": src_out_f, "src_dur_f": src_dur_f,
+                         "out_dur_f": out_dur_f, "offset_f": cursor_f, "retimed": retimed})
+            cursor_f += out_dur_f
+
+        # Nhóm các title phụ đề theo từng event clip trên timeline để neo (anchor) đúng chuẩn FCPXML v1.9.
+        # Clip tua nhanh không gắn title (không có lời thoại đáng kể, và mốc neo trong clip retime dễ sai).
+        def anchored_title(ev_idx: int, ev: Dict[str, Any], ov_start: float, ov_end: float) -> Optional[tuple]:
+            pl = plan[ev_idx]
+            if pl is None or pl["retimed"]:
+                return None
+            offset_f = pl["src_in_f"] + to_f(ov_start - ev["rec_in"])
+            dur_f = max(1, to_f(ov_end - ov_start))
+            dur_f = min(dur_f, pl["src_out_f"] - offset_f)
+            if dur_f < 1 or offset_f < pl["src_in_f"]:
+                return None
+            return fr(offset_f), fr(dur_f)
+
         clip_titles_map = {ev_idx: [] for ev_idx in range(len(events))}
         if subtitles and events:
             for idx, sub in enumerate(subtitles):
@@ -379,21 +426,16 @@ class FCPXMLGenerator:
                 if not words or style["animation"] == "static":
                     if card_end <= card_start:
                         continue
-                    
-                    # Neo title vào các clip tương ứng trên timeline
+
                     for ev_idx, ev in enumerate(events):
                         ov_start = max(card_start, ev["rec_in"])
                         ov_end = min(card_end, ev["rec_out"])
                         if ov_end > ov_start:
-                            src_offset = ev["src_in"] + (ov_start - ev["rec_in"])
-                            dur = ov_end - ov_start
-                            offset_ms = int(round(src_offset * 1000))
-                            dur_ms = int(round(dur * 1000))
-                            if dur_ms <= 0:
+                            at = anchored_title(ev_idx, ev, ov_start, ov_end)
+                            if not at:
                                 continue
-                            
                             title_xml = f"""
-                <title ref="r2" offset="{offset_ms}/1000s" duration="{dur_ms}/1000s" start="0s" role="Video" lane="1">
+                <title ref="r2" offset="{at[0]}" duration="{at[1]}" start="0s" role="Video" lane="1">
                   <text>
                     <text-style ref="ts_normal">{html.escape(card_text)}</text-style>
                   </text>
@@ -409,18 +451,14 @@ class FCPXMLGenerator:
                         if w_end <= w_start:
                             continue
 
-                        # Neo word vào các clip tương ứng trên timeline
                         for ev_idx, ev in enumerate(events):
                             ov_start = max(w_start, ev["rec_in"])
                             ov_end = min(w_end, ev["rec_out"])
                             if ov_end > ov_start:
-                                src_offset = ev["src_in"] + (ov_start - ev["rec_in"])
-                                dur = ov_end - ov_start
-                                offset_ms = int(round(src_offset * 1000))
-                                dur_ms = int(round(dur * 1000))
-                                if dur_ms <= 0:
+                                at = anchored_title(ev_idx, ev, ov_start, ov_end)
+                                if not at:
                                     continue
-                                
+
                                 word_text_xml = []
                                 for i_idx, iw in enumerate(words):
                                     is_active = (i_idx == w_idx)
@@ -431,7 +469,7 @@ class FCPXMLGenerator:
                                 full_word_text = " ".join(word_text_xml)
 
                                 word_title_xml = f"""
-                <title ref="r2" offset="{offset_ms}/1000s" duration="{dur_ms}/1000s" start="0s" role="Video" lane="1">
+                <title ref="r2" offset="{at[0]}" duration="{at[1]}" start="0s" role="Video" lane="1">
                   <text>{full_word_text}</text>
                   <text-style-def id="ts_highlight">
                     <text-style font="{f_name}" fontSize="{hl_size}" fontColor="{hl_col}"{stroke_attrs} alignment="center" bold="{bold_val}"/>
@@ -444,35 +482,31 @@ class FCPXMLGenerator:
 
         spine_elements = []
         for ev_idx, ev in enumerate(events):
+            pl = plan[ev_idx]
+            if pl is None:
+                continue
             v_path = ev["video_path"]
             asset_id = asset_map[v_path]
             clip_name = html.escape(os.path.basename(v_path))
             reel_name = html.escape(os.path.splitext(os.path.basename(v_path))[0])
-            
-            meta_file = meta_map.get(v_path, {})
-            max_file_dur = meta_file.get("duration", 0.0)
-            
-            src_in_sec = max(0.0, ev["src_in"])
-            src_out_sec = ev["src_out"]
-            if max_file_dur > 0:
-                # Giới hạn src_out không vượt quá thời lượng vật lý của tệp video để chống Media Offline ở đuôi clip
-                src_out_sec = min(src_out_sec, max_file_dur)
-            duration_sec = max(0.0, src_out_sec - src_in_sec)
-            
-            if duration_sec <= 0.03:
-                continue
-
-            offset_ms = int(ev["rec_in"] * 1000)
-            src_start_ms = int(src_in_sec * 1000)
-            dur_ms = int(duration_sec * 1000)
 
             inner_titles = "".join(clip_titles_map.get(ev_idx, []))
 
+            # Đoạn tua nhanh: timeMap ánh xạ thời gian ĐẦU RA (0 -> out_dur) sang thời gian NGUỒN (0 -> src_dur)
+            time_map = ""
+            if pl["retimed"]:
+                time_map = (
+                    f'\n              <timeMap>'
+                    f'<timept time="0s" value="0s" interp="linear"/>'
+                    f'<timept time="{fr(pl["out_dur_f"])}" value="{fr(pl["src_dur_f"])}" interp="linear"/>'
+                    f'</timeMap>'
+                )
+
             clip_xml = f"""
-            <asset-clip name="{clip_name}" ref="{asset_id}" offset="{offset_ms}/1000s" start="{src_start_ms}/1000s" duration="{dur_ms}/1000s" format="r_fmt" audioRole="dialogue">
+            <asset-clip name="{clip_name}" ref="{asset_id}" offset="{fr(pl["offset_f"])}" start="{fr(pl["src_in_f"])}" duration="{fr(pl["out_dur_f"])}" format="r_fmt" audioRole="dialogue">
               <metadata>
                 <md key="com.apple.proapps.studio.reel" value="{reel_name}"/>
-              </metadata>{inner_titles}
+              </metadata>{time_map}{inner_titles}
             </asset-clip>"""
             spine_elements.append(clip_xml)
 

@@ -93,3 +93,71 @@ def test_audit_reporter_teaser_and_manifest(tmp_path):
     assert "Báo cáo Trích xuất Intro Vlog Teaser" in md_content
     assert "Wow nhìn này" in md_content
     assert "Vlog_DaLat_AI_Visual_Cut" in md_content
+
+def test_audit_reporter_thumbnail(tmp_path):
+    reporter = ExecutionAuditReporter(project_name="Vlog_DaLat_Thumb")
+
+    dummy_thumb = os.path.join(tmp_path, "thumb_01.png")
+    with open(dummy_thumb, "w") as f:
+        f.write("image_data")
+
+    reporter.record_thumbnail(
+        index=1,
+        clip_name="vlog_cam1.mp4",
+        timestamp_sec=5.25,
+        timecode="00:00:05:07",
+        overall_score=88.5,
+        sharpness_score=110.2,
+        file_path=dummy_thumb
+    )
+
+    assert len(reporter.thumbnail_items) == 1
+    assert reporter.thumbnail_items[0].timecode == "00:00:05:07"
+
+    summary = reporter.generate_console_summary()
+    assert "KHUNG HÌNH VÀNG ĐỀ XUẤT LÀM THUMBNAIL" in summary
+    assert "Thumb #01" in summary
+
+    report_md_path = os.path.join(tmp_path, "report_with_thumb.md")
+    reporter.export_markdown_report(report_md_path)
+    with open(report_md_path, "r", encoding="utf-8") as f:
+        md_text = f.read()
+    assert "Khung Hình Vàng Đề Xuất Làm Thumbnail" in md_text
+    assert "Thumb #01" in md_text
+
+def test_audit_reporter_audio_normalization(tmp_path):
+    reporter = ExecutionAuditReporter(project_name="Vlog_DaLat_AudioNorm")
+
+    reporter.record_audio_normalization(
+        clip_name="voiceover_raw.wav",
+        input_i=-24.5,
+        input_tp=-4.2,
+        output_i=-14.0,
+        output_tp=-1.0,
+        preset_name="youtube_tiktok"
+    )
+
+    assert len(reporter.audio_normalizations) == 1
+    item = reporter.audio_normalizations[0]
+    assert item.clip_name == "voiceover_raw.wav"
+    assert item.gain_adjustment_db == 10.5
+    assert item.output_i == -14.0
+
+    # Console summary
+    summary = reporter.generate_console_summary()
+    assert "CHUẨN HÓA ÂM LƯỢNG (EBU R128 / LOUDNORM)" in summary
+    assert "voiceover_raw.wav" in summary
+    assert "-24.5 LUFS" in summary
+    assert "-14.0 LUFS" in summary
+
+    # Markdown export
+    report_md_path = os.path.join(tmp_path, "report_audio.md")
+    reporter.export_markdown_report(report_md_path)
+    with open(report_md_path, "r", encoding="utf-8") as f:
+        md_content = f.read()
+
+    assert "Chuẩn Hóa Âm Lượng Giọng Nói" in md_content
+    assert "voiceover_raw.wav" in md_content
+    assert "-14.0 LUFS" in md_content
+
+

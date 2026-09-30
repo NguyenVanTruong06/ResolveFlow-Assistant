@@ -291,3 +291,18 @@ def test_resolve_media_pool_operations(tmp_path):
     mock_pool.ImportMedia.assert_called_once()
     assert any("Đã tự động nạp" in l for l in logs)
 
+
+
+def test_connect_reports_readable_error_when_scripting_refused(monkeypatch):
+    import sys
+    import types
+    from src.core.resolve_api import ResolveAutomation
+    fake = types.ModuleType("DaVinciResolveScript")
+
+    def boom(_name):
+        raise SystemError("initialization of fusionscript failed without raising an exception")
+    fake.scriptapp = boom
+    monkeypatch.setitem(sys.modules, "DaVinciResolveScript", fake)
+    r = ResolveAutomation()
+    assert r.connect() is False
+    assert "External scripting" in r.last_connect_error and "Free" in r.last_connect_error

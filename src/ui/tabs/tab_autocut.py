@@ -19,6 +19,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal as pyqtSignal
 from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS, MODULE_DESCRIPTIONS
 from src.ui.widgets.section_card import SectionCard
+from src.ui.widgets.mini_timeline import MiniTimelineWidget
+from src.core.story_planner import PACING_PRESETS, DEFAULT_PACING
+from src.core.story_arranger import INTENTS
+from src.core.edit_policy import VIDEO_TYPES, POLICIES
 
 class TabAutoCut(QWidget):
     """
@@ -119,7 +123,80 @@ class TabAutoCut(QWidget):
         self.slide_master_intensity.setValue(2)
         form_master.addWidget(self.lbl_master_intensity)
         form_master.addWidget(self.slide_master_intensity)
+
+        lbl_type = QLabel("Kiểu video (quyết định cách cắt khoảng lặng và tua):")
+        lbl_type.setStyleSheet(f"color: {ThemeColors.TEXT_SECONDARY}; font-size: 11px; margin-top: 4px;")
+        self.combo_video_type = QComboBox()
+        for key, label in VIDEO_TYPES.items():
+            self.combo_video_type.addItem(label, key)
+        self.combo_video_type.setToolTip(
+            "Tự nhận diện: app đo lời thoại và chuyển động hình ảnh để chọn luật phù hợp.\n" +
+            "\n".join(f"• {p.label}: {p.summary}" for p in POLICIES.values())
+        )
+        form_master.addWidget(lbl_type)
+        form_master.addWidget(self.combo_video_type)
+
+        lbl_pacing = QLabel("Nhịp dựng (độ dài shot, tần suất đổi khung hình):")
+        lbl_pacing.setStyleSheet(f"color: {ThemeColors.TEXT_SECONDARY}; font-size: 11px; margin-top: 4px;")
+        self.combo_pacing = QComboBox()
+        for key, preset in PACING_PRESETS.items():
+            self.combo_pacing.addItem(preset["label"], key)
+        self.combo_pacing.setCurrentIndex(self.combo_pacing.findData(DEFAULT_PACING))
+        self.combo_pacing.setToolTip(
+            "Thong thả: giữ nhịp tự nhiên, ít zoom. Cân bằng: chuẩn YouTube. "
+            "Nhanh: đổi khung hình thường xuyên kiểu TikTok/Shorts."
+        )
+        form_master.addWidget(lbl_pacing)
+        form_master.addWidget(self.combo_pacing)
         panel.addWidget(self.group_master)
+
+        # 3.4 STORY ARRANGER (SẮP XẾP CÓ Ý ĐỒ)
+        self.group_story = SectionCard("🧭 SẮP XẾP CÓ Ý ĐỒ (AI STORY ARRANGER)", accent_color=ThemeColors.WARNING)
+        self.group_story.setObjectName("group_story")
+        form_story = QFormLayout()
+        self.group_story.set_body_layout(form_story)
+        desc_story = QLabel(
+            "AI chia timeline thành các khối ý, gắn vai trò (Hook / Mở đầu / Diễn biến / Cao trào / Kết) rồi sắp xếp "
+            "theo ý đồ. Timeline theo thứ tự gốc vẫn được giữ; bản đã sắp xếp nằm ở một timeline riêng (_SapXep) để bạn so sánh."
+        )
+        desc_story.setWordWrap(True)
+        desc_story.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 2px;")
+        form_story.addRow(desc_story)
+
+        self.combo_story_intent = QComboBox()
+        for key, label in INTENTS.items():
+            self.combo_story_intent.addItem(label, key)
+        form_story.addRow("Ý đồ:", self.combo_story_intent)
+
+        self.combo_story_target = QComboBox()
+        for secs in (30, 45, 60, 90):
+            self.combo_story_target.addItem(f"{secs} giây", float(secs))
+        self.combo_story_target.setCurrentIndex(2)
+        self.combo_story_target.setToolTip("Chỉ dùng cho ý đồ Shorts: tổng thời lượng video ngắn mong muốn.")
+        form_story.addRow("Thời lượng Shorts:", self.combo_story_target)
+
+        self.txt_api_key = QLineEdit()
+        self.txt_api_key.setEchoMode(QLineEdit.Password)
+        self.txt_api_key.setPlaceholderText("Tùy chọn: API Key Gemini để AI hiểu nội dung sâu hơn")
+        self.txt_api_key.setToolTip(
+            "Nếu nhập, AI dùng Gemini để gán vai trò cho từng khối và chọn đoạn cho Shorts/Podcast Summary. "
+            "Để trống: dùng thuật toán chấm điểm cục bộ (không gửi dữ liệu ra ngoài). Khóa không được lưu vào Recipe."
+        )
+        form_story.addRow("API Key (tùy chọn):", self.txt_api_key)
+        panel.addWidget(self.group_story)
+
+        # 3.5 MINI TIMELINE PREVIEW WIDGET
+        self.group_timeline = SectionCard("⏱ XEM TRƯỚC TIMELINE THU NHỎ (MINI TIMELINE PREVIEW)", accent_color=ThemeColors.PRIMARY_HOVER)
+        self.group_timeline.setObjectName("group_timeline")
+        vbox_timeline = QVBoxLayout()
+        self.group_timeline.set_body_layout(vbox_timeline)
+        desc_timeline = QLabel("Hiển thị trực quan các phân đoạn thoại, khoảng lặng cắt bỏ và mốc Teaser/Subtitles.")
+        desc_timeline.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 2px;")
+        vbox_timeline.addWidget(desc_timeline)
+
+        self.mini_timeline = MiniTimelineWidget()
+        vbox_timeline.addWidget(self.mini_timeline)
+        panel.addWidget(self.group_timeline)
 
         # Toggle Advanced Button
         self.btn_toggle_advanced = QPushButton("⚙ Tùy chỉnh nâng cao (Chi tiết Module) ▾")
@@ -151,6 +228,14 @@ class TabAutoCut(QWidget):
         self.check_cache = QCheckBox("⚡ Bật Scan Cache (Bỏ qua transcribe nếu file không đổi)")
         self.check_cache.setChecked(True)
         form_ai.addRow(self.check_cache)
+
+        self.check_fill_gaps = QCheckBox("🔍 Quét bổ sung vùng Whisper bỏ sót (chậm hơn, cho video ồn/dài)")
+        self.check_fill_gaps.setChecked(False)
+        self.check_fill_gaps.setToolTip(
+            "Sau lần nhận dạng đầu, tìm các quãng dài có âm thanh lớn mà không ra chữ và nhận dạng lại riêng "
+            "từng quãng. Mất thêm thời gian; nên dùng khi phụ đề bị thiếu cả đoạn dài."
+        )
+        form_ai.addRow(self.check_fill_gaps)
         adv_layout.addWidget(self.group_ai)
 
         # Group 2: AI Director & Semantic Cutting
@@ -172,6 +257,11 @@ class TabAutoCut(QWidget):
         self.check_bad_takes.setChecked(True)
         form_director.addRow(self.check_bad_takes)
 
+        self.check_repeats = QCheckBox("Loại câu nói lặp lại (chỉ giữ lần nói cuối)")
+        self.check_repeats.setChecked(True)
+        self.check_repeats.setToolTip("Nếu bạn nói lại cùng một ý sau vài câu, chỉ giữ lần nói cuối. Câu bị loại hiện trong bảng duyệt để bạn đổi lại.")
+        form_director.addRow(self.check_repeats)
+
         self.check_punch_in = QCheckBox("Hiệu ứng Auto Punch-in (Zoom luân phiên)")
         self.check_punch_in.setChecked(True)
         form_director.addRow(self.check_punch_in)
@@ -188,7 +278,7 @@ class TabAutoCut(QWidget):
         desc_vlog.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px; margin-bottom: 4px;")
         form_vlog_hook.addRow(desc_vlog)
 
-        self.check_vlog_hook = QCheckBox("Tự động tạo Teaser/Hook mở đầu (10-30s)")
+        self.check_vlog_hook = QCheckBox("Tự động tạo Teaser: đọc toàn clip, ghép nhiều khoảnh khắc hay nhất")
         self.check_vlog_hook.setChecked(False)
         form_vlog_hook.addRow(self.check_vlog_hook)
 
@@ -198,7 +288,17 @@ class TabAutoCut(QWidget):
         self.combo_hook_dur.addItem("2.5s / clip (Đủ trọn vẹn câu thoại)", 2.5)
         self.combo_hook_dur.addItem("3.0s / clip (Trích đoạn mở rộng)", 3.0)
         self.combo_hook_dur.setCurrentIndex(1)
-        form_vlog_hook.addRow("Thời lượng mỗi clip:", self.combo_hook_dur)
+        form_vlog_hook.addRow("Độ dài mỗi khoảnh khắc:", self.combo_hook_dur)
+
+        self.combo_hook_total = QComboBox()
+        for secs in (10, 15, 20, 30):
+            self.combo_hook_total.addItem(f"{secs} giây", float(secs))
+        self.combo_hook_total.setCurrentIndex(2)
+        self.combo_hook_total.setToolTip(
+            "Tổng thời lượng teaser. App quét lời thoại hook, cao trào âm thanh và chuyển động hình ảnh "
+            "của toàn bộ clip (kể cả chỉ có 1 clip), rồi ghép các khoảnh khắc điểm cao nhất, trải đều nội dung."
+        )
+        form_vlog_hook.addRow("Tổng thời lượng Teaser:", self.combo_hook_total)
         adv_layout.addWidget(self.group_vlog_hook)
 
         # Group 4: Visual Reframing & Multi-Track Media
@@ -233,6 +333,14 @@ class TabAutoCut(QWidget):
         self.check_cut = QCheckBox("Kích hoạt xử lý khoảng lặng")
         self.check_cut.setChecked(True)
         form_cut.addRow(self.check_cut)
+
+        self.check_scene_guard = QCheckBox("🎞 Bảo vệ cảnh quay (Vlog-safe): không cắt khoảng lặng đang có chuyển động hình ảnh")
+        self.check_scene_guard.setChecked(True)
+        self.check_scene_guard.setToolTip(
+            "Khoảng lặng mà hình ảnh vẫn chuyển động (đi bộ, quay cảnh...) sẽ được GIỮ (ngắn) hoặc TUA NHANH (dài) "
+            "thay vì cắt, để cảnh không bị giật. Chỉ cắt khoảng lặng thật sự tĩnh. Cần đo thêm hình ảnh (khoảng 1-2 phút/giờ video)."
+        )
+        form_cut.addRow(self.check_scene_guard)
 
         self.check_speedup = QCheckBox("⚡ Tua nhanh khoảng lặng thay vì cắt bỏ (Auto Speed-Ramp 8x)")
         self.check_speedup.setChecked(False)

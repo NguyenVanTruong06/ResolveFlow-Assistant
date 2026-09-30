@@ -267,7 +267,10 @@ class SilenceDetector:
         - Các đoạn im lặng được gán hiệu ứng tua nhanh (speed = speed_multiplier).
         """
         # Đảm bảo dùng đúng cấu hình speedup
-        config_speedup = config.copy(update={"speed_up_silence": True, "silence_speed_multiplier": speed_multiplier})
+        if hasattr(config, "model_copy"):
+            config_speedup = config.model_copy(update={"speed_up_silence": True, "silence_speed_multiplier": speed_multiplier})
+        else:
+            config_speedup = config.copy(update={"speed_up_silence": True, "silence_speed_multiplier": speed_multiplier})
         segments = SilenceDetector.detect_silence_from_wav(wav_path, config_speedup)
         
         # Phòng hờ trường hợp bị patch trả về Tuple thay vì CutSegment trong unit tests cũ
@@ -585,6 +588,8 @@ class EDLGenerator:
 
             if ev.get("is_speedup") or ev.get("speed", 1.0) > 1.0:
                 speed_val = ev.get("speed", 8.0)
+                # Motion Effect chuẩn CMX3600: tốc độ tính bằng khung hình/giây (vd 8x ở 30fps = 240.0)
+                lines.append(f"M2   {reel_id} {fps * speed_val:05.1f}                {src_in_tc}")
                 lines.append(f"* COMMENT: SPEED_RAMP_{speed_val}X")
 
             # Event cho luồng Audio (Track 1 & Track 2 - Stereo)

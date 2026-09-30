@@ -297,6 +297,18 @@ class TabExport(QWidget):
         self.combo_lut.currentIndexChanged.connect(self._on_combo_lut_changed)
         form_c.addRow("Bộ màu đang chọn:", self.combo_lut)
 
+        self.combo_lut_scope = QComboBox()
+        self.combo_lut_scope.addItem("Toàn Timeline (nằm trên grade từng clip - khuyên dùng)", "timeline")
+        self.combo_lut_scope.addItem("Từng clip (node 1 của mỗi clip)", "clips")
+        form_c.addRow("Phạm vi áp dụng:", self.combo_lut_scope)
+
+        self.check_lut_skip_existing = QCheckBox("Bỏ qua nơi đã có LUT (giữ LUT bạn đã gắn, không chồng 2 LUT)")
+        self.check_lut_skip_existing.setChecked(True)
+        form_c.addRow(self.check_lut_skip_existing)
+
+        self.btn_scan_luts = QPushButton("🔍 Kiểm tra LUT đã gắn trong Timeline")
+        form_c.addRow(self.btn_scan_luts)
+
         h_lut_btns = QHBoxLayout()
         self.btn_apply_lut = QPushButton("✨ Áp Dụng Bộ Màu Này Vào Timeline DaVinci Resolve")
         self.btn_apply_lut.setStyleSheet(f"""

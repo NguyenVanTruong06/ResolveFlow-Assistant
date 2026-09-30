@@ -2,6 +2,7 @@ import gc
 import re
 import os
 from typing import Literal, Optional, List, Dict, Any, Callable
+from src.core import transcript_quality
 from pydantic import BaseModel, Field
 
 class ModelConfig(BaseModel):
@@ -20,6 +21,28 @@ class ModelConfig(BaseModel):
         default="float16",
         description="Định dạng số học để tối ưu hóa bộ nhớ: float16 (khuyên dùng cho GPU) hoặc float32"
     )
+
+def register_nvidia_dll_dirs() -> List[str]:
+    """
+    Đăng ký thư mục DLL của các gói pip nvidia-cublas-cu12 / nvidia-cudnn-cu12 (nếu có) để Windows tìm thấy
+    cuBLAS/cuDNN khi chạy Whisper bằng GPU mà không cần cài CUDA Toolkit. Trả về danh sách thư mục đã đăng ký.
+    """
+    added: List[str] = []
+    try:
+        import glob
+        import importlib.util
+        spec = importlib.util.find_spec("nvidia")
+        roots = list(spec.submodule_search_locations) if spec and spec.submodule_search_locations else []
+        for root in roots:
+            for bin_dir in glob.glob(os.path.join(root, "*", "bin")):
+                if hasattr(os, "add_dll_directory"):
+                    os.add_dll_directory(bin_dir)
+                os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+                added.append(bin_dir)
+    except Exception:
+        pass
+    return added
+
 
 def is_whisper_hallucination(text: str) -> bool:
     """
@@ -64,6 +87,8 @@ class ResolveTranscriber:
     def __init__(self, config: ModelConfig):
         self.config = config
         self.model = None
+        self.active_device = None
+        self.active_compute_type = None
 
     def is_model_cached(self) -> bool:
         """Kiểm tra xem mô hình Whisper đã được tải về máy trước đó chưa."""
@@ -89,21 +114,19 @@ class ResolveTranscriber:
 
         device = self.config.device
         compute_type = self.config.compute_type
+        if device == "cuda":
+            register_nvidia_dll_dirs()
 
-        # Tự động phát hiện CUDA của máy tính
+        # Tự động phát hiện CUDA của máy tính (dùng ctranslate2 - chính backend của faster-whisper,
+        # không yêu cầu cài PyTorch)
         if device == "cuda":
             try:
-                import torch
-                if not torch.cuda.is_available():
-                    msg = "⚠️ CUDA không khả dụng trên thiết bị. Tự động chuyển sang xử lý bằng CPU (float32)."
-                    if log_callback:
-                        log_callback(msg)
-                    else:
-                        print(f" Warn: {msg}")
-                    device = "cpu"
-                    compute_type = "float32"
-            except ImportError:
-                msg = "⚠️ Không tìm thấy PyTorch CUDA. Tự động chuyển sang CPU."
+                import ctranslate2
+                cuda_ok = ctranslate2.get_cuda_device_count() > 0
+            except Exception:
+                cuda_ok = False
+            if not cuda_ok:
+                msg = "⚠️ CUDA không khả dụng trên thiết bị. Tự động chuyển sang xử lý bằng CPU (float32)."
                 if log_callback:
                     log_callback(msg)
                 else:
@@ -128,6 +151,22 @@ class ResolveTranscriber:
             compute_type=compute_type
         )
 
+        # Thiếu thư viện CUDA (cuBLAS/cuDNN) chỉ lộ ra ở lần suy luận đầu tiên, nên chạy thử 1 lần ngay tại đây
+        if device == "cuda":
+            try:
+                import numpy as np
+                list(self.model.transcribe(np.zeros(16000, dtype=np.float32), language="en")[0])
+            except Exception as e:
+                msg = f"⚠️ GPU CUDA không chạy được ({str(e).splitlines()[0][:120]}). Chuyển sang CPU (int8)."
+                if log_callback:
+                    log_callback(msg)
+                else:
+                    print(f" Warn: {msg}")
+                device, compute_type = "cpu", "int8"
+                self.model = WhisperModel(self.config.model_size, device=device, compute_type=compute_type)
+        self.active_device = device
+        self.active_compute_type = compute_type
+
         if log_callback:
             log_callback(f"✔ Đã nạp thành công mô hình Whisper AI '{self.config.model_size}'.")
 
@@ -136,10 +175,12 @@ class ResolveTranscriber:
         audio_path: str,
         language: Optional[str] = None,
         is_cancelled_callback: Optional[Callable[[], bool]] = None,
-        progress_callback: Optional[Callable[[float, str], None]] = None
+        progress_callback: Optional[Callable[[float, str], None]] = None,
+        fill_gaps: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Thực hiện nhận dạng giọng nói ngoại tuyến từ tệp âm thanh kèm streaming progress.
+        fill_gaps=True: quét bổ sung các khoảng dài có âm thanh lớn mà lần quét đầu không ra chữ (chậm hơn).
 
         Args:
             audio_path (str): Đường dẫn tệp âm thanh đầu vào (.wav).
@@ -158,7 +199,9 @@ class ResolveTranscriber:
             language=language,
             beam_size=5,
             vad_filter=True,
-            word_timestamps=True
+            word_timestamps=True,
+            # Tắt "nhớ câu trước": trên video dài nhiều tạp âm, Whisper dễ kẹt vòng lặp rồi bỏ trống cả quãng dài
+            condition_on_previous_text=False
         )
 
         results = []
@@ -193,7 +236,55 @@ class ResolveTranscriber:
                 progress_ratio = min(1.0, segment.end / total_duration)
                 progress_callback(progress_ratio, segment_text)
 
+        results = transcript_quality.split_stretched_segments(results)
+        if fill_gaps and not (is_cancelled_callback and is_cancelled_callback()):
+            results = self.fill_uncovered_gaps(audio_path, results, language, is_cancelled_callback, progress_callback)
         return results
+
+    def transcribe_slice(
+        self,
+        audio: "np.ndarray",
+        offset: float,
+        language: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Nhận dạng một đoạn âm thanh (numpy 16kHz) với VAD tắt, rồi cộng offset vào mốc thời gian.
+        Loại các câu Whisper không tin tưởng (no_speech cao, lặp chữ, logprob quá thấp).
+        """
+        segments, _ = self.model.transcribe(
+            audio, language=language, beam_size=5, vad_filter=False,
+            word_timestamps=True, condition_on_previous_text=False
+        )
+        out = []
+        for seg in segments:
+            text = seg.text.strip()
+            if (not text or is_whisper_hallucination(text) or seg.no_speech_prob > 0.7
+                    or seg.compression_ratio > 2.4 or seg.avg_logprob < -1.3):
+                continue
+            words = [{"word": w.word, "start": w.start + offset, "end": w.end + offset,
+                      "probability": w.probability} for w in (seg.words or [])]
+            out.append({"start": seg.start + offset, "end": seg.end + offset, "text": text,
+                        "words": words, "filled": True})
+        return transcript_quality.split_stretched_segments(out)
+
+    def fill_uncovered_gaps(
+        self,
+        audio_path: str,
+        results: List[Dict[str, Any]],
+        language: Optional[str] = None,
+        is_cancelled_callback: Optional[Callable[[], bool]] = None,
+        progress_callback: Optional[Callable[[float, str], None]] = None
+    ) -> List[Dict[str, Any]]:
+        audio, sr = transcript_quality.read_wav_mono(audio_path)
+        gaps = transcript_quality.find_uncovered_gaps(results, audio, sr)
+        extra: List[Dict[str, Any]] = []
+        for n, (a, b) in enumerate(gaps, 1):
+            if is_cancelled_callback and is_cancelled_callback():
+                break
+            extra.extend(self.transcribe_slice(audio[int(a * sr): int(b * sr)], a, language))
+            if progress_callback:
+                progress_callback(n / len(gaps), f"Quét bổ sung vùng bị bỏ sót {n}/{len(gaps)}")
+        return transcript_quality.merge_segments(results, extra)
 
     def unload_model(self) -> None:
         """

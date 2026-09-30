@@ -30,6 +30,8 @@ class Recipe(BaseModel):
     # AI Director & Semantic Cutting
     ai_mode: str = Field(default="clean_talk")
     remove_bad_takes: bool = Field(default=True)
+    remove_repeated_phrases: bool = Field(default=True)
+    pacing: str = Field(default="balanced", description="Nhịp dựng: relaxed / balanced / fast")
     enable_punch_in: bool = Field(default=True)
     punch_in_scale: float = Field(default=1.15)
     confidence_threshold: float = Field(default=0.70)
@@ -56,7 +58,19 @@ class Recipe(BaseModel):
     
     # Smart Vlog Hook / Intro
     enable_vlog_hook: bool = Field(default=False)
-    vlog_hook_duration: float = Field(default=2.0)
+    vlog_hook_duration: float = Field(default=2.0, description="Độ dài mỗi khoảnh khắc trong teaser (giây)")
+    vlog_hook_total: float = Field(default=20.0, description="Tổng thời lượng teaser (giây)")
+
+    # Tư duy cắt/tua theo loại video
+    video_type: str = Field(default="auto", description="auto / talk / mixed / vlog")
+
+    # Sắp xếp có ý đồ (Story Arranger)
+    story_intent: str = Field(default="keep", description="keep / cold_open / rising_action / shorts")
+    story_target: float = Field(default=60.0, description="Thời lượng mục tiêu cho ý đồ Shorts (giây)")
+
+    # Vlog dài: bảo vệ cảnh quay & quét bổ sung vùng Whisper bỏ sót
+    scene_guard: bool = Field(default=True)
+    fill_gaps: bool = Field(default=False)
 
 
 class RecipeManager:

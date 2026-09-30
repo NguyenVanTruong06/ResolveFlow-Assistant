@@ -167,6 +167,27 @@ class TabSFX(QWidget):
 
         panel.addWidget(self.group_cfg)
 
+        # 2.5 LOUDNESS NORMALIZATION (FFMPEG 2-PASS LOUDNORM)
+        self.group_loudnorm = QGroupBox("🎚 CHUẨN HÓA ÂM LƯỢNG GIỌNG NÓI (EBU R128 / YOUTUBE -14 LUFS)")
+        form_loudnorm = QFormLayout(self.group_loudnorm)
+
+        self.check_loudnorm = QCheckBox("Bật chuẩn hóa âm lượng giọng nói (FFmpeg 2-Pass Loudnorm)")
+        self.check_loudnorm.setChecked(False)
+        self.check_loudnorm.setToolTip(TOOLTIPS.get("auto_sfx", "Đảm bảo âm lượng giọng nói đạt chuẩn tiêu chuẩn nền tảng mà không méo tiếng."))
+        form_loudnorm.addRow(self.check_loudnorm)
+
+        self.combo_loudnorm_preset = QComboBox()
+        self.combo_loudnorm_preset.addItem("🌐 YouTube / TikTok / Reels (-14 LUFS, True Peak -1.0 dBFS)", "youtube_tiktok")
+        self.combo_loudnorm_preset.addItem("🎙 Podcast / Spotify / Apple (-16 LUFS, True Peak -1.0 dBFS)", "podcast_spotify")
+        self.combo_loudnorm_preset.addItem("📺 Truyền hình Chuẩn EBU R128 (-23 LUFS, True Peak -1.0 dBFS)", "broadcast_ebu_r128")
+        form_loudnorm.addRow("Chuẩn âm lượng mục tiêu:", self.combo_loudnorm_preset)
+
+        self.lbl_loudnorm_desc = QLabel("💡 <i>Thuật toán 2-Pass đo chính xác Integrated Loudness & True Peak, tự động bù Gain không nén bẹp dynamic range.</i>")
+        self.lbl_loudnorm_desc.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
+        form_loudnorm.addRow(self.lbl_loudnorm_desc)
+
+        panel.addWidget(self.group_loudnorm)
+
         # 3. ACTION CONTROLS
         self.group_actions = QGroupBox("⚡ THAO TÁC TRỰC TIẾP VỚI TIMELINE")
         vbox_act = QVBoxLayout(self.group_actions)

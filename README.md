@@ -10,10 +10,10 @@
 **ResolveFlow Assistant v4.1** là bộ công cụ trợ lý AI toàn năng tự động hóa quy trình hậu kỳ video 100% cục bộ (Local / On-Premise) dành cho **DaVinci Resolve** (Hỗ trợ cả bản **Free** và bản **Studio**).
 
 Hệ thống được tái cấu trúc sang **Giao diện 4 Tab Chức Năng (Workflow Tabs)** chuyên nghiệp:
-- **Tab 1: ✂ Auto Cut & Rough Cut:** Quét khoảng lặng (VAD), Đạo diễn AI lọc sạch câu nói vấp (Bad Takes), Tua nhanh Timelapse (Speed-Ramp 8x), Bám mặt chuyển dọc 9:16 (Auto Reframe) và Vlog Hook Teaser.
+- **Tab 1: ✂ Auto Cut & Rough Cut:** Quét khoảng lặng (VAD), **Interactive Mini Timeline Preview (Thanh xem trước timeline trực quan với khối thoại/cắt/speedup)**, Đạo diễn AI lọc sạch câu nói vấp (Bad Takes), Tua nhanh Timelapse (Speed-Ramp 8x), Bám mặt chuyển dọc 9:16 (Auto Reframe) và Vlog Hook Teaser.
 - **Tab 2: 📝 Titles, Captions & Text Presets:** 7 Kiểu dáng phụ đề Text+/Fusion Text động chuẩn CapCut (Karaoke Pop, Bounce Word, Box Highlight...), Real-time Live Preview & chèn Text+ tại Playhead.
-- **Tab 3: 🔊 SFX & Soundboard Studio:** Lưới 8 SFX Pad (Whoosh, Pop, Ding, Click, Camera, Glitch, Riser, Sub Drop) nghe thử độ trễ cực thấp, tự động hạ volume offset (-12dB) và chèn vào Playhead trên Timeline.
-- **Tab 4: 🚀 Polish & Quick Export:** Bộ màu / LUTs chuẩn (Rec.709, Warm Vlog, Cinematic Teal-Orange) và 1-Click Export Presets (TikTok 9:16, YouTube 4K, Podcast MP3).
+- **Tab 3: 🔊 SFX & Audio Enhancer Studio:** Lưới 8 SFX Pad (Whoosh, Pop, Ding, Click, Camera, Glitch, Riser, Sub Drop) nghe thử độ trễ cực thấp, tự động hạ volume offset (-12dB), chèn vào Playhead và **Chuẩn hóa âm lượng giọng nói 2-Pass Loudnorm EBU R128 / YouTube (-14 LUFS, Peak -1.0 dBFS)**.
+- **Tab 4: 🚀 Polish & Quick Export:** Bộ màu / LUTs chuẩn (Rec.709, Warm Vlog, Cinematic Teal-Orange), **Auto Thumbnail Golden Keyframes Extractor (Laplacian Sharpness & Anti-blur scoring)**, **Báo cáo Minh bạch Nhật ký Thực thi (Execution Audit Report)** và 1-Click Export Presets (TikTok 9:16, YouTube 4K, Podcast MP3).
 
 ---
 
@@ -22,8 +22,12 @@ Hệ thống được tái cấu trúc sang **Giao diện 4 Tab Chức Năng (Wo
 | Tính năng | Bản v1.0 - v3.0 | Bản v4.0 | Bản v4.1 (Hiện tại - Nâng cấp Toàn diện) |
 | :--- | :---: | :---: | :---: |
 | **Kiến trúc Giao diện** | Cuộn dọc 1 trang | Giao diện cơ bản | **Hệ thống 4 Workflow Tabs (Auto Cut, Titles, SFX Studio, Polish/Export)** |
+| **Mini Timeline Preview** | ❌ | ❌ | **Interactive Mini Timeline (Khối Voice/Cut/Speedup/Hook + Playhead scrub)** |
 | **SFX & Soundboard** | ❌ | Gợi ý Markers | **Lưới 8 SFX Pad nghe thử tức thì + Auto -12dB Volume + Chèn Playhead** |
+| **Chuẩn hóa Âm lượng** | ❌ | ❌ | **FFmpeg 2-Pass Loudnorm (EBU R128 / YouTube -14 LUFS, Peak -1.0 dBFS)** |
 | **Text Style Presets** | Phụ đề cơ bản | Karaoke chữ nhảy đơn giản | **7 Preset CapCut-like Text+ + Quick Preview + Chèn Text tại Playhead** |
+| **Thumbnail Keyframes** | ❌ | ❌ | **Auto Golden Keyframes (Laplacian Sharpness + Anti-blur + Exposure)** |
+| **Báo cáo Kiểm toán (Audit)** | Log thô | Log cơ bản | **Báo cáo Minh bạch Định lượng & Xuất Markdown Báo cáo Xử lý** |
 | **Polish & Render** | ❌ | Xuất thủ công | **1-Click Export Presets (TikTok 9:16, YouTube 4K) & Điều khiển Render Queue** |
 | **Tốc độ Quét (Scanning)** | Chạy trực tiếp file gốc | Quét tuần tự | **Scan Cache theo Checksum (<0.05s) + Proxy 480p & Pipeline song song** |
 | **Gợi ý Whisper Model** | Người dùng tự chọn | Người dùng tự chọn | **Tự động gợi ý model tối ưu theo thời lượng video** |
@@ -131,7 +135,7 @@ python main.py
 ```powershell
 .\venv\Scripts\pytest -v
 ```
-Toàn bộ **68/68 kịch bản kiểm thử** đạt kết quả **100% PASSED**.
+Toàn bộ **132/132 kịch bản kiểm thử** đạt kết quả **100% PASSED** (0 warnings, 0 errors).
 
 ---
 

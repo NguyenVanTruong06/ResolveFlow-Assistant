@@ -736,3 +736,200 @@ def test_tab_export_cards_and_palette(app_window):
 
 
 
+
+
+def test_review_toolbar_workflow(app_window):
+    from src.core.ai_director import ProposedSegment
+    app_window.proposed_segments = [
+        ProposedSegment(id=i, start=i * 2.0, end=i * 2.0 + 2.0, text=f"t{i}", decision="keep",
+                        confidence=0.95, reason="ok", approved=True)
+        for i in range(3)
+    ]
+    app_window._populate_review_table()
+    app_window._set_review_visible(True)
+    assert app_window.review_toolbar.isHidden() is False
+
+    app_window._review_bulk(app_window.review_state.cut_all)
+    assert not any(p.approved for p in app_window.proposed_segments)
+    cb = app_window.table_review.cellWidget(0, 0).findChild(type(app_window.check_cache))
+    assert cb.isChecked() is False
+
+    app_window._review_undo()
+    assert all(p.approved for p in app_window.proposed_segments)
+    app_window._reset_workflow_phase()
+    assert app_window.review_toolbar.isHidden() is True
+
+
+def test_pacing_combo_present(app_window):
+    assert app_window.combo_pacing.currentData() == "balanced"
+    assert app_window.combo_pacing.count() == 3
+
+
+def test_recipe_roundtrip_keeps_pacing_and_repeats(app_window):
+    from src.core.recipe_manager import Recipe
+    r = Recipe(id="t", name="t", pacing="fast", remove_repeated_phrases=False)
+    app_window._apply_recipe_to_ui(r)
+    assert app_window.combo_pacing.currentData() == "fast"
+    assert app_window.check_repeats.isChecked() is False
+
+
+def test_new_vlog_controls_and_recipe_roundtrip(app_window):
+    from src.core.recipe_manager import Recipe
+    w = app_window
+    assert w.check_scene_guard.isChecked() is True
+    assert w.check_fill_gaps.isChecked() is False
+    assert w.combo_hook_total.currentData() == 20.0
+    w._apply_recipe_to_ui(Recipe(id="v", name="v", scene_guard=False, fill_gaps=True, vlog_hook_total=30.0))
+    assert w.check_scene_guard.isChecked() is False
+    assert w.check_fill_gaps.isChecked() is True
+    assert w.combo_hook_total.currentData() == 30.0
+
+
+def _run_worker_with_active_silence(tmp_path, scene_guard):
+    import os
+    import numpy as np
+    from unittest.mock import patch
+    from src.core.autocut import CutSegment
+    video = os.path.join(tmp_path, "vlog.mp4")
+    with open(video, "w", encoding="utf-8") as f:
+        f.write("mock")
+    worker = PipelineWorker(
+        video_paths=[video], model_size="tiny", language="Auto", run_cut=True, silence_db=-35.0,
+        min_duration=0.5, split_mode="characters", split_limit=42, speed_up_silence=False,
+        enable_broll=False, enable_sfx=False, enable_vlog_hook=False, enable_subtitles=False,
+        ai_mode="silence_only", use_cache=False, scene_guard=scene_guard
+    )
+    segs = [CutSegment(start=0, end=3, action="keep"), CutSegment(start=3, end=5, action="cut"),
+            CutSegment(start=5, end=10, action="keep")]
+    activity = np.full(10, 0.3, dtype=np.float32)   # cảnh đang chuyển động suốt clip
+    with patch("src.core.audio.AudioExtractor.extract_audio"), \
+         patch("src.core.audio.AudioExtractor.get_audio_duration", return_value=10.0), \
+         patch("src.core.transcriber.ResolveTranscriber.load_model"), \
+         patch("src.core.transcriber.ResolveTranscriber.transcribe", return_value=[]), \
+         patch("src.core.autocut.SilenceDetector.detect_silence_from_wav", return_value=segs), \
+         patch("src.ui.app.compute_visual_activity", return_value=activity), \
+         patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False), \
+         patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
+        worker.run()
+    return open(os.path.join(tmp_path, "vlog_Timeline_CatLoc.edl"), encoding="utf-8").read()
+
+
+def test_pipeline_scene_guard_keeps_active_silence(tmp_path):
+    edl = _run_worker_with_active_silence(tmp_path, scene_guard=True)
+    assert sum(1 for ln in edl.splitlines() if " V " in ln) == 1     # 3 đoạn gộp thành 1 cảnh liền mạch, không giật
+
+
+def test_pipeline_without_scene_guard_still_cuts(tmp_path):
+    edl = _run_worker_with_active_silence(tmp_path, scene_guard=False)
+    assert sum(1 for ln in edl.splitlines() if " V " in ln) == 2     # vẫn cắt khoảng lặng như cũ
+
+
+def _run_worker_story(tmp_path, intent, api_key=None, story_target=60.0):
+    import os
+    import numpy as np
+    from unittest.mock import patch
+    from src.core.autocut import CutSegment
+    video = os.path.join(tmp_path, "story.mp4")
+    with open(video, "w", encoding="utf-8") as f:
+        f.write("mock")
+    worker = PipelineWorker(
+        video_paths=[video], model_size="tiny", language="Auto", run_cut=True, silence_db=-35.0,
+        min_duration=0.5, split_mode="characters", split_limit=42, speed_up_silence=False,
+        enable_broll=False, enable_sfx=False, enable_vlog_hook=False, enable_subtitles=True,
+        ai_mode="silence_only", use_cache=False, scene_guard=False, story_intent=intent,
+        story_target=story_target, api_key=api_key
+    )
+    subs = [{"start": 2.0, "end": 8.0, "text": "Chào mừng các bạn đến với vlog hôm nay", "words": []},
+            {"start": 30.0, "end": 36.0, "text": "Wow nhìn này không thể tin được", "words": []},
+            {"start": 70.0, "end": 76.0, "text": "Cảnh ở đây rất đẹp", "words": []},
+            {"start": 105.0, "end": 112.0, "text": "Tóm lại hãy đăng ký kênh nhé", "words": []}]
+    segs = [CutSegment(start=0, end=120, action="keep")]
+    with patch("src.core.audio.AudioExtractor.extract_audio"), \
+         patch("src.core.audio.AudioExtractor.get_audio_duration", return_value=120.0), \
+         patch("src.core.transcriber.ResolveTranscriber.load_model"), \
+         patch("src.core.transcriber.ResolveTranscriber.transcribe", return_value=subs), \
+         patch("src.core.autocut.SilenceDetector.detect_silence_from_wav", return_value=segs), \
+         patch("src.ui.app.compute_visual_activity", return_value=np.full(120, 0.2, dtype=np.float32)), \
+         patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False), \
+         patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
+        worker.run()
+    return tmp_path
+
+
+def test_pipeline_story_cold_open_exports_extra_timeline(tmp_path):
+    import os
+    _run_worker_story(tmp_path, "cold_open")
+    arranged = os.path.join(tmp_path, "story_Timeline_SapXep.fcpxml")
+    assert os.path.exists(arranged) and os.path.exists(os.path.join(tmp_path, "story_KeHoach_SapXep.txt"))
+    assert os.path.exists(os.path.join(tmp_path, "story_Timeline_CatLoc.fcpxml"))   # timeline gốc vẫn được giữ
+    plan = open(os.path.join(tmp_path, "story_KeHoach_SapXep.txt"), encoding="utf-8").read()
+    assert "Hook" in plan and "[chép]" in plan
+
+
+def test_pipeline_story_keep_does_not_export_arranged(tmp_path):
+    import os
+    _run_worker_story(tmp_path, "keep")
+    assert not os.path.exists(os.path.join(tmp_path, "story_Timeline_SapXep.fcpxml"))
+
+
+def test_pipeline_story_llm_failure_falls_back_to_heuristic(tmp_path):
+    import os
+    from unittest.mock import patch
+    with patch("src.core.llm_director.LLMSemanticSelector.complete_json", side_effect=Exception("mạng lỗi")):
+        _run_worker_story(tmp_path, "cold_open", api_key="fake")
+    assert os.path.exists(os.path.join(tmp_path, "story_Timeline_SapXep.fcpxml"))
+
+
+def test_story_controls_and_workflow_defaults(app_window):
+    from src.core.recipe_manager import Recipe
+    w = app_window
+    assert w.combo_story_intent.currentData() == "keep" and w.txt_api_key.text() == ""
+    w.combo_workflow.setCurrentIndex(w.combo_workflow.findData("shorts"))
+    assert w.combo_story_intent.currentData() == "shorts"
+    w.combo_workflow.setCurrentIndex(w.combo_workflow.findData("vlog"))
+    assert w.combo_story_intent.currentData() == "cold_open"
+    w._apply_recipe_to_ui(Recipe(id="s", name="s", story_intent="rising_action", story_target=90.0))
+    assert w.combo_story_intent.currentData() == "rising_action" and w.combo_story_target.currentData() == 90.0
+
+
+def test_video_type_control_and_recipe(app_window):
+    from src.core.recipe_manager import Recipe
+    w = app_window
+    assert w.combo_video_type.currentData() == "auto" and w.combo_video_type.count() == 4
+    w._apply_recipe_to_ui(Recipe(id="vt", name="vt", video_type="vlog"))
+    assert w.combo_video_type.currentData() == "vlog"
+
+
+def _run_worker_video_type(tmp_path, video_type, activity_value):
+    import os
+    import numpy as np
+    from unittest.mock import patch
+    from src.core.autocut import CutSegment
+    video = os.path.join(tmp_path, "vt.mp4")
+    with open(video, "w", encoding="utf-8") as f:
+        f.write("mock")
+    worker = PipelineWorker(
+        video_paths=[video], model_size="tiny", language="Auto", run_cut=True, silence_db=-35.0,
+        min_duration=0.5, split_mode="characters", split_limit=42, speed_up_silence=False,
+        enable_broll=False, enable_sfx=False, enable_vlog_hook=False, enable_subtitles=False,
+        ai_mode="silence_only", use_cache=False, scene_guard=True, video_type=video_type
+    )
+    segs = [CutSegment(start=0, end=30, action="keep"), CutSegment(start=30, end=31, action="cut"),
+            CutSegment(start=31, end=60, action="keep")]
+    with patch("src.core.audio.AudioExtractor.extract_audio"), \
+         patch("src.core.audio.AudioExtractor.get_audio_duration", return_value=60.0), \
+         patch("src.core.transcriber.ResolveTranscriber.load_model"), \
+         patch("src.core.transcriber.ResolveTranscriber.transcribe", return_value=[]), \
+         patch("src.core.autocut.SilenceDetector.detect_silence_from_wav", return_value=segs), \
+         patch("src.ui.app.compute_visual_activity", return_value=np.full(60, activity_value, dtype=np.float32)), \
+         patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False), \
+         patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
+        worker.run()
+    edl = open(os.path.join(tmp_path, "vt_Timeline_CatLoc.edl"), encoding="utf-8").read()
+    return sum(1 for ln in edl.splitlines() if " V " in ln)
+
+
+def test_pipeline_talkshow_cuts_1s_pause_but_vlog_leaves_it(tmp_path_factory):
+    talk = _run_worker_video_type(tmp_path_factory.mktemp("t"), "auto", 0.02)    # hình tĩnh -> talk: cắt nhát 1s
+    vlog = _run_worker_video_type(tmp_path_factory.mktemp("v"), "auto", 0.3)     # hình chuyển động -> vlog: giữ nguyên
+    assert talk == 2 and vlog == 1

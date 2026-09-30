@@ -118,8 +118,83 @@ def test_generate_timeline_fcpxml_with_subtitles_offset_sync(tmp_path) -> None:
     with open(output_xml, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Offset của từ "Câu" đầu tiên (2.0s timeline) trong Clip 1 (src_in=10s) phải là 12000/1000s
-    assert 'offset="12000/1000s"' in content
-    # Offset của từ "Câu" thứ hai (7.0s timeline) trong Clip 2 (src_in=30s, rec_in=5s) phải là 32000/1000s
-    assert 'offset="32000/1000s"' in content
+    # Giá trị thời gian giờ được ghi theo khung hình (vd 360/30s), nên so sánh theo số giây thay vì chuỗi
+    import re
+    offsets = {round(int(n) / int(d), 3) for n, d in re.findall(r'offset="(\d+)/(\d+)s"', content)}
+    # Offset của từ "Câu" đầu tiên (2.0s timeline) trong Clip 1 (src_in=10s) phải là 12.0s
+    assert 12.0 in offsets
+    # Offset của từ "Câu" thứ hai (7.0s timeline) trong Clip 2 (src_in=30s, rec_in=5s) phải là 32.0s
+    assert 32.0 in offsets
 
+
+
+
+def _sec(v):
+    import re
+    m = re.match(r"(\d+)/(\d+)s", v)
+    return int(m.group(1)) / int(m.group(2)) if m else 0.0
+
+
+def _spine(xml_path):
+    import xml.etree.ElementTree as ET
+    root = ET.parse(xml_path).getroot()
+    return root, root.findall(".//spine/asset-clip")
+
+
+def _ev(src_in, src_out, rec_in, speed=1.0):
+    return {"video_path": "clip.mp4", "src_in": src_in, "src_out": src_out, "rec_in": rec_in,
+            "rec_out": rec_in + (src_out - src_in) / speed, "fps": 30.0, "speed": speed,
+            "is_speedup": speed > 1.0}
+
+
+def test_speedup_clips_do_not_overlap_and_use_timemap(tmp_path):
+    # Ca thực tế gây lỗi mất hình/lệch tiếng: đoạn tua nhanh 8x xen giữa các đoạn thoại
+    events, rec = [], 0.0
+    for src_in, src_out, speed in [(0, 10, 1.0), (10, 50, 8.0), (50, 60, 1.0), (60, 100, 4.0), (100, 110, 1.0)]:
+        ev = _ev(src_in, src_out, rec, speed)
+        events.append(ev)
+        rec = ev["rec_out"]
+    out = os.path.join(tmp_path, "speed.fcpxml")
+    FCPXMLGenerator.generate_timeline_fcpxml(events, out)
+    root, clips = _spine(out)
+    prev_end = 0.0
+    for c in clips:
+        off, dur = _sec(c.get("offset")), _sec(c.get("duration"))
+        assert abs(off - prev_end) < 1e-6, "clip phải nối liền nhau, không chồng lấn / hở"
+        prev_end = off + dur
+    assert abs(prev_end - rec) < 0.1                      # độ dài timeline = tổng thời lượng đầu ra
+    retimed = [c for c in clips if c.find("timeMap") is not None]
+    assert len(retimed) == 2
+    pts = retimed[0].find("timeMap").findall("timept")
+    assert _sec(pts[1].get("time")) == 5.0 and _sec(pts[1].get("value")) == 40.0   # 40s nguồn -> 5s đầu ra (8x)
+
+
+def test_all_times_are_on_frame_grid_for_29_97(tmp_path):
+    events, rec = [], 0.0
+    for i in range(200):
+        ev = _ev(i * 1.237, i * 1.237 + 0.913, rec)
+        ev["fps"] = 29.97
+        events.append(ev)
+        rec = ev["rec_out"]
+    out = os.path.join(tmp_path, "grid.fcpxml")
+    FCPXMLGenerator.generate_timeline_fcpxml(events, out, fps=29.97)
+    root, clips = _spine(out)
+    fd = 1001 / 30000
+    for c in clips:
+        for attr in ("offset", "start", "duration"):
+            frames = _sec(c.get(attr)) / fd
+            assert abs(frames - round(frames)) < 1e-6, f"{attr} lệch lưới khung hình"
+    assert all(abs(_sec(b.get("offset")) - (_sec(a.get("offset")) + _sec(a.get("duration")))) < 1e-9
+               for a, b in zip(clips, clips[1:]))
+
+
+def test_subtitles_not_anchored_inside_retimed_clips(tmp_path):
+    events = [_ev(0, 10, 0.0), _ev(10, 50, 10.0, speed=8.0), _ev(50, 60, 15.0)]
+    subs = [{"start": 1.0, "end": 3.0, "text": "trước", "words": []},
+            {"start": 11.0, "end": 13.0, "text": "trong đoạn tua", "words": []},
+            {"start": 16.0, "end": 18.0, "text": "sau", "words": []}]
+    out = os.path.join(tmp_path, "subs.fcpxml")
+    FCPXMLGenerator.generate_timeline_fcpxml(events, out, subtitles=subs, preset="clean_outline")
+    root, clips = _spine(out)
+    titles_per_clip = [len(c.findall("title")) for c in clips]
+    assert titles_per_clip == [1, 0, 1]

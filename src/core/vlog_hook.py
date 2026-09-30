@@ -244,6 +244,167 @@ class VlogHookGenerator:
             text=best_text
         )
 
+    # ------------------------------------------------------------------
+    # Teaser đa khoảnh khắc: đọc toàn bộ clip, gom nhiều điểm nhấn thành một teaser
+    # ------------------------------------------------------------------
+    @staticmethod
+    def audio_energy_db(wav_path: str, step: float = 1.0) -> Optional[np.ndarray]:
+        """Mức âm lượng (dB) theo từng `step` giây của tệp WAV; None nếu không đọc được."""
+        try:
+            from src.core.transcript_quality import read_wav_mono
+            audio, sr = read_wav_mono(wav_path)
+        except Exception:
+            return None
+        size = int(step * sr)
+        n = len(audio) // size
+        if n == 0:
+            return None
+        rms = np.sqrt(np.mean(audio[: n * size].reshape(n, size) ** 2, axis=1)) + 1e-10
+        return 20 * np.log10(rms)
+
+    @classmethod
+    def find_moment_candidates(
+        cls,
+        video_path: str,
+        total_duration: float,
+        subtitles: Optional[List[Dict[str, Any]]] = None,
+        energy_db: Optional[np.ndarray] = None,
+        activity: Optional[np.ndarray] = None,
+        moment_len: float = 2.5,
+        stride: float = 1.0,
+        top_k: int = 12,
+        max_len: float = 4.0,
+    ) -> List[HookSegment]:
+        """
+        Quét toàn bộ clip bằng cửa sổ trượt và chấm điểm từng khoảnh khắc theo 3 tín hiệu:
+        - lời thoại hook (từ khóa, câu hỏi, cảm thán),
+        - cao trào âm thanh so với mức nền của chính clip (hét, cười, tiếng động lớn),
+        - chuyển động hình ảnh (cảnh hành động so với phần còn lại).
+        Bỏ vùng đầu/cuối clip (rung máy lúc bấm quay) và cửa sổ "chết" (im lặng + tĩnh).
+        Trả về tối đa top_k ứng viên không chồng lấn, điểm giảm dần.
+        """
+        if total_duration <= 0:
+            return []
+        n_bins = int(total_duration // stride)
+        win = max(1, int(round(moment_len / stride)))
+        if n_bins < win:
+            return []
+
+        base_db = float(np.median(energy_db)) if energy_db is not None and len(energy_db) else 0.0
+        # Mức sàn tuyệt đối: clip gần như tĩnh không được chuẩn hóa tương đối thành 'chuyển động mạnh'
+        act_ref = max(float(np.percentile(activity, 90)), 0.15) if activity is not None and len(activity) else 0.0
+        subs = subtitles or []
+
+        scored: List[Tuple[float, int, str, str, float, float]] = []
+        for i in range(0, n_bins - win + 1):
+            t0, t1 = i * stride, i * stride + moment_len
+            parts: Dict[str, float] = {}
+            if energy_db is not None and i + win <= len(energy_db):
+                w = energy_db[i:i + win]
+                parts["energy"] = float(np.clip((float(w.max()) - base_db) / 15.0, 0.0, 1.0))
+            if activity is not None and act_ref > 0 and i + win <= len(activity):
+                parts["motion"] = float(np.clip(float(np.mean(activity[i:i + win])) / act_ref, 0.0, 1.0))
+
+            speech, sp_text, sp_reason = 0.0, "", ""
+            for sub in subs:
+                if sub["end"] > t0 and sub["start"] < t1:
+                    hs, hr = cls.score_subtitle_hook(sub.get("text", ""))
+                    if hs / 10.0 > speech:
+                        speech, sp_text, sp_reason = min(1.0, hs / 10.0), sub.get("text", ""), hr
+            if subs:
+                parts["speech"] = speech
+
+            if not parts:
+                continue
+            weights = {"speech": 0.40, "energy": 0.25, "motion": 0.35}
+            wsum = sum(weights[k] for k in parts)
+            score = sum(parts[k] * weights[k] for k in parts) / wsum
+
+            dead = parts.get("energy", 1.0) < 0.05 and parts.get("motion", 1.0) < 0.15 and speech == 0.0
+            if dead:
+                continue
+            if t0 < total_duration * 0.04 or t1 > total_duration * 0.96:
+                score *= 0.5
+
+            top = max(parts, key=lambda k: parts[k] * weights[k])
+            if top == "speech" and sp_text:
+                reason = f"Hook thoại: {sp_reason}"
+            elif top == "energy":
+                reason = f"Âm thanh cao trào (+{(float(energy_db[i:i + win].max()) - base_db):.0f} dB so với nền)"
+            else:
+                reason = "Chuyển động mạnh (cảnh hành động)"
+            scored.append((score, i, reason, sp_text, t0, t1))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        picked: List[HookSegment] = []
+        for score, i, reason, text, t0, t1 in scored:
+            start, end = t0, t1
+            if text:  # căn theo câu thoại để không cắt ngang lời
+                for sub in subs:
+                    if sub.get("text", "") == text and sub["end"] > t0 and sub["start"] < t1:
+                        start = max(0.0, sub["start"] - 0.15)
+                        end = min(total_duration, max(start + 1.5, min(sub["end"] + 0.25, start + max_len)))
+                        break
+            if any(start < p.src_out and end > p.src_in for p in picked):
+                continue
+            picked.append(HookSegment(
+                video_path=video_path, src_in=round(start, 3), src_out=round(end, 3),
+                duration=round(end - start, 3), score=round(score * 10.0, 2), reason=reason, text=text
+            ))
+            if len(picked) >= top_k:
+                break
+        return picked
+
+    @staticmethod
+    def select_teaser(
+        pool: List[HookSegment],
+        target_total: float = 20.0,
+        min_gap: float = 8.0,
+        video_order: Optional[List[str]] = None,
+        spread_seconds: float = 90.0,
+    ) -> List[HookSegment]:
+        """
+        Chọn các khoảnh khắc để ghép teaser: lấy theo điểm cao nhất, dồn tới tổng thời lượng mục tiêu,
+        giữ khoảng cách tối thiểu giữa các khoảnh khắc cùng clip và giảm điểm những khoảnh khắc nằm sát nhau
+        (trong spread_seconds) để teaser trải đều nội dung thay vì dồn vào một đoạn.
+        Thứ tự: khoảnh khắc mạnh nhất mở đầu (hook), phần còn lại theo trình tự thời gian.
+        """
+        chosen: List[HookSegment] = []
+        total = 0.0
+        remaining = list(pool)
+        while remaining:
+            best, best_eff = None, 0.0
+            for cand in remaining:
+                if total + cand.duration > target_total + 1e-6:
+                    continue
+                eff = cand.score
+                too_close = False
+                for c in chosen:
+                    if c.video_path != cand.video_path:
+                        continue
+                    if cand.src_in < c.src_out + min_gap and cand.src_out > c.src_in - min_gap:
+                        too_close = True
+                        break
+                    if abs(cand.src_in - c.src_in) < spread_seconds:
+                        eff *= 0.6  # ưu tiên trải đều: khoảnh khắc gần cái đã chọn bị giảm điểm
+                if too_close:
+                    continue
+                if eff > best_eff:
+                    best, best_eff = cand, eff
+            if best is None:
+                break
+            chosen.append(best)
+            total += best.duration
+            remaining.remove(best)
+        if not chosen and pool:
+            chosen = [max(pool, key=lambda c: c.score)]
+        if not chosen:
+            return []
+        first = chosen[0]
+        order = {p: i for i, p in enumerate(video_order or [])}
+        rest = sorted(chosen[1:], key=lambda c: (order.get(c.video_path, 0), c.src_in))
+        return [first] + rest
+
     @classmethod
     def generate_teaser_edl(
         cls,
