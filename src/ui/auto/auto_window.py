@@ -3233,16 +3233,46 @@ class AutoWindow(QMainWindow):
         self.tab_copilot.txt_json_input.setPlainText(raw_json)
         self._apply_json_text_plan(raw_json)
 
+    def _set_ui_step_progress(self, pct: int, status: str, step_idx: int = -1):
+        """Cập nhật mượt mà tiến trình UI không bao giờ bị đứng app."""
+        if hasattr(self, "progress_bar"):
+            self.progress_bar.setValue(pct)
+        if hasattr(self, "lbl_pct_big"):
+            self.lbl_pct_big.setText(f"{pct}%")
+            col = "#86efac" if pct >= 100 else "#f4f4f5"
+            self.lbl_pct_big.setStyleSheet(f"font-size: 32px; font-weight: bold; color: {col};")
+        if hasattr(self, "lbl_eta"):
+            self.lbl_eta.setText(status)
+        if hasattr(self, "step_labels") and hasattr(self, "step_names"):
+            for i, lbl in enumerate(self.step_labels):
+                if pct >= 100:
+                    lbl.setText(f"✓ {self.step_names[i]}")
+                    lbl.setStyleSheet("color: #86efac; font-size: 11.5px; font-weight: 500;")
+                elif i < step_idx:
+                    lbl.setText(f"✓ {self.step_names[i]}")
+                    lbl.setStyleSheet("color: #86efac; font-size: 11.5px;")
+                elif i == step_idx:
+                    lbl.setText(f"● {self.step_names[i]}")
+                    lbl.setStyleSheet("color: #c4b5fd; font-size: 11.5px; font-weight: bold;")
+                else:
+                    lbl.setText(f"○ {self.step_names[i]}")
+                    lbl.setStyleSheet("color: #71717a; font-size: 11.5px;")
+        if hasattr(self, "bubble") and self.bubble:
+            self.bubble.update_progress(pct, status)
+        QApplication.processEvents()
+
     def _apply_json_text_plan(self, json_text: str):
         """Phân tích và thi công kịch bản JSON nhập từ ô văn bản TabCopilot."""
         if not json_text or not json_text.strip():
             QMessageBox.warning(self, "Chưa có kịch bản JSON", "Vui lòng dán đoạn mã JSON kịch bản trước khi thi công.")
             return
 
+        self._set_ui_step_progress(15, "Đang phân tích kịch bản JSON...", 0)
         try:
             plan = StoryCopilot.parse_copilot_response(json_text)
         except Exception as e:
             QMessageBox.critical(self, "Lỗi phân tích JSON", f"Không thể phân tích đoạn kịch bản JSON:\n{e}")
+            self._set_ui_step_progress(0, "Lỗi cú pháp JSON", -1)
             return
 
         self._on_copilot_plan_applied(plan)
@@ -3411,7 +3441,9 @@ class AutoWindow(QMainWindow):
                 except Exception:
                     pass
 
+        self._set_ui_step_progress(45, "Đang khớp video & tính toán cuts...", 1)
         events, subs, markers = StoryCopilot.convert_plan_to_resolve_timeline(plan, path_map)
+        self._set_ui_step_progress(70, "Đang tạo file FCP7 XML & FCPXML...", 2)
 
         if not events:
             QMessageBox.warning(self, "Không có phân đoạn", "Bản vẽ không tìm thấy phân đoạn video hợp lệ nào.")
@@ -3518,20 +3550,7 @@ class AutoWindow(QMainWindow):
             )
             EDLGenerator.create_multi_clip_edl(hook_events, out_hook_edl, markers=hook_markers)
 
-                # Cập nhật ngay tiến trình UI lên 100% rực rỡ
-        if hasattr(self, "progress_bar"):
-            self.progress_bar.setValue(100)
-        if hasattr(self, "lbl_pct_big"):
-            self.lbl_pct_big.setText("100%")
-            self.lbl_pct_big.setStyleSheet("font-size: 32px; font-weight: bold; color: #86efac;")
-        if hasattr(self, "lbl_eta"):
-            self.lbl_eta.setText("✓ Đã tạo xong Timeline!")
-        if hasattr(self, "step_labels") and hasattr(self, "step_names"):
-            for i, lbl in enumerate(self.step_labels):
-                lbl.setText(f"✓ {self.step_names[i]}")
-                lbl.setStyleSheet("color: #86efac; font-size: 11.5px; font-weight: 500;")
-        if hasattr(self, "bubble") and self.bubble:
-            self.bubble.update_progress(100, "Đã xuất Timeline!")
+
 
         self.txt_console.appendPlainText(f"📁 [Xuất Toàn Bộ Timeline Vào Thư Mục _TIMELINE_IMPORT]:")
         self.txt_console.appendPlainText(f"   🎬 1. Master Timeline Multi-Track XML (DaVinci): {out_fcp7xml}")
@@ -3541,6 +3560,7 @@ class AutoWindow(QMainWindow):
             self.txt_console.appendPlainText(f"   🔥 2. Dedicated Intro Hook Timeline FCPXML: {out_hook_fcpxml}")
         self.txt_console.appendPlainText(f"   📂 Toàn bộ file lưu tập trung tại: {output_dir}")
 
+        self._set_ui_step_progress(90, "Đang kiểm tra kết nối DaVinci...", 3)
         resolve_auto = ResolveAutomation()
         connected = resolve_auto.connect()
 
@@ -3548,6 +3568,7 @@ class AutoWindow(QMainWindow):
             success = resolve_auto.import_fcpxml_timeline(out_fcp7xml if os.path.exists(out_fcp7xml) else out_fcpxml)
             if success:
                 self.txt_console.appendPlainText(f"🎉 Đã nạp thành công Master Timeline '{timeline_name}' vào DaVinci Resolve Studio!")
+                self._set_ui_step_progress(100, "✓ Đã tạo xong Timeline!", 4)
                 QMessageBox.information(
                     self,
                     "Dựng Phim Hoàn Tất!",
@@ -3562,6 +3583,7 @@ class AutoWindow(QMainWindow):
         if out_hook_fcp7xml:
             hook_info_html = f"🔥 <b>File Intro Hook Riêng Biệt:</b> <code>{os.path.basename(out_hook_fcp7xml)}</code><br>"
 
+        self._set_ui_step_progress(100, "✓ Đã tạo xong Timeline!", 4)
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("🎉 Đã Tạo Xong Timeline Kịch Bản AI!")
         msg_box.setText(
