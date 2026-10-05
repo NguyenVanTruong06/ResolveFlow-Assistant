@@ -1519,7 +1519,7 @@ class AutoWindow(QMainWindow):
         self.tab_widget.addTab(self.tab_sfx, "SFX Soundboard")
         self.tab_widget.addTab(self.tab_export, "Polish & Export")
         
-                self.btn_toggle_legacy = QPushButton("⚙️ Hiển thị Cấu hình AI Chuyên sâu")
+        self.btn_toggle_legacy = QPushButton("⚙️ Hiển thị Cấu hình AI Chuyên sâu")
         self.btn_toggle_legacy.setCheckable(True)
         self.btn_toggle_legacy.setStyleSheet("background-color: #27272a; color: #a1a1aa; padding: 6px; border-radius: 4px;")
         self.btn_toggle_legacy.clicked.connect(lambda c: self.tab_copilot.setVisible(c))
