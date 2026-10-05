@@ -2,25 +2,21 @@ import os
 from typing import Optional, Callable
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QMenu,
-    QGraphicsDropShadowEffect, QApplication, QScrollArea, QGridLayout, QLineEdit, QPushButton
+    QGraphicsDropShadowEffect, QApplication, QScrollArea, QGridLayout, QLineEdit, QPushButton, QStackedWidget
 )
 from PySide6.QtCore import Qt, QPoint, Signal as pyqtSignal, QPropertyAnimation, QEasingCurve, QSize
 from PySide6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QCursor, QAction, QIcon
 from src.ui.theme import ThemeColors, ThemeFonts
 
-# Import assets for mini browser
 from src.core.text_preset import BUILTIN_PRESETS, TextStylePreset
 from src.core.transition_preset import BUILTIN_TRANSITIONS, TransitionStylePreset
 from src.ui.tabs.tab_assets import AssetCard
 
-
 class FloatingBubbleWidget(QWidget):
     """
-    Widget dạng Bong bóng nổi (Floating Chat Head / Pill Overlay)
-    - Always on top, không viền (Frameless), nền bán trong suốt bo tròn
-    - Kéo thả di chuyển tự do khắp màn hình (Draggable)
-    - Vòng tròn / thanh tiến trình % chạy ngầm
-    - MỚI: Tích hợp Mini Asset Browser cho phép mở rộng cửa sổ để kéo thả Preset ngay trong DaVinci.
+    Tách biệt 2 Luồng:
+    1. AI Director (Mở Giao diện đầy đủ)
+    2. Kho Tài Nguyên / CapCut Mode (Mở Mini Browser)
     """
     restore_requested = pyqtSignal()
     stop_requested = pyqtSignal()
@@ -37,7 +33,7 @@ class FloatingBubbleWidget(QWidget):
         self.is_processing = False
         
         self.is_expanded = False
-        self.collapsed_size = QSize(280, 64)
+        self.collapsed_size = QSize(320, 64)
         self.expanded_size = QSize(340, 480)
 
         self.setFixedSize(self.collapsed_size)
@@ -66,50 +62,55 @@ class FloatingBubbleWidget(QWidget):
         """)
         header_layout.addWidget(self.lbl_icon)
 
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(2)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.lbl_title = QLabel("<b>ChunDVC v1.0</b>")
+        # Trạng thái tiến trình (Chỉ hiện khi đang xử lý AI)
+        self.info_layout = QWidget()
+        i_layout = QVBoxLayout(self.info_layout)
+        i_layout.setSpacing(2)
+        i_layout.setContentsMargins(0, 0, 0, 0)
+        self.lbl_title = QLabel("<b>Đang chạy AI Director...</b>")
         self.lbl_title.setStyleSheet(f"color: {ThemeColors.TEXT_ACCENT}; font-size: 11px;")
-        
-        self.lbl_status = QLabel("Sẵn sàng")
+        self.lbl_status = QLabel("Processing...")
         self.lbl_status.setStyleSheet(f"color: {ThemeColors.TEXT_SECONDARY}; font-size: 10px;")
-        
         self.lbl_progress = QLabel("0%")
         self.lbl_progress.setStyleSheet(f"color: {ThemeColors.TEXT_ACCENT}; font-size: 10px; font-weight: bold;")
-
         h_status = QHBoxLayout()
         h_status.setSpacing(4)
         h_status.addWidget(self.lbl_status, stretch=1)
         h_status.addWidget(self.lbl_progress)
+        i_layout.addWidget(self.lbl_title)
+        i_layout.addLayout(h_status)
+        self.info_layout.setVisible(False)
+        header_layout.addWidget(self.info_layout, stretch=1)
 
-        info_layout.addWidget(self.lbl_title)
-        info_layout.addLayout(h_status)
-        header_layout.addLayout(info_layout, stretch=1)
+        # Cụm 2 Nút (Launcher Mode - Hiển thị khi đang rảnh)
+        self.launcher_layout = QWidget()
+        l_layout = QHBoxLayout(self.launcher_layout)
+        l_layout.setContentsMargins(0,0,0,0)
+        l_layout.setSpacing(6)
         
-        # Nút Mở rộng Asset Browser
-        self.btn_expand = QPushButton("🗂️")
-        self.btn_expand.setFixedSize(32, 32)
-        self.btn_expand.setCursor(Qt.PointingHandCursor)
-        self.btn_expand.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {ThemeColors.BG_INPUT};
-                border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 6px;
-                color: {ThemeColors.TEXT_PRIMARY};
-            }}
-            QPushButton:hover {{
-                background-color: {ThemeColors.BORDER_DEFAULT};
-                border: 1px solid {ThemeColors.PRIMARY};
-            }}
+        self.btn_ai_mode = QPushButton("🤖 AI Director")
+        self.btn_ai_mode.setCursor(Qt.PointingHandCursor)
+        self.btn_ai_mode.setStyleSheet(f"""
+            QPushButton {{ background-color: {ThemeColors.BG_INPUT}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 6px; color: {ThemeColors.TEXT_PRIMARY}; padding: 8px; font-weight: bold; font-size: 11px; }}
+            QPushButton:hover {{ background-color: {ThemeColors.BORDER_DEFAULT}; border: 1px solid {ThemeColors.PRIMARY}; }}
         """)
-        self.btn_expand.clicked.connect(self.toggle_expand)
-        header_layout.addWidget(self.btn_expand)
+        self.btn_ai_mode.clicked.connect(self.restore_requested.emit)
+        
+        self.btn_capcut_mode = QPushButton("🎨 Kho Hiệu ứng")
+        self.btn_capcut_mode.setCursor(Qt.PointingHandCursor)
+        self.btn_capcut_mode.setStyleSheet(f"""
+            QPushButton {{ background-color: {ThemeColors.BG_INPUT}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 6px; color: {ThemeColors.TEXT_PRIMARY}; padding: 8px; font-weight: bold; font-size: 11px; }}
+            QPushButton:hover {{ background-color: {ThemeColors.BORDER_DEFAULT}; border: 1px solid {ThemeColors.PRIMARY}; }}
+        """)
+        self.btn_capcut_mode.clicked.connect(self.toggle_expand)
+        
+        l_layout.addWidget(self.btn_ai_mode, stretch=1)
+        l_layout.addWidget(self.btn_capcut_mode, stretch=1)
+        header_layout.addWidget(self.launcher_layout, stretch=1)
 
         self.main_layout.addWidget(header_widget)
 
-        # 2. Mini Asset Browser (Hidden by default)
+        # 2. Mini Asset Browser
         self.browser_container = QWidget()
         self.browser_container.setVisible(False)
         b_layout = QVBoxLayout(self.browser_container)
@@ -137,7 +138,6 @@ class FloatingBubbleWidget(QWidget):
         
         self.main_layout.addWidget(self.browser_container, stretch=1)
 
-        # Hiệu ứng bóng đổ Glow
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(20)
         shadow.setColor(QColor(0, 0, 0, 200))
@@ -151,7 +151,6 @@ class FloatingBubbleWidget(QWidget):
         self.card_widgets = []
         for p in self.all_assets:
             card = AssetCard(preset=p, sample_text_func=lambda: "ChunDVC Title")
-            # Shrink the card for mini browser
             card.setFixedHeight(90)
             self.card_widgets.append(card)
         self._filter_assets()
@@ -178,7 +177,6 @@ class FloatingBubbleWidget(QWidget):
     def toggle_expand(self):
         self.is_expanded = not self.is_expanded
         
-        # Animation cho mượt
         self.anim = QPropertyAnimation(self, b"size")
         self.anim.setDuration(250)
         self.anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -187,11 +185,18 @@ class FloatingBubbleWidget(QWidget):
         if self.is_expanded:
             self.anim.setEndValue(self.expanded_size)
             self.browser_container.setVisible(True)
-            self.btn_expand.setText("➖")
+            self.btn_capcut_mode.setText("➖ Đóng")
+            self.btn_capcut_mode.setStyleSheet(f"""
+                QPushButton {{ background-color: {ThemeColors.BORDER_ACTIVE}; border: 1px solid {ThemeColors.PRIMARY}; border-radius: 6px; color: {ThemeColors.BG_MAIN}; padding: 8px; font-weight: bold; font-size: 11px; }}
+            """)
         else:
             self.anim.setEndValue(self.collapsed_size)
             self.browser_container.setVisible(False)
-            self.btn_expand.setText("🗂️")
+            self.btn_capcut_mode.setText("🎨 Kho Hiệu ứng")
+            self.btn_capcut_mode.setStyleSheet(f"""
+                QPushButton {{ background-color: {ThemeColors.BG_INPUT}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 6px; color: {ThemeColors.TEXT_PRIMARY}; padding: 8px; font-weight: bold; font-size: 11px; }}
+                QPushButton:hover {{ background-color: {ThemeColors.BORDER_DEFAULT}; border: 1px solid {ThemeColors.PRIMARY}; }}
+            """)
             
         self.anim.start()
 
@@ -199,8 +204,7 @@ class FloatingBubbleWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Nền Capsule tối
-        brush = QBrush(QColor(2, 20, 22, 245)) # BG_MAIN with alpha
+        brush = QBrush(QColor(2, 20, 22, 245))
         border_color = QColor(ThemeColors.BORDER_ACTIVE) if self.is_processing else QColor(ThemeColors.BORDER_DEFAULT)
         pen = QPen(border_color, 1.5)
 
@@ -228,6 +232,15 @@ class FloatingBubbleWidget(QWidget):
             self.lbl_status.setText(clean_text)
         
         self.is_processing = (self.progress_pct > 0 and self.progress_pct < 100)
+        
+        # Toggle UI Based on State
+        if self.is_processing:
+            self.launcher_layout.setVisible(False)
+            self.info_layout.setVisible(True)
+        else:
+            self.launcher_layout.setVisible(True)
+            self.info_layout.setVisible(False)
+            
         self.update()
 
     def mousePressEvent(self, event):
@@ -240,41 +253,19 @@ class FloatingBubbleWidget(QWidget):
             self.move(event.globalPosition().toPoint() - self.drag_position)
             event.accept()
 
-    def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.restore_requested.emit()
-            event.accept()
-
     def contextMenuEvent(self, event):
         menu = QMenu(self)
         menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {ThemeColors.BG_MAIN};
-                color: {ThemeColors.TEXT_PRIMARY};
-                border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 6px;
-                padding: 4px;
-            }}
-            QMenu::item {{
-                padding: 6px 20px;
-                border-radius: 4px;
-            }}
-            QMenu::item:selected {{
-                background-color: {ThemeColors.BG_INPUT};
-                color: {ThemeColors.TEXT_ACCENT};
-            }}
+            QMenu {{ background-color: {ThemeColors.BG_MAIN}; color: {ThemeColors.TEXT_PRIMARY}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 6px; padding: 4px; }}
+            QMenu::item {{ padding: 6px 20px; border-radius: 4px; }}
+            QMenu::item:selected {{ background-color: {ThemeColors.BG_INPUT}; color: {ThemeColors.TEXT_ACCENT}; }}
         """)
-
         action_restore = menu.addAction("🖥️ Mở Giao Diện Đầy Đủ")
         action_restore.triggered.connect(self.restore_requested.emit)
-
         menu.addSeparator()
-
         if self.is_processing:
             action_stop = menu.addAction("🛑 Dừng Tiến Trình")
             action_stop.triggered.connect(self.stop_requested.emit)
-
         action_quit = menu.addAction("❌ Thoát Ứng Dụng")
         action_quit.triggered.connect(QApplication.instance().quit)
-
         menu.exec(event.globalPos())
