@@ -1,6 +1,7 @@
 import os
-import tempfile
+import json
 import uuid
+import tempfile
 from typing import Optional, Callable, List, Any
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
@@ -16,15 +17,37 @@ from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS
 from src.core.text_preset import TextStylePreset, BUILTIN_PRESETS, FusionSettingGenerator
 from src.core.transition_preset import TransitionStylePreset, BUILTIN_TRANSITIONS, TransitionMacroGenerator
 
-# --- NEW: MÔ HÌNH DỮ LIỆU TÀI NGUYÊN LOCAL ---
+# --- FAVORITES MANAGER ---
+class FavoritesManager:
+    FILE_PATH = "data/favorites.json"
+    
+    @classmethod
+    def load(cls) -> set:
+        if not os.path.exists("data"):
+            os.makedirs("data")
+        if not os.path.exists(cls.FILE_PATH):
+            return set()
+        try:
+            with open(cls.FILE_PATH, 'r', encoding='utf-8') as f:
+                return set(json.load(f))
+        except:
+            return set()
+            
+    @classmethod
+    def save(cls, favs: set):
+        if not os.path.exists("data"):
+            os.makedirs("data")
+        with open(cls.FILE_PATH, 'w', encoding='utf-8') as f:
+            json.dump(list(favs), f)
+
+# --- LOCAL ASSET MODEL ---
 class LocalAsset:
     def __init__(self, file_path: str):
         self.file_path = file_path
         self.name = os.path.basename(file_path)
-        self.id = uuid.uuid4().hex
+        self.id = file_path # Dùng file_path làm ID cho asset local
         self.ext = os.path.splitext(file_path)[1].lower()
         
-        # Categorize based on extension
         if self.ext in ['.wav', '.mp3', '.aac']:
             self.category = "SFX"
             self.badge_icon = "🎵"
@@ -37,6 +60,10 @@ class LocalAsset:
             self.category = "IMAGE"
             self.badge_icon = "🖼️"
             self.type = "image"
+        elif self.ext in ['.cube']: # FEATURE 3: LUTs
+            self.category = "LUT"
+            self.badge_icon = "🎨"
+            self.type = "color"
         else:
             self.category = "FILE"
             self.badge_icon = "📄"
@@ -75,11 +102,9 @@ class DraggableAssetLabel(QLabel):
         drag = QDrag(self)
         mime_data = QMimeData()
 
-        # Handle Local File Drag directly
         if isinstance(preset, LocalAsset):
             mime_data.setUrls([QUrl.fromLocalFile(preset.file_path)])
         else:
-            # Handle Fusion Macro Generation
             temp_setting = os.path.join(tempfile.gettempdir(), f"ChunDVC_{preset.id}_{uuid.uuid4().hex[:6]}.setting")
             if isinstance(preset, TextStylePreset):
                 sample_txt = self.sample_text_getter() if callable(self.sample_text_getter) else preset.name
@@ -95,21 +120,20 @@ class DraggableAssetLabel(QLabel):
 
 class AssetCard(QFrame):
     selected_signal = pyqtSignal(str) 
+    favorite_toggled = pyqtSignal(str, bool)
 
-    def __init__(self, preset: Any, sample_text_func=None, parent=None):
+    def __init__(self, preset: Any, is_fav: bool = False, sample_text_func=None, parent=None):
         super().__init__(parent)
         self.preset = preset
+        self.is_fav = is_fav
         self.sample_text_func = sample_text_func
         self.is_selected = False
         self.setProperty("class", "asset_card")
         self.setFrameShape(QFrame.StyledPanel)
         self.setCursor(Qt.PointingHandCursor)
         
-        # Audio Player for SFX Preview
         self.player = None
         self.audio_output = None
-        
-        # Video/GIF Movie
         self.movie = None
 
         self._init_ui()
@@ -123,12 +147,17 @@ class AssetCard(QFrame):
         lbl_icon = QLabel(self.preset.badge_icon if hasattr(self.preset, 'badge_icon') else "✨")
         lbl_title = QLabel(f"<b>{self.preset.name}</b>")
         lbl_title.setStyleSheet(f"color: {ThemeColors.TEXT_ACCENT}; font-size: 12px;")
-        
-        # Truncate long file names
-        if len(self.preset.name) > 18:
-            lbl_title.setText(f"<b>{self.preset.name[:15]}...</b>")
+        if len(self.preset.name) > 15:
+            lbl_title.setText(f"<b>{self.preset.name[:12]}...</b>")
             lbl_title.setToolTip(self.preset.name)
         
+        # Nút Tim (Favorite)
+        self.btn_fav = QPushButton("❤️" if self.is_fav else "🤍")
+        self.btn_fav.setFixedSize(24, 24)
+        self.btn_fav.setCursor(Qt.PointingHandCursor)
+        self.btn_fav.setStyleSheet("background: transparent; border: none; font-size: 14px;")
+        self.btn_fav.clicked.connect(self._toggle_fav)
+
         cat_str = self.preset.category.upper() if hasattr(self.preset, 'category') else "EFFECT"
         cat_badge = QLabel(cat_str)
         cat_badge.setStyleSheet(f"""
@@ -139,7 +168,7 @@ class AssetCard(QFrame):
 
         h_top.addWidget(lbl_icon)
         h_top.addWidget(lbl_title, stretch=1)
-        h_top.addWidget(cat_badge)
+        h_top.addWidget(self.btn_fav)
         layout.addLayout(h_top)
 
         self.preview_box = DraggableAssetLabel(self)
@@ -148,7 +177,6 @@ class AssetCard(QFrame):
         self.preview_box.setFixedHeight(60)
         self.preview_box.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border: 1.5px dashed {ThemeColors.BORDER_DEFAULT}; border-radius: 6px;")
         
-        # Set Default Text/Images
         if isinstance(self.preset, TextStylePreset):
             self.preview_box.setText("T: Text+ Macro")
         elif isinstance(self.preset, TransitionStylePreset):
@@ -156,14 +184,13 @@ class AssetCard(QFrame):
         elif isinstance(self.preset, LocalAsset):
             if self.preset.type == "audio":
                 self.preview_box.setText("🔊 Hover để nghe")
-            elif self.preset.type == "video" or self.preset.type == "image":
-                self.preview_box.setText("🎞️ Kéo & Thả")
+            elif self.preset.type == "color":
+                self.preview_box.setText("🎨 Kéo & Thả LUT")
             else:
-                self.preview_box.setText("📄 Tài liệu")
+                self.preview_box.setText("🎞️ Kéo & Thả")
                 
         layout.addWidget(self.preview_box)
         
-        # Setup Preview Logic
         if isinstance(self.preset, LocalAsset):
             if self.preset.type == "audio":
                 self.player = QMediaPlayer()
@@ -174,8 +201,12 @@ class AssetCard(QFrame):
                 self.movie = QMovie(self.preset.file_path)
                 self.preview_box.setMovie(self.movie)
 
+    def _toggle_fav(self):
+        self.is_fav = not self.is_fav
+        self.btn_fav.setText("❤️" if self.is_fav else "🤍")
+        self.favorite_toggled.emit(self.preset.id, self.is_fav)
+
     def enterEvent(self, event):
-        """Hover to Play: Tự động phát nhạc hoặc Video/GIF khi đưa chuột vào."""
         if self.player:
             self.player.play()
             self.preview_box.setStyleSheet(f"background-color: {ThemeColors.BORDER_ACTIVE}; color: {ThemeColors.BG_MAIN}; border-radius: 6px; font-weight: bold;")
@@ -185,7 +216,6 @@ class AssetCard(QFrame):
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        """Dừng phát khi chuột rời đi."""
         if self.player:
             self.player.stop()
             self.preview_box.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border: 1.5px dashed {ThemeColors.BORDER_DEFAULT}; border-radius: 6px;")
@@ -206,7 +236,6 @@ class AssetCard(QFrame):
             self.selected_signal.emit(self.preset.id)
         super().mousePressEvent(event)
 
-
 class TabAssets(QWidget):
     insert_title_requested = pyqtSignal(str, str, float)
     install_presets_requested = pyqtSignal()
@@ -216,11 +245,11 @@ class TabAssets(QWidget):
         super().__init__(parent)
         self._current_preset_callback = None
         self.all_presets = BUILTIN_PRESETS.copy()
-        
-        # DVC PRO Phase 4: Local Assets
         self.local_assets: List[LocalAsset] = []
-        
         self.all_assets = BUILTIN_PRESETS + BUILTIN_TRANSITIONS
+        
+        self.favorites = FavoritesManager.load()
+        
         self.current_category = "all"
         self.card_widgets = []
         self._init_ui()
@@ -242,7 +271,9 @@ class TabAssets(QWidget):
         h_preset = QHBoxLayout()
         self.combo_text_preset = QComboBox()
         self.btn_preview_preset = QPushButton("👁 Xem Trước")
-        self.btn_save_custom_preset = QPushButton("➕ Lưu Preset...")
+        self.btn_save_custom_preset = QPushButton("🧲 Hút Preset từ DaVinci")
+        self.btn_save_custom_preset.setStyleSheet(f"background-color: {ThemeColors.BG_INPUT}; color: {ThemeColors.PRIMARY}; font-weight: bold;")
+        self.btn_save_custom_preset.setToolTip("Giai đoạn tới: Dùng API lấy Node đang chọn trong DaVinci lưu thành Preset mới!")
         h_preset.addWidget(self.combo_text_preset)
         h_preset.addWidget(self.btn_preview_preset)
         h_preset.addWidget(self.btn_save_custom_preset)
@@ -253,7 +284,7 @@ class TabAssets(QWidget):
         self.preview_lbl.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border: 1px dashed {ThemeColors.BORDER_DEFAULT}; border-radius: 4px;")
         form_p.addRow("Master Kéo-Thả:", self.preview_lbl)
         
-        self.btn_install_presets = QPushButton("📥 Cài Đặt Toàn Bộ Tài Nguyên (Library)")
+        self.btn_install_presets = QPushButton("📥 Cài Đặt Toàn Bộ Tài Nguyên")
         self.btn_copy_fusion = QPushButton("📋 Copy Fusion Node")
         h_ins = QHBoxLayout()
         h_ins.addWidget(self.btn_install_presets)
@@ -282,7 +313,14 @@ class TabAssets(QWidget):
         side_layout.addWidget(lbl_nav)
         
         self.nav_btns = {}
-        cats = [("all", "Tất cả tài nguyên"), ("title", "Tiêu đề (Titles)"), ("transition", "Chuyển cảnh (Trans)"), ("local", "Thư viện Local (SFX/Vid)")]
+        cats = [
+            ("favorites", "❤️ Yêu thích"),
+            ("all", "Tất cả tài nguyên"), 
+            ("title", "Tiêu đề (Titles)"), 
+            ("transition", "Chuyển cảnh (Trans)"), 
+            ("color", "Màu sắc (LUTs)"),
+            ("local", "Thư viện Local")
+        ]
         for cid, cname in cats:
             btn = QPushButton(cname)
             btn.setCheckable(True)
@@ -295,7 +333,6 @@ class TabAssets(QWidget):
             self.nav_btns[cid] = btn
         self.nav_btns["all"].setChecked(True)
         
-        # Nút Quét thư mục Local
         self.btn_scan_local = QPushButton("➕ Quét Thư mục Local")
         self.btn_scan_local.setStyleSheet(f"background-color: {ThemeColors.BG_CARD}; color: {ThemeColors.TEXT_PRIMARY}; margin-top: 10px;")
         self.btn_scan_local.clicked.connect(self._scan_local_folder)
@@ -308,7 +345,7 @@ class TabAssets(QWidget):
         right_panel = QWidget()
         r_layout = QVBoxLayout(right_panel)
         self.txt_search = QLineEdit()
-        self.txt_search.setPlaceholderText("🔍 Tìm trong tất cả tài nguyên (Hormozi, Zoom, Whoosh)...")
+        self.txt_search.setPlaceholderText("🔍 Tìm hiệu ứng, âm thanh, hoặc LUT...")
         self.txt_search.textChanged.connect(self._refresh_grid)
         r_layout.addWidget(self.txt_search)
         
@@ -327,11 +364,11 @@ class TabAssets(QWidget):
         self._populate_cards()
 
     def _scan_local_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục chứa SFX / B-Roll / Overlays")
+        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục chứa SFX / B-Roll / LUTs")
         if not folder: return
         
         found = 0
-        valid_exts = ['.wav', '.mp3', '.aac', '.mp4', '.mov', '.gif', '.png', '.jpg']
+        valid_exts = ['.wav', '.mp3', '.aac', '.mp4', '.mov', '.gif', '.png', '.jpg', '.cube']
         for root, _, files in os.walk(folder):
             for f in files:
                 ext = os.path.splitext(f)[1].lower()
@@ -342,13 +379,23 @@ class TabAssets(QWidget):
                     
         self.all_assets = BUILTIN_PRESETS + BUILTIN_TRANSITIONS + self.local_assets
         self._populate_cards()
-        QMessageBox.information(self, "Quét hoàn tất", f"Đã quét và thêm {found} tài nguyên từ thư mục cá nhân!")
+        QMessageBox.information(self, "Quét hoàn tất", f"Đã quét và thêm {found} tài nguyên (bao gồm LUTs) từ thư mục cá nhân!")
 
     def _filter_by_nav(self, cid: str):
         self.current_category = cid
         for k, b in self.nav_btns.items():
             if k != cid: b.setChecked(False)
         self._refresh_grid()
+
+    def _on_favorite_toggled(self, preset_id: str, is_fav: bool):
+        if is_fav:
+            self.favorites.add(preset_id)
+        else:
+            self.favorites.discard(preset_id)
+        FavoritesManager.save(self.favorites)
+        # Tự động refresh nếu đang ở tab Favorites
+        if self.current_category == "favorites":
+            self._refresh_grid()
 
     def _populate_cards(self):
         for c in self.card_widgets:
@@ -362,8 +409,10 @@ class TabAssets(QWidget):
                     self.combo_text_preset.addItem(p.name, p.id)
                     
         for p in self.all_assets:
-            card = AssetCard(preset=p, sample_text_func=lambda: self.txt_single_title.text().strip())
+            is_fav = p.id in self.favorites
+            card = AssetCard(preset=p, is_fav=is_fav, sample_text_func=lambda: self.txt_single_title.text().strip())
             card.selected_signal.connect(self._on_card_selected)
+            card.favorite_toggled.connect(self._on_favorite_toggled)
             self.card_widgets.append(card)
             
         self._refresh_grid()
@@ -381,16 +430,23 @@ class TabAssets(QWidget):
             is_title = isinstance(p, TextStylePreset)
             is_trans = isinstance(p, TransitionStylePreset)
             is_local = isinstance(p, LocalAsset)
+            is_color = is_local and getattr(p, 'type', '') == 'color'
+            is_fav = p.id in self.favorites
             
+            if self.current_category == "favorites" and not is_fav: continue
             if self.current_category == "title" and not is_title: continue
             if self.current_category == "transition" and not is_trans: continue
             if self.current_category == "local" and not is_local: continue
+            if self.current_category == "color" and not is_color: continue
             
             cat = p.category.lower() if hasattr(p, 'category') else ""
             if query and query not in p.name.lower() and query not in cat:
                 continue
                 
             visible.append(c)
+            
+        # Sắp xếp: Yêu thích (Favorites) luôn nổi lên trên cùng ở mọi tab
+        visible.sort(key=lambda x: 0 if x.is_fav else 1)
             
         for i, c in enumerate(visible):
             c.setVisible(True)
