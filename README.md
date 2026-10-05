@@ -1,19 +1,20 @@
-# 🚀 ResolveFlow Assistant v4.1 - AI Visual, Director, Text+ Presets & Smart Performance Suite
+# ChunDVC v1.0
 
-[![Test & Build CI](https://github.com/NguyenVanTruong06/ResolveFlow-Assistant/actions/workflows/test.yml/badge.svg)](https://github.com/NguyenVanTruong06/ResolveFlow-Assistant/actions/workflows/test.yml)
+
+[![Test & Build CI](https://github.com/NguyenVanTruong06/ChunDVC/actions/workflows/test.yml/badge.svg)](https://github.com/NguyenVanTruong06/ChunDVC/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![DaVinci Resolve Free & Studio](https://img.shields.io/badge/DaVinci%20Resolve-Free%20%26%20Studio-red.svg)](https://www.blackmagicdesign.com/products/davinciresolve)
 
 > **GitHub Topics:** `davinci-resolve`, `whisper-ai`, `video-editing`, `automation`, `fcpxml`, `ai-director`, `pyside6`, `speech-to-text`, `video-production`
 
-**ResolveFlow Assistant v4.1** là bộ công cụ trợ lý AI toàn năng tự động hóa quy trình hậu kỳ video 100% cục bộ (Local / On-Premise) dành cho **DaVinci Resolve** (Hỗ trợ cả bản **Free** và bản **Studio**).
+**ChunDVC v4.1** là bộ công cụ trợ lý AI toàn năng tự động hóa quy trình hậu kỳ video 100% cục bộ (Local / On-Premise) dành cho **DaVinci Resolve** (Hỗ trợ cả bản **Free** và bản **Studio**).
 
 Hệ thống được tái cấu trúc sang **Giao diện 4 Tab Chức Năng (Workflow Tabs)** chuyên nghiệp:
-- **Tab 1: ✂ Auto Cut & Rough Cut:** Quét khoảng lặng (VAD), **Interactive Mini Timeline Preview (Thanh xem trước timeline trực quan với khối thoại/cắt/speedup)**, Đạo diễn AI lọc sạch câu nói vấp (Bad Takes), Tua nhanh Timelapse (Speed-Ramp 8x), Bám mặt chuyển dọc 9:16 (Auto Reframe) và Vlog Hook Teaser.
+- **Tab 1: ✂ Auto Cut & Story Arranger:** **Quét & Nạp cả Thư mục Dự án Phân tầng (Chapters, A-Roll, B-Roll, Footages)** kèm Kéo-thả linh hoạt, Quét khoảng lặng (VAD), **Interactive Mini Timeline Preview**, Đạo diễn AI lọc sạch câu nói vấp, **Sắp xếp kịch bản theo Ý đồ Marketing (AIDA, PAS, Open-Loop, Cold Open, Shorts)** kèm Bảng duyệt kịch bản tương tác (Story Review Table), **Tự động sinh Viral Marketing Pack (5 Tiêu đề giật tít, Hook 3s đầu, Kịch bản CTA & SEO Description)**, Tua nhanh Timelapse (Speed-Ramp 8x), Bám mặt chuyển dọc 9:16 (Auto Reframe) và Vlog Hook Teaser.
 - **Tab 2: 📝 Titles, Captions & Text Presets:** 7 Kiểu dáng phụ đề Text+/Fusion Text động chuẩn CapCut (Karaoke Pop, Bounce Word, Box Highlight...), Real-time Live Preview & chèn Text+ tại Playhead.
 - **Tab 3: 🔊 SFX & Audio Enhancer Studio:** Lưới 8 SFX Pad (Whoosh, Pop, Ding, Click, Camera, Glitch, Riser, Sub Drop) nghe thử độ trễ cực thấp, tự động hạ volume offset (-12dB), chèn vào Playhead và **Chuẩn hóa âm lượng giọng nói 2-Pass Loudnorm EBU R128 / YouTube (-14 LUFS, Peak -1.0 dBFS)**.
-- **Tab 4: 🚀 Polish & Quick Export:** Bộ màu / LUTs chuẩn (Rec.709, Warm Vlog, Cinematic Teal-Orange), **Auto Thumbnail Golden Keyframes Extractor (Laplacian Sharpness & Anti-blur scoring)**, **Báo cáo Minh bạch Nhật ký Thực thi (Execution Audit Report)** và 1-Click Export Presets (TikTok 9:16, YouTube 4K, Podcast MP3).
+- **Tab 4: 🚀 Polish & Quick Export:** Bộ màu / LUTs chuẩn (Rec.709, Warm Vlog, Cinematic Teal-Orange), **Auto Thumbnail Golden Keyframes Extractor (Laplacian Sharpness & Anti-blur scoring)**, **Báo cáo Minh bạch Nhật ký Thực thi (Execution Audit Report)**, xuất bản bộ **Gói Marketing Viral Pack (.md)** và 1-Click Export Presets (TikTok 9:16, YouTube 4K, Podcast MP3).
 
 ---
 
@@ -21,6 +22,8 @@ Hệ thống được tái cấu trúc sang **Giao diện 4 Tab Chức Năng (Wo
 
 | Tính năng | Bản v1.0 - v3.0 | Bản v4.0 | Bản v4.1 (Hiện tại - Nâng cấp Toàn diện) |
 | :--- | :---: | :---: | :---: |
+| **Nhập Media Từ Google Drive** | ❌ | ❌ | **Tự động bóc tách link File/Folder + Streaming tải ngầm + Nạp trực tiếp** |
+| **Nhập Thư Mục Dự Án Phân Tầng** | ❌ | ❌ | **Quét đệ quy Folder cha-con + Tự phân loại Chapter & B-Roll Pool + Drag/Drop** |
 | **Kiến trúc Giao diện** | Cuộn dọc 1 trang | Giao diện cơ bản | **Hệ thống 4 Workflow Tabs (Auto Cut, Titles, SFX Studio, Polish/Export)** |
 | **Mini Timeline Preview** | ❌ | ❌ | **Interactive Mini Timeline (Khối Voice/Cut/Speedup/Hook + Playhead scrub)** |
 | **SFX & Soundboard** | ❌ | Gợi ý Markers | **Lưới 8 SFX Pad nghe thử tức thì + Auto -12dB Volume + Chèn Playhead** |
@@ -60,10 +63,10 @@ Hệ thống cho phép lựa chọn hoặc tự tạo các kiểu dáng phụ đ
 
 > **Dành cho Người Dùng Cuối (Không cần cài đặt Python hay cấu hình dòng lệnh):**
 
-1. Truy cập trang **[GitHub Releases](https://github.com/NguyenVanTruong06/ResolveFlow-Assistant/releases)** của repository.
-2. Tải về tệp nén mới nhất: **`ResolveFlow-Assistant-v4.1.0-windows-x64.zip`**.
-3. Giải nén tệp `.zip` vào bất kỳ thư mục nào trên máy tính (ví dụ: `D:\ResolveFlow\`).
-4. Nhấp đúp chuột vào file **`ResolveFlow-Assistant.exe`** để mở ứng dụng.
+1. Truy cập trang **[GitHub Releases](https://github.com/NguyenVanTruong06/ChunDVC/releases)** của repository.
+2. Tải về tệp nén mới nhất: **`ChunDVC-v4.1.0-windows-x64.zip`**.
+3. Giải nén tệp `.zip` vào bất kỳ thư mục nào trên máy tính (ví dụ: `D:\ChunDVC\`).
+4. Nhấp đúp chuột vào file **`ChunDVC.exe`** để mở ứng dụng.
 5. *Lưu ý khởi chạy lần đầu:* Khi bạn chọn một mô hình Whisper AI mới (ví dụ: `small` hoặc `medium`), ứng dụng sẽ tự động tải mô hình về bộ nhớ đệm máy tính kèm thanh thông báo tiến trình rõ ràng (chỉ diễn ra 1 lần duy nhất).
 
 ---
@@ -79,8 +82,8 @@ Hệ thống cho phép lựa chọn hoặc tự tạo các kiểu dáng phụ đ
 ### 2. Cài đặt mã nguồn nhanh (1-Click)
 ```powershell
 # 1. Clone mã nguồn về máy
-git clone https://github.com/NguyenVanTruong06/ResolveFlow-Assistant.git
-cd ResolveFlow-Assistant
+git clone https://github.com/NguyenVanTruong06/ChunDVC.git
+cd ChunDVC
 
 # 2. Chạy script thiết lập tự động
 powershell -ExecutionPolicy Bypass -File setup_project.ps1
@@ -98,13 +101,13 @@ pip install pyinstaller
 ```powershell
 python build_standalone.py
 ```
-File `.exe` sẽ được tạo tại `dist/ResolveFlow-Assistant/ResolveFlow-Assistant.exe`.
+File `.exe` sẽ được tạo tại `dist/ChunDVC/ChunDVC.exe`.
 
 ---
 
 ## 📖 Hướng Dẫn Sử Dụng Chi Tiết (Bản v4.1)
 
-Chạy ứng dụng bằng cách double-click file **`Run_ResolveFlow.bat`** hoặc lệnh:
+Chạy ứng dụng bằng cách double-click file **`Run_ChunDVC.bat`** hoặc lệnh:
 ```powershell
 python main.py
 ```
@@ -125,9 +128,9 @@ python main.py
 
 ---
 
-### 🟢 3. Tối Ưu Hiệu Năng & Scan Cache
-* **Scan Cache theo Checksum:** Nạp lại kết quả nhận diện giọng nói và cắt lọc trong **0.05s** nếu chạy lại cùng file video gốc.
-* **Gợi ý Model Whisper:** Tự động tính thời lượng video để gợi ý `large-v3` (< 3 phút) hoặc `small`/`medium` (> 30 phút, tiết kiệm 65-75% thời gian).
+### 🟢 4. Bảng Duyệt Kịch Bản Trực Quan (Interactive Story Blocks Review)
+* **Duyệt & Tinh chỉnh Kịch bản:** Cho phép xem trước danh sách các khối câu chuyện (Hook, Mở đầu, Diễn biến, Cao trào, Kết), đổi thứ tự bằng nút `⬆ Lên` / `⬇ Xuống` (hoặc phím `Alt+Up` / `Alt+Down`).
+* **Bật/Tắt linh hoạt:** Checkbox từng phân đoạn để lọc nhanh khối không muốn đưa vào timeline, tự động cập nhật tổng thời lượng theo ngân sách mục tiêu.
 
 ---
 
@@ -135,7 +138,7 @@ python main.py
 ```powershell
 .\venv\Scripts\pytest -v
 ```
-Toàn bộ **132/132 kịch bản kiểm thử** đạt kết quả **100% PASSED** (0 warnings, 0 errors).
+Toàn bộ **211/211 kịch bản kiểm thử** đạt kết quả **100% PASSED** (0 warnings, 0 errors).
 
 ---
 

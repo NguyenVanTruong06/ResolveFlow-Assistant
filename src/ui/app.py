@@ -81,7 +81,7 @@ class PreviewDialog(QDialog):
             TextPreviewRenderer.render_preview_to_file(
                 preset=preset,
                 output_image_path=temp_img,
-                sample_words=["ResolveFlow", "AI", "Text+", "Subtitle"],
+                sample_words=["ChunDVC", "AI", "Text+", "Subtitle"],
                 active_index=2,
                 aspect_ratio=aspect_ratio
             )
@@ -261,7 +261,7 @@ class PipelineWorker(QThread):
         transcriber = None
         temp_files_to_clean = []
         try:
-            self.log_signal.emit("🚀 Đang khởi động ResolveFlow-Assistant v4.1 (Text Presets, Smart Cache & Pipeline Suite)...")
+            self.log_signal.emit("🚀 Đang khởi động ChunDVC-Assistant v4.1 (Text Presets, Smart Cache & Pipeline Suite)...")
             self.progress_signal.emit(5)
 
             if self.is_interrupted:
@@ -424,17 +424,17 @@ class PipelineWorker(QThread):
                 fps = 30.0
             
             if self.project_structure and getattr(self.project_structure, "root_name", None):
-                stamped_name = f"ResolveFlow_{self.project_structure.root_name}"
+                stamped_name = f"ChunDVC_{self.project_structure.root_name}"
             elif len(self.video_paths) == 1:
                 stamped_name = os.path.splitext(os.path.basename(first_video))[0]
             else:
-                stamped_name = f"ResolveFlow_Merged_{len(self.video_paths)}clips"
+                stamped_name = f"ChunDVC_Merged_{len(self.video_paths)}clips"
 
             audit_reporter = ExecutionAuditReporter(project_name=stamped_name)
             audit_reporter.record_validation_warnings(self.validation_warnings)
 
             total_clips = len(self.video_paths)
-            temp_audio_dir = os.path.join(tempfile.gettempdir(), "ResolveFlow_Audio")
+            temp_audio_dir = os.path.join(tempfile.gettempdir(), "ChunDVC_Audio")
             os.makedirs(temp_audio_dir, exist_ok=True)
 
             # --- VÒNG LẶP XỬ LÝ TỪNG CLIP (PHASE 1 HOẶC END-TO-END) ---
@@ -1370,15 +1370,15 @@ class PipelineWorker(QThread):
         self.finished_signal.emit(False, "Tiến trình đã dừng bởi người dùng (Cancelled).")
 
 
-class ResolveFlowApp(QMainWindow):
+class ChunDVCApp(QMainWindow):
     """
-    Lớp giao diện người dùng chính (Main Dashboard) của ResolveFlow Assistant v4.1.
+    Lớp giao diện người dùng chính (Main Dashboard) của ChunDVC v1.0.
     Tích hợp Workflow Mode 1-click, Phân tầng 2 lớp Cơ bản/Nâng cao, Hệ thống Text Style Preset,
     Hệ thống Recipe và Scan Cache siêu tốc.
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ResolveFlow Assistant v4.1 - AI Visual & Director Automation Suite")
+        self.setWindowTitle("ChunDVC v1.0 - AI Visual & Director Automation Suite")
         self.resize(1280, 880)
         self.setMinimumSize(1080, 720)
         self.worker = None
@@ -1494,7 +1494,7 @@ class ResolveFlowApp(QMainWindow):
 
         lbl_s1_desc = QLabel(
             "<b>👋 Chào bạn! Hãy bắt đầu bằng cách chọn Thư mục Dự án hoặc Video nguồn:</b><br>"
-            "ResolveFlow sẽ tự động nhận diện lời thoại Whisper, khoảng lặng và chuyển động hình ảnh 1 lần duy nhất vào bộ nhớ Cache.<br>"
+            "ChunDVC sẽ tự động nhận diện lời thoại Whisper, khoảng lặng và chuyển động hình ảnh 1 lần duy nhất vào bộ nhớ Cache.<br>"
             "<i>Sau khi nạp xong, bạn sẽ chuyển sang <b>Bước 2</b> để chọn dựng tự động bằng AI Copilot hoặc cắt thô offline!</i>"
         )
         lbl_s1_desc.setWordWrap(True)
@@ -1892,7 +1892,7 @@ class ResolveFlowApp(QMainWindow):
 
         self.txt_console = QPlainTextEdit()
         self.txt_console.setReadOnly(True)
-        self.txt_console.appendPlainText("🌟 ResolveFlow Assistant v4.1 sẵn sàng làm việc.")
+        self.txt_console.appendPlainText("🌟 ChunDVC v1.0 sẵn sàng làm việc.")
         vbox_console.addWidget(self.txt_console)
         right_panel.addWidget(self.group_console, stretch=1)
 
@@ -2165,7 +2165,7 @@ class ResolveFlowApp(QMainWindow):
             TextPreviewRenderer.render_preview_to_file(
                 preset=render_preset,
                 output_image_path=temp_img,
-                sample_words=["ResolveFlow", "AI", "Text+", "Subtitle"],
+                sample_words=["ChunDVC", "AI", "Text+", "Subtitle"],
                 active_index=2,
                 aspect_ratio=aspect
             )
@@ -4097,6 +4097,6 @@ def start_gui():
     app = QApplication(sys.argv)
     default_font = QFont("Segoe UI", 10)
     app.setFont(default_font)
-    window = ResolveFlowApp()
+    window = ChunDVCApp()
     window.show()
     sys.exit(app.exec())
