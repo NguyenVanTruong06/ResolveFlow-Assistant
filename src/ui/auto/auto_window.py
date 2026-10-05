@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
     QLabel, QComboBox, QLineEdit, QPushButton, QCheckBox, QProgressBar,
     QPlainTextEdit, QGroupBox, QFormLayout, QSlider, QFileDialog,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMessageBox,
-    QDialog, QScrollArea, QInputDialog, QFrame, QTabWidget, QSplitter
+    QDialog, QScrollArea, QInputDialog, QFrame, QTabWidget, QSplitter, QListWidget, QStackedWidget
 )
 from PySide6.QtCore import QThread, Signal as pyqtSignal, Slot as pyqtSlot, Qt
 from PySide6.QtGui import QFont, QColor, QPixmap, QIcon, QShortcut, QKeySequence
@@ -1412,104 +1412,851 @@ class AutoWindow(QMainWindow):
         window_layout.setContentsMargins(0, 0, 0, 0)
         window_layout.setSpacing(0)
 
-        # === Khởi tạo các dummy/legacy widgets để backend không bị lỗi ===
-
-        
-        # --- HEADER ---
+        # =========================================================================
+        # 1. HEADER (Titlebar)
+        # =========================================================================
         header = QWidget()
-        header.setFixedHeight(50)
-        header.setStyleSheet("background-color: #1e1e24; border-bottom: 1px solid #33333b;")
+        header.setFixedHeight(48)
+        header.setStyleSheet("background-color: #111113; border-bottom: 1px solid #27272a;")
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(16, 0, 16, 0)
-        
+        h_layout.setSpacing(12)
+
+        lbl_logo = QLabel("⚡")
+        lbl_logo.setStyleSheet("font-size: 16px; color: #a78bfa;")
+        h_layout.addWidget(lbl_logo)
+
         lbl_title = QLabel("AI Director")
-        lbl_title.setStyleSheet("color: #3dcee1; font-size: 16px; font-weight: bold;")
+        lbl_title.setStyleSheet("color: #f4f4f5; font-size: 14px; font-weight: bold;")
         h_layout.addWidget(lbl_title)
+
+        lbl_crumb = QLabel("/ ResolveFlow_H264")
+        lbl_crumb.setStyleSheet("color: #71717a; font-size: 13px;")
+        h_layout.addWidget(lbl_crumb)
+
         h_layout.addStretch()
-        
-        # --- AUTO LAYOUT (Grid 3 cột + Timeline) ---
-        auto_widget = QWidget()
-        auto_layout = QGridLayout(auto_widget)
-        auto_layout.setContentsMargins(0, 0, 0, 0)
-        auto_layout.setSpacing(0)
-        
-        # 1. LEFT (300px)
+
+        pill_status = QLabel("● Đang nhận diện lời thoại")
+        pill_status.setStyleSheet("background-color: rgba(139,92,246,0.15); color: #c4b5fd; padding: 4px 10px; border-radius: 12px; font-size: 11.5px;")
+        h_layout.addWidget(pill_status)
+
+        pill_resolve = QLabel("● DaVinci Resolve đã kết nối")
+        pill_resolve.setStyleSheet("background-color: rgba(34,197,94,0.15); color: #86efac; padding: 4px 10px; border-radius: 12px; font-size: 11.5px;")
+        h_layout.addWidget(pill_resolve)
+
+        window_layout.addWidget(header)
+
+        # =========================================================================
+        # 2. MAIN WORKSPACE (Grid 3 Cột: Left 300px | Center Stretch | Right 340px)
+        # =========================================================================
+        workspace = QWidget()
+        workspace_layout = QHBoxLayout(workspace)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setSpacing(0)
+
+        # -------------------------------------------------------------------------
+        # CỘT TRÁI (300px): Nguồn footage, Dự án, Cache, Danh sách chương
+        # -------------------------------------------------------------------------
         a_left = QFrame()
         a_left.setFixedWidth(300)
-        a_left.setStyleSheet("background-color: #151518; border-right: 1px solid #33333b;")
+        a_left.setStyleSheet("background-color: #111113; border-right: 1px solid #27272a;")
         l_vbox = QVBoxLayout(a_left)
         l_vbox.setContentsMargins(16, 16, 16, 16)
-        l_vbox.setSpacing(12)
-        
-        lbl_src = QLabel("Nguồn Footage")
-        lbl_src.setStyleSheet("font-weight: bold; color: #fff;")
-        l_vbox.addWidget(lbl_src)
-        
-        self.btn_browse_folder = QPushButton("Chọn Thư mục")
+        l_vbox.setSpacing(14)
+
+        # Dropzone
+        self.drop_frame = QFrame()
+        self.drop_frame.setCursor(Qt.PointingHandCursor)
+        self.drop_frame.setStyleSheet("""
+            QFrame {
+                border: 1.5px dashed #3f3f46;
+                border-radius: 10px;
+                background-color: #18181b;
+                padding: 16px;
+            }
+            QFrame:hover {
+                border-color: #a78bfa;
+                background-color: rgba(139,92,246,0.1);
+            }
+        """)
+        drop_layout = QVBoxLayout(self.drop_frame)
+        drop_layout.setSpacing(4)
+        drop_layout.setAlignment(Qt.AlignCenter)
+        lbl_drop_icon = QLabel("📥")
+        lbl_drop_icon.setAlignment(Qt.AlignCenter)
+        lbl_drop_icon.setStyleSheet("font-size: 20px; color: #a1a1aa;")
+        drop_layout.addWidget(lbl_drop_icon)
+        lbl_drop_txt = QLabel("Thả thư mục footage vào đây")
+        lbl_drop_txt.setAlignment(Qt.AlignCenter)
+        lbl_drop_txt.setStyleSheet("font-size: 12.5px; font-weight: bold; color: #f4f4f5;")
+        drop_layout.addWidget(lbl_drop_txt)
+        lbl_drop_hint = QLabel("hoặc chọn nguồn bên dưới")
+        lbl_drop_hint.setAlignment(Qt.AlignCenter)
+        lbl_drop_hint.setStyleSheet("font-size: 11px; color: #71717a;")
+        drop_layout.addWidget(lbl_drop_hint)
+        l_vbox.addWidget(self.drop_frame)
+
+        # 4 Nút Nguồn 2x2
+        src_grid = QGridLayout()
+        src_grid.setSpacing(8)
+
+        self.btn_browse_folder = QPushButton("📁 Thư mục")
+        self.btn_browse_folder.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 7px; border-radius: 6px; font-size: 11.5px; text-align: left;")
         self.btn_browse_folder.clicked.connect(self._browse_folder)
-        self.btn_browse_files = QPushButton("Chọn Tập tin")
+
+        self.btn_browse_files = QPushButton("🎬 Tệp video")
+        self.btn_browse_files.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 7px; border-radius: 6px; font-size: 11.5px; text-align: left;")
         self.btn_browse_files.clicked.connect(self._browse_file)
-        
-        l_vbox.addWidget(self.btn_browse_folder)
-        l_vbox.addWidget(self.btn_browse_files)
-        
-        self.lbl_cache_badge = QLabel("Bộ nhớ đệm: 0 / 0 clip")
-        self.lbl_cache_badge.setStyleSheet("color: #a1a1aa; font-size: 12px; margin-top: 10px;")
-        l_vbox.addWidget(self.lbl_cache_badge)
-        
-        self.btn_scan_only = QPushButton("🔄 Quét Cache (Tiền xử lý video)")
-        self.btn_scan_only.setStyleSheet("background-color: #0c3d44; color: #39c1d3; padding: 8px; border-radius: 6px; font-weight: bold; border: 1px solid #39c1d3; margin-top: 5px;")
+
+        self.btn_from_davinci = QPushButton("🎞️ Từ DaVinci")
+        self.btn_from_davinci.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 7px; border-radius: 6px; font-size: 11.5px; text-align: left;")
+        self.btn_from_davinci.clicked.connect(self._auto_detect_video)
+
+        self.btn_google_drive = QPushButton("☁️ Google Drive")
+        self.btn_google_drive.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 7px; border-radius: 6px; font-size: 11.5px; text-align: left;")
+        self.btn_google_drive.clicked.connect(self._open_google_drive_dialog)
+
+        src_grid.addWidget(self.btn_browse_folder, 0, 0)
+        src_grid.addWidget(self.btn_browse_files, 0, 1)
+        src_grid.addWidget(self.btn_from_davinci, 1, 0)
+        src_grid.addWidget(self.btn_google_drive, 1, 1)
+        l_vbox.addLayout(src_grid)
+
+        # Dự án & Bộ nhớ đệm (Cache)
+        proj_box = QFrame()
+        proj_box.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 10px;")
+        proj_layout = QVBoxLayout(proj_box)
+        proj_layout.setSpacing(6)
+
+        proj_top = QHBoxLayout()
+        lbl_p_icon = QLabel("📁")
+        self.lbl_proj_name = QLabel("ResolveFlow_H264")
+        self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #f4f4f5; font-size: 12.5px;")
+        proj_top.addWidget(lbl_p_icon)
+        proj_top.addWidget(self.lbl_proj_name, stretch=1)
+        proj_layout.addLayout(proj_top)
+
+        self.lbl_proj_meta = QLabel("67 clip · 3h 30m footage")
+        self.lbl_proj_meta.setStyleSheet("color: #71717a; font-size: 11px;")
+        proj_layout.addWidget(self.lbl_proj_meta)
+
+        cache_row = QHBoxLayout()
+        lbl_c_title = QLabel("Bộ nhớ đệm")
+        lbl_c_title.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
+        self.lbl_cache_badge = QLabel("52 / 67 clip")
+        self.lbl_cache_badge.setStyleSheet("color: #22d3ee; font-size: 11.5px; font-weight: bold;")
+        cache_row.addWidget(lbl_c_title)
+        cache_row.addStretch()
+        cache_row.addWidget(self.lbl_cache_badge)
+        proj_layout.addLayout(cache_row)
+
+        self.cache_progress_bar = QProgressBar()
+        self.cache_progress_bar.setFixedHeight(5)
+        self.cache_progress_bar.setTextVisible(False)
+        self.cache_progress_bar.setValue(78)
+        self.cache_progress_bar.setStyleSheet("""
+            QProgressBar {
+                background-color: #27272a;
+                border-radius: 2.5px;
+            }
+            QProgressBar::chunk {
+                background-color: #06b6d4;
+                border-radius: 2.5px;
+            }
+        """)
+        proj_layout.addWidget(self.cache_progress_bar)
+
+        self.btn_scan_only = QPushButton("🔄 Quét Cache (Tiền xử lý)")
+        self.btn_scan_only.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(6,182,212,0.15);
+                color: #22d3ee;
+                border: 1px solid rgba(6,182,212,0.3);
+                border-radius: 6px;
+                padding: 6px;
+                font-weight: bold;
+                font-size: 11.5px;
+                margin-top: 4px;
+            }
+            QPushButton:hover {
+                background-color: rgba(6,182,212,0.25);
+            }
+        """)
         self.btn_scan_only.clicked.connect(self._start_phase_1_scan)
-        l_vbox.addWidget(self.btn_scan_only)
-        
-        
-        l_vbox.addStretch()
-        
-        # 2. CENTER (expanding)
+        proj_layout.addWidget(self.btn_scan_only)
+
+        l_vbox.addWidget(proj_box)
+
+        # Danh sách Chương
+        chap_head = QHBoxLayout()
+        lbl_chaps = QLabel("Chương")
+        lbl_chaps.setStyleSheet("font-weight: bold; color: #a1a1aa; font-size: 12px;")
+        chap_head.addWidget(lbl_chaps)
+        chap_head.addStretch()
+        btn_sort_chap = QPushButton("Sắp xếp")
+        btn_sort_chap.setStyleSheet("background: transparent; color: #71717a; border: none; font-size: 11px;")
+        chap_head.addWidget(btn_sort_chap)
+        l_vbox.addLayout(chap_head)
+
+        self.list_chapters = QListWidget()
+        self.list_chapters.setStyleSheet("""
+            QListWidget {
+                background-color: transparent;
+                border: none;
+                color: #a1a1aa;
+                font-size: 11.5px;
+            }
+            QListWidget::item {
+                padding: 5px 8px;
+                border-radius: 5px;
+            }
+            QListWidget::item:hover {
+                background-color: #18181b;
+            }
+            QListWidget::item:selected {
+                background-color: #27272a;
+                color: #fff;
+            }
+        """)
+        sample_chaps = [
+            ("● 01_Cay_Tung_Bu", "7 clip · 5:26"),
+            ("● 02_Cau_Khi", "3 clip · 11:26"),
+            ("● 03_Mua_Ve_Pha", "8 clip · 12:33"),
+            ("● 04_Mua_Do_Nhau", "5 clip · 5:59"),
+            ("● 05_Dap_Xe_Mua", "5 clip · 9:32"),
+            ("● 06_Nhau", "5 clip · 2h 39m")
+        ]
+        for name, dur in sample_chaps:
+            self.list_chapters.addItem(f"{name}  ({dur})")
+        l_vbox.addWidget(self.list_chapters, stretch=1)
+
+        workspace_layout.addWidget(a_left)
+
+        # -------------------------------------------------------------------------
+        # CỘT GIỮA (Expanding): Stepper, Presets, Thiết lập nhanh, Toggles, Động cơ AI
+        # -------------------------------------------------------------------------
         a_center = QWidget()
-        a_center.setStyleSheet("background-color: #1a1a1f;")
-        c_vbox = QVBoxLayout(a_center)
-        c_vbox.setContentsMargins(20, 20, 20, 20)
-        c_vbox.setSpacing(16)
-        
-        lbl_center = QLabel("Cấu Hình Dựng")
-        lbl_center.setStyleSheet("font-size: 18px; font-weight: bold; color: #fff;")
-        c_vbox.addWidget(lbl_center)
-        
+        a_center.setStyleSheet("background-color: #09090b;")
+        c_outer = QVBoxLayout(a_center)
+        c_outer.setContentsMargins(0, 0, 0, 0)
+        c_outer.setSpacing(0)
+
+        # Vùng cuộn ScrollArea
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background-color: #09090b;")
+        c_vbox = QVBoxLayout(scroll_content)
+        c_vbox.setContentsMargins(28, 24, 28, 24)
+        c_vbox.setSpacing(20)
+
+        # Stepper
+        stepper_layout = QHBoxLayout()
+        stepper_layout.setSpacing(10)
+        s1 = QLabel("✓ 1. Nguồn")
+        s1.setStyleSheet("color: #86efac; font-weight: bold; font-size: 12px;")
+        line1 = QFrame()
+        line1.setFrameShape(QFrame.HLine)
+        line1.setStyleSheet("color: #3f3f46;")
+        line1.setFixedWidth(50)
+        s2 = QLabel("● 2. Kiểu dựng")
+        s2.setStyleSheet("color: #a78bfa; font-weight: bold; font-size: 12px;")
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.HLine)
+        line2.setStyleSheet("color: #27272a;")
+        line2.setFixedWidth(50)
+        s3 = QLabel("○ 3. Chạy và xuất")
+        s3.setStyleSheet("color: #71717a; font-weight: bold; font-size: 12px;")
+
+        stepper_layout.addWidget(s1)
+        stepper_layout.addWidget(line1)
+        stepper_layout.addWidget(s2)
+        stepper_layout.addWidget(line2)
+        stepper_layout.addWidget(s3)
+        stepper_layout.addStretch()
+        c_vbox.addLayout(stepper_layout)
+
+        # Tiêu đề
+        lbl_h2 = QLabel("Bạn muốn dựng video kiểu gì?")
+        lbl_h2.setStyleSheet("font-size: 19px; font-weight: bold; color: #f4f4f5;")
+        c_vbox.addWidget(lbl_h2)
+        lbl_sub = QLabel("Chọn một kiểu, app tự bật bộ tính năng phù hợp. Muốn chỉnh từng thông số thì mở phần nâng cao bên dưới.")
+        lbl_sub.setStyleSheet("font-size: 12.5px; color: #71717a;")
+        c_vbox.addWidget(lbl_sub)
+
+        # Hidden Combo để tương thích backend
         self.combo_workflow = QComboBox()
         self.combo_workflow.addItem("Vlog có Hook", "vlog")
         self.combo_workflow.addItem("Podcast, Phỏng vấn", "podcast")
         self.combo_workflow.addItem("Shorts, TikTok 9:16", "shorts")
         self.combo_workflow.addItem("Tùy chỉnh", "adv")
         self.combo_workflow.currentIndexChanged.connect(self._on_workflow_mode_changed)
-        c_vbox.addWidget(QLabel("Preset:"))
+        self.combo_workflow.hide()
         c_vbox.addWidget(self.combo_workflow)
-        
-        # Toggles
-        self.check_cut = QCheckBox("Cắt khoảng lặng")
-        self.check_subtitle = QCheckBox("Tạo phụ đề")
-        self.check_hook = QCheckBox("Hook mở đầu")
-        self.check_punch_in = QCheckBox("Punch-in")
-        self.check_broll = QCheckBox("Gợi ý B-roll")
-        self.check_sfx = QCheckBox("Tự chèn SFX")
-        self.check_reframe = QCheckBox("Reframe 9:16")
-        
-        for chk in [self.check_cut, self.check_subtitle, self.check_hook, self.check_punch_in, self.check_broll, self.check_sfx, self.check_reframe]:
-            c_vbox.addWidget(chk)
-            
+
+        # 4 Thẻ Preset Cards (Grid 4 cột)
+        self.presets_grid = QGridLayout()
+        self.presets_grid.setSpacing(10)
+
+        self.preset_cards = []
+        card_data = [
+            ("🎙️", "Podcast, phỏng vấn", "Cắt khoảng lặng, lọc câu vấp, phụ đề viền thanh lịch", 1),
+            ("📱", "Shorts, TikTok 9:16", "Cắt viral 60s, reframe dọc, karaoke sub, tự chèn SFX", 2),
+            ("🎬", "Vlog có Hook", "Teaser mở đầu, punch-in, B-roll, tua nhanh khoảng lặng", 0),
+            ("🎛️", "Tự chỉnh", "Mở toàn bộ 6 nhóm thông số để tinh chỉnh tay", 3),
+        ]
+
+        def make_preset_card(icon, title, desc, idx):
+            btn = QPushButton()
+            btn.setCheckable(True)
+            btn.setChecked(idx == 0) # Vlog default
+            btn.setFixedHeight(105)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    border: 1px solid #27272a;
+                    border-radius: 10px;
+                    background-color: #18181b;
+                    padding: 10px;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    border-color: #3f3f46;
+                }
+                QPushButton:checked {
+                    border-color: #a78bfa;
+                    background-color: rgba(139,92,246,0.12);
+                }
+            """)
+            b_lay = QVBoxLayout(btn)
+            b_lay.setContentsMargins(10, 8, 10, 8)
+            b_lay.setSpacing(4)
+
+            top_row = QHBoxLayout()
+            lbl_ic = QLabel(icon)
+            lbl_ic.setStyleSheet("font-size: 16px;")
+            top_row.addWidget(lbl_ic)
+            top_row.addStretch()
+            lbl_ck = QLabel("✓" if idx == 0 else "○")
+            lbl_ck.setStyleSheet("color: #a78bfa; font-weight: bold;")
+            top_row.addWidget(lbl_ck)
+            b_lay.addLayout(top_row)
+
+            lbl_t = QLabel(title)
+            lbl_t.setStyleSheet("font-weight: bold; font-size: 12.5px; color: #f4f4f5;")
+            b_lay.addWidget(lbl_t)
+
+            lbl_d = QLabel(desc)
+            lbl_d.setWordWrap(True)
+            lbl_d.setStyleSheet("font-size: 10.5px; color: #71717a;")
+            b_lay.addWidget(lbl_d)
+
+            def on_click():
+                for other_btn, other_idx in self.preset_cards:
+                    other_btn.setChecked(other_btn == btn)
+                self.combo_workflow.setCurrentIndex(idx)
+
+            btn.clicked.connect(on_click)
+            self.preset_cards.append((btn, idx))
+            return btn
+
+        for i, (ic, t, d, idx) in enumerate(card_data):
+            c_btn = make_preset_card(ic, t, d, idx)
+            self.presets_grid.addWidget(c_btn, 0, i)
+
+        c_vbox.addLayout(self.presets_grid)
+
+        # Khối: Thiết lập nhanh
+        c_vbox.addWidget(QLabel("<b>Thiết lập nhanh</b>"))
+        quick_grid = QGridLayout()
+        quick_grid.setSpacing(12)
+
+        # Footage Type
+        quick_grid.addWidget(QLabel("Loại footage:"), 0, 0)
+        seg_footage = QHBoxLayout()
+        for ft_name in ["Tự nhận diện", "Nói liên tục", "Hỗn hợp", "Du lịch"]:
+            btn_ft = QPushButton(ft_name)
+            btn_ft.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 4px 8px; font-size: 11px;")
+            seg_footage.addWidget(btn_ft)
+        quick_grid.addLayout(seg_footage, 0, 1)
+
+        # Nhịp dựng
+        quick_grid.addWidget(QLabel("Nhịp dựng:"), 1, 0)
+        seg_pacing = QHBoxLayout()
+        for pc_name in ["Thong thả", "Cân bằng", "Nhanh"]:
+            btn_pc = QPushButton(pc_name)
+            btn_pc.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 4px 8px; font-size: 11px;")
+            seg_pacing.addWidget(btn_pc)
+        quick_grid.addLayout(seg_pacing, 1, 1)
+
+        # Mức độ cắt vấp (Slider)
+        quick_grid.addWidget(QLabel("Mức độ cắt vấp (Nhẹ · Vừa · Mạnh):"), 2, 0)
         self.slide_master_intensity = QSlider(Qt.Horizontal)
         self.slide_master_intensity.setRange(1, 3)
+        self.slide_master_intensity.setValue(2)
+        self.slide_master_intensity.setStyleSheet("""
+            QSlider::groove:horizontal { height: 6px; background: #27272a; border-radius: 3px; }
+            QSlider::sub-page:horizontal { background: #8b5cf6; border-radius: 3px; }
+            QSlider::handle:horizontal { background: #fff; width: 14px; margin-top: -4px; margin-bottom: -4px; border-radius: 7px; }
+        """)
         self.slide_master_intensity.valueChanged.connect(self._on_master_intensity_changed)
-        c_vbox.addWidget(QLabel("Mức độ cắt vấp (1-3):"))
-        c_vbox.addWidget(self.slide_master_intensity)
-                        # --- NÚT MỞ TÙY CHỈNH AI (Dạng Dialog) ---
-        self.btn_open_ai_settings = QPushButton("🧠 Cấu hình Động cơ AI & Nhập JSON")
-        self.btn_open_ai_settings.setStyleSheet("background-color: #27272a; color: #a1a1aa; padding: 10px; border-radius: 6px; font-weight: bold; margin-top: 10px;")
-        self.btn_open_ai_settings.clicked.connect(self._open_ai_dialog)
-        c_vbox.addWidget(self.btn_open_ai_settings)
+        quick_grid.addWidget(self.slide_master_intensity, 2, 1)
+
+        c_vbox.addLayout(quick_grid)
+
+        # Khối: Tính năng đang bật (Toggles 3x2)
+        c_vbox.addWidget(QLabel("<b>Tính năng đang bật</b>"))
+        tog_grid = QGridLayout()
+        tog_grid.setSpacing(10)
+
+        self.check_hook = QCheckBox("Hook mở đầu (3 câu, 5s)")
+        self.check_punch_in = QCheckBox("Punch-in (Zoom 1.15x)")
+        self.check_broll = QCheckBox("Gợi ý B-roll, meme (Max 4)")
+        self.check_sfx = QCheckBox("Tự chèn SFX (Cách 15s)")
+        self.check_reframe = QCheckBox("Reframe 9:16 (Bám mặt)")
+        self.check_subtitle = QCheckBox("Phụ đề (Karaoke Pop)")
+        self.check_cut = QCheckBox("Cắt khoảng lặng")
+
+        all_chks = [self.check_hook, self.check_punch_in, self.check_broll,
+                    self.check_sfx, self.check_reframe, self.check_subtitle]
+
+        for i, chk in enumerate(all_chks):
+            chk.setChecked(True)
+            chk.setStyleSheet("""
+                QCheckBox {
+                    background-color: #18181b;
+                    border: 1px solid #27272a;
+                    border-radius: 8px;
+                    padding: 8px;
+                    font-size: 11.5px;
+                    color: #f4f4f5;
+                }
+                QCheckBox:hover { border-color: #3f3f46; }
+                QCheckBox::indicator { width: 16px; height: 16px; }
+            """)
+            tog_grid.addWidget(chk, i // 3, i % 3)
+
+        c_vbox.addLayout(tog_grid)
+
+        # =========================================================================
+        # TÙY CHỈNH NÂNG CAO (ACCORDION & ĐỘNG CƠ AI ĐẦY ĐỦ)
+        # =========================================================================
+        acc_box = QFrame()
+        acc_box.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 10px;")
+        acc_layout = QVBoxLayout(acc_box)
+        acc_layout.setContentsMargins(0, 0, 0, 0)
+        acc_layout.setSpacing(0)
+
+        def make_acc_row(icon, title, desc):
+            row = QFrame()
+            row.setStyleSheet("border-bottom: 1px solid #27272a; padding: 6px 12px;")
+            r_lay = QHBoxLayout(row)
+            r_lay.setContentsMargins(10, 6, 10, 6)
+            lbl_i = QLabel(icon)
+            lbl_i.setStyleSheet("font-size: 14px;")
+            lbl_t = QLabel(title)
+            lbl_t.setStyleSheet("font-weight: 500; font-size: 12.5px; color: #f4f4f5;")
+            lbl_d = QLabel(desc)
+            lbl_d.setStyleSheet("color: #71717a; font-size: 11.5px;")
+            r_lay.addWidget(lbl_i)
+            r_lay.addWidget(lbl_t)
+            r_lay.addStretch()
+            r_lay.addWidget(lbl_d)
+            return row
+
+        acc_layout.addWidget(make_acc_row("✂️", "Cắt khoảng lặng", "-30 dB · tối thiểu 0.6s · tua 8x"))
+        acc_layout.addWidget(make_acc_row("🤖", "Đạo diễn AI", "Clean talk · lọc vấp · lọc lặp"))
+        acc_layout.addWidget(make_acc_row("📑", "Mạch kịch bản", "Giữ thứ tự thời gian"))
+        acc_layout.addWidget(make_acc_row("📝", "Phụ đề", "Theo từ · tối đa 6 từ/dòng"))
+
+        # Hàng Động cơ AI (Có thể bấm để bung ra)
+        btn_acc_engine = QPushButton("⚡  Động cơ AI (Chọn Web / Cloud / Local)  ▾")
+        btn_acc_engine.setStyleSheet("""
+            QPushButton {
+                background-color: #1f1f23;
+                border: none;
+                border-top: 1px solid #27272a;
+                color: #c4b5fd;
+                font-weight: bold;
+                font-size: 12.5px;
+                padding: 10px 14px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #27272a;
+            }
+        """)
+        acc_layout.addWidget(btn_acc_engine)
+
+        # Khung cấu hình Động cơ AI (Expandable Panel)
+        self.ai_engine_panel = QFrame()
+        self.ai_engine_panel.setStyleSheet("background-color: #111113; padding: 14px;")
+        ai_panel_layout = QVBoxLayout(self.ai_engine_panel)
+        ai_panel_layout.setSpacing(12)
+
+        # 3 Nút chọn chế độ AI
+        mode_btn_layout = QHBoxLayout()
+        self.btn_mode_web = QPushButton("📋 Prompt Web (Miễn phí)")
+        self.btn_mode_cloud = QPushButton("☁️ Cloud API (OpenAI/Gemini)")
+        self.btn_mode_ollama = QPushButton("💻 Local AI (Ollama)")
+
+        self.btn_mode_web.setCheckable(True)
+        self.btn_mode_cloud.setCheckable(True)
+        self.btn_mode_ollama.setCheckable(True)
+        self.btn_mode_web.setChecked(True)
+
+        mode_style = """
+            QPushButton {
+                background-color: #18181b;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                padding: 8px;
+                font-size: 11.5px;
+                color: #a1a1aa;
+            }
+            QPushButton:checked {
+                background-color: #8b5cf6;
+                color: #fff;
+                font-weight: bold;
+                border-color: #a78bfa;
+            }
+        """
+        self.btn_mode_web.setStyleSheet(mode_style)
+        self.btn_mode_cloud.setStyleSheet(mode_style)
+        self.btn_mode_ollama.setStyleSheet(mode_style)
+
+        mode_btn_layout.addWidget(self.btn_mode_web)
+        mode_btn_layout.addWidget(self.btn_mode_cloud)
+        mode_btn_layout.addWidget(self.btn_mode_ollama)
+        ai_panel_layout.addLayout(mode_btn_layout)
+
+        # Stacked Pages cho 3 chế độ
+        self.ai_stack = QStackedWidget()
+
+        # Page 0: Prompt Web
+        p_web = QWidget()
+        pw_lay = QVBoxLayout(p_web)
+        pw_lay.setContentsMargins(0, 0, 0, 0)
+        pw_lay.setSpacing(8)
+
+        lbl_step1 = QLabel("1. Nhấn nút dưới đây để copy toàn bộ Transcript & Prompt gửi cho ChatGPT / Claude:")
+        lbl_step1.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
+        pw_lay.addWidget(lbl_step1)
+
+        self.btn_quick_copy = QPushButton("📋 1. Copy Prompt Đạo Diễn (Kèm Dữ Liệu Video)")
+        self.btn_quick_copy.setStyleSheet("background-color: #27272a; border: 1px solid #3f3f46; color: #f4f4f5; padding: 8px; border-radius: 6px; font-weight: bold;")
+        pw_lay.addWidget(self.btn_quick_copy)
+
+        lbl_step2 = QLabel("2. Dán mã JSON kịch bản mà AI trả về vào đây:")
+        lbl_step2.setStyleSheet("color: #a1a1aa; font-size: 11.5px; margin-top: 6px;")
+        pw_lay.addWidget(lbl_step2)
+
+        self.txt_json_input = QPlainTextEdit()
+        self.txt_json_input.setPlaceholderText("Dán JSON kịch bản vào đây (bắt đầu bằng { 'timeline': ... })...")
+        self.txt_json_input.setFixedHeight(90)
+        self.txt_json_input.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 6px; color: #22d3ee; font-family: monospace; font-size: 11px;")
+        pw_lay.addWidget(self.txt_json_input)
+
+        self.btn_apply_json = QPushButton("✅ 2. Áp dụng Kịch bản JSON")
+
+        self.btn_apply_json.setStyleSheet("background-color: #06b6d4; color: #000; font-weight: bold; padding: 7px; border-radius: 6px;")
+        pw_lay.addWidget(self.btn_apply_json)
+        self.ai_stack.addWidget(p_web)
+
+        # Page 1: Cloud API
+        p_cloud = QWidget()
+        pc_lay = QVBoxLayout(p_cloud)
+        pc_lay.setContentsMargins(0, 0, 0, 0)
+        pc_lay.setSpacing(8)
+
+        row_c1 = QHBoxLayout()
+        row_c1.addWidget(QLabel("Nhà cung cấp:"))
+        self.combo_cloud_provider = QComboBox()
+        self.combo_cloud_provider.addItems(["Google Gemini 1.5 Pro", "OpenAI GPT-4o", "Anthropic Claude 3.5 Sonnet"])
+        self.combo_cloud_provider.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 6px; border-radius: 4px; color: #fff;")
+        row_c1.addWidget(self.combo_cloud_provider, stretch=1)
+        pc_lay.addLayout(row_c1)
+
+        row_c2 = QHBoxLayout()
+        row_c2.addWidget(QLabel("API Key:"))
+        self.txt_api_key = QLineEdit()
+        self.txt_api_key.setEchoMode(QLineEdit.Password)
+        self.txt_api_key.setPlaceholderText("sk-...")
+        self.txt_api_key.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 6px; border-radius: 4px; color: #fff;")
+        row_c2.addWidget(self.txt_api_key, stretch=1)
+        pc_lay.addLayout(row_c2)
+
+        self.btn_run_api = QPushButton("⚡ 1-Click: Cloud AI Tự Động Lên Kịch Bản & Dựng")
+        self.btn_run_api.setStyleSheet("background-color: #8b5cf6; color: #fff; font-weight: bold; padding: 8px; border-radius: 6px;")
+        pc_lay.addWidget(self.btn_run_api)
+        self.ai_stack.addWidget(p_cloud)
+
+        # Page 2: Local AI Ollama
+        p_ollama = QWidget()
+        po_lay = QVBoxLayout(p_ollama)
+        po_lay.setContentsMargins(0, 0, 0, 0)
+        po_lay.setSpacing(8)
+
+        row_o1 = QHBoxLayout()
+        row_o1.addWidget(QLabel("Mô hình Ollama:"))
+        self.combo_ollama_model = QComboBox()
+        self.combo_ollama_model.addItems(["llama3:latest", "qwen2.5:7b", "mistral:latest"])
+        self.combo_ollama_model.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 6px; border-radius: 4px; color: #fff;")
+        row_o1.addWidget(self.combo_ollama_model, stretch=1)
+        po_lay.addLayout(row_o1)
+
+        self.btn_run_ollama = QPushButton("💻 1-Click: Local AI Tự Động Lên Kịch Bản & Dựng")
+        self.btn_run_ollama.setStyleSheet("background-color: #8b5cf6; color: #fff; font-weight: bold; padding: 8px; border-radius: 6px;")
+        po_lay.addWidget(self.btn_run_ollama)
+        self.ai_stack.addWidget(p_ollama)
+
+        def switch_mode(idx):
+            self.btn_mode_web.setChecked(idx == 0)
+            self.btn_mode_cloud.setChecked(idx == 1)
+            self.btn_mode_ollama.setChecked(idx == 2)
+            self.ai_stack.setCurrentIndex(idx)
+
+        self.btn_mode_web.clicked.connect(lambda: switch_mode(0))
+        self.btn_mode_cloud.clicked.connect(lambda: switch_mode(1))
+        self.btn_mode_ollama.clicked.connect(lambda: switch_mode(2))
+
+        self.btn_quick_copy.clicked.connect(self._quick_copy_copilot_prompt)
+        self.btn_apply_json.clicked.connect(lambda: self._apply_json_text_plan(self.txt_json_input.toPlainText()))
+        self.btn_run_ollama.clicked.connect(lambda: self._run_local_ollama_pipeline("travel_vlog", self.combo_ollama_model.currentText(), "http://localhost:11434"))
+        self.btn_run_api.clicked.connect(lambda: self._run_cloud_api_pipeline("travel_vlog", self.combo_cloud_provider.currentText(), self.txt_api_key.text()))
+
+        ai_panel_layout.addWidget(self.ai_stack)
+        acc_layout.addWidget(self.ai_engine_panel)
+
+        # Toggle Expand/Collapse cho panel Động cơ AI
+        def toggle_engine():
+            vis = self.ai_engine_panel.isVisible()
+            self.ai_engine_panel.setVisible(not vis)
+            btn_acc_engine.setText("⚡  Động cơ AI (Chọn Web / Cloud / Local)  " + ("▾" if not vis else "▴"))
+
+        btn_acc_engine.clicked.connect(toggle_engine)
+
+        c_vbox.addWidget(acc_box)
         c_vbox.addStretch()
 
-        # === RESTORED TABS FOR LEGACY FEATURES ===
+        scroll.setWidget(scroll_content)
+        c_outer.addWidget(scroll, stretch=1)
+
+        # Runbar ở chân cột giữa
+        runbar = QFrame()
+        runbar.setFixedHeight(56)
+        runbar.setStyleSheet("background-color: #111113; border-top: 1px solid #27272a; padding: 0 20px;")
+        rb_lay = QHBoxLayout(runbar)
+        rb_lay.setContentsMargins(16, 0, 16, 0)
+        rb_lay.setSpacing(12)
+
+        self.btn_save_recipe = QPushButton("💾 Lưu recipe")
+        self.btn_save_recipe.setStyleSheet("background: transparent; border: 1px solid #27272a; border-radius: 6px; padding: 6px 12px; color: #a1a1aa; font-size: 12px;")
+        self.btn_save_recipe.clicked.connect(self._save_current_as_recipe)
+        rb_lay.addWidget(self.btn_save_recipe)
+
+        rb_lay.addStretch()
+
+        self.combo_render_preset = QComboBox()
+        self.combo_render_preset.addItems(["Xuất: FCPXML 1.9", "Xuất: FCP7 XML", "Xuất: EDL"])
+        self.combo_render_preset.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 6px 10px; border-radius: 6px; color: #f4f4f5; font-size: 12px;")
+        rb_lay.addWidget(self.combo_render_preset)
+
+        btn_scan_mid = QPushButton("Chỉ quét nguồn")
+        btn_scan_mid.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 6px; padding: 8px 14px; color: #f4f4f5; font-weight: 500; font-size: 12px;")
+        btn_scan_mid.clicked.connect(self._start_phase_1_scan)
+        rb_lay.addWidget(btn_scan_mid)
+
+        self.btn_run = QPushButton("▶ Bắt đầu dựng")
+        self.btn_run.setStyleSheet("""
+            QPushButton {
+                background-color: #8b5cf6;
+                color: #fff;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 8px 20px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #7c3aed;
+            }
+        """)
+        self.btn_run.clicked.connect(self._toggle_pipeline_execution)
+        rb_lay.addWidget(self.btn_run)
+
+        c_outer.addWidget(runbar)
+        workspace_layout.addWidget(a_center, stretch=1)
+
+        # -------------------------------------------------------------------------
+        # CỘT PHẢI (340px): Tiến trình, ETA, Các bước Pipeline, Stop, Nhật ký
+        # -------------------------------------------------------------------------
+        a_right = QFrame()
+        a_right.setFixedWidth(340)
+        a_right.setStyleSheet("background-color: #111113; border-left: 1px solid #27272a;")
+        r_vbox = QVBoxLayout(a_right)
+        r_vbox.setContentsMargins(18, 18, 18, 18)
+        r_vbox.setSpacing(12)
+
+        # Header Phần trăm lớn & ETA
+        pct_row = QHBoxLayout()
+        self.lbl_pct_big = QLabel("46%")
+        self.lbl_pct_big.setStyleSheet("font-size: 32px; font-weight: bold; color: #f4f4f5;")
+        self.lbl_eta = QLabel("còn khoảng 3 phút")
+        self.lbl_eta.setStyleSheet("color: #71717a; font-size: 12px; margin-top: 10px;")
+        pct_row.addWidget(self.lbl_pct_big)
+        pct_row.addStretch()
+        pct_row.addWidget(self.lbl_eta)
+        r_vbox.addLayout(pct_row)
+
+        # Main Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(6)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setValue(46)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                background-color: #27272a;
+                border-radius: 3px;
+            }
+            QProgressBar::chunk {
+                background-color: #8b5cf6;
+                border-radius: 3px;
+            }
+        """)
+        r_vbox.addWidget(self.progress_bar)
+
+        # Pipeline Steps
+        pipe_box = QFrame()
+        pipe_box.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 10px;")
+        pipe_lay = QVBoxLayout(pipe_box)
+        pipe_lay.setSpacing(6)
+
+        steps = [
+            ("✓ Nạp Whisper & Phân tích âm thanh", "#86efac"),
+            ("● Đạo diễn AI: Lọc vấp, dựng mạch, tìm Hook", "#c4b5fd"),
+            ("○ Chèn B-roll, Meme & SFX", "#71717a"),
+            ("○ Tạo phụ đề & Polish Timeline", "#71717a"),
+        ]
+        for st_name, st_col in steps:
+            lbl_st = QLabel(st_name)
+            lbl_st.setStyleSheet(f"color: {st_col}; font-size: 11.5px;")
+            pipe_lay.addWidget(lbl_st)
+        r_vbox.addWidget(pipe_box)
+
+        # Nút Dừng
+        self.btn_stop = QPushButton("⏹ Dừng tiến trình")
+        self.btn_stop.setStyleSheet("""
+            QPushButton {
+                background-color: #18181b;
+                border: 1px solid rgba(239,68,68,0.4);
+                color: #f87171;
+                border-radius: 6px;
+                padding: 6px;
+                font-weight: 500;
+                font-size: 11.5px;
+            }
+            QPushButton:hover {
+                background-color: rgba(239,68,68,0.15);
+            }
+        """)
+        self.btn_stop.clicked.connect(self._stop_pipeline)
+        r_vbox.addWidget(self.btn_stop)
+
+        # Nhật ký Console
+        log_head = QHBoxLayout()
+        lbl_log = QLabel("Nhật ký")
+        lbl_log.setStyleSheet("font-weight: bold; color: #a1a1aa; font-size: 12px;")
+        log_head.addWidget(lbl_log)
+        log_head.addStretch()
+        btn_copy_log = QPushButton("Sao chép")
+        btn_copy_log.setStyleSheet("background: transparent; color: #71717a; border: none; font-size: 11px;")
+        log_head.addWidget(btn_copy_log)
+        r_vbox.addLayout(log_head)
+
+        self.txt_console = QPlainTextEdit()
+        self.txt_console.setReadOnly(True)
+        self.txt_console.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #18181b;
+                border: 1px solid #27272a;
+                border-radius: 8px;
+                color: #a1a1aa;
+                font-family: monospace;
+                font-size: 11px;
+                padding: 6px;
+            }
+        """)
+        r_vbox.addWidget(self.txt_console, stretch=1)
+
+        workspace_layout.addWidget(a_right)
+        window_layout.addWidget(workspace, stretch=1)
+
+        # =========================================================================
+        # 3. MINI TIMELINE (Dưới cùng: Chiều cao 178px)
+        # =========================================================================
+        tl_frame = QFrame()
+        tl_frame.setFixedHeight(178)
+        tl_frame.setStyleSheet("background-color: #09090b; border-top: 1px solid #27272a;")
+        tl_layout = QVBoxLayout(tl_frame)
+        tl_layout.setContentsMargins(16, 8, 16, 8)
+        tl_layout.setSpacing(6)
+
+        # Header Timeline (Tracks)
+        tl_head = QHBoxLayout()
+        lbl_tl_time = QLabel("Timeline 21:01")
+        lbl_tl_time.setStyleSheet("font-weight: bold; color: #f4f4f5; font-size: 12px;")
+        tl_head.addWidget(lbl_tl_time)
+        tl_head.addSpacing(16)
+
+        trk_info = [
+            ("V2 B-roll", "#22d3ee"),
+            ("V1 Footage", "#a78bfa"),
+            ("A1 Thoại", "#86efac"),
+            ("A2 SFX", "#fcd34d"),
+            ("A3 Nhạc", "#f472b6"),
+        ]
+        for trk_name, trk_color in trk_info:
+            lbl_trk = QLabel(f"■ {trk_name}")
+            lbl_trk.setStyleSheet(f"color: {trk_color}; font-size: 11px; font-weight: 500;")
+            tl_head.addWidget(lbl_trk)
+            tl_head.addSpacing(8)
+
+        tl_head.addStretch()
+        tl_layout.addLayout(tl_head)
+
+        # Body Mini Timeline Visualizer
+        tl_canvas = QFrame()
+        tl_canvas.setStyleSheet("background-color: #111113; border: 1px solid #1f1f23; border-radius: 6px;")
+        tl_body_lay = QVBoxLayout(tl_canvas)
+        tl_body_lay.setContentsMargins(8, 6, 8, 6)
+        tl_body_lay.setSpacing(3)
+
+        tracks = [
+            ("#22d3ee", "V2: B-roll (Mèo khóc, Cái nịt...)"),
+            ("#a78bfa", "V1: 14 clips (Hook -> Suối Tràn -> Thác)"),
+            ("#86efac", "A1: Audio Thoại Clean"),
+            ("#fcd34d", "A2: SFX Hits & Whooshes"),
+            ("#f472b6", "A3: Nhạc Lofi Background"),
+        ]
+        for col, desc in tracks:
+            lane = QFrame()
+            lane.setFixedHeight(18)
+            lane.setStyleSheet(f"background-color: rgba(255,255,255,0.03); border-left: 3px solid {col}; border-radius: 3px;")
+            l_desc = QLabel(f" {desc}")
+            l_desc.setStyleSheet(f"color: {col}; font-size: 10px;")
+            lane_lay = QHBoxLayout(lane)
+            lane_lay.setContentsMargins(4, 0, 0, 0)
+            lane_lay.addWidget(l_desc)
+            tl_body_lay.addWidget(lane)
+
+        tl_layout.addWidget(tl_canvas, stretch=1)
+        window_layout.addWidget(tl_frame)
+
+        # =========================================================================
+        # TƯƠNG THÍCH BACKEND (Giữ nguyên các tab ẩn và dummies)
+        # =========================================================================
         self.tab_widget = QTabWidget()
         self.tab_copilot = TabCopilot()
         self.tab_autocut = TabAutoCut()
@@ -1522,14 +2269,9 @@ class AutoWindow(QMainWindow):
         self.tab_widget.addTab(self.tab_titles, "Chữ & Đồ Họa")
         self.tab_widget.addTab(self.tab_sfx, "SFX Soundboard")
         self.tab_widget.addTab(self.tab_export, "Polish & Export")
-        
-        
-        
-        # === TOP LEVEL DUMMIES / MISSING CONTROLS ===
+
         self.combo_ai_engine = QComboBox()
         self.combo_ai_engine.addItems(["Prompt Web (Miễn phí)", "Cloud API (OpenAI/Gemini)", "Local (Ollama)"])
-        self.btn_quick_copy = QPushButton("📋 Copy Prompt")
-        self.txt_json_input = QPlainTextEdit()
 
         self.combo_model = QComboBox()
         self.combo_model.addItem('large-v3')
@@ -1546,90 +2288,10 @@ class AutoWindow(QMainWindow):
         self.btn_stage1_main_scan = QPushButton()
         self.btn_s1_skip_stage2 = QPushButton()
         self.btn_back_to_stage1 = QPushButton()
-        self.btn_scan_only = QPushButton()
         self.btn_instant_export = QPushButton()
-        
         self.check_cache = QCheckBox()
+
         self._bind_tab_delegates()
-
-        
-        # 3. RIGHT (340px)
-        a_right = QFrame()
-        a_right.setFixedWidth(340)
-        a_right.setStyleSheet("background-color: #151518; border-left: 1px solid #33333b;")
-        r_vbox = QVBoxLayout(a_right)
-        r_vbox.setContentsMargins(16, 16, 16, 16)
-        
-        self.progress_bar = QProgressBar()
-        self.lbl_eta = QLabel("Sẵn sàng")
-        self.txt_console = QPlainTextEdit()
-        self.txt_console.setReadOnly(True)
-        
-        self.btn_run = QPushButton("Chạy & Xuất")
-        self.btn_run.setStyleSheet("background-color: #3dcee1; color: #000; font-weight: bold; padding: 10px; border-radius: 6px;")
-        self.btn_run.clicked.connect(self._toggle_pipeline_execution)
-        
-        self.btn_stop = QPushButton("Dừng")
-        self.btn_stop.clicked.connect(self._stop_pipeline)
-        
-        r_vbox.addWidget(self.progress_bar)
-        r_vbox.addWidget(self.lbl_eta)
-        
-        h_btns = QHBoxLayout()
-        h_btns.addWidget(self.btn_run, stretch=1)
-        h_btns.addWidget(self.btn_stop)
-        r_vbox.addLayout(h_btns)
-        
-        r_vbox.addWidget(QLabel("Nhật ký:"))
-        r_vbox.addWidget(self.txt_console)
-        
-        # 4. TIMELINE (row 1)
-        tl_frame = QFrame()
-        tl_frame.setFixedHeight(178)
-        tl_frame.setStyleSheet("background-color: #111113; border-top: 1px solid #33333b;")
-        tl_layout = QHBoxLayout(tl_frame)
-        tl_layout.addWidget(QLabel("Mini Timeline View (Visual placeholder cho Giai đoạn 4)"))
-        
-        # Grid add
-        auto_layout.addWidget(a_left, 0, 0)
-        auto_layout.addWidget(a_center, 0, 1)
-        auto_layout.addWidget(a_right, 0, 2)
-        auto_layout.addWidget(tl_frame, 1, 0, 1, 3)
-        
-        window_layout.addWidget(header)
-        window_layout.addWidget(auto_widget, stretch=1)
-        
-
-    def _open_ai_dialog(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Cấu hình Động cơ AI (Kịch bản)")
-        dlg.resize(500, 400)
-        dlg.setStyleSheet("background-color: #09090b; color: #e4e4e7;")
-        layout = QVBoxLayout(dlg)
-        
-        row_engine = QHBoxLayout()
-        row_engine.addWidget(QLabel("Động cơ:"))
-        self.combo_ai_engine.setParent(dlg)
-        self.combo_ai_engine.setStyleSheet("background-color: #111113; border: 1px solid #33333b; padding: 6px;")
-        row_engine.addWidget(self.combo_ai_engine, stretch=1)
-        
-        self.btn_quick_copy.setParent(dlg)
-        self.btn_quick_copy.setStyleSheet("background-color: #27272a; padding: 6px;")
-        row_engine.addWidget(self.btn_quick_copy)
-        
-        layout.addLayout(row_engine)
-        
-        layout.addWidget(QLabel("Dán JSON kịch bản trả về vào đây:"))
-        self.txt_json_input.setParent(dlg)
-        self.txt_json_input.setStyleSheet("background-color: #111113; border: 1px solid #33333b; color: #a1a1aa;")
-        layout.addWidget(self.txt_json_input)
-        
-        btn_close = QPushButton("Xác nhận & Đóng")
-        btn_close.setStyleSheet("background-color: #39c1d3; color: #000; padding: 8px; font-weight: bold; border-radius: 4px;")
-        btn_close.clicked.connect(dlg.accept)
-        layout.addWidget(btn_close)
-        
-        dlg.exec()
 
     def _bind_tab_delegates(self):
         # Forward modern AI widgets to the TabCopilot backend dummy
