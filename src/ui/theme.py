@@ -148,7 +148,7 @@ def get_application_stylesheet() -> str:
     }}
 
     /* --- CARDS & GROUPBOXES --- */
-    QGroupBox {
+    QGroupBox {{
         background-color: transparent;
         border: none;
         border-top: 1px solid {ThemeColors.BORDER_DEFAULT};
@@ -158,7 +158,7 @@ def get_application_stylesheet() -> str:
         font-weight: 600;
         font-size: 13px;
         color: {ThemeColors.TEXT_PRIMARY};
-    };
+    }};
         border: 1.5px solid {ThemeColors.BORDER_DEFAULT};
         border-radius: 6px;
         margin-top: 14px;
@@ -171,7 +171,7 @@ def get_application_stylesheet() -> str:
         color: {ThemeColors.TEXT_ACCENT};
     }}
     
-    QGroupBox::title {
+    QGroupBox::title {{
         subcontrol-origin: margin;
         subcontrol-position: top left;
         left: 0px;
@@ -182,7 +182,7 @@ def get_application_stylesheet() -> str:
         font-size: 11px;
         text-transform: uppercase;
         letter-spacing: 1px;
-    };
+    }};
         border-radius: 6px;
     }}
     
@@ -237,7 +237,7 @@ def get_application_stylesheet() -> str:
     }}
 
     /* --- INPUTS & CONTROLS --- */
-    QLineEdit, QComboBox {
+    QLineEdit, QComboBox {{
         background-color: transparent;
         border: none;
         border-bottom: 1.5px solid {ThemeColors.BORDER_DEFAULT};
@@ -245,21 +245,21 @@ def get_application_stylesheet() -> str:
         padding: 8px 4px;
         color: {ThemeColors.TEXT_PRIMARY};
         font-size: 13px;
-    };
+    }};
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
         border-radius: 6px;
         padding: 6px 8px;
         color: {ThemeColors.TEXT_PRIMARY};
         selection-background-color: {ThemeColors.PRIMARY};
     }}
-    QLineEdit:hover, QComboBox:hover {
+    QLineEdit:hover, QComboBox:hover {{
         border-bottom: 1.5px solid {ThemeColors.BORDER_HOVER};
-    };
+    }};
     }}
-    QLineEdit:focus, QComboBox:focus {
+    QLineEdit:focus, QComboBox:focus {{
         border-bottom: 2px solid {ThemeColors.PRIMARY};
         background-color: rgba(51, 176, 193, 0.05);
-    };
+    }};
         background-color: #22222E;
     }}
     QComboBox::drop-down {{
@@ -428,17 +428,17 @@ def get_application_stylesheet() -> str:
     }}
 
     /* --- TAB WIDGET & TAB BAR --- */
-    QTabWidget::pane {
+    QTabWidget::pane {{
         border: none;
         border-top: 1px solid {ThemeColors.BORDER_DEFAULT};
         background-color: transparent;
         top: -1px;
-    };
+    }};
         background-color: {ThemeColors.BG_MAIN};
         border-radius: 6px;
         top: -1px;
     }}
-    QTabBar::tab {
+    QTabBar::tab {{
         background-color: transparent;
         color: {ThemeColors.TEXT_SECONDARY};
         border: none;
@@ -446,7 +446,7 @@ def get_application_stylesheet() -> str:
         margin-right: 8px;
         font-weight: 600;
         font-size: 13px;
-    };
+    }};
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
         border-bottom: none;
         border-top-left-radius: 8px;
@@ -456,18 +456,18 @@ def get_application_stylesheet() -> str:
         font-weight: bold;
         font-size: 12px;
     }}
-    QTabBar::tab:hover {
+    QTabBar::tab:hover {{
         color: {ThemeColors.TEXT_PRIMARY};
         background-color: rgba(255, 255, 255, 0.05);
         border-radius: 6px;
-    };
+    }};
         border-color: {ThemeColors.BORDER_HOVER};
     }}
-    QTabBar::tab:selected {
+    QTabBar::tab:selected {{
         background-color: transparent;
         color: {ThemeColors.PRIMARY};
         border-bottom: 2px solid {ThemeColors.PRIMARY};
-    };
+    }};
         color: {ThemeColors.TEXT_ACCENT};
         border: 1.5px solid {ThemeColors.BORDER_DEFAULT};
         border-bottom: 2px solid {ThemeColors.PRIMARY};
