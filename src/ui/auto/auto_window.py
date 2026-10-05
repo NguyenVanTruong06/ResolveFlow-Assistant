@@ -1457,14 +1457,12 @@ class AutoWindow(QMainWindow):
         self.lbl_cache_badge.setStyleSheet("color: #a1a1aa; font-size: 12px; margin-top: 10px;")
         l_vbox.addWidget(self.lbl_cache_badge)
         
-        # Thêm nút quét cache và tải JSON (vì HTML gốc không vẽ, nhưng backend cần)
-        self.btn_scan_only = QPushButton("🔍 Quét Cache")
+        self.btn_scan_only = QPushButton("🔄 Quét Cache (Tiền xử lý video)")
+        self.btn_scan_only.setStyleSheet("background-color: #0c3d44; color: #39c1d3; padding: 8px; border-radius: 6px; font-weight: bold; border: 1px solid #39c1d3; margin-top: 5px;")
         self.btn_scan_only.clicked.connect(self._start_phase_1_scan)
-        self.btn_load_json_plan = QPushButton("📜 Tải JSON Kịch Bản")
-        self.btn_load_json_plan.clicked.connect(self._load_json_plan_from_disk)
-        
         l_vbox.addWidget(self.btn_scan_only)
-        l_vbox.addWidget(self.btn_load_json_plan)
+        
+        
         l_vbox.addStretch()
         
         # 2. CENTER (expanding)
@@ -1504,7 +1502,13 @@ class AutoWindow(QMainWindow):
         self.slide_master_intensity.valueChanged.connect(self._on_master_intensity_changed)
         c_vbox.addWidget(QLabel("Mức độ cắt vấp (1-3):"))
         c_vbox.addWidget(self.slide_master_intensity)
+                        # --- NÚT MỞ TÙY CHỈNH AI (Dạng Dialog) ---
+        self.btn_open_ai_settings = QPushButton("🧠 Cấu hình Động cơ AI & Nhập JSON")
+        self.btn_open_ai_settings.setStyleSheet("background-color: #27272a; color: #a1a1aa; padding: 10px; border-radius: 6px; font-weight: bold; margin-top: 10px;")
+        self.btn_open_ai_settings.clicked.connect(self._open_ai_dialog)
+        c_vbox.addWidget(self.btn_open_ai_settings)
         c_vbox.addStretch()
+
         # === RESTORED TABS FOR LEGACY FEATURES ===
         self.tab_widget = QTabWidget()
         self.tab_copilot = TabCopilot()
@@ -1519,16 +1523,14 @@ class AutoWindow(QMainWindow):
         self.tab_widget.addTab(self.tab_sfx, "SFX Soundboard")
         self.tab_widget.addTab(self.tab_export, "Polish & Export")
         
-        self.btn_toggle_legacy = QPushButton("⚙️ Hiển thị Cấu hình AI Chuyên sâu")
-        self.btn_toggle_legacy.setCheckable(True)
-        self.btn_toggle_legacy.setStyleSheet("background-color: #27272a; color: #a1a1aa; padding: 6px; border-radius: 4px;")
-        self.btn_toggle_legacy.clicked.connect(lambda c: self.tab_copilot.setVisible(c))
         
-        c_vbox.addWidget(self.btn_toggle_legacy)
-        c_vbox.addWidget(self.tab_copilot)
-        self.tab_copilot.hide()
         
         # === TOP LEVEL DUMMIES / MISSING CONTROLS ===
+        self.combo_ai_engine = QComboBox()
+        self.combo_ai_engine.addItems(["Prompt Web (Miễn phí)", "Cloud API (OpenAI/Gemini)", "Local (Ollama)"])
+        self.btn_quick_copy = QPushButton("📋 Copy Prompt")
+        self.txt_json_input = QPlainTextEdit()
+
         self.combo_model = QComboBox()
         self.combo_model.addItem('large-v3')
         self.combo_lang = QComboBox()
@@ -1597,7 +1599,43 @@ class AutoWindow(QMainWindow):
         window_layout.addWidget(header)
         window_layout.addWidget(auto_widget, stretch=1)
         
+
+    def _open_ai_dialog(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Cấu hình Động cơ AI (Kịch bản)")
+        dlg.resize(500, 400)
+        dlg.setStyleSheet("background-color: #09090b; color: #e4e4e7;")
+        layout = QVBoxLayout(dlg)
+        
+        row_engine = QHBoxLayout()
+        row_engine.addWidget(QLabel("Động cơ:"))
+        self.combo_ai_engine.setParent(dlg)
+        self.combo_ai_engine.setStyleSheet("background-color: #111113; border: 1px solid #33333b; padding: 6px;")
+        row_engine.addWidget(self.combo_ai_engine, stretch=1)
+        
+        self.btn_quick_copy.setParent(dlg)
+        self.btn_quick_copy.setStyleSheet("background-color: #27272a; padding: 6px;")
+        row_engine.addWidget(self.btn_quick_copy)
+        
+        layout.addLayout(row_engine)
+        
+        layout.addWidget(QLabel("Dán JSON kịch bản trả về vào đây:"))
+        self.txt_json_input.setParent(dlg)
+        self.txt_json_input.setStyleSheet("background-color: #111113; border: 1px solid #33333b; color: #a1a1aa;")
+        layout.addWidget(self.txt_json_input)
+        
+        btn_close = QPushButton("Xác nhận & Đóng")
+        btn_close.setStyleSheet("background-color: #39c1d3; color: #000; padding: 8px; font-weight: bold; border-radius: 4px;")
+        btn_close.clicked.connect(dlg.accept)
+        layout.addWidget(btn_close)
+        
+        dlg.exec()
+
     def _bind_tab_delegates(self):
+        # Forward modern AI widgets to the TabCopilot backend dummy
+        self.tab_copilot.txt_json_input = self.txt_json_input
+        self.tab_copilot.btn_quick_copy = self.btn_quick_copy
+
         """Liên kết các thuộc tính widget trên các Tab để duy trì tính tương thích 100%."""
         # Tab 1: Auto Cut Delegates
         self.banner_onboarding = self.tab_autocut.banner_onboarding
