@@ -3518,6 +3518,21 @@ class AutoWindow(QMainWindow):
             )
             EDLGenerator.create_multi_clip_edl(hook_events, out_hook_edl, markers=hook_markers)
 
+                # Cập nhật ngay tiến trình UI lên 100% rực rỡ
+        if hasattr(self, "progress_bar"):
+            self.progress_bar.setValue(100)
+        if hasattr(self, "lbl_pct_big"):
+            self.lbl_pct_big.setText("100%")
+            self.lbl_pct_big.setStyleSheet("font-size: 32px; font-weight: bold; color: #86efac;")
+        if hasattr(self, "lbl_eta"):
+            self.lbl_eta.setText("✓ Đã tạo xong Timeline!")
+        if hasattr(self, "step_labels") and hasattr(self, "step_names"):
+            for i, lbl in enumerate(self.step_labels):
+                lbl.setText(f"✓ {self.step_names[i]}")
+                lbl.setStyleSheet("color: #86efac; font-size: 11.5px; font-weight: 500;")
+        if hasattr(self, "bubble") and self.bubble:
+            self.bubble.update_progress(100, "Đã xuất Timeline!")
+
         self.txt_console.appendPlainText(f"📁 [Xuất Toàn Bộ Timeline Vào Thư Mục _TIMELINE_IMPORT]:")
         self.txt_console.appendPlainText(f"   🎬 1. Master Timeline Multi-Track XML (DaVinci): {out_fcp7xml}")
         self.txt_console.appendPlainText(f"   🎬 1. Master Timeline Apple FCPXML: {out_fcpxml}")
