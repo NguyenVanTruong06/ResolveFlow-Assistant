@@ -40,7 +40,7 @@ from src.core.cloud_downloader import GoogleDriveDownloader, parse_google_drive_
 from src.core.story_copilot import StoryCopilot, CopilotDirectorPlan
 from src.ui.widgets.drive_dialog import GoogleDriveImportDialog
 from src.ui.widgets.copilot_dialog import StoryCopilotDialog
-from src.ui.widgets.floating_bubble import FloatingBubbleWidget
+from src.ui.bubble.floating_bubble import FloatingBubbleWidget
 from src.ui.widgets.section_card import SectionCard
 
 from PySide6.QtWidgets import (
@@ -4100,3 +4100,8 @@ def start_gui():
     window = ChunDVCApp()
     window.show()
     sys.exit(app.exec())
+
+
+# Alias for backward compatibility
+ResolveFlowApp = ChunDVCApp
+

@@ -134,3 +134,61 @@ def test_llm_roles_valid_and_invalid():
         sa.llm_assign_roles(blocks, "cold_open", "k", selector=FakeSelector({"roles": {"999": "hook"}}))
     with pytest.raises(ValueError):
         sa.llm_assign_roles(blocks, "cold_open", "k", selector=FakeSelector({}))
+
+
+def test_story_review_state_move_and_toggle():
+    from src.core.review_state import StoryReviewState
+    blocks = _blocks()
+    arr = sa.arrange(blocks, "shorts", target_seconds=60.0)
+    state = StoryReviewState(arr, blocks, target_seconds=60.0)
+
+    # Initial summary
+    sm = state.summary()
+    assert sm["enabled_count"] == len(arr.items)
+    assert sm["total_seconds"] == round(arr.total_seconds, 2)
+
+    # Move down item 0
+    orig_first_id = state.items[0].block_id
+    orig_second_id = state.items[1].block_id
+    assert state.move_down(0)
+    assert state.items[0].block_id == orig_second_id
+    assert state.items[1].block_id == orig_first_id
+
+    # Undo move
+    assert state.can_undo
+    assert state.undo()
+    assert state.items[0].block_id == orig_first_id
+
+    # Redo move
+    assert state.can_redo
+    assert state.redo()
+    assert state.items[0].block_id == orig_second_id
+
+    # Move up back
+    assert state.move_up(1)
+    assert state.items[0].block_id == orig_first_id
+
+    # Toggle disable item 0
+    assert state.toggle_enabled(0)
+    assert state.items[0].enabled is False
+    sm2 = state.summary()
+    assert sm2["enabled_count"] == len(arr.items) - 1
+    assert sm2["total_seconds"] < sm["total_seconds"]
+
+    # Restore AI plan
+    assert state.restore_ai_plan()
+    assert state.items[0].enabled is True
+    assert state.items[0].block_id == orig_first_id
+
+
+def test_apply_arrangement_skips_disabled_items():
+    blocks = _blocks()
+    arr = sa.arrange(blocks, "cold_open", cold_open_len=6.0)
+    # Disable hook copy item
+    arr.items[0].enabled = False
+    subs = _subs()
+    marks = [{"time": 152.0, "duration": 1.0, "name": "x", "color": "Red"}]
+    ev, su, mk = sa.apply_arrangement(_events(), subs, marks, arr)
+    # Hook copy should be skipped, timeline total matches original blocks
+    assert abs(ev[-1]["rec_out"] - 300.0) < 1e-3
+

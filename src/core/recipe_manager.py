@@ -61,6 +61,8 @@ class Recipe(BaseModel):
     vlog_hook_duration: float = Field(default=2.0, description="Độ dài mỗi khoảnh khắc trong teaser (giây)")
     vlog_hook_total: float = Field(default=20.0, description="Tổng thời lượng teaser (giây)")
 
+    hide_weak_subs: bool = Field(default=True)
+
     # Tư duy cắt/tua theo loại video
     video_type: str = Field(default="auto", description="auto / talk / mixed / vlog")
 

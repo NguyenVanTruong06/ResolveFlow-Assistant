@@ -123,6 +123,10 @@ class TabSFX(QWidget):
             ("glitch", "Glitch Điện Tử", "⚡", "glitch.wav"),
             ("riser", "Riser Kịch Tính", "📈", "riser.wav"),
             ("swoosh_sub", "Deep Sub Bass", "🔊", "swoosh_sub.wav"),
+            ("vine_boom", "Vine Boom Meme", "💣", "vine_boom.wav"),
+            ("censor_beep", "Censor Beep", "🤬", "censor_beep.wav"),
+            ("punch_hit", "Punch / Đấm", "🥊", "punch_hit.wav"),
+            ("laser_pew", "Laser Pew Pew", "🔫", "laser_pew.wav"),
         ]
 
         self.pad_buttons: Dict[str, SFXPadButton] = {}
@@ -209,9 +213,14 @@ class TabSFX(QWidget):
         vbox_act.addWidget(self.btn_insert_playhead)
 
         h_extra = QHBoxLayout()
-        btn_open_folder = QPushButton("📂 Mở Thư Mục SFX...")
+        btn_open_folder = QPushButton("📂 Mở Thư Mục SFX")
         btn_open_folder.clicked.connect(self._open_sfx_folder)
         h_extra.addWidget(btn_open_folder)
+
+        btn_open_broll = QPushButton("🎬 Mở Thư Mục B-Roll & Memes")
+        btn_open_broll.clicked.connect(self._open_broll_folder)
+        h_extra.addWidget(btn_open_broll)
+
         vbox_act.addLayout(h_extra)
 
         panel.addWidget(self.group_actions)
@@ -242,3 +251,9 @@ class TabSFX(QWidget):
         """Mở thư mục SFX trên File Explorer."""
         if os.path.exists(self.sound_effects_dir):
             os.startfile(self.sound_effects_dir)
+
+    def _open_broll_folder(self):
+        """Mở thư mục B-Roll & Memes trên File Explorer."""
+        broll_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "assets", "broll_memes"))
+        os.makedirs(broll_dir, exist_ok=True)
+        os.startfile(broll_dir)

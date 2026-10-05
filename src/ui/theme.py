@@ -150,15 +150,6 @@ def get_application_stylesheet() -> str:
     /* --- CARDS & GROUPBOXES --- */
     QGroupBox {{
         background-color: transparent;
-        border: none;
-        border-top: 1px solid {ThemeColors.BORDER_DEFAULT};
-        margin-top: 24px;
-        padding-top: 20px;
-        padding-bottom: 8px;
-        font-weight: 600;
-        font-size: 13px;
-        color: {ThemeColors.TEXT_PRIMARY};
-    }};
         border: 1.5px solid {ThemeColors.BORDER_DEFAULT};
         border-radius: 6px;
         margin-top: 14px;
@@ -166,24 +157,22 @@ def get_application_stylesheet() -> str:
         padding-bottom: 8px;
         padding-left: 8px;
         padding-right: 8px;
-        font-weight: bold;
+        font-weight: 600;
         font-size: 12px;
-        color: {ThemeColors.TEXT_ACCENT};
+        color: {ThemeColors.TEXT_PRIMARY};
     }}
     
     QGroupBox::title {{
         subcontrol-origin: margin;
         subcontrol-position: top left;
-        left: 0px;
+        left: 8px;
         top: -8px;
-        padding: 0px 8px 0px 0px;
+        padding: 0px 6px;
         background-color: {ThemeColors.BG_MAIN};
         color: {ThemeColors.TEXT_MUTED};
         font-size: 11px;
         text-transform: uppercase;
         letter-spacing: 1px;
-    }};
-        border-radius: 6px;
     }}
     
     QGroupBox[active="true"] {{

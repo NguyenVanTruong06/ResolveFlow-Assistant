@@ -7,7 +7,7 @@ Kiểm soát chất lượng bản nhận dạng giọng nói (Whisper) cho vide
 """
 import os
 import wave
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -118,6 +118,27 @@ def find_uncovered_gaps(
         if run_start is not None and b - run_start >= min_gap:
             gaps.append((round(run_start, 2), round(b, 2)))
     return gaps
+
+
+def mean_word_probability(seg: Segment) -> Optional[float]:
+    words = seg.get("words") or []
+    probs = [w["probability"] for w in words if "probability" in w]
+    return sum(probs) / len(probs) if probs else None
+
+
+def drop_low_confidence_subs(segments: List[Segment], min_prob: float) -> Tuple[List[Segment], int]:
+    """
+    Bỏ CHỮ của các câu Whisper không chắc (xác suất từ trung bình < min_prob) để khỏi hiện phụ đề sai.
+    Chỉ ảnh hưởng phụ đề: hình và tiếng của đoạn đó vẫn được giữ. Câu không có dữ liệu xác suất được giữ nguyên.
+    """
+    kept, dropped = [], 0
+    for seg in segments:
+        p = mean_word_probability(seg)
+        if p is not None and p < min_prob:
+            dropped += 1
+        else:
+            kept.append(seg)
+    return kept, dropped
 
 
 def coverage_stats(segments: List[Segment], duration: float) -> Dict[str, float]:

@@ -93,3 +93,126 @@ class ReviewState:
             "total_seconds": total,
             "saved_percent": round((1 - kept / total) * 100, 1) if total > 0 else 0.0,
         }
+
+
+class StoryReviewState:
+    """
+    Quản lý trạng thái duyệt và sắp xếp lại các khối kịch bản Story Blocks (Phase Story Review).
+    Hỗ trợ: đổi thứ tự (Move Up/Down), Bật/Tắt phân đoạn (Enable/Disable), Hoàn tác (Undo/Redo) và tính toán thời lượng.
+    """
+    MAX_HISTORY = 200
+
+    def __init__(self, arrangement: Any, blocks: Sequence[Any], target_seconds: float = 60.0):
+        self.arrangement = arrangement
+        self.items = list(arrangement.items) if arrangement else []
+        self.blocks = list(blocks)
+        self.blocks_by_id = {b.id: b for b in self.blocks}
+        self.target_seconds = target_seconds
+        self._initial_state = [item.model_copy() for item in self.items]
+        self._undo: List[List[Any]] = []
+        self._redo: List[List[Any]] = []
+
+    def _snapshot(self) -> List[Any]:
+        return [item.model_copy() for item in self.items]
+
+    def _record_change(self):
+        self._undo.append(self._snapshot())
+        del self._undo[:-self.MAX_HISTORY]
+        self._redo.clear()
+
+    def move_up(self, index: int) -> bool:
+        """Di chuyển khối lên vị trí trước đó 1 bậc."""
+        if index <= 0 or index >= len(self.items):
+            return False
+        self._undo.append(self._snapshot())
+        self._redo.clear()
+        self.items[index - 1], self.items[index] = self.items[index], self.items[index - 1]
+        self.arrangement.items = self.items
+        return True
+
+    def move_down(self, index: int) -> bool:
+        """Di chuyển khối xuống vị trí kế tiếp 1 bậc."""
+        if index < 0 or index >= len(self.items) - 1:
+            return False
+        self._undo.append(self._snapshot())
+        self._redo.clear()
+        self.items[index], self.items[index + 1] = self.items[index + 1], self.items[index]
+        self.arrangement.items = self.items
+        return True
+
+    def set_enabled(self, index: int, enabled: bool) -> bool:
+        if 0 <= index < len(self.items):
+            if self.items[index].enabled == enabled:
+                return False
+            self._undo.append(self._snapshot())
+            self._redo.clear()
+            self.items[index].enabled = enabled
+            return True
+        return False
+
+    def toggle_enabled(self, index: int) -> bool:
+        if 0 <= index < len(self.items):
+            return self.set_enabled(index, not self.items[index].enabled)
+        return False
+
+    def enable_all(self) -> bool:
+        self._undo.append(self._snapshot())
+        self._redo.clear()
+        for it in self.items:
+            it.enabled = True
+        return True
+
+    def disable_all(self) -> bool:
+        self._undo.append(self._snapshot())
+        self._redo.clear()
+        for it in self.items:
+            it.enabled = False
+        return True
+
+    def restore_ai_plan(self) -> bool:
+        """Khôi phục lại kế hoạch sắp xếp ban đầu của AI."""
+        self._undo.append(self._snapshot())
+        self._redo.clear()
+        self.items = [item.model_copy() for item in self._initial_state]
+        self.arrangement.items = self.items
+        return True
+
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo)
+
+    @property
+    def can_redo(self) -> bool:
+        return bool(self._redo)
+
+    def undo(self) -> bool:
+        if not self._undo:
+            return False
+        current = self._snapshot()
+        prev = self._undo.pop()
+        self._redo.append(current)
+        self.items = prev
+        self.arrangement.items = self.items
+        return True
+
+    def redo(self) -> bool:
+        if not self._redo:
+            return False
+        current = self._snapshot()
+        next_state = self._redo.pop()
+        self._undo.append(current)
+        self.items = next_state
+        self.arrangement.items = self.items
+        return True
+
+    def summary(self) -> Dict[str, Any]:
+        enabled_items = [it for it in self.items if getattr(it, "enabled", True)]
+        total_sec = sum(max(0.0, it.t1 - it.t0) for it in enabled_items)
+        return {
+            "enabled_count": len(enabled_items),
+            "total_count": len(self.items),
+            "total_seconds": round(total_sec, 2),
+            "target_seconds": self.target_seconds,
+            "difference_to_target": round(total_sec - self.target_seconds, 2)
+        }
+

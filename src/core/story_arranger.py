@@ -26,6 +26,9 @@ INTENTS = {
     "cold_open": "Mở bằng Hook (chép khoảnh khắc hay nhất lên đầu, giữ nguyên phần còn lại)",
     "rising_action": "Kịch tính dần (đổi thứ tự cảnh: Mở đầu → tăng dần → Cao trào → Kết)",
     "shorts": "Shorts / TikTok (Hook → Diễn biến → Cao trào → Chốt)",
+    "aida": "AIDA Marketing (Attention/Hook → Interest/Vấn đề → Desire/Giải pháp → Action/CTA)",
+    "pas": "PAS Chuyển Đổi (Problem/Nỗi đau → Agitation/Đẩy cao → Solution/Kết quả → Action)",
+    "open_loop": "Open-Loop Retention (Teaser bí mật ở 0-3s → Giữ lời giải đến cuối)",
 }
 ROLE_LABELS = {"hook": "Hook", "intro": "Mở đầu", "build": "Diễn biến", "climax": "Cao trào",
                "outro": "Kết", "filler": "Phụ"}
@@ -66,6 +69,7 @@ class ArrangedItem(BaseModel):
     role: str
     reason: str = ""
     is_copy: bool = False
+    enabled: bool = True
 
 
 class Arrangement(BaseModel):
@@ -106,15 +110,17 @@ def _span_signals(events, t0, t1, energy_by_video, activity_by_video):
         last = (ev["video_path"], s1)
         e_arr = energy_by_video.get(ev["video_path"])
         if e_arr is not None and len(e_arr):
-            seg = e_arr[int(s0): max(int(s0) + 1, int(np.ceil(s1)))]
+            e_np = np.asarray(e_arr)
+            seg = e_np[int(s0): max(int(s0) + 1, int(np.ceil(s1)))]
             if len(seg):
-                energies.append(float(np.clip((float(seg.max()) - float(np.median(e_arr))) / 15.0, 0.0, 1.0)))
+                energies.append(float(np.clip((float(seg.max()) - float(np.median(e_np))) / 15.0, 0.0, 1.0)))
                 weights.append(b - a)
         a_arr = activity_by_video.get(ev["video_path"])
         if a_arr is not None and len(a_arr):
-            seg = a_arr[int(s0): max(int(s0) + 1, int(np.ceil(s1)))]
+            a_np = np.asarray(a_arr)
+            seg = a_np[int(s0): max(int(s0) + 1, int(np.ceil(s1)))]
             if len(seg):
-                ref = max(float(np.percentile(a_arr, 90)), 0.15)
+                ref = max(float(np.percentile(a_np, 90)), 0.15)
                 motions.append(float(np.clip(float(np.mean(seg)) / ref, 0.0, 1.0)))
     energy = max(energies) if energies else None
     motion = float(np.average(motions, weights=weights[: len(motions)])) if motions and len(weights) >= len(motions) else (
@@ -391,6 +397,105 @@ def arrange(
         items = ([lead] if lead else []) + picked + ([tail] if tail else [])
         return Arrangement(intent=intent, items=items, total_seconds=used, changed=True)
 
+    if intent == "aida":
+        # Attention (Hook) -> Interest (Intro/Build) -> Desire (Climax/Solution) -> Action (Outro/CTA)
+        budget = target_seconds if target_seconds and target_seconds > 0 else float("inf")
+        hook = _first(blocks, "hook") or _first(blocks, "climax") or blocks[0]
+        intro = _first(blocks, "intro")
+        climax = _first(blocks, "climax") or hook
+        outro = _first(blocks, "outro")
+        used_ids = {b.id for b in (hook, intro, climax, outro) if b}
+        middle = [b for b in blocks if b.id not in used_ids and b.role != "filler"]
+
+        order = []
+        used = 0.0
+        if hook:
+            span = _trim(hook, 6.0) if budget < float("inf") else (hook.t0, hook.t1)
+            order.append(_item(hook, span))
+            used += span[1] - span[0]
+        if intro and intro.id != hook.id:
+            span = _trim(intro, 10.0) if budget < float("inf") else (intro.t0, intro.t1)
+            if used + (span[1] - span[0]) <= budget + 1e-6:
+                order.append(_item(intro, span))
+                used += span[1] - span[0]
+        for b in middle:
+            span = _trim(b, 10.0) if budget < float("inf") else (b.t0, b.t1)
+            if used + (span[1] - span[0]) <= budget + 1e-6:
+                order.append(_item(b, span))
+                used += span[1] - span[0]
+        if climax and climax.id != hook.id and climax.id != (intro.id if intro else -1):
+            span = _trim(climax, 10.0) if budget < float("inf") else (climax.t0, climax.t1)
+            if used + (span[1] - span[0]) <= budget + 1e-6:
+                order.append(_item(climax, span))
+                used += span[1] - span[0]
+        if outro and outro.id not in {it.block_id for it in order}:
+            span = _trim(outro, 8.0) if budget < float("inf") else (outro.t0, outro.t1)
+            if used + (span[1] - span[0]) <= budget + 1e-6 or not order:
+                order.append(_item(outro, span))
+                used += span[1] - span[0]
+
+        return Arrangement(intent=intent, items=order, total_seconds=used, changed=True)
+
+    if intent == "pas":
+        # Problem (Intro/Vấn đề) -> Agitation (Build/Đẩy cao) -> Solution (Climax/Kết quả) -> Action (Outro)
+        budget = target_seconds if target_seconds and target_seconds > 0 else float("inf")
+        problem = _first(blocks, "intro") or blocks[0]
+        solution = _first(blocks, "climax") or _first(blocks, "hook")
+        action = _first(blocks, "outro")
+        used_ids = {b.id for b in (problem, solution, action) if b}
+        agitation = [b for b in blocks if b.id not in used_ids and b.role != "filler"]
+        # Sắp xếp các đoạn agitation theo cường độ tăng dần
+        agitation.sort(key=lambda b: b.intensity)
+
+        order = []
+        used = 0.0
+        if problem:
+            span = _trim(problem, 10.0) if budget < float("inf") else (problem.t0, problem.t1)
+            order.append(_item(problem, span))
+            used += span[1] - span[0]
+
+        for b in agitation:
+            span = _trim(b, 10.0) if budget < float("inf") else (b.t0, b.t1)
+            if used + (span[1] - span[0]) <= budget + 1e-6:
+                order.append(_item(b, span))
+                used += span[1] - span[0]
+
+        if solution and solution.id != problem.id:
+            span = _trim(solution, 10.0) if budget < float("inf") else (solution.t0, solution.t1)
+            if used + (span[1] - span[0]) <= budget + 1e-6:
+                order.append(_item(solution, span))
+                used += span[1] - span[0]
+
+        if action and action.id not in {it.block_id for it in order}:
+            span = _trim(action, 8.0) if budget < float("inf") else (action.t0, action.t1)
+            if used + (span[1] - span[0]) <= budget + 1e-6 or not order:
+                order.append(_item(action, span))
+                used += span[1] - span[0]
+
+        return Arrangement(intent=intent, items=order, total_seconds=used, changed=True)
+
+    if intent == "open_loop":
+        # Chép 3-4s khoảnh khắc gây tò mò / cao trào lên đầu (Teaser), mạch chính giữ nguyên đến cuối mới lộ kết quả
+        highlight = _first(blocks, "hook") or _first(blocks, "climax")
+        if highlight is None:
+            return Arrangement(intent=intent, items=original, total_seconds=total_original, changed=False)
+        teaser = _item(highlight, _trim(highlight, 4.5), is_copy=True)
+        teaser.reason = "Open-Loop Teaser: Mở vòng lặp tò mò trong 3s đầu"
+        
+        budget = target_seconds if target_seconds and target_seconds > 0 else float("inf")
+        if budget < float("inf"):
+            used = teaser.t1 - teaser.t0
+            items = [teaser]
+            for it in original:
+                span_len = it.t1 - it.t0
+                if used + span_len <= budget + 1e-6:
+                    items.append(it)
+                    used += span_len
+            return Arrangement(intent=intent, items=items, total_seconds=used, changed=True)
+        else:
+            items = [teaser] + original
+            return Arrangement(intent=intent, items=items, total_seconds=sum(i.t1 - i.t0 for i in items), changed=True)
+
     raise ValueError(f"Ý đồ không hỗ trợ: {intent}")
 
 
@@ -424,6 +529,8 @@ def apply_arrangement(
     new_markers: List[Dict[str, Any]] = []
     cursor = 0.0
     for item in arrangement.items:
+        if not getattr(item, "enabled", True):
+            continue
         a, b = item.t0, item.t1
         for ev in slice_events(events, a, b):
             oa, ob = ev.pop("_rec_a"), ev.pop("_rec_b")
@@ -483,6 +590,8 @@ def describe(arrangement: Arrangement, blocks: Sequence[Block]) -> List[str]:
     for n, it in enumerate(arrangement.items, 1):
         b = by_id.get(it.block_id)
         snippet = (b.text[:50] + "…") if b and b.text else "(không lời)"
+        state_tag = " [TẮT]" if not getattr(it, "enabled", True) else (" [chép]" if it.is_copy else "")
         lines.append(f"{n:2d}. {ROLE_LABELS.get(it.role, it.role):<9} {it.t0:7.1f}s-{it.t1:7.1f}s "
-                     f"({it.t1 - it.t0:4.1f}s){' [chép]' if it.is_copy else ''}  {snippet}")
+                     f"({it.t1 - it.t0:4.1f}s){state_tag}  {snippet}")
     return lines
+

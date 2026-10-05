@@ -125,8 +125,8 @@ class DraggableLUTCard(QFrame):
         """)
         self.btn_apply.clicked.connect(lambda: self.apply_signal.emit(self.look.id))
 
-        lbl_drag_hint = QLabel("🖱️ Kéo .cube vào Resolve ➔")
-        lbl_drag_hint.setStyleSheet("color: #C084FC; font-size: 10px; font-style: italic;")
+        lbl_drag_hint = QLabel("🖱️ Kéo (Drag) thẻ này & Thả vào Tab Color của DaVinci")
+        lbl_drag_hint.setStyleSheet("color: #C084FC; font-size: 10px; font-style: italic; font-weight: bold;")
 
         h_act.addWidget(self.btn_apply)
         h_act.addStretch(1)

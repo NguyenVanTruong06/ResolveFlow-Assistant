@@ -119,7 +119,8 @@ class FCPXMLGenerator:
         highlight_color: str = "1 0.84 0 1",
         aspect_ratio: str = "16:9",
         markers: Optional[List[Dict[str, Any]]] = None,
-        preset: Optional[Union[TextStylePreset, str]] = None
+        preset: Optional[Union[TextStylePreset, str]] = None,
+        **kwargs
     ) -> str:
         format_name = "FFVideoFormat1080x1920p" if aspect_ratio == "9:16" else "FFVideoFormat1080p"
         frame_dur_str = FCPXMLGenerator._get_fcpxml_frame_duration(fps)
@@ -282,6 +283,57 @@ class FCPXMLGenerator:
               </title>"""
 
     @staticmethod
+    def get_clip_start_frame_and_tc(file_path: str, target_fps: int = 30) -> tuple:
+        """
+        Trích xuất timecode gốc từ file media và quy đổi thành frame count + NDF timecode string
+        tương thích 100% với cơ chế import của DaVinci Resolve.
+        """
+        import subprocess, json, re
+        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'stream_tags=timecode:format_tags=timecode', '-of', 'json', file_path]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            d = json.loads(res.stdout)
+        except Exception:
+            return 0, '00:00:00:00', 'NDF'
+
+        tc_str = None
+        for st in d.get('streams', []):
+            tc = st.get('tags', {}).get('timecode')
+            if tc:
+                tc_str = tc
+                break
+        if not tc_str:
+            tc_str = d.get('format', {}).get('tags', {}).get('timecode')
+
+        if not tc_str:
+            return 0, '00:00:00:00', 'NDF'
+
+        is_df = ';' in tc_str or ',' in tc_str
+        parts = [int(p) for p in re.split(r'[:;,]', tc_str) if p.isdigit()]
+        if len(parts) < 4:
+            return 0, '00:00:00:00', 'NDF'
+
+        hh, mm, ss, ff = parts[0], parts[1], parts[2], parts[3]
+
+        if is_df:
+            total_minutes = hh * 60 + mm
+            total_frames = (hh * 3600 + mm * 60 + ss) * target_fps + ff
+            dropped_frames = 2 * (total_minutes - total_minutes // 10)
+            real_frames = total_frames - dropped_frames
+        else:
+            real_frames = (hh * 3600 + mm * 60 + ss) * target_fps + ff
+
+        ff_ndf = real_frames % target_fps
+        total_s = real_frames // target_fps
+        ss_ndf = total_s % 60
+        total_m = total_s // 60
+        mm_ndf = total_m % 60
+        hh_ndf = total_m // 60
+        ndf_str = f'{hh_ndf:02d}:{mm_ndf:02d}:{ss_ndf:02d}:{ff_ndf:02d}'
+
+        return real_frames, ndf_str, 'NDF'
+
+    @staticmethod
     def generate_timeline_fcpxml(
         events: List[Dict[str, Any]], 
         output_xml_path: str,
@@ -293,7 +345,9 @@ class FCPXMLGenerator:
         font_size: int = 48,
         standard_color: str = "1 1 1 1",
         highlight_color: str = "1 0.84 0 1",
-        preset: Optional[Union[TextStylePreset, str]] = None
+        preset: Optional[Union[TextStylePreset, str]] = None,
+        markers: Optional[List[Dict[str, Any]]] = None,
+        **kwargs
     ) -> str:
         """
         Sinh tệp FCPXML v1.9 tạo dựng Timeline hoàn chỉnh (Clips + Audio + Cuts)
@@ -321,10 +375,24 @@ class FCPXMLGenerator:
         stroke_attrs = style["stroke_attrs"]
         bold_val = style["bold"]
 
+        # ---- Lưới khung hình: mọi mốc offset/start/duration là bội số nguyên của 1 khung hình ----
+        # (làm tròn mili-giây từng clip gây khe hở/chồng lấn 1 khung và lệch hình-tiếng khi có hàng nghìn clip)
+        fd_num, fd_den = [int(x) for x in frame_dur_str.rstrip("s").split("/")]
+        real_fps = fd_den / fd_num
+
+        def fr(n_frames: int) -> str:
+            return "0s" if n_frames == 0 else f"{n_frames * fd_num}/{fd_den}s"
+
+        def to_f(sec: float) -> int:
+            return int(round(sec * real_fps))
+
+        clip_metadata_db = kwargs.get("clip_metadata_db") or {}
+
         # Sử dụng dict.fromkeys để giữ nguyên vẹn thứ tự clip và loại bỏ trùng lặp (không làm đảo lộn thứ tự như set())
         unique_paths = list(dict.fromkeys([ev["video_path"] for ev in events]))
         asset_map = {}
         meta_map = {}
+        asset_tc_map = {}
         
         resources_xml = [
             f'    <format id="r_fmt" name="{format_name}" frameDuration="{frame_dur_str}"/>'
@@ -337,17 +405,35 @@ class FCPXMLGenerator:
         for i, path in enumerate(unique_paths, 1):
             asset_id = f"r_asset_{i}"
             asset_map[path] = asset_id
-            meta = get_media_metadata(path)
+
+            meta = {}
+            if clip_metadata_db:
+                if path in clip_metadata_db:
+                    meta = clip_metadata_db[path]
+                else:
+                    base = os.path.basename(path)
+                    for k, v in clip_metadata_db.items():
+                        if os.path.basename(k) == base:
+                            meta = v
+                            break
+            if not meta:
+                meta = get_media_metadata(path)
             meta_map[path] = meta
+
+            # Lấy timecode gốc của file để DaVinci Resolve link chính xác frame vật lý
+            if "start_tc_frames" in meta or "tc_frames" in meta:
+                start_tc_f = meta.get("start_tc_frames", meta.get("tc_frames", 0))
+            else:
+                start_tc_f, _, _ = FCPXMLGenerator.get_clip_start_frame_and_tc(path, int(round(real_fps)))
+            asset_tc_map[path] = start_tc_f
 
             # Không dùng as_uri() vì nó mã hóa phần trăm (ví dụ: %20), làm Resolve trên Windows bị lỗi Media Offline
             abs_path = os.path.abspath(path).replace('\\', '/')
             if not abs_path.startswith('/'):
-                file_url = f"file://localhost/{abs_path}"
+                file_url = f"file:///{abs_path}"
             else:
-                file_url = f"file://localhost{abs_path}"
+                file_url = f"file://{abs_path}"
             clip_name = html.escape(os.path.basename(path))
-            reel_name = html.escape(os.path.splitext(os.path.basename(path))[0])
             
             total_dur_sec = meta.get("duration", 0.0)
             matching_evs = [ev.get("src_out", 0.0) for ev in events if ev.get("video_path") == path]
@@ -355,29 +441,19 @@ class FCPXMLGenerator:
                 total_dur_sec = max(total_dur_sec, max(matching_evs) + 0.1)
             elif total_dur_sec <= 0.0:
                 total_dur_sec = 3600.0
-            dur_ms = int(total_dur_sec * 1000)
+            dur_frames = to_f(total_dur_sec)
             has_audio_val = "1" if meta.get("has_audio", True) else "0"
 
             escaped_file_url = html.escape(file_url)
+            start_tc_str_val = fr(start_tc_f)
+            dur_tc_str_val = fr(dur_frames)
             resources_xml.append(
-                f"""    <asset id="{asset_id}" name="{clip_name}" src="{escaped_file_url}" start="0s" duration="{dur_ms}/1000s" hasVideo="1" format="r_fmt" hasAudio="{has_audio_val}">
+                f"""    <asset id="{asset_id}" name="{clip_name}" src="{escaped_file_url}" start="{start_tc_str_val}" duration="{dur_tc_str_val}" hasVideo="1" format="r_fmt" hasAudio="{has_audio_val}">
       <metadata>
-        <md key="com.apple.proapps.studio.reel" value="{reel_name}"/>
         <md key="com.apple.proapps.spotlight.kMDItemContentType" value="public.movie"/>
       </metadata>
     </asset>"""
             )
-
-        # ---- Lưới khung hình: mọi mốc offset/start/duration là bội số nguyên của 1 khung hình ----
-        # (làm tròn mili-giây từng clip gây khe hở/chồng lấn 1 khung và lệch hình-tiếng khi có hàng nghìn clip)
-        fd_num, fd_den = [int(x) for x in frame_dur_str.rstrip("s").split("/")]
-        real_fps = fd_den / fd_num
-
-        def fr(n_frames: int) -> str:
-            return "0s" if n_frames == 0 else f"{n_frames * fd_num}/{fd_den}s"
-
-        def to_f(sec: float) -> int:
-            return int(round(sec * real_fps))
 
         # Kế hoạch từng clip: vị trí trên timeline được CỘNG DỒN từ thời lượng ĐẦU RA (đã tính tốc độ),
         # nên các clip luôn nối liền nhau, không bao giờ chồng lấn, kể cả đoạn tua nhanh.
@@ -408,10 +484,13 @@ class FCPXMLGenerator:
             pl = plan[ev_idx]
             if pl is None or pl["retimed"]:
                 return None
-            offset_f = pl["src_in_f"] + to_f(ov_start - ev["rec_in"])
+            v_path = ev["video_path"]
+            start_tc_f = asset_tc_map.get(v_path, 0)
+            clip_start_f = start_tc_f + pl["src_in_f"]
+            offset_f = clip_start_f + to_f(ov_start - ev["rec_in"])
             dur_f = max(1, to_f(ov_end - ov_start))
-            dur_f = min(dur_f, pl["src_out_f"] - offset_f)
-            if dur_f < 1 or offset_f < pl["src_in_f"]:
+            dur_f = min(dur_f, (start_tc_f + pl["src_out_f"]) - offset_f)
+            if dur_f < 1 or offset_f < clip_start_f:
                 return None
             return fr(offset_f), fr(dur_f)
 
@@ -489,6 +568,8 @@ class FCPXMLGenerator:
             asset_id = asset_map[v_path]
             clip_name = html.escape(os.path.basename(v_path))
             reel_name = html.escape(os.path.splitext(os.path.basename(v_path))[0])
+            start_tc_f = asset_tc_map.get(v_path, 0)
+            clip_start_f = start_tc_f + pl["src_in_f"]
 
             inner_titles = "".join(clip_titles_map.get(ev_idx, []))
 
@@ -503,10 +584,7 @@ class FCPXMLGenerator:
                 )
 
             clip_xml = f"""
-            <asset-clip name="{clip_name}" ref="{asset_id}" offset="{fr(pl["offset_f"])}" start="{fr(pl["src_in_f"])}" duration="{fr(pl["out_dur_f"])}" format="r_fmt" audioRole="dialogue">
-              <metadata>
-                <md key="com.apple.proapps.studio.reel" value="{reel_name}"/>
-              </metadata>{time_map}{inner_titles}
+            <asset-clip name="{clip_name}" ref="{asset_id}" offset="{fr(pl["offset_f"])}" start="{fr(clip_start_f)}" duration="{fr(pl["out_dur_f"])}" format="r_fmt" audioRole="dialogue">{time_map}{inner_titles}
             </asset-clip>"""
             spine_elements.append(clip_xml)
 
@@ -537,5 +615,476 @@ class FCPXMLGenerator:
 
         with open(output_xml_path, "w", encoding="utf-8") as f:
             f.write("\n".join(xml_lines))
+
+        return output_xml_path
+
+    @staticmethod
+    def generate_fcp7_xml(
+        events: list,
+        output_xml_path: str,
+        timeline_name: str = "ResolveFlow Cut Timeline",
+        fps: float = 30.0,
+        aspect_ratio: str = "16:9",
+        broll_inserts: list = None,
+        sfx_inserts: list = None,
+        markers: list = None,
+        **kwargs
+    ) -> str:
+        """
+        Sinh tệp Final Cut Pro 7 XML (xmeml v5) chuyên nghiệp tương thích 100% với DaVinci Resolve Windows:
+        - Track V1: Video A-Roll chính (cắt gọt chính xác).
+        - Track V2: B-Roll / Meme minh họa (nếu có).
+        - Track A1/A2: Stereo Audio thoại gốc.
+        - Track A3: Âm thanh hiệu ứng SFX (Whoosh, Pop, Bell...).
+        - Track A4/A5: Âm thanh kèm theo của video B-Roll (nếu có).
+        """
+        import re
+        import xml.etree.ElementTree as ET
+        import xml.dom.minidom as minidom
+        from src.core.autocut import get_media_metadata
+        from src.core.broll_sfx import GlobalAssetPool
+
+        asset_pool = GlobalAssetPool.get_instance()
+
+        real_fps = float(fps)
+        timebase_int = int(round(real_fps))
+        timebase_str = str(timebase_int)
+        is_ntsc = abs(real_fps - 29.97) < 0.05 or abs(real_fps - 23.976) < 0.05 or abs(real_fps - 59.94) < 0.05
+        ntsc_str = "TRUE" if is_ntsc else "FALSE"
+        w_val = "1080" if aspect_ratio == "9:16" else "1920"
+        h_val = "1920" if aspect_ratio == "9:16" else "1080"
+
+        def sec_to_frame(sec: float) -> int:
+            return int(round(sec * real_fps))
+
+        def clean_path_url(path: str) -> str:
+            p = os.path.abspath(path).replace('\\', '/')
+            if not p.startswith('/'):
+                return f"file:///{p}"
+            return f"file://{p}"
+
+        def clean_str(val: Any) -> str:
+            if not val:
+                return ""
+            s = str(val)
+            return re.sub(r'[\U00010000-\U0010ffff]', '', s).strip()
+
+        def _get_val(obj, *keys, default=None):
+            for k in keys:
+                if isinstance(obj, dict) and k in obj:
+                    return obj[k]
+                elif hasattr(obj, k):
+                    val = getattr(obj, k)
+                    if val is not None:
+                        return val
+            return default
+
+        clip_metadata_db = kwargs.get("clip_metadata_db") or {}
+
+        # 1. Thu thập metadata của các clip nguồn
+        clip_db = {}
+        def get_or_create_file_meta(vpath: str) -> dict:
+            data = None
+            if clip_metadata_db:
+                if vpath in clip_metadata_db:
+                    data = dict(clip_metadata_db[vpath])
+                else:
+                    base = os.path.basename(vpath)
+                    for k, v in clip_metadata_db.items():
+                        if os.path.basename(k) == base:
+                            data = dict(v)
+                            break
+
+            if data is None:
+                base_upper = os.path.basename(vpath).upper()
+                if base_upper in clip_db:
+                    return clip_db[base_upper]
+                if vpath in clip_db:
+                    return clip_db[vpath]
+
+                meta = get_media_metadata(vpath)
+                dur_sec = meta.get("duration", 0.0)
+                dur_frames = max(1, sec_to_frame(dur_sec))
+                data = {
+                    "name": os.path.basename(vpath),
+                    "path": os.path.abspath(vpath),
+                    "pathurl": clean_path_url(vpath),
+                    "duration": dur_sec,
+                    "dur_frames": dur_frames,
+                    "has_audio": meta.get("has_audio", True),
+                    "channels": 2
+                }
+
+            # Đảm bảo timecode được trích xuất chính xác từ file vật lý nếu chưa có
+            if "start_tc_frames" not in data and "tc_frames" not in data:
+                tc_frames, tc_str, tc_fmt = FCPXMLGenerator.get_clip_start_frame_and_tc(vpath, timebase_int)
+                data["start_tc_frames"] = tc_frames
+                data["start_tc_str"] = tc_str
+                data["tc_format"] = tc_fmt
+            else:
+                data["start_tc_frames"] = data.get("start_tc_frames", data.get("tc_frames", 0))
+                data["start_tc_str"] = data.get("start_tc_str", data.get("timecode", "00:00:00:00"))
+                data["tc_format"] = data.get("tc_format", "NDF")
+
+            base_upper = os.path.basename(vpath).upper()
+            clip_db[base_upper] = data
+            clip_db[vpath] = data
+            return data
+
+        file_elements_cache = set()
+        def add_file_node(parent: ET.Element, file_meta: dict, file_id: str, is_audio_only: bool = False):
+            if file_id in file_elements_cache:
+                return ET.SubElement(parent, "file", id=file_id)
+
+            file_elements_cache.add(file_id)
+            file_el = ET.SubElement(parent, "file", id=file_id)
+            ET.SubElement(file_el, "name").text = file_meta["name"]
+            ET.SubElement(file_el, "pathurl").text = file_meta.get("pathurl", clean_path_url(file_meta.get("path", "")))
+            f_rate = ET.SubElement(file_el, "rate")
+            ET.SubElement(f_rate, "timebase").text = timebase_str
+            ET.SubElement(f_rate, "ntsc").text = ntsc_str
+            ET.SubElement(file_el, "duration").text = str(file_meta.get("dur_frames", max(1, sec_to_frame(file_meta.get("duration", 1.0)))))
+
+            tc_node = ET.SubElement(file_el, "timecode")
+            tc_r = ET.SubElement(tc_node, "rate")
+            ET.SubElement(tc_r, "timebase").text = timebase_str
+            ET.SubElement(tc_r, "ntsc").text = ntsc_str
+            ET.SubElement(tc_node, "string").text = file_meta.get("start_tc_str", "00:00:00:00")
+            ET.SubElement(tc_node, "frame").text = str(file_meta.get("start_tc_frames", 0))
+            ET.SubElement(tc_node, "displayformat").text = file_meta.get("tc_format", "NDF")
+
+            media_el = ET.SubElement(file_el, "media")
+            if not is_audio_only:
+                v_media = ET.SubElement(media_el, "video")
+                sc_v = ET.SubElement(v_media, "samplecharacteristics")
+                ET.SubElement(sc_v, "width").text = w_val
+                ET.SubElement(sc_v, "height").text = h_val
+            if file_meta.get("has_audio", True) or is_audio_only:
+                a_media = ET.SubElement(media_el, "audio")
+                sc_a = ET.SubElement(a_media, "samplecharacteristics")
+                ET.SubElement(sc_a, "depth").text = "16"
+                ET.SubElement(sc_a, "samplerate").text = "48000"
+            return file_el
+
+        # Tính tổng thời lượng trước để ghi duration đúng chuẩn FCP7 XML
+        total_timeline_frames = 0
+        for ev in events:
+            s_in = max(0.0, float(ev.get("src_in", 0.0)))
+            s_out = float(ev.get("src_out", 0.0))
+            if s_out > s_in:
+                total_timeline_frames += max(1, sec_to_frame(s_out - s_in))
+
+        # 2. Xây dựng XMEML Root chuẩn Apple Final Cut Pro 7 / DaVinci Resolve
+        xmeml = ET.Element("xmeml", version="5")
+        sequence = ET.SubElement(xmeml, "sequence")
+        ET.SubElement(sequence, "name").text = clean_str(timeline_name)
+        seq_dur_node = ET.SubElement(sequence, "duration")
+        seq_dur_node.text = str(total_timeline_frames)
+
+        rate = ET.SubElement(sequence, "rate")
+        ET.SubElement(rate, "timebase").text = timebase_str
+        ET.SubElement(rate, "ntsc").text = ntsc_str
+
+        # Timecode chuẩn của Sequence
+        tc_seq = ET.SubElement(sequence, "timecode")
+        tc_seq_rate = ET.SubElement(tc_seq, "rate")
+        ET.SubElement(tc_seq_rate, "timebase").text = timebase_str
+        ET.SubElement(tc_seq_rate, "ntsc").text = ntsc_str
+        ET.SubElement(tc_seq, "string").text = "00:00:00:00"
+        ET.SubElement(tc_seq, "frame").text = "0"
+        ET.SubElement(tc_seq, "displayformat").text = "DF" if ntsc_str == "TRUE" else "NDF"
+
+        media = ET.SubElement(sequence, "media")
+        video = ET.SubElement(media, "video")
+
+        # Format Video Sequence (Bắt buộc cho DaVinci Resolve)
+        v_format = ET.SubElement(video, "format")
+        sc_v_seq = ET.SubElement(v_format, "samplecharacteristics")
+        ET.SubElement(sc_v_seq, "width").text = w_val
+        ET.SubElement(sc_v_seq, "height").text = h_val
+        ET.SubElement(sc_v_seq, "pixelaspectratio").text = "square"
+        rate_v_seq = ET.SubElement(sc_v_seq, "rate")
+        ET.SubElement(rate_v_seq, "timebase").text = timebase_str
+        ET.SubElement(rate_v_seq, "ntsc").text = ntsc_str
+
+        v_track1 = ET.SubElement(video, "track") # Track V1 Main
+
+        audio = ET.SubElement(media, "audio")
+        # Format Audio Sequence (Bắt buộc cho DaVinci Resolve)
+        a_format = ET.SubElement(audio, "format")
+        sc_a_seq = ET.SubElement(a_format, "samplecharacteristics")
+        ET.SubElement(sc_a_seq, "depth").text = "16"
+        ET.SubElement(sc_a_seq, "samplerate").text = "48000"
+
+        a_track1 = ET.SubElement(audio, "track") # A1 Main L
+        a_track2 = ET.SubElement(audio, "track") # A2 Main R
+
+        current_timeline_frame = 0
+
+        # 3. Duyệt và xếp các đoạn A-Roll lên V1, A1, A2
+        for idx, ev in enumerate(events, 1):
+            vpath = ev.get("video_path")
+            if not vpath or (not os.path.exists(vpath) and vpath not in clip_metadata_db):
+                continue
+            f_meta = get_or_create_file_meta(vpath)
+            f_id = f"file-v1-{idx}"
+
+            src_in_sec = max(0.0, float(ev.get("src_in", 0.0)))
+            src_out_sec = float(ev.get("src_out", 0.0))
+            max_dur = f_meta.get("duration", 0.0)
+            if max_dur > 0:
+                src_out_sec = min(src_out_sec, max_dur)
+            dur_sec = max(0.0, src_out_sec - src_in_sec)
+            if dur_sec <= 0.01:
+                continue
+
+            tc_base = f_meta.get("start_tc_frames", 0)
+            in_f = tc_base + sec_to_frame(src_in_sec)
+            dur_f = max(1, sec_to_frame(dur_sec))
+            out_f = in_f + dur_f
+            clip_dur_f = tc_base + f_meta.get("dur_frames", 1)
+
+            # Video V1
+            v_item = ET.SubElement(v_track1, "clipitem", id=f"clipitem-v1-{idx}")
+            ET.SubElement(v_item, "name").text = f_meta["name"]
+            ET.SubElement(v_item, "duration").text = str(clip_dur_f)
+            v_rate = ET.SubElement(v_item, "rate")
+            ET.SubElement(v_rate, "timebase").text = timebase_str
+            ET.SubElement(v_rate, "ntsc").text = ntsc_str
+            ET.SubElement(v_item, "start").text = str(current_timeline_frame)
+            ET.SubElement(v_item, "end").text = str(current_timeline_frame + dur_f)
+            ET.SubElement(v_item, "in").text = str(in_f)
+            ET.SubElement(v_item, "out").text = str(out_f)
+            add_file_node(v_item, f_meta, f_id, is_audio_only=False)
+
+            st_v = ET.SubElement(v_item, "sourcetrack")
+            ET.SubElement(st_v, "mediatype").text = "video"
+            ET.SubElement(st_v, "trackindex").text = "1"
+
+            # Audio A1 (Left)
+            a_item1 = ET.SubElement(a_track1, "clipitem", id=f"clipitem-a1-{idx}")
+            ET.SubElement(a_item1, "name").text = f_meta["name"]
+            ET.SubElement(a_item1, "duration").text = str(clip_dur_f)
+            a_rate1 = ET.SubElement(a_item1, "rate")
+            ET.SubElement(a_rate1, "timebase").text = timebase_str
+            ET.SubElement(a_rate1, "ntsc").text = ntsc_str
+            ET.SubElement(a_item1, "start").text = str(current_timeline_frame)
+            ET.SubElement(a_item1, "end").text = str(current_timeline_frame + dur_f)
+            ET.SubElement(a_item1, "in").text = str(in_f)
+            ET.SubElement(a_item1, "out").text = str(out_f)
+            add_file_node(a_item1, f_meta, f_id, is_audio_only=False)
+
+            st_a1 = ET.SubElement(a_item1, "sourcetrack")
+            ET.SubElement(st_a1, "mediatype").text = "audio"
+            ET.SubElement(st_a1, "trackindex").text = "1"
+
+            # Audio A2 (Right)
+            a_item2 = ET.SubElement(a_track2, "clipitem", id=f"clipitem-a2-{idx}")
+            ET.SubElement(a_item2, "name").text = f_meta["name"]
+            ET.SubElement(a_item2, "duration").text = str(clip_dur_f)
+            a_rate2 = ET.SubElement(a_item2, "rate")
+            ET.SubElement(a_rate2, "timebase").text = timebase_str
+            ET.SubElement(a_rate2, "ntsc").text = ntsc_str
+            ET.SubElement(a_item2, "start").text = str(current_timeline_frame)
+            ET.SubElement(a_item2, "end").text = str(current_timeline_frame + dur_f)
+            ET.SubElement(a_item2, "in").text = str(in_f)
+            ET.SubElement(a_item2, "out").text = str(out_f)
+            add_file_node(a_item2, f_meta, f_id, is_audio_only=False)
+
+            st_a2 = ET.SubElement(a_item2, "sourcetrack")
+            ET.SubElement(st_a2, "mediatype").text = "audio"
+            ET.SubElement(st_a2, "trackindex").text = "2"
+
+            # Liên kết Audio và Video (Link) để DaVinci khóa đồng bộ
+            for itm in (v_item, a_item1, a_item2):
+                lv = ET.SubElement(itm, "link")
+                ET.SubElement(lv, "linkclipref").text = f"clipitem-v1-{idx}"
+                ET.SubElement(lv, "mediatype").text = "video"
+                ET.SubElement(lv, "trackindex").text = "1"
+                ET.SubElement(lv, "clipindex").text = str(idx)
+
+                la1 = ET.SubElement(itm, "link")
+                ET.SubElement(la1, "linkclipref").text = f"clipitem-a1-{idx}"
+                ET.SubElement(la1, "mediatype").text = "audio"
+                ET.SubElement(la1, "trackindex").text = "1"
+                ET.SubElement(la1, "clipindex").text = str(idx)
+                ET.SubElement(la1, "groupindex").text = "1"
+
+                la2 = ET.SubElement(itm, "link")
+                ET.SubElement(la2, "linkclipref").text = f"clipitem-a2-{idx}"
+                ET.SubElement(la2, "mediatype").text = "audio"
+                ET.SubElement(la2, "trackindex").text = "2"
+                ET.SubElement(la2, "clipindex").text = str(idx)
+                ET.SubElement(la2, "groupindex").text = "1"
+
+            current_timeline_frame += dur_f
+
+        # 4. Duyệt và xếp B-Roll lên Video Track 2 (V2) & Audio B-Roll (A4/A5)
+        if broll_inserts:
+            broll_clips = []
+            broll_a1_clips = []
+            broll_a2_clips = []
+            for b_idx, b_item in enumerate(broll_inserts, 1):
+                raw_file = _get_val(b_item, "video_path", "asset_file", "clip_name", "query", "matched_path", default="")
+                resolved_p = None
+                if raw_file and (os.path.exists(str(raw_file)) or (clip_metadata_db and str(raw_file) in clip_metadata_db)):
+                    resolved_p = str(raw_file)
+                else:
+                    resolver = getattr(asset_pool, "resolve_broll", getattr(asset_pool, "resolve_meme", None))
+                    resolved_p = resolver(str(raw_file)) if resolver else None
+
+                if not resolved_p or (not os.path.exists(resolved_p) and resolved_p not in clip_metadata_db):
+                    continue
+
+                b_meta = get_or_create_file_meta(resolved_p)
+                tl_start_sec = float(_get_val(b_item, "timeline_sec", "time", "start_time", default=0.0))
+                dur_sec = float(_get_val(b_item, "duration_sec", "duration", default=3.0))
+
+                b_start_f = sec_to_frame(tl_start_sec)
+                b_dur_f = max(1, sec_to_frame(dur_sec))
+                b_tc_base = b_meta.get("start_tc_frames", 0)
+                b_in_f = b_tc_base
+                b_out_f = b_in_f + b_dur_f
+                b_clip_dur_f = b_tc_base + b_meta.get("dur_frames", 1)
+                f_broll_id = f"file-broll-{b_idx}"
+
+                b_clip = ET.Element("clipitem", id=f"clipitem-broll-{b_idx}")
+                ET.SubElement(b_clip, "name").text = b_meta["name"]
+                ET.SubElement(b_clip, "duration").text = str(b_clip_dur_f)
+                b_rate = ET.SubElement(b_clip, "rate")
+                ET.SubElement(b_rate, "timebase").text = timebase_str
+                ET.SubElement(b_rate, "ntsc").text = ntsc_str
+                ET.SubElement(b_clip, "start").text = str(b_start_f)
+                ET.SubElement(b_clip, "end").text = str(b_start_f + b_dur_f)
+                ET.SubElement(b_clip, "in").text = str(b_in_f)
+                ET.SubElement(b_clip, "out").text = str(b_out_f)
+                add_file_node(b_clip, b_meta, f_broll_id, is_audio_only=False)
+
+                st_b = ET.SubElement(b_clip, "sourcetrack")
+                ET.SubElement(st_b, "mediatype").text = "video"
+                ET.SubElement(st_b, "trackindex").text = "1"
+                broll_clips.append(b_clip)
+
+                # B-Roll Audio A4 / A5 nếu có
+                if b_meta.get("has_audio", False):
+                    b_a1 = ET.Element("clipitem", id=f"clipitem-broll-a1-{b_idx}")
+                    ET.SubElement(b_a1, "name").text = b_meta["name"]
+                    ET.SubElement(b_a1, "duration").text = str(b_clip_dur_f)
+                    b_ar1 = ET.SubElement(b_a1, "rate")
+                    ET.SubElement(b_ar1, "timebase").text = timebase_str
+                    ET.SubElement(b_ar1, "ntsc").text = ntsc_str
+                    ET.SubElement(b_a1, "start").text = str(b_start_f)
+                    ET.SubElement(b_a1, "end").text = str(b_start_f + b_dur_f)
+                    ET.SubElement(b_a1, "in").text = str(b_in_f)
+                    ET.SubElement(b_a1, "out").text = str(b_out_f)
+                    add_file_node(b_a1, b_meta, f_broll_id, is_audio_only=True)
+                    st_b_a1 = ET.SubElement(b_a1, "sourcetrack")
+                    ET.SubElement(st_b_a1, "mediatype").text = "audio"
+                    ET.SubElement(st_b_a1, "trackindex").text = "1"
+                    broll_a1_clips.append(b_a1)
+
+                    b_a2 = ET.Element("clipitem", id=f"clipitem-broll-a2-{b_idx}")
+                    ET.SubElement(b_a2, "name").text = b_meta["name"]
+                    ET.SubElement(b_a2, "duration").text = str(b_clip_dur_f)
+                    b_ar2 = ET.SubElement(b_a2, "rate")
+                    ET.SubElement(b_ar2, "timebase").text = timebase_str
+                    ET.SubElement(b_ar2, "ntsc").text = ntsc_str
+                    ET.SubElement(b_a2, "start").text = str(b_start_f)
+                    ET.SubElement(b_a2, "end").text = str(b_start_f + b_dur_f)
+                    ET.SubElement(b_a2, "in").text = str(b_in_f)
+                    ET.SubElement(b_a2, "out").text = str(b_out_f)
+                    add_file_node(b_a2, b_meta, f_broll_id, is_audio_only=True)
+                    st_b_a2 = ET.SubElement(b_a2, "sourcetrack")
+                    ET.SubElement(st_b_a2, "mediatype").text = "audio"
+                    ET.SubElement(st_b_a2, "trackindex").text = "2"
+                    broll_a2_clips.append(b_a2)
+
+            if broll_clips:
+                v_track2 = ET.SubElement(video, "track")
+                for c in broll_clips:
+                    v_track2.append(c)
+
+        # 5. Duyệt và xếp SFX lên Audio Track 3 (A3) - Chỉ tạo track khi có audio thật
+        if sfx_inserts:
+            sfx_clips = []
+            for s_idx, s_item in enumerate(sfx_inserts, 1):
+                raw_file = _get_val(s_item, "audio_path", "asset_file", "sfx_type", default="")
+                resolved_p = None
+                if raw_file and (os.path.exists(str(raw_file)) or (clip_metadata_db and str(raw_file) in clip_metadata_db)):
+                    resolved_p = str(raw_file)
+                else:
+                    resolved_p = asset_pool.resolve_sfx(str(raw_file))
+
+                if not resolved_p or (not os.path.exists(resolved_p) and resolved_p not in clip_metadata_db):
+                    continue
+
+                s_meta = get_or_create_file_meta(resolved_p)
+                tl_start_sec = float(_get_val(s_item, "timeline_sec", "time", default=0.0))
+                dur_sec = float(_get_val(s_item, "duration_sec", "duration", default=1.0))
+
+                s_start_f = sec_to_frame(tl_start_sec)
+                s_dur_f = max(1, sec_to_frame(dur_sec))
+                s_tc_base = s_meta.get("start_tc_frames", 0)
+                s_in_f = s_tc_base
+                s_out_f = s_in_f + s_dur_f
+                s_clip_dur_f = s_tc_base + s_meta.get("dur_frames", 1)
+
+                s_clip = ET.Element("clipitem", id=f"clipitem-sfx-{s_idx}")
+                ET.SubElement(s_clip, "name").text = s_meta["name"]
+                ET.SubElement(s_clip, "duration").text = str(s_clip_dur_f)
+                s_rate = ET.SubElement(s_clip, "rate")
+                ET.SubElement(s_rate, "timebase").text = timebase_str
+                ET.SubElement(s_rate, "ntsc").text = ntsc_str
+                ET.SubElement(s_clip, "start").text = str(s_start_f)
+                ET.SubElement(s_clip, "end").text = str(s_start_f + s_dur_f)
+                ET.SubElement(s_clip, "in").text = str(s_in_f)
+                ET.SubElement(s_clip, "out").text = str(s_out_f)
+                add_file_node(s_clip, s_meta, f"file-sfx-{s_idx}", is_audio_only=True)
+
+                st_sfx = ET.SubElement(s_clip, "sourcetrack")
+                ET.SubElement(st_sfx, "mediatype").text = "audio"
+                ET.SubElement(st_sfx, "trackindex").text = "1"
+                sfx_clips.append(s_clip)
+
+            if sfx_clips:
+                a_track3 = ET.SubElement(audio, "track")
+                for c in sfx_clips:
+                    a_track3.append(c)
+
+        # Gắn thêm track A4, A5 cho Audio B-Roll nếu có
+        if broll_inserts and 'broll_a1_clips' in locals() and broll_a1_clips:
+            a_track4 = ET.SubElement(audio, "track")
+            for c in broll_a1_clips:
+                a_track4.append(c)
+            a_track5 = ET.SubElement(audio, "track")
+            for c in broll_a2_clips:
+                a_track5.append(c)
+
+        # 6. Thêm Markers lên Sequence (đã làm sạch emoji)
+        if markers:
+            for m in markers:
+                m_name = clean_str(m.get("name", "Marker"))
+                m_note = clean_str(m.get("note", ""))
+                m_el = ET.SubElement(sequence, "marker")
+                ET.SubElement(m_el, "name").text = m_name
+                ET.SubElement(m_el, "comment").text = m_note
+                m_in = sec_to_frame(float(m.get("time", 0.0)))
+                m_dur = sec_to_frame(float(m.get("duration", 1.0)))
+                ET.SubElement(m_el, "in").text = str(m_in)
+                ET.SubElement(m_el, "out").text = str(m_in + max(1, m_dur))
+
+        # 7. Cập nhật lại tổng thời lượng chính xác ở đầu Sequence
+        seq_dur_node.text = str(current_timeline_frame)
+
+        parent_dir = os.path.dirname(output_xml_path)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
+
+        rough_string = ET.tostring(xmeml, encoding="utf-8")
+        reparsed = minidom.parseString(rough_string)
+        pretty_xml = reparsed.toprettyxml(indent="  ", encoding="utf-8")
+
+        with open(output_xml_path, "wb") as f:
+            f.write(pretty_xml)
 
         return output_xml_path

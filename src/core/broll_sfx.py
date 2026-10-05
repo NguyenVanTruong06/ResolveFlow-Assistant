@@ -138,3 +138,152 @@ class SFXEngine:
 
         # Sắp xếp theo thứ tự thời gian
         return sorted(sfx_list, key=lambda x: x.time)
+
+
+class GlobalAssetPool:
+    """
+    Kho Tài Nguyên Toàn Cục (Global Shared Asset Pool):
+    - Tự động quét và lập chỉ mục vĩnh viễn toàn bộ Memes, Green Screen, SFX dùng chung.
+    - Cung cấp API tra cứu tức thì (<0.001s) cho DaVinci Resolve Timeline Generator.
+    - Hỗ trợ quét bổ sung (incremental refresh) và nạp thêm Kho B-Roll/SFX riêng của dự án.
+    """
+    _instance: Optional["GlobalAssetPool"] = None
+    
+    def __init__(self, base_asset_dir: Optional[str] = None):
+        if base_asset_dir is None:
+            self.base_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "assets"))
+        else:
+            self.base_dir = os.path.abspath(base_asset_dir)
+            
+        self.memes_index: Dict[str, str] = {}         # basename_lower -> abs_path (Global)
+        self.sfx_index: Dict[str, str] = {}           # basename_lower -> abs_path (Global)
+        self.project_memes_index: Dict[str, str] = {} # basename_lower -> abs_path (Project)
+        self.project_sfx_index: Dict[str, str] = {}   # basename_lower -> abs_path (Project)
+        self.refresh()
+
+    @classmethod
+    def get_instance(cls, base_asset_dir: Optional[str] = None) -> "GlobalAssetPool":
+        if cls._instance is None:
+            cls._instance = GlobalAssetPool(base_asset_dir)
+        elif base_asset_dir and os.path.abspath(base_asset_dir) != cls._instance.base_dir:
+            cls._instance.base_dir = os.path.abspath(base_asset_dir)
+            cls._instance.refresh()
+        return cls._instance
+
+    def register_project_assets(self, project_dir: str) -> Tuple[int, int]:
+        """
+        Nạp thêm kho tài nguyên (B-Roll, Canh_Chen, SFX, Âm thanh) riêng của từng dự án.
+        Ưu tiên sử dụng tài nguyên của dự án trước khi fallback về kho chung.
+        """
+        self.project_memes_index.clear()
+        self.project_sfx_index.clear()
+        if not project_dir or not os.path.exists(project_dir):
+            return 0, 0
+
+        for root, dirs, files in os.walk(project_dir):
+            # Bỏ qua các thư mục timeline import và file tạm
+            dirs[:] = [d for d in dirs if not d.startswith((".", "_timeline_import"))]
+            for f in files:
+                ext = os.path.splitext(f)[1].lower()
+                full_path = os.path.join(root, f)
+                if ext in ('.mp4', '.mov', '.webm', '.mkv'):
+                    self.project_memes_index[f.lower()] = full_path
+                elif ext in ('.wav', '.mp3', '.m4a', '.aac', '.flac'):
+                    self.project_sfx_index[f.lower()] = full_path
+
+        return len(self.project_memes_index), len(self.project_sfx_index)
+
+    def refresh(self) -> Tuple[int, int]:
+        """Quét và cập nhật toàn bộ chỉ mục tài nguyên toàn cục (Memes & SFX)."""
+        self.memes_index.clear()
+        self.sfx_index.clear()
+        
+        if not os.path.exists(self.base_dir):
+            return 0, 0
+
+        # Quét B-Roll Memes (toàn bộ thư mục con: green_screen, memes, cinematic,...)
+        broll_dir = os.path.join(self.base_dir, "broll_memes")
+        if os.path.exists(broll_dir):
+            for root, _, files in os.walk(broll_dir):
+                for f in files:
+                    if f.lower().endswith(('.mp4', '.mov', '.webm', '.mkv')):
+                        self.memes_index[f.lower()] = os.path.join(root, f)
+
+        # Quét SFX
+        sfx_dir = os.path.join(self.base_dir, "sfx")
+        if os.path.exists(sfx_dir):
+            for root, _, files in os.walk(sfx_dir):
+                for f in files:
+                    if f.lower().endswith(('.wav', '.mp3', '.m4a', '.aac', '.flac')):
+                        self.sfx_index[f.lower()] = os.path.join(root, f)
+
+        return len(self.memes_index), len(self.sfx_index)
+
+    def resolve_meme(self, query: str) -> Optional[str]:
+        """Tìm đường dẫn tuyệt đối của video meme/b-roll theo tên file hoặc từ khóa."""
+        if not query:
+            return None
+        if os.path.isabs(query) and os.path.exists(query):
+            return query
+
+        q = os.path.basename(query).lower()
+        q_stem = os.path.splitext(q)[0]
+
+        # 1. Tra cứu trong kho Dự án (Project-specific) trước
+        if q in self.project_memes_index:
+            return self.project_memes_index[q]
+        for name, path in self.project_memes_index.items():
+            if q_stem in name or name.startswith(q_stem):
+                return path
+
+        # 2. Tra cứu trong kho Toàn cục (Global Assets)
+        if q in self.memes_index:
+            return self.memes_index[q]
+        for name, path in self.memes_index.items():
+            if q_stem in name or name.startswith(q_stem) or q in name:
+                return path
+
+        # 3. Tra cứu từ khóa từng phần
+        words = [w for w in re.split(r'[\s_\-]+', q_stem) if len(w) > 2]
+        for name, path in self.memes_index.items():
+            if any(w in name for w in words):
+                return path
+
+        return None
+
+    def resolve_broll(self, query: str) -> Optional[str]:
+        """Alias cho resolve_meme hỗ trợ cả B-roll và Meme."""
+        return self.resolve_meme(query)
+
+    def resolve_sfx(self, query: str) -> Optional[str]:
+        """Tìm đường dẫn tuyệt đối của âm thanh SFX theo tên file hoặc từ khóa."""
+        if not query:
+            return None
+        if os.path.isabs(query) and os.path.exists(query):
+            return query
+
+        q = os.path.basename(query).lower()
+        q_stem = os.path.splitext(q)[0]
+
+        # 1. Tra cứu trong kho Dự án trước
+        if q in self.project_sfx_index:
+            return self.project_sfx_index[q]
+        for name, path in self.project_sfx_index.items():
+            if q_stem in name or name.startswith(q_stem):
+                return path
+
+        # 2. Tra cứu trong kho Toàn cục
+        if q in self.sfx_index:
+            return self.sfx_index[q]
+        for name, path in self.sfx_index.items():
+            if q_stem in name or name.startswith(q_stem) or q in name:
+                return path
+
+        # 3. Tra cứu từ khóa từng phần
+        words = [w for w in re.split(r'[\s_\-]+', q_stem) if len(w) > 2]
+        for name, path in self.sfx_index.items():
+            if any(w in name for w in words):
+                return path
+
+        return None
+

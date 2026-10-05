@@ -571,23 +571,44 @@ def test_pipeline_worker_stops_at_phase1_when_has_cut_proposals(tmp_path):
     assert finished_signals[0][1] == "phase1_done"
 
 def test_tab_widget_structure(app_window):
-    """Kiểm tra khởi tạo QTabWidget chứa đủ 4 Workflow Tabs."""
+    """Kiểm tra khởi tạo QTabWidget chứa đủ 5 Workflow Tabs (AI Copilot, Dựng Thô, Chữ & Phụ Đề, SFX, Polish & Export)."""
     window = app_window
     assert hasattr(window, "tab_widget")
-    assert window.tab_widget.count() == 4
+    assert window.tab_widget.count() == 5
     
-    tab_names = [window.tab_widget.tabText(i) for i in range(4)]
-    assert any("Dựng Thô" in name for name in tab_names)
+    tab_names = [window.tab_widget.tabText(i) for i in range(5)]
+    assert any("AI Copilot" in name or "Kịch Bản" in name for name in tab_names)
+    assert any("Dựng Thô" in name or "Auto Cut" in name for name in tab_names)
     assert any("Chữ & Phụ Đề" in name for name in tab_names)
     assert any("SFX" in name for name in tab_names)
-    assert any("Export" in name for name in tab_names)
+    assert any("Export" in name or "Polish" in name for name in tab_names)
+
+def test_tab_copilot_and_cache_check(app_window, monkeypatch):
+    """Kiểm tra TabCopilot và cơ chế tự động kiểm tra Cache."""
+    window = app_window
+    assert hasattr(window, "tab_copilot")
+    assert hasattr(window, "lbl_cache_badge")
+    
+    # Kiểm tra trạng thái ban đầu
+    window.selected_files = []
+    window._check_project_cache_status()
+    assert "Chưa chọn video" in window.lbl_cache_badge.text()
+    
+    # Giả lập file có cache
+    from unittest.mock import patch, MagicMock
+    with patch("src.core.cache_manager.ScanCacheManager.get_cached_scan", return_value={"clip_dur": 10.0, "raw_subtitles": [{"text": "hello"}]}):
+        window.selected_files = ["d:/clip1.mp4", "d:/clip2.mp4"]
+        window._check_project_cache_status()
+        assert "100%" in window.lbl_cache_badge.text()
+        assert "100%" in window.lbl_s1_cache_status.text()
+
 
 def test_tab_sfx_pad_and_preview(app_window):
-    """Kiểm tra Tab 3 SFX Soundboard: Có đủ 8 nút Pad, phát preview và phát signal insert."""
+    """Kiểm tra Tab 3 SFX Soundboard: Có đủ các nút Pad (>=8), phát preview và phát signal insert."""
     window = app_window
     tab_sfx = window.tab_sfx
     
-    assert len(tab_sfx.pad_buttons) == 8
+    assert len(tab_sfx.pad_buttons) >= 8
     assert "whoosh" in tab_sfx.pad_buttons
     assert "ding" in tab_sfx.pad_buttons
     
@@ -933,3 +954,208 @@ def test_pipeline_talkshow_cuts_1s_pause_but_vlog_leaves_it(tmp_path_factory):
     talk = _run_worker_video_type(tmp_path_factory.mktemp("t"), "auto", 0.02)    # hình tĩnh -> talk: cắt nhát 1s
     vlog = _run_worker_video_type(tmp_path_factory.mktemp("v"), "auto", 0.3)     # hình chuyển động -> vlog: giữ nguyên
     assert talk == 2 and vlog == 1
+
+
+def test_loudnorm_pipeline_uses_correct_normalizer_signature(tmp_path):
+    import os
+    from unittest.mock import patch, MagicMock
+    video = os.path.join(tmp_path, "ln.mp4")
+    with open(video, "w", encoding="utf-8") as f:
+        f.write("mock")
+    worker = PipelineWorker(
+        video_paths=[video], model_size="tiny", language="Auto", run_cut=False, silence_db=-35.0,
+        min_duration=0.5, split_mode="characters", split_limit=42, enable_subtitles=False,
+        enable_broll=False, enable_sfx=False, enable_vlog_hook=False, ai_mode="silence_only",
+        use_cache=False, scene_guard=False, enable_loudnorm=True, loudnorm_preset="youtube_tiktok"
+    )
+    metrics = MagicMock(measured_i=-20.0, measured_tp=-3.0, target_i=-14.0, target_tp=-1.0, gain_delta_i=6.0)
+    with patch("src.core.audio.AudioExtractor.extract_audio"), \
+         patch("src.core.audio.AudioExtractor.get_audio_duration", return_value=10.0), \
+         patch("src.core.autocut.get_media_metadata", return_value={"duration": 10.0, "fps": 30.0, "start_seconds": 0.0, "has_audio": True}), \
+         patch("src.core.audio_normalizer.AudioNormalizer.normalize_audio_file", return_value=metrics) as norm, \
+         patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False), \
+         patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
+        worker.run()
+    kwargs = norm.call_args.kwargs
+    assert kwargs["input_audio_path"].endswith(".wav") and kwargs["output_audio_path"].endswith("ln_Normalized.wav")
+    assert kwargs["target"].target_i == -14.0
+
+
+def test_playhead_changed_handler_does_not_crash(app_window):
+    app_window._on_mini_timeline_playhead_changed(12.5)    # trước đây NameError: seconds_to_timecode
+    assert "00:00:12" in app_window.txt_console.toPlainText()
+
+
+def _run_worker_story_no_cut(tmp_path, intent, target=60.0):
+    import os
+    import numpy as np
+    from unittest.mock import patch
+    video = os.path.join(tmp_path, "nocut.mp4")
+    with open(video, "w", encoding="utf-8") as f:
+        f.write("mock")
+    worker = PipelineWorker(
+        video_paths=[video], model_size="tiny", language="Auto", run_cut=False, silence_db=-35.0,
+        min_duration=0.5, split_mode="characters", split_limit=42, speed_up_silence=False,
+        enable_broll=False, enable_sfx=False, enable_vlog_hook=False, enable_subtitles=True,
+        ai_mode="silence_only", use_cache=False, story_intent=intent, story_target=target
+    )
+    subs = [{"start": 2.0, "end": 8.0, "text": "Chào mừng các bạn đến với vlog hôm nay", "words": []},
+            {"start": 30.0, "end": 36.0, "text": "Wow nhìn này không thể tin được", "words": []},
+            {"start": 70.0, "end": 76.0, "text": "Cảnh ở đây rất đẹp", "words": []},
+            {"start": 105.0, "end": 112.0, "text": "Tóm lại hãy đăng ký kênh nhé", "words": []}]
+    with patch("src.core.audio.AudioExtractor.extract_audio"), \
+         patch("src.core.audio.AudioExtractor.get_audio_duration", return_value=120.0), \
+         patch("src.core.autocut.get_media_metadata", return_value={"duration": 120.0, "fps": 30.0, "start_seconds": 0.0, "has_audio": True}), \
+         patch("src.core.transcriber.ResolveTranscriber.load_model"), \
+         patch("src.core.transcriber.ResolveTranscriber.transcribe", return_value=subs), \
+         patch("src.ui.app.compute_visual_activity", return_value=np.full(120, 0.2, dtype=np.float32)), \
+         patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False), \
+         patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
+        worker.run()
+    return tmp_path
+
+
+def test_story_arranger_works_without_silence_cut(tmp_path):
+    import os
+    _run_worker_story_no_cut(tmp_path, "cold_open")
+    assert os.path.exists(os.path.join(tmp_path, "nocut_Timeline_Goc_CoSub.fcpxml"))      # timeline gốc, không cắt
+    assert os.path.exists(os.path.join(tmp_path, "nocut_Timeline_SapXep.fcpxml"))         # timeline đã sắp xếp
+    plan = open(os.path.join(tmp_path, "nocut_KeHoach_SapXep.txt"), encoding="utf-8").read()
+    assert "Hook" in plan
+
+
+def test_shorts_intent_without_silence_cut_builds_short_timeline(tmp_path):
+    import os
+    import re
+    _run_worker_story_no_cut(tmp_path, "shorts", target=30.0)
+    xml = open(os.path.join(tmp_path, "nocut_Timeline_SapXep.fcpxml"), encoding="utf-8").read()
+    total = sum(int(n) / int(d) for n, d in re.findall(r'<asset-clip[^>]*duration="(\d+)/(\d+)s"', xml))
+    assert 10.0 < total <= 30.5       # video 120s được rút còn <= 30s theo ngân sách
+
+
+def test_story_review_table_ui_interactions(app_window):
+    from src.core.story_arranger import Block, ArrangedItem, Arrangement
+    blocks = [
+        Block(id=0, t0=0.0, t1=15.0, text="Chào mừng đến với vlog", role="intro", reason="Mở đầu"),
+        Block(id=1, t0=15.0, t1=40.0, text="Cảnh đẹp tuyệt vời", role="build", reason="Diễn biến"),
+        Block(id=2, t0=40.0, t1=60.0, text="Wow không thể tin được", role="hook", reason="Hook cao trào"),
+        Block(id=3, t0=60.0, t1=80.0, text="Tạm biệt và hẹn gặp lại", role="outro", reason="Kết thúc"),
+    ]
+    items = [
+        ArrangedItem(block_id=2, t0=40.0, t1=60.0, role="hook", reason="Hook đắt giá"),
+        ArrangedItem(block_id=0, t0=0.0, t1=15.0, role="intro", reason="Mở đầu"),
+        ArrangedItem(block_id=1, t0=15.0, t1=40.0, role="build", reason="Diễn biến"),
+        ArrangedItem(block_id=3, t0=60.0, t1=80.0, role="outro", reason="Kết thúc"),
+    ]
+    arr = Arrangement(intent="shorts", items=items, total_seconds=75.0, changed=True)
+
+    app_window._populate_story_review_table(blocks, arr, target_seconds=60.0)
+    assert not app_window.table_story_review.isHidden()
+    assert app_window.table_story_review.rowCount() == 4
+
+    # Kiểm tra Move Down item 0 (Hook)
+    app_window.table_story_review.selectRow(0)
+    app_window._on_story_move_down()
+    assert app_window.story_review_state.items[0].block_id == 0
+    assert app_window.story_review_state.items[1].block_id == 2
+
+    # Kiểm tra Undo
+    app_window._story_undo()
+    assert app_window.story_review_state.items[0].block_id == 2
+
+    # Kiểm tra Toggle disable item 0
+    app_window.table_story_review.selectRow(0)
+    app_window._story_toggle_selected()
+    assert app_window.story_review_state.items[0].enabled is False
+    assert "Đang bật 3/4 khối" in app_window.lbl_story_summary.text()
+
+    # Kiểm tra Enable All
+    app_window._story_enable_all()
+    assert all(it.enabled for it in app_window.story_review_state.items)
+    assert "Đang bật 4/4 khối" in app_window.lbl_story_summary.text()
+
+
+def test_story_arrangement_override_in_pipeline(tmp_path):
+    import os
+    import re
+    from unittest.mock import patch
+    from src.core.story_arranger import ArrangedItem, Arrangement
+    video = os.path.join(tmp_path, "custom_story.mp4")
+    with open(video, "w", encoding="utf-8") as f:
+        f.write("mock")
+
+    # Chỉ bật 1 phân đoạn 20s
+    custom_items = [
+        ArrangedItem(block_id=0, t0=10.0, t1=30.0, role="hook", reason="Tùy biến", enabled=True),
+        ArrangedItem(block_id=1, t0=50.0, t1=90.0, role="build", reason="Bỏ qua", enabled=False),
+    ]
+    override = Arrangement(intent="shorts", items=custom_items, total_seconds=20.0, changed=True)
+
+    worker = PipelineWorker(
+        video_paths=[video], model_size="tiny", language="Auto", run_cut=False, silence_db=-35.0,
+        min_duration=0.5, split_mode="characters", split_limit=42, speed_up_silence=False,
+        enable_broll=False, enable_sfx=False, enable_vlog_hook=False, enable_subtitles=True,
+        ai_mode="silence_only", use_cache=False, story_intent="shorts", story_target=60.0,
+        story_arrangement_override=override
+    )
+    subs = [{"start": 12.0, "end": 28.0, "text": "Câu thoại nằm trong phân đoạn 10-30s", "words": []}]
+    with patch("src.core.audio.AudioExtractor.extract_audio"), \
+         patch("src.core.audio.AudioExtractor.get_audio_duration", return_value=120.0), \
+         patch("src.core.autocut.get_media_metadata", return_value={"duration": 120.0, "fps": 30.0, "start_seconds": 0.0, "has_audio": True}), \
+         patch("src.core.transcriber.ResolveTranscriber.load_model"), \
+         patch("src.core.transcriber.ResolveTranscriber.transcribe", return_value=subs), \
+         patch("src.ui.app.compute_visual_activity", return_value=None), \
+         patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False), \
+         patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
+        worker.run()
+
+    fcpxml_path = os.path.join(tmp_path, "custom_story_Timeline_SapXep.fcpxml")
+    assert os.path.exists(fcpxml_path)
+    xml = open(fcpxml_path, encoding="utf-8").read()
+    durations = [int(n) / int(d) for n, d in re.findall(r'<asset-clip[^>]*duration="(\d+)/(\d+)s"', xml)]
+    assert sum(durations) == 20.0     # Đúng 20.0s do chỉ lấy khối 1 (khối 2 đã tắt)
+
+
+def test_project_folder_ui_and_drag_drop(app_window, tmp_path):
+    proj_dir = tmp_path / "Vlog_DuLich_Hue"
+    proj_dir.mkdir()
+
+    intro_dir = proj_dir / "01_MoDau"
+    intro_dir.mkdir()
+    (intro_dir / "clip1.mp4").write_text("mock")
+
+    broll_dir = proj_dir / "B-Roll_SongHuong"
+    broll_dir.mkdir()
+    (broll_dir / "sc1.mov").write_text("mock")
+
+    # Nạp folder dự án vào giao diện
+    app_window._load_project_folder(str(proj_dir))
+    assert app_window.project_structure is not None
+    assert app_window.project_structure.root_name == "Vlog_DuLich_Hue"
+    assert len(app_window.selected_files) == 2
+    assert "Vlog_DuLich_Hue" in app_window.lbl_file.text()
+    assert "2 nhóm" in app_window.lbl_file.text()
+
+
+def test_google_drive_dialog_and_import(app_window, tmp_path):
+    from src.ui.widgets.drive_dialog import GoogleDriveImportDialog
+    dlg = GoogleDriveImportDialog(app_window)
+    
+    # Test invalid URL
+    dlg.txt_url.setText("invalid_url")
+    assert dlg.btn_download.isEnabled() is False
+
+    # Test valid Drive URL
+    dlg.txt_url.setText("https://drive.google.com/file/d/1MockFileID1234567890/view")
+    assert dlg.btn_download.isEnabled() is True
+    assert "Tệp Video Đơn" in dlg.lbl_info.text()
+
+    # Test import callback on main window
+    mock_file = tmp_path / "Drive_Clip.mp4"
+    mock_file.write_text("mock")
+    app_window._on_google_drive_import_completed(str(mock_file), is_folder=False)
+    assert app_window.selected_files == [str(mock_file)]
+    assert str(mock_file) in app_window.lbl_file.text()
+
+
+

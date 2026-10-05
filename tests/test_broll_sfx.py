@@ -27,3 +27,38 @@ def test_sfx_engine_generation():
     assert len(sfx_cues) == 2
     assert sfx_cues[0].sfx_type == "whoosh"
     assert sfx_cues[0].time == 3.5
+
+
+def test_global_asset_pool(tmp_path):
+    import os
+    from src.core.broll_sfx import GlobalAssetPool
+
+    # Tạo mock thư mục assets toàn cục
+    base_dir = tmp_path / "global_assets"
+    os.makedirs(base_dir / "broll_memes", exist_ok=True)
+    os.makedirs(base_dir / "sfx", exist_ok=True)
+
+    meme_p = base_dir / "broll_memes" / "cat_vibing.mp4"
+    sfx_p = base_dir / "sfx" / "whoosh_sound.wav"
+    with open(meme_p, "w") as f:
+        f.write("dummy")
+    with open(sfx_p, "w") as f:
+        f.write("dummy")
+
+    pool = GlobalAssetPool(str(base_dir))
+    assert pool.resolve_meme("cat_vibing.mp4") == str(meme_p)
+    assert pool.resolve_meme("cat") == str(meme_p)
+    assert pool.resolve_sfx("whoosh_sound.wav") == str(sfx_p)
+    assert pool.resolve_sfx("whoosh") == str(sfx_p)
+
+    # Thử đăng ký kho tài nguyên dự án (Project Assets)
+    proj_dir = tmp_path / "my_project"
+    os.makedirs(proj_dir / "B_Roll", exist_ok=True)
+    proj_meme = proj_dir / "B_Roll" / "custom_broll.mp4"
+    with open(proj_meme, "w") as f:
+        f.write("dummy")
+
+    n_m, n_s = pool.register_project_assets(str(proj_dir))
+    assert n_m >= 1
+    assert pool.resolve_meme("custom_broll") == str(proj_meme)
+

@@ -198,3 +198,262 @@ def test_subtitles_not_anchored_inside_retimed_clips(tmp_path):
     root, clips = _spine(out)
     titles_per_clip = [len(c.findall("title")) for c in clips]
     assert titles_per_clip == [1, 0, 1]
+
+
+def test_generate_fcp7_xml_multitrack(tmp_path):
+    events = [
+        {
+            "video_path": os.path.join(tmp_path, "clip1.mp4"),
+            "src_in": 0.0,
+            "src_out": 5.0,
+            "rec_in": 0.0,
+            "rec_out": 5.0,
+            "fps": 30.0,
+            "speed": 1.0
+        }
+    ]
+    broll = [
+        {
+            "video_path": os.path.join(tmp_path, "meme1.mp4"),
+            "timeline_sec": 1.0,
+            "duration_sec": 2.0,
+            "src_in": 0.0
+        }
+    ]
+    sfx = [
+        {
+            "audio_path": os.path.join(tmp_path, "whoosh.wav"),
+            "timeline_sec": 1.0,
+            "duration_sec": 0.5
+        }
+    ]
+    clip_db = {
+        os.path.join(tmp_path, "clip1.mp4"): {
+            "name": "clip1.mp4",
+            "path": os.path.join(tmp_path, "clip1.mp4"),
+            "pathurl": f"file://localhost/{os.path.join(tmp_path, 'clip1.mp4')}",
+            "duration": 10.0,
+            "dur_frames": 300,
+            "timecode": "01:00:00:00",
+            "tc_frames": 108000,
+            "has_audio": True
+        },
+        os.path.join(tmp_path, "meme1.mp4"): {
+            "name": "meme1.mp4",
+            "path": os.path.join(tmp_path, "meme1.mp4"),
+            "pathurl": f"file://localhost/{os.path.join(tmp_path, 'meme1.mp4')}",
+            "duration": 5.0,
+            "dur_frames": 150,
+            "timecode": "00:00:00:00",
+            "tc_frames": 0,
+            "has_audio": False
+        },
+        os.path.join(tmp_path, "whoosh.wav"): {
+            "name": "whoosh.wav",
+            "path": os.path.join(tmp_path, "whoosh.wav"),
+            "pathurl": f"file://localhost/{os.path.join(tmp_path, 'whoosh.wav')}",
+            "duration": 1.0,
+            "dur_frames": 30,
+            "timecode": "00:00:00:00",
+            "tc_frames": 0,
+            "has_audio": True
+        }
+    }
+
+    # Create dummy files
+    for p in [os.path.join(tmp_path, "clip1.mp4"), os.path.join(tmp_path, "meme1.mp4"), os.path.join(tmp_path, "whoosh.wav")]:
+        with open(p, "w") as f:
+            f.write("dummy")
+
+    out_xml = os.path.join(tmp_path, "multitrack_timeline.xml")
+    FCPXMLGenerator.generate_fcp7_xml(
+        events=events,
+        output_xml_path=out_xml,
+        timeline_name="Test Multi-Track",
+        fps=30.0,
+        broll_inserts=broll,
+        sfx_inserts=sfx,
+        clip_metadata_db=clip_db
+    )
+
+    assert os.path.exists(out_xml)
+    with open(out_xml, "rb") as f:
+        content = f.read().decode("utf-8")
+
+    assert '<xmeml version="5">' in content
+    assert '<name>Test Multi-Track</name>' in content
+    assert 'clipitem-v1-1' in content
+    assert 'clipitem-broll-1' in content
+    assert 'clipitem-sfx-1' in content
+    assert 'timecode' in content
+
+
+def test_generate_fcp7_xml_broll_audio_and_file_dedup(tmp_path):
+    events = [
+        {
+            "video_path": os.path.join(tmp_path, "main.mp4"),
+            "src_in": 0.0,
+            "src_out": 4.0,
+            "rec_in": 0.0,
+            "rec_out": 4.0,
+            "fps": 30.0,
+            "speed": 1.0
+        }
+    ]
+    broll = [
+        {
+            "video_path": os.path.join(tmp_path, "meme_sound.mp4"),
+            "timeline_sec": 1.0,
+            "duration_sec": 2.0,
+            "src_in": 0.0
+        }
+    ]
+    clip_db = {
+        os.path.join(tmp_path, "main.mp4"): {
+            "name": "main.mp4",
+            "path": os.path.join(tmp_path, "main.mp4"),
+            "pathurl": f"file://localhost/{os.path.join(tmp_path, 'main.mp4')}",
+            "duration": 10.0,
+            "dur_frames": 300,
+            "timecode": "01:00:00:00",
+            "tc_frames": 108000,
+            "has_audio": True,
+            "channels": 1  # Mono
+        },
+        os.path.join(tmp_path, "meme_sound.mp4"): {
+            "name": "meme_sound.mp4",
+            "path": os.path.join(tmp_path, "meme_sound.mp4"),
+            "pathurl": f"file://localhost/{os.path.join(tmp_path, 'meme_sound.mp4')}",
+            "duration": 5.0,
+            "dur_frames": 150,
+            "timecode": "00:00:00:00",
+            "tc_frames": 0,
+            "has_audio": True,
+            "channels": 2
+        }
+    }
+
+    for p in [os.path.join(tmp_path, "main.mp4"), os.path.join(tmp_path, "meme_sound.mp4")]:
+        with open(p, "w") as f:
+            f.write("dummy")
+
+    out_xml = os.path.join(tmp_path, "broll_audio.xml")
+    FCPXMLGenerator.generate_fcp7_xml(
+        events=events,
+        output_xml_path=out_xml,
+        timeline_name="Test B-Roll Audio",
+        fps=30.0,
+        broll_inserts=broll,
+        clip_metadata_db=clip_db
+    )
+
+    assert os.path.exists(out_xml)
+    with open(out_xml, "rb") as f:
+        content = f.read().decode("utf-8")
+
+    # B-Roll Audio tracks A4 and A5 should be generated
+    assert 'clipitem-broll-a1-1' in content
+    assert 'clipitem-broll-a2-1' in content
+    # File node deduplication: subsequent file nodes should be self-closing <file id="file-v1-1"/>
+    assert '<file id="file-v1-1"/>' in content
+    assert '<file id="file-broll-1"/>' in content
+
+
+def test_generate_fcp7_xml_with_camera_timecode(tmp_path):
+    clip_p = os.path.join(tmp_path, "dji_clip.mp4")
+    with open(clip_p, "w") as f:
+        f.write("dummy")
+
+    events = [
+        {
+            "video_path": clip_p,
+            "src_in": 1.0,
+            "src_out": 5.0,
+            "rec_in": 0.0,
+            "rec_out": 4.0,
+            "fps": 30.0
+        }
+    ]
+    clip_db = {
+        clip_p: {
+            "name": "dji_clip.mp4",
+            "path": clip_p,
+            "duration": 60.0,
+            "dur_frames": 1800,
+            "start_tc_frames": 1776663,
+            "start_tc_str": "16:27:02:03",
+            "tc_format": "NDF",
+            "has_audio": True
+        }
+    }
+
+    out_xml = os.path.join(tmp_path, "camera_tc.xml")
+    FCPXMLGenerator.generate_fcp7_xml(
+        events=events,
+        output_xml_path=out_xml,
+        timeline_name="Camera TC Test",
+        fps=30.0,
+        clip_metadata_db=clip_db
+    )
+
+    assert os.path.exists(out_xml)
+    with open(out_xml, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Timecode metadata in file node
+    assert "<frame>1776663</frame>" in content
+    assert "<string>16:27:02:03</string>" in content
+    assert "<displayformat>NDF</displayformat>" in content
+    # In/Out offsets adjusted with camera timecode: src_in = 1.0s (30 frames) -> 1776663 + 30 = 1776693
+    assert "<in>1776693</in>" in content
+    # Out: 1776693 + 120 = 1776813
+    assert "<out>1776813</out>" in content
+
+
+def test_generate_timeline_fcpxml_with_camera_timecode(tmp_path):
+    clip_p = os.path.join(tmp_path, "dji_clip.mp4")
+    with open(clip_p, "w") as f:
+        f.write("dummy")
+
+    events = [
+        {
+            "video_path": clip_p,
+            "src_in": 2.0,
+            "src_out": 6.0,
+            "rec_in": 0.0,
+            "rec_out": 4.0,
+            "fps": 30.0
+        }
+    ]
+    clip_db = {
+        clip_p: {
+            "name": "dji_clip.mp4",
+            "path": clip_p,
+            "duration": 60.0,
+            "dur_frames": 1800,
+            "start_tc_frames": 1776663,
+            "start_tc_str": "16:27:02:03",
+            "has_audio": True
+        }
+    }
+
+    out_fcpxml = os.path.join(tmp_path, "camera_tc.fcpxml")
+    FCPXMLGenerator.generate_timeline_fcpxml(
+        events=events,
+        output_xml_path=out_fcpxml,
+        timeline_name="Camera TC FCPXML Test",
+        fps=30.0,
+        clip_metadata_db=clip_db
+    )
+
+    assert os.path.exists(out_fcpxml)
+    with open(out_fcpxml, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Asset start attribute matches start_tc_f (1776663 / 30s)
+    assert 'start="1776663/30s"' in content
+    # Asset clip start: (1776663 + 60) / 30s = 1776723/30s
+    assert 'start="1776723/30s"' in content
+
+
+
