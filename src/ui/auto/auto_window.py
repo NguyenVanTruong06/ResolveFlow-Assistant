@@ -1494,6 +1494,7 @@ class AutoWindow(QMainWindow):
         lbl_drop_hint.setAlignment(Qt.AlignCenter)
         lbl_drop_hint.setStyleSheet("font-size: 11px; color: #71717a;")
         drop_layout.addWidget(lbl_drop_hint)
+        self.drop_frame.mousePressEvent = lambda e: self._browse_folder()
         l_vbox.addWidget(self.drop_frame)
 
         # 4 Nút Nguồn 2x2
@@ -1792,7 +1793,9 @@ class AutoWindow(QMainWindow):
         quick_grid.addLayout(seg_pacing, 1, 1)
 
         # Mức độ cắt vấp (Slider)
-        quick_grid.addWidget(QLabel("Mức độ cắt vấp (Nhẹ · Vừa · Mạnh):"), 2, 0)
+        self.lbl_master_intensity = QLabel("Mức độ cắt vấp & im lặng: VỪA (Cân bằng)")
+        self.lbl_master_intensity.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
+        quick_grid.addWidget(self.lbl_master_intensity, 2, 0)
         self.slide_master_intensity = QSlider(Qt.Horizontal)
         self.slide_master_intensity.setRange(1, 3)
         self.slide_master_intensity.setValue(2)
@@ -3797,8 +3800,13 @@ class AutoWindow(QMainWindow):
 
     def _on_worker_progress(self, val: int):
         self.progress_bar.setValue(val)
+        if hasattr(self, "lbl_pct_big"):
+            self.lbl_pct_big.setText(f"{val}%")
+        status_txt = self.lbl_eta.text() if hasattr(self, "lbl_eta") else ""
+        if hasattr(self, "lbl_progress_status"):
+            status_txt = self.lbl_progress_status.text()
         if hasattr(self, "bubble") and self.bubble:
-            if self.bubble: self.bubble.update_progress(val, self.lbl_progress_status.text())
+            self.bubble.update_progress(val, status_txt)
 
     def _run_pipeline(self, forced_phase=None):
         # Ưu tiên lấy từ self.selected_files nếu hợp lệ, nếu không lấy từ text trên giao diện
@@ -4031,7 +4039,10 @@ class AutoWindow(QMainWindow):
             status_str = "🏁 Hoàn tất thành công!"
 
         if status_str:
-            self.lbl_progress_status.setText(status_str)
+            if hasattr(self, "lbl_progress_status"):
+                self.lbl_progress_status.setText(status_str)
+            if hasattr(self, "lbl_eta"):
+                self.lbl_eta.setText(status_str)
             if hasattr(self, "bubble") and self.bubble:
                 if self.bubble: self.bubble.update_progress(self.progress_bar.value(), status_str)
 
