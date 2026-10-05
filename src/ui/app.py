@@ -1654,7 +1654,7 @@ class ChunDVCApp(QMainWindow):
 
         self.tab_widget.addTab(self.tab_copilot, "🧠 1. Kịch Bản AI Copilot")
         self.tab_widget.addTab(self.tab_autocut, "✂ 2. Cắt Thô (Auto Cut)")
-        self.tab_widget.addTab(self.tab_titles, "🗂️ 3. Asset Hub (Tài Nguyên)")
+        self.tab_widget.addTab(self.tab_titles, "🗂️ 3. Chữ & Phụ Đề (Kho Đạo Cụ)")
         self.tab_widget.addTab(self.tab_sfx, "🔊 4. SFX Soundboard")
         self.tab_widget.addTab(self.tab_export, "🚀 5. Polish & Export")
 

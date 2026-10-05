@@ -44,7 +44,7 @@ from src.ui.bubble.floating_bubble import FloatingBubbleWidget
 from src.ui.widgets.section_card import SectionCard
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QComboBox, QLineEdit, QPushButton, QCheckBox, QProgressBar,
     QPlainTextEdit, QGroupBox, QFormLayout, QSlider, QFileDialog,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMessageBox,
@@ -1409,584 +1409,208 @@ class AutoWindow(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         window_layout = QVBoxLayout(main_widget)
-        window_layout.setContentsMargins(8, 8, 8, 8)
-        window_layout.setSpacing(6)
+        window_layout.setContentsMargins(0, 0, 0, 0)
+        window_layout.setSpacing(0)
 
-        # -------------------------------------------------------------
-        # Header Title Bar (Toàn chiều rộng cửa sổ: Brand trái - Nút Bong bóng góc phải)
-        # -------------------------------------------------------------
-        top_header_widget = QWidget()
-        top_header_layout = QHBoxLayout(top_header_widget)
-        top_header_layout.setContentsMargins(4, 2, 4, 4)
-
-        title_vbox = QVBoxLayout()
-        title_vbox.setSpacing(1)
-        title_label = QLabel("RESOLVEFLOW v4.2")
-        title_font = QFont("Segoe UI", 16)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #3dcee1; letter-spacing: 1.5px;")
+        # === Khởi tạo các dummy/legacy widgets để backend không bị lỗi ===
+        self._init_legacy_dummies()
         
-        subtitle_label = QLabel("AI Director, Text+ Presets, SFX Soundboard & Timeline Automation Suite")
-        subtitle_label.setStyleSheet("color: #39c1d3; font-size: 11px;")
-        title_vbox.addWidget(title_label)
-        title_vbox.addWidget(subtitle_label)
-
-        top_header_layout.addLayout(title_vbox, stretch=1)
-
-        self.btn_minimize_bubble = QPushButton("🫧 Thu Nhỏ Bong Bóng")
-        self.btn_minimize_bubble.setCursor(Qt.PointingHandCursor)
-        self.btn_minimize_bubble.setToolTip("Thu nhỏ thành Bong bóng nổi luôn trên cùng (Always-on-Top Floating Bubble)")
-        self.btn_minimize_bubble.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #031e22;
-                color: #3dcee1;
-                border: 1px solid #0c3d44;
-                border-radius: 6px;
-                padding: 7px 14px;
-                font-size: 11px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: #021416;
-                border-color: #3dcee1;
-                color: #84ebfc;
-            }}
-        """)
-        self.btn_minimize_bubble.clicked.connect(self._minimize_to_bubble)
-        top_header_layout.addWidget(self.btn_minimize_bubble)
-
-        window_layout.addWidget(top_header_widget)
-
-        # -------------------------------------------------------------
-        # Splitter Chính: Chia Cột Trái (Thao tác rộng) & Cột Phải (Giám sát)
-        # -------------------------------------------------------------
-        self.main_splitter = QSplitter(Qt.Horizontal)
-        window_layout.addWidget(self.main_splitter, stretch=1)
-
-        # -------------------------------------------------------------
-        # Cột trái: Workspace Từng Bước (Workflow Steps - Rộng ~65%)
-        # -------------------------------------------------------------
-        left_container = QWidget()
-        left_panel = QVBoxLayout(left_container)
-        left_panel.setContentsMargins(0, 0, 6, 0)
-
-        # Giữ lại các nút điều hướng ẩn để duy trì tương thích 100%
-        self.btn_stage_1 = QPushButton()
-        self.btn_stage_1.clicked.connect(lambda: self._set_workflow_stage(1))
-        self.btn_stage_2 = QPushButton()
-        self.btn_stage_2.clicked.connect(lambda: self._set_workflow_stage(2))
-
-        # -------------------------------------------------------------
-        # GIAI ĐOẠN 1: SCAN & INGEST HUB (Chỉ hiện khi ở Bước 1)
-        # -------------------------------------------------------------
-        self.stage_1_container = QWidget()
-        s1_layout = QVBoxLayout(self.stage_1_container)
-        s1_layout.setContentsMargins(0, 0, 0, 0)
-        s1_layout.setSpacing(10)
-
-        # Card 1: Chọn Tệp hoặc Thư Mục
-        card_scan_intro = SectionCard("📁 BƯỚC 1: CHỌN NGUỒN MEDIA (THƯ MỤC HOẶC TỆP VIDEO)", accent_color=ThemeColors.PRIMARY)
-        v_s1_intro = QVBoxLayout()
-        card_scan_intro.set_body_layout(v_s1_intro)
-
-        lbl_s1_desc = QLabel(
-            "<b>👋 Chào bạn! Hãy bắt đầu bằng cách chọn Thư mục Dự án hoặc Video nguồn:</b><br>"
-            "ChunDVC sẽ tự động nhận diện lời thoại Whisper, khoảng lặng và chuyển động hình ảnh 1 lần duy nhất vào bộ nhớ Cache.<br>"
-            "<i>Sau khi nạp xong, bạn sẽ chuyển sang <b>Bước 2</b> để chọn dựng tự động bằng AI Copilot hoặc cắt thô offline!</i>"
-        )
-        lbl_s1_desc.setWordWrap(True)
-        lbl_s1_desc.setStyleSheet("color: #d5f7fe; font-size: 12px; line-height: 1.4;")
-        v_s1_intro.addWidget(lbl_s1_desc)
-        v_s1_intro.addSpacing(6)
-
-        s1_btn_row = QHBoxLayout()
-        self.btn_s1_browse_folder = QPushButton("📂 Chọn Thư Mục Dự Án")
-        self.btn_s1_browse_folder.setStyleSheet("background-color: #258895; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
-        self.btn_s1_browse_folder.clicked.connect(self._browse_folder)
-
-        self.btn_s1_browse_files = QPushButton("🎬 Chọn Tệp Video")
-        self.btn_s1_browse_files.setStyleSheet("background-color: #1e737e; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
-        self.btn_s1_browse_files.clicked.connect(self._browse_file)
-
-        self.btn_s1_auto_resolve = QPushButton("🎯 Tự Lấy Từ DaVinci")
-        self.btn_s1_auto_resolve.setStyleSheet("background-color: #0c3d44; color: white; padding: 11px; border-radius: 6px; font-size: 12px;")
-        self.btn_s1_auto_resolve.clicked.connect(self._auto_detect_video)
-
-        self.btn_s1_drive = QPushButton("☁ Google Drive")
-        self.btn_s1_drive.setStyleSheet("background-color: #083338; color: #84ebfc; padding: 11px; border-radius: 6px; font-size: 12px;")
-        self.btn_s1_drive.clicked.connect(self._open_google_drive_dialog)
-
-        s1_btn_row.addWidget(self.btn_s1_browse_folder, stretch=3)
-        s1_btn_row.addWidget(self.btn_s1_browse_files, stretch=3)
-        s1_btn_row.addWidget(self.btn_s1_auto_resolve, stretch=2)
-        s1_btn_row.addWidget(self.btn_s1_drive, stretch=2)
-        v_s1_intro.addLayout(s1_btn_row)
-
-        self.lbl_s1_media_info = QLabel("⚪ Chưa chọn tệp video nào. Hãy chọn thư mục hoặc video ở trên.")
-        self.lbl_s1_media_info.setStyleSheet("color: #39c1d3; font-size: 12px; padding: 4px 0;")
-        v_s1_intro.addWidget(self.lbl_s1_media_info)
-        s1_layout.addWidget(card_scan_intro)
-
-        # Card 2: Cấu hình Quét & Cache
-        card_scan_cfg = SectionCard("🎙 CẤU HÌNH NHẬN DIỆN LỜI THOẠI & BỘ NHỚ ĐỆM (CACHE)", accent_color=ThemeColors.TEXT_ACCENT)
-        v_s1_cfg = QVBoxLayout()
-        card_scan_cfg.set_body_layout(v_s1_cfg)
-
-        form_s1_whisper = QFormLayout()
-        self.combo_model = QComboBox()
-        self.combo_model.addItems(["tiny", "base", "small", "medium", "large-v3"])
-        self.combo_model.setCurrentText("small")
-        self.combo_model.setToolTip(TOOLTIPS.get("whisper_model", "Kích thước model Whisper"))
-        form_s1_whisper.addRow("Kích thước Model Whisper:", self.combo_model)
-
-        self.combo_lang = QComboBox()
-        self.combo_lang.addItems(["Tiếng Việt", "Auto", "Tiếng Anh"])
-        self.combo_lang.setCurrentText("Tiếng Việt")
-        self.combo_lang.setToolTip(TOOLTIPS.get("language", "Ngôn ngữ trong video"))
-        form_s1_whisper.addRow("Ngôn ngữ đầu vào:", self.combo_lang)
-
-        self.check_cache = QCheckBox("⚡ Bật Scan Cache (Bỏ qua transcribe nếu file không đổi)")
-        self.check_cache.setChecked(True)
-        self.check_cache.setToolTip(TOOLTIPS.get("scan_cache", "Bật Scan Cache"))
-        form_s1_whisper.addRow(self.check_cache)
-
-        self.check_fill_gaps = QCheckBox("🔍 Quét bổ sung vùng Whisper bỏ sót (chậm hơn, cho video ồn/dài)")
-        self.check_fill_gaps.setChecked(False)
-        form_s1_whisper.addRow(self.check_fill_gaps)
-
-        v_s1_cfg.addLayout(form_s1_whisper)
-
-        lbl_s1_cfg_hint = QLabel("💡 <b>Mẹo tối ưu:</b> Với video dài >20 phút, nên chọn model <b>'small'</b> hoặc <b>'base'</b> để quét nhanh gấp 5-10 lần mà vẫn nhận diện lời thoại cực chuẩn.")
-        lbl_s1_cfg_hint.setWordWrap(True)
-        lbl_s1_cfg_hint.setStyleSheet("color: #3dcee1; font-size: 11px;")
-        v_s1_cfg.addWidget(lbl_s1_cfg_hint)
-        v_s1_cfg.addSpacing(6)
-
-        self.lbl_s1_cache_status = QLabel("⚪ Đang chờ chọn nguồn video để kiểm tra Cache...")
-        self.lbl_s1_cache_status.setStyleSheet("background-color: #031e22; color: #39c1d3; border: 1px solid #0c3d44; border-radius: 6px; padding: 8px; font-size: 12px;")
-        v_s1_cfg.addWidget(self.lbl_s1_cache_status)
-        s1_layout.addWidget(card_scan_cfg)
-
-        # Card 3: Nút Hành Động Bước 1
-        card_s1_actions = SectionCard("🚀 TIẾN HÀNH QUÉT HOẶC CHUYỂN BƯỚC DỰNG", accent_color="#10B981")
-        v_s1_act = QVBoxLayout()
-        card_s1_actions.set_body_layout(v_s1_act)
-
-        self.btn_stage1_main_scan = QPushButton("🔍 1. BẮT ĐẦU QUÉT NGUỒN & NẠP CACHE (PHASE 1)")
-        self.btn_stage1_main_scan.setCursor(Qt.PointingHandCursor)
-        self.btn_stage1_main_scan.setStyleSheet("""
-            QPushButton {
-                background-color: #2c9dac;
-                color: white;
-                font-size: 14px;
-                font-weight: bold;
-                padding: 14px;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #1e737e;
-            }
-        """)
-        self.btn_stage1_main_scan.clicked.connect(self._start_phase_1_scan)
-        v_s1_act.addWidget(self.btn_stage1_main_scan)
-
-        # Chuyển bước dựng
-        self.btn_s1_skip_stage2 = QPushButton("⏩ Sang Bước 2: Chọn Kiểu Dựng")
-        self.btn_s1_skip_stage2.setCursor(Qt.PointingHandCursor)
-        self.btn_s1_skip_stage2.setStyleSheet("background-color: #0c3d44; color: #d5f7fe; padding: 11px; border-radius: 6px; font-weight: bold;")
-        self.btn_s1_skip_stage2.clicked.connect(lambda: self._set_workflow_stage(2))
-        v_s1_act.addWidget(self.btn_s1_skip_stage2)
-        s1_layout.addWidget(card_s1_actions)
-        s1_layout.addStretch(1)
-
-        left_panel.addWidget(self.stage_1_container)
-
-        # -------------------------------------------------------------
-        # GIAI ĐOẠN 2: 5 TABS DỰNG & BIÊN TẬP (Chỉ hiện khi ở Bước 2)
-        # -------------------------------------------------------------
-        self.stage_2_wrapper = QWidget()
-        s2_layout = QVBoxLayout(self.stage_2_wrapper)
-        s2_layout.setContentsMargins(0, 0, 0, 0)
-        s2_layout.setSpacing(6)
-
-        # Thanh điều hướng Breadcrumb ở đỉnh Bước 2
-        s2_breadcrumb = QWidget()
-        s2_bc_layout = QHBoxLayout(s2_breadcrumb)
-        s2_bc_layout.setContentsMargins(0, 0, 0, 4)
-
-        self.btn_back_to_stage1 = QPushButton("📁 ⬅ Đổi Nguồn / Quét Dự Án Khác")
-        self.btn_back_to_stage1.setCursor(Qt.PointingHandCursor)
-        self.btn_back_to_stage1.setStyleSheet("""
-            QPushButton {
-                background-color: #031e22;
-                color: #3dcee1;
-                border: 1px solid #0c3d44;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0c3d44;
-                color: #84ebfc;
-            }
-        """)
-        self.btn_back_to_stage1.clicked.connect(lambda: self._set_workflow_stage(1))
-
-        lbl_s2_status_title = QLabel("🎬 <b>BƯỚC 2: CHỌN PHƯƠNG THỨC DỰNG & BIÊN TẬP</b>")
-        lbl_s2_status_title.setStyleSheet("color: #10B981; font-size: 12px;")
-
-        s2_bc_layout.addWidget(self.btn_back_to_stage1)
-        s2_bc_layout.addSpacing(10)
-        s2_bc_layout.addWidget(lbl_s2_status_title)
-        s2_bc_layout.addStretch(1)
-        s2_layout.addWidget(s2_breadcrumb)
-
-        self.tab_widget = QTabWidget()
-        self.tab_copilot = TabCopilot()
-        self.tab_autocut = TabAutoCut()
-        self.tab_titles = TabAssets()  # Keep variable name to not break _bind_tab_delegates
-        self.tab_sfx = TabSFX()
-        self.tab_export = TabExport()
-
-        # Giai đoạn 1: Ẩn các Tab không thuộc luồng AUTO, nhưng VẪN KHỞI TẠO chúng
-        # để _bind_tab_delegates và PipelineWorker không bị lỗi undefined!
-        self.tab_widget.addTab(self.tab_copilot, "🧠 Kịch Bản & Ráp Khung (Copilot)")
-        self.tab_widget.addTab(self.tab_autocut, "✂ Lọc Vấp & Xóa Khoảng Lặng (AutoCut)")
-        # Không addTab cho tab_titles, tab_sfx, tab_export để ẩn chúng khỏi UI của AutoWindow
-
-        s2_layout.addWidget(self.tab_widget)
-        left_panel.addWidget(self.stage_2_wrapper)
-        self.main_splitter.addWidget(left_container)
-
-        # Liên kết delegates để tương thích 100% với mã nguồn & unit tests
-        self._bind_tab_delegates()
-
-        # Kết nối sự kiện tương tác Tab Copilot
-        self.tab_copilot.open_copilot_dialog_requested.connect(self._open_story_copilot_dialog)
-        self.tab_copilot.quick_copy_prompt_requested.connect(self._quick_copy_copilot_prompt)
-        self.tab_copilot.browse_json_requested.connect(self._load_json_plan_from_disk)
-        self.tab_copilot.apply_json_text_requested.connect(self._apply_json_text_plan)
-        self.tab_copilot.run_local_ai_requested.connect(self._run_local_ollama_pipeline)
-        self.tab_copilot.run_cloud_api_requested.connect(self._run_cloud_api_pipeline)
-        self.tab_autocut.run_autocut_requested.connect(self._start_instant_export)
-
-        # Kết nối sự kiện tương tác Tab 1 Auto Cut
+        # --- HEADER ---
+        header = QWidget()
+        header.setFixedHeight(50)
+        header.setStyleSheet("background-color: #1e1e24; border-bottom: 1px solid #33333b;")
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(16, 0, 16, 0)
+        
+        lbl_title = QLabel("AI Director")
+        lbl_title.setStyleSheet("color: #3dcee1; font-size: 16px; font-weight: bold;")
+        h_layout.addWidget(lbl_title)
+        h_layout.addStretch()
+        
+        # --- AUTO LAYOUT (Grid 3 cột + Timeline) ---
+        auto_widget = QWidget()
+        auto_layout = QGridLayout(auto_widget)
+        auto_layout.setContentsMargins(0, 0, 0, 0)
+        auto_layout.setSpacing(0)
+        
+        # 1. LEFT (300px)
+        a_left = QFrame()
+        a_left.setFixedWidth(300)
+        a_left.setStyleSheet("background-color: #151518; border-right: 1px solid #33333b;")
+        l_vbox = QVBoxLayout(a_left)
+        l_vbox.setContentsMargins(16, 16, 16, 16)
+        l_vbox.setSpacing(12)
+        
+        lbl_src = QLabel("Nguồn Footage")
+        lbl_src.setStyleSheet("font-weight: bold; color: #fff;")
+        l_vbox.addWidget(lbl_src)
+        
+        self.btn_browse_folder = QPushButton("Chọn Thư mục")
+        self.btn_browse_folder.clicked.connect(self._browse_folder)
+        self.btn_browse_files = QPushButton("Chọn Tập tin")
+        self.btn_browse_files.clicked.connect(self._browse_file)
+        
+        l_vbox.addWidget(self.btn_browse_folder)
+        l_vbox.addWidget(self.btn_browse_files)
+        
+        self.lbl_cache_badge = QLabel("Bộ nhớ đệm: 0 / 0 clip")
+        self.lbl_cache_badge.setStyleSheet("color: #a1a1aa; font-size: 12px; margin-top: 10px;")
+        l_vbox.addWidget(self.lbl_cache_badge)
+        l_vbox.addStretch()
+        
+        # 2. CENTER (expanding)
+        a_center = QWidget()
+        a_center.setStyleSheet("background-color: #1a1a1f;")
+        c_vbox = QVBoxLayout(a_center)
+        c_vbox.setContentsMargins(20, 20, 20, 20)
+        c_vbox.setSpacing(16)
+        
+        lbl_center = QLabel("Cấu Hình Dựng")
+        lbl_center.setStyleSheet("font-size: 18px; font-weight: bold; color: #fff;")
+        c_vbox.addWidget(lbl_center)
+        
+        self.combo_workflow = QComboBox()
+        self.combo_workflow.addItem("Vlog có Hook", "vlog")
+        self.combo_workflow.addItem("Podcast, Phỏng vấn", "podcast")
+        self.combo_workflow.addItem("Shorts, TikTok 9:16", "shorts")
+        self.combo_workflow.addItem("Tùy chỉnh", "adv")
         self.combo_workflow.currentIndexChanged.connect(self._on_workflow_mode_changed)
-        self.combo_recipes.currentIndexChanged.connect(self._on_recipe_selected)
-        self.btn_save_recipe.clicked.connect(self._save_current_as_recipe)
-        self.btn_delete_recipe.clicked.connect(self._delete_selected_recipe)
+        c_vbox.addWidget(QLabel("Preset:"))
+        c_vbox.addWidget(self.combo_workflow)
+        
+        # Toggles
+        self.check_cut = QCheckBox("Cắt khoảng lặng")
+        self.check_subtitle = QCheckBox("Tạo phụ đề")
+        self.check_hook = QCheckBox("Hook mở đầu")
+        self.check_punch_in = QCheckBox("Punch-in")
+        self.check_broll = QCheckBox("Gợi ý B-roll")
+        self.check_sfx = QCheckBox("Tự chèn SFX")
+        self.check_reframe = QCheckBox("Reframe 9:16")
+        
+        for chk in [self.check_cut, self.check_subtitle, self.check_hook, self.check_punch_in, self.check_broll, self.check_sfx, self.check_reframe]:
+            c_vbox.addWidget(chk)
+            
+        self.slide_master_intensity = QSlider(Qt.Horizontal)
+        self.slide_master_intensity.setRange(1, 3)
         self.slide_master_intensity.valueChanged.connect(self._on_master_intensity_changed)
-        self.btn_toggle_advanced.clicked.connect(self._toggle_advanced_panel)
-        self.mini_timeline.playhead_changed.connect(self._on_mini_timeline_playhead_changed)
-
-        # Kết nối sự kiện tương tác Tab 2 Titles
-        self.tab_titles.set_preset_provider(self._get_current_active_preset)
-        self.combo_text_preset.currentIndexChanged.connect(self._on_preset_changed)
-        self.btn_preview_preset.clicked.connect(self._show_quick_preview)
-        self.btn_save_custom_preset.clicked.connect(self._save_custom_preset_dialog)
-        self.combo_split_mode.activated.connect(self._on_user_mode_changed)
-        self.txt_split_limit.textEdited.connect(self._on_user_customized_limit)
-        self.tab_titles.insert_title_requested.connect(self._on_insert_title_at_playhead)
-        self.tab_titles.install_presets_requested.connect(lambda: self.txt_console.appendPlainText("🎉 [Effects Library] Đã cài đặt 7 Presets Fusion Text+ vào DaVinci Resolve!"))
-        self.tab_titles.copy_fusion_node_requested.connect(lambda pid: self.txt_console.appendPlainText(f"📋 [Clipboard] Đã copy Fusion Node của preset '{pid}'. Hãy chuyển sang DaVinci Resolve và ấn Ctrl+V để chèn!"))
-
-        # Kết nối sự kiện tương tác Tab 3 SFX & Tab 4 Export
-        self.tab_sfx.insert_sfx_requested.connect(self._on_insert_sfx_at_playhead)
-        self.tab_export.apply_lut_requested.connect(self._on_apply_lut_to_timeline)
-        self.tab_export.btn_scan_luts.clicked.connect(self._on_scan_existing_luts)
-        self.tab_export.render_requested.connect(self._on_start_render_job)
-
-        # Kết nối cập nhật viền màu trực quan khi bật/tắt module
-        self.check_cache.toggled.connect(self._update_card_active_states)
-        self.check_bad_takes.toggled.connect(self._update_card_active_states)
-        self.check_punch_in.toggled.connect(self._update_card_active_states)
-        self.combo_ai_mode.currentIndexChanged.connect(self._update_card_active_states)
-        self.check_vlog_hook.toggled.connect(self._update_card_active_states)
-        self.check_reframe.toggled.connect(self._update_card_active_states)
-        self.check_broll.toggled.connect(self._update_card_active_states)
-        self.check_sfx.toggled.connect(self._update_card_active_states)
-        self.check_subtitle.toggled.connect(self._update_card_active_states)
-        self.check_cut.toggled.connect(self._update_card_active_states)
-
-        # Kết nối cập nhật realtime cho Live Preview
-        self.combo_text_preset.currentIndexChanged.connect(self._update_live_preview)
-        self.txt_font.textChanged.connect(self._update_live_preview)
-        self.txt_size.textChanged.connect(self._update_live_preview)
-        self.txt_color.textChanged.connect(self._update_live_preview)
-        self.check_reframe.toggled.connect(self._update_live_preview)
+        c_vbox.addWidget(QLabel("Mức độ cắt vấp (1-3):"))
+        c_vbox.addWidget(self.slide_master_intensity)
+        c_vbox.addStretch()
         
-        # Cập nhật trạng thái viền ban đầu
-        self._update_card_active_states()
-
-        # -------------------------------------------------------------
-        # Cột phải: Bảng Giám Sát & Điều Khiển Thực Thi (Right Panel - ~35%)
-        # -------------------------------------------------------------
-        right_container = QWidget()
-        right_panel = QVBoxLayout(right_container)
-        right_panel.setContentsMargins(6, 0, 0, 0)
-
-        # 1. Card Tóm Tắt Nguồn Media & Trạng Thái Cache
-        self.group_file = QGroupBox("📊 THÔNG TIN DỰ ÁN & TIẾN TRÌNH")
-        form_file = QVBoxLayout(self.group_file)
+        # 3. RIGHT (340px)
+        a_right = QFrame()
+        a_right.setFixedWidth(340)
+        a_right.setStyleSheet("background-color: #151518; border-left: 1px solid #33333b;")
+        r_vbox = QVBoxLayout(a_right)
+        r_vbox.setContentsMargins(16, 16, 16, 16)
         
-        file_layout = QVBoxLayout()
-        self.lbl_file = QLineEdit()
-        self.lbl_file.setPlaceholderText("Kéo-thả thư mục hoặc tệp video vào đây...")
-        self.lbl_file.setReadOnly(True)
-        self.lbl_file.setStyleSheet("""
-            QLineEdit {
-                background-color: #021416;
-                color: #3dcee1;
-                font-weight: bold;
-                border: 1px solid #0c3d44;
-                border-radius: 6px;
-                padding: 7px;
-            }
-        """)
-
-        h_badge_row = QHBoxLayout()
-        self.lbl_cache_badge = QLabel("⚪ Chưa chọn nguồn")
-        self.lbl_cache_badge.setStyleSheet("background-color: #031e22; color: #39c1d3; border: 1px solid #0c3d44; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;")
-        
-        h_badge_row.addWidget(QLabel("<b style='color: #39c1d3;'>Trạng thái Cache:</b>"))
-        h_badge_row.addWidget(self.lbl_cache_badge)
-        h_badge_row.addStretch(1)
-
-        file_layout.addWidget(self.lbl_file)
-        file_layout.addLayout(h_badge_row)
-        form_file.addLayout(file_layout)
-        right_panel.addWidget(self.group_file)
-
-        # Delegate shortcuts để tương thích tuyệt đối với các unit tests & legacy callers
-        self.btn_browse = self.btn_s1_browse_files
-        self.btn_browse_folder = self.btn_s1_browse_folder
-        self.btn_drive = self.btn_s1_drive
-        self.btn_copilot = self.tab_copilot.btn_open_copilot
-        self.btn_load_json_plan = self.tab_copilot.btn_load_file
-
-        # 2. Review Table (Pha 1 AI Đạo Diễn)
-        self.table_review = QTableWidget()
-        self.table_review.setColumnCount(7)
-        self.table_review.setHorizontalHeaderLabels([
-            "Giữ", "ID", "Bắt đầu", "Kết thúc", "Lý do AI", "Độ tin cậy", "Nội dung câu thoại"
-        ])
-        self.table_review.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        self.table_review.horizontalHeader().setStretchLastSection(True)
-        self.table_review.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table_review.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_review.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.table_review.hide()
-
-        self.review_state = ReviewState([])
-        self.review_toolbar = self._build_review_toolbar()
-        self.review_toolbar.hide()
-        right_panel.addWidget(self.review_toolbar)
-        right_panel.addWidget(self.table_review)
-
-        self.table_review.itemSelectionChanged.connect(self._on_review_selection_changed)
-        sc_toggle = QShortcut(QKeySequence(Qt.Key_Space), self.table_review)
-        sc_toggle.setContext(Qt.WidgetShortcut)
-        sc_toggle.activated.connect(self._review_toggle_selected)
-        sc_undo = QShortcut(QKeySequence.Undo, self.table_review)
-        sc_undo.setContext(Qt.WidgetShortcut)
-        sc_undo.activated.connect(self._review_undo)
-        sc_redo = QShortcut(QKeySequence.Redo, self.table_review)
-        sc_redo.setContext(Qt.WidgetShortcut)
-        sc_redo.activated.connect(self._review_redo)
-
-        # 2.5 Story Blocks Review Table (Duyệt & Tinh chỉnh Kịch bản Sắp xếp)
-        self.table_story_review = QTableWidget()
-        self.table_story_review.setColumnCount(6)
-        self.table_story_review.setHorizontalHeaderLabels([
-            "Bật", "STT", "Vai trò", "Thời lượng", "Lý do / Đặc tính", "Nội dung thoại"
-        ])
-        self.table_story_review.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        self.table_story_review.horizontalHeader().setStretchLastSection(True)
-        self.table_story_review.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table_story_review.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_story_review.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table_story_review.hide()
-
-        self.story_review_state: Optional[StoryReviewState] = None
-        self.story_arrangement = None
-        self.story_blocks = []
-        self.story_review_toolbar = self._build_story_review_toolbar()
-        self.story_review_toolbar.hide()
-        right_panel.addWidget(self.story_review_toolbar)
-        right_panel.addWidget(self.table_story_review)
-
-        self.table_story_review.itemSelectionChanged.connect(self._on_story_review_selection_changed)
-        sc_story_toggle = QShortcut(QKeySequence(Qt.Key_Space), self.table_story_review)
-        sc_story_toggle.setContext(Qt.WidgetShortcut)
-        sc_story_toggle.activated.connect(self._story_toggle_selected)
-        sc_story_up = QShortcut(QKeySequence(Qt.ALT | Qt.Key_Up), self.table_story_review)
-        sc_story_up.setContext(Qt.WidgetShortcut)
-        sc_story_up.activated.connect(self._on_story_move_up)
-        sc_story_down = QShortcut(QKeySequence(Qt.ALT | Qt.Key_Down), self.table_story_review)
-        sc_story_down.setContext(Qt.WidgetShortcut)
-        sc_story_down.activated.connect(self._on_story_move_down)
-        sc_story_undo = QShortcut(QKeySequence.Undo, self.table_story_review)
-        sc_story_undo.setContext(Qt.WidgetShortcut)
-        sc_story_undo.activated.connect(self._story_undo)
-        sc_story_redo = QShortcut(QKeySequence.Redo, self.table_story_review)
-        sc_story_redo.setContext(Qt.WidgetShortcut)
-        sc_story_redo.activated.connect(self._story_redo)
-
-        # 3. Card Tiến Trình Thực Thi & Giám Sát (Execution Monitor)
-        self.group_exec = QGroupBox("⚡ TIẾN TRÌNH THỰC THI (EXECUTION MONITOR)")
-        vbox_exec = QVBoxLayout(self.group_exec)
-
-        self.lbl_progress_status = QLabel("Trạng thái: Sẵn sàng làm việc.")
-        self.lbl_progress_status.setStyleSheet(f"color: {ThemeColors.TEXT_ACCENT}; font-size: 11px; font-weight: bold;")
-        vbox_exec.addWidget(self.lbl_progress_status)
-
         self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
-        vbox_exec.addWidget(self.progress_bar)
-
-        self.btn_run = QPushButton("⏹ DỪNG LẠI (STOP / CANCEL)")
-        self.btn_run.setObjectName("btn_run")
-        self.btn_run.setEnabled(False)
-        self.btn_run.setCursor(Qt.PointingHandCursor)
-        self.btn_run.setStyleSheet("""
-            QPushButton#btn_run {
-                background-color: #031e22;
-                color: #1e737e;
-                padding: 10px;
-                border-radius: 6px;
-                font-weight: bold;
-                border: 1px solid #0c3d44;
-            }
-        """)
-        self.btn_run.clicked.connect(self._toggle_pipeline_execution)
-        vbox_exec.addWidget(self.btn_run)
-
-        # Giữ lại các widget ẩn để duy trì tương thích ngược 100%
-        self.btn_scan_only = QPushButton()
-        self.btn_scan_only.clicked.connect(self._start_phase_1_scan)
-        self.btn_instant_export = QPushButton()
-        self.btn_instant_export.clicked.connect(self._start_instant_export)
-
-        right_panel.addWidget(self.group_exec)
-
-        # 3.5 Visual Step Progress
-        from src.ui.widgets.step_progress_widget import StepProgressWidget
-        STEPS = [
-            ("validate", "Kiểm tra"),
-            ("load_model", "Tải AI"),
-            ("speech_to_text", "Nhận diện"),
-            ("ai_director", "Đạo diễn AI"),
-            ("apply_cut", "Biên tập"),
-            ("export", "Xuất bản")
-        ]
-        self.step_progress = StepProgressWidget(STEPS)
-        right_panel.addWidget(self.step_progress)
-
-        # 4. Card Nhật Ký Xử Lý (AI Console Logs)
-        self.group_console = QGroupBox("📋 NHẬT KÝ XỬ LÝ (AI CONSOLE)")
-        vbox_console = QVBoxLayout(self.group_console)
-
+        self.lbl_eta = QLabel("Sẵn sàng")
         self.txt_console = QPlainTextEdit()
         self.txt_console.setReadOnly(True)
-        self.txt_console.appendPlainText("🌟 ChunDVC v1.0 sẵn sàng làm việc.")
-        vbox_console.addWidget(self.txt_console)
-        right_panel.addWidget(self.group_console, stretch=1)
-
-        self.main_splitter.addWidget(right_container)
-
-        # Thiết lập tỷ lệ mặc định: Cột trái 65% (~800px), Cột phải 35% (~440px)
-        self.main_splitter.setStretchFactor(0, 7)
-        self.main_splitter.setStretchFactor(1, 4)
-        self.main_splitter.setSizes([800, 440])
-
-        self.setAcceptDrops(True)
-
+        
+        self.btn_run = QPushButton("Chạy & Xuất")
+        self.btn_run.setStyleSheet("background-color: #3dcee1; color: #000; font-weight: bold; padding: 10px; border-radius: 6px;")
+        self.btn_run.clicked.connect(self._toggle_pipeline_execution)
+        
+        self.btn_stop = QPushButton("Dừng")
+        self.btn_stop.clicked.connect(self._stop_pipeline)
+        
+        r_vbox.addWidget(self.progress_bar)
+        r_vbox.addWidget(self.lbl_eta)
+        
+        h_btns = QHBoxLayout()
+        h_btns.addWidget(self.btn_run, stretch=1)
+        h_btns.addWidget(self.btn_stop)
+        r_vbox.addLayout(h_btns)
+        
+        r_vbox.addWidget(QLabel("Nhật ký:"))
+        r_vbox.addWidget(self.txt_console)
+        
+        # 4. TIMELINE (row 1)
+        tl_frame = QFrame()
+        tl_frame.setFixedHeight(178)
+        tl_frame.setStyleSheet("background-color: #111113; border-top: 1px solid #33333b;")
+        tl_layout = QHBoxLayout(tl_frame)
+        tl_layout.addWidget(QLabel("Mini Timeline View (Visual placeholder cho Giai đoạn 4)"))
+        
+        # Grid add
+        auto_layout.addWidget(a_left, 0, 0)
+        auto_layout.addWidget(a_center, 0, 1)
+        auto_layout.addWidget(a_right, 0, 2)
+        auto_layout.addWidget(tl_frame, 1, 0, 1, 3)
+        
+        window_layout.addWidget(header)
+        window_layout.addWidget(auto_widget, stretch=1)
+        
+    def _init_legacy_dummies(self):
+        self.banner_onboarding = QLabel()
+        self.group_wf = QGroupBox()
+        self.group_recipe = QGroupBox()
+        self.combo_recipes = QComboBox()
+        self.btn_save_recipe = QPushButton()
+        self.btn_delete_recipe = QPushButton()
+        self.group_master = QGroupBox()
+        self.combo_pacing = QComboBox()
+        self.combo_video_type = QComboBox()
+        self.check_hide_weak_subs = QCheckBox()
+        self.check_scene_guard = QCheckBox()
+        self.check_fill_gaps = QCheckBox()
+        self.combo_hook_total = QComboBox()
+        self.combo_story_intent = QComboBox()
+        self.combo_story_target = QComboBox()
+        self.txt_api_key = QLineEdit()
+        self.check_repeats = QCheckBox()
+        self.lbl_master_intensity = QLabel()
+        self.group_timeline = QGroupBox()
+        self.mini_timeline = QWidget()
+        self.btn_toggle_advanced = QPushButton()
+        self.advanced_container = QWidget()
+        self.group_ai = QGroupBox()
+        self.group_director = QGroupBox()
+        self.combo_ai_mode = QComboBox()
+        self.check_bad_takes = QCheckBox()
+        self.txt_confidence_threshold = QLineEdit()
+        self.group_vlog_hook = QGroupBox()
+        self.check_vlog_hook = QCheckBox()
+        self.combo_hook_dur = QComboBox()
+        self.group_v4 = QGroupBox()
+        self.group_cut = QGroupBox()
+        self.check_speedup = QCheckBox()
+        self.slide_db = QSlider()
+        self.lbl_db = QLabel()
+        self.slide_dur = QSlider()
+        self.lbl_dur = QLabel()
+        self.combo_audio_track = QComboBox()
+        self.group_presets = QGroupBox()
+        self.combo_text_preset = QComboBox()
+        self.btn_preview_preset = QPushButton()
+        self.btn_save_custom_preset = QPushButton()
+        self.combo_split_mode = QComboBox()
+        self.txt_split_limit = QLineEdit()
+        self.txt_font = QLineEdit()
+        self.txt_size = QLineEdit()
+        self.txt_color = QLineEdit()
+        self.preview_lbl = QLabel()
+        self.txt_single_title = QLineEdit()
+        self.slide_title_dur = QSlider()
+        self.btn_insert_title_playhead = QPushButton()
+        self.btn_install_presets = QPushButton()
+        self.btn_copy_fusion = QPushButton()
+        self.combo_target_track = QComboBox()
+        self.slide_volume_offset = QSlider()
+        self.btn_insert_playhead = QPushButton()
+        self.check_loudnorm = QCheckBox()
+        self.combo_loudnorm_preset = QComboBox()
+        self.combo_lut = QComboBox()
+        self.btn_apply_lut = QPushButton()
+        self.combo_render_preset = QComboBox()
+        self.btn_start_render = QPushButton()
+        self.btn_s1_browse_folder = QPushButton()
+        self.btn_s1_browse_files = QPushButton()
+        
     def _bind_tab_delegates(self):
-        """Liên kết các thuộc tính widget trên các Tab để duy trì tính tương thích 100%."""
-        # Tab 1: Auto Cut Delegates
-        self.banner_onboarding = self.tab_autocut.banner_onboarding
-        self.group_wf = self.tab_autocut.group_wf
-        self.combo_workflow = self.tab_autocut.combo_workflow
-        self.group_recipe = self.tab_autocut.group_recipe
-        self.combo_recipes = self.tab_autocut.combo_recipes
-        self.btn_save_recipe = self.tab_autocut.btn_save_recipe
-        self.btn_delete_recipe = self.tab_autocut.btn_delete_recipe
-        self.group_master = self.tab_autocut.group_master
-        self.slide_master_intensity = self.tab_autocut.slide_master_intensity
-        self.combo_pacing = self.tab_autocut.combo_pacing
-        self.combo_video_type = self.tab_autocut.combo_video_type
-        self.check_hide_weak_subs = self.tab_autocut.check_hide_weak_subs
-        self.check_scene_guard = self.tab_autocut.check_scene_guard
-        self.check_fill_gaps = self.tab_autocut.check_fill_gaps
-        self.combo_hook_total = self.tab_autocut.combo_hook_total
-        self.combo_story_intent = self.tab_autocut.combo_story_intent
-        self.combo_story_target = self.tab_autocut.combo_story_target
-        self.txt_api_key = self.tab_autocut.txt_api_key
-        self.check_repeats = self.tab_autocut.check_repeats
-        self.lbl_master_intensity = self.tab_autocut.lbl_master_intensity
-        self.group_timeline = self.tab_autocut.group_timeline
-        self.mini_timeline = self.tab_autocut.mini_timeline
-        self.btn_toggle_advanced = self.tab_autocut.btn_toggle_advanced
-        self.advanced_container = self.tab_autocut.advanced_container
-        self.group_ai = self.tab_autocut.group_ai
-        # Giữ liên kết hai chiều cho các điều khiển Whisper ở Stage 1
-        self.tab_autocut.combo_model = self.combo_model
-        self.tab_autocut.combo_lang = self.combo_lang
-        self.tab_autocut.check_cache = self.check_cache
-        self.tab_autocut.check_fill_gaps = self.check_fill_gaps
-        self.group_director = self.tab_autocut.group_director
-        self.combo_ai_mode = self.tab_autocut.combo_ai_mode
-        self.check_bad_takes = self.tab_autocut.check_bad_takes
-        self.check_punch_in = self.tab_autocut.check_punch_in
-        self.txt_confidence_threshold = self.tab_autocut.txt_confidence_threshold
-        self.group_vlog_hook = self.tab_autocut.group_vlog_hook
-        self.check_vlog_hook = self.tab_autocut.check_vlog_hook
-        self.combo_hook_dur = self.tab_autocut.combo_hook_dur
-        self.group_v4 = self.tab_autocut.group_v4
-        self.check_reframe = self.tab_autocut.check_reframe
-        self.check_broll = self.tab_autocut.check_broll
-        self.check_sfx = self.tab_autocut.check_sfx
-        self.group_cut = self.tab_autocut.group_cut
-        self.check_cut = self.tab_autocut.check_cut
-        self.check_speedup = self.tab_autocut.check_speedup
-        self.slide_db = self.tab_autocut.slide_db
-        self.lbl_db = self.tab_autocut.lbl_db
-        self.slide_dur = self.tab_autocut.slide_dur
-        self.lbl_dur = self.tab_autocut.lbl_dur
-        self.combo_audio_track = self.tab_autocut.combo_audio_track
-
-        # Tab 2: Titles Delegates
-        self.group_sub = self.tab_titles.group_presets
-        self.check_subtitle = self.tab_titles.check_subtitle
-        self.combo_text_preset = self.tab_titles.combo_text_preset
-        self.btn_preview_preset = self.tab_titles.btn_preview_preset
-        self.btn_save_custom_preset = self.tab_titles.btn_save_custom_preset
-        self.combo_split_mode = self.tab_titles.combo_split_mode
-        self.txt_split_limit = self.tab_titles.txt_split_limit
-        self.txt_font = self.tab_titles.txt_font
-        self.txt_size = self.tab_titles.txt_size
-        self.txt_color = self.tab_titles.txt_color
-        self.preview_lbl = self.tab_titles.preview_lbl
-        self.txt_single_title = self.tab_titles.txt_single_title
-        self.slide_title_dur = self.tab_titles.slide_title_dur
-        self.btn_insert_title_playhead = self.tab_titles.btn_insert_title_playhead
-        self.btn_install_presets = self.tab_titles.btn_install_presets
-        self.btn_copy_fusion = self.tab_titles.btn_copy_fusion
-
-        # Tab 3: SFX & Audio Enhancer Delegates
-        self.combo_sfx_track = self.tab_sfx.combo_target_track
-        self.slide_volume_offset = self.tab_sfx.slide_volume_offset
-        self.btn_insert_sfx_playhead = self.tab_sfx.btn_insert_playhead
-        self.check_loudnorm = self.tab_sfx.check_loudnorm
-        self.combo_loudnorm_preset = self.tab_sfx.combo_loudnorm_preset
-
-        # Tab 4: Export Delegates
-        self.combo_lut = self.tab_export.combo_lut
-        self.btn_apply_lut = self.tab_export.btn_apply_lut
-        self.combo_render_preset = self.tab_export.combo_render_preset
-        self.btn_start_render = self.tab_export.btn_start_render
+        pass
 
     def _get_current_active_preset(self) -> Optional[TextStylePreset]:
         """Lấy đối tượng TextStylePreset hiện tại từ giao diện."""

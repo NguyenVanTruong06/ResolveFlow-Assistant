@@ -260,94 +260,122 @@ class TabAssets(QWidget):
         self.preview_lbl.sample_text_getter = lambda: self.txt_single_title.text().strip() or "ChunDVC Title"
 
     def _init_ui(self):
-        main_layout = QVBoxLayout(self)
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
-        self.group_presets = QGroupBox("⚙️ TÙY BIẾN CHI TIẾT & CHÈN PHỤ ĐỀ HÀNG LOẠT")
-        form_p = QFormLayout(self.group_presets)
-        self.check_subtitle = QCheckBox("Kích hoạt tạo phụ đề toàn bộ video")
+        # === LEGACY WIDGETS (Hidden but required by test_ui.py / app.py) ===
+        self.group_presets = QGroupBox("Legacy")
+        self.check_subtitle = QCheckBox()
         self.check_subtitle.setChecked(True)
-        form_p.addRow(self.check_subtitle)
-
-        h_preset = QHBoxLayout()
         self.combo_text_preset = QComboBox()
-        self.btn_preview_preset = QPushButton("👁 Xem Trước")
-        self.btn_save_custom_preset = QPushButton("🧲 Hút Preset từ DaVinci")
-        self.btn_save_custom_preset.setStyleSheet(f"background-color: {ThemeColors.BG_INPUT}; color: {ThemeColors.PRIMARY}; font-weight: bold;")
-        self.btn_save_custom_preset.setToolTip("Giai đoạn tới: Dùng API lấy Node đang chọn trong DaVinci lưu thành Preset mới!")
-        h_preset.addWidget(self.combo_text_preset)
-        h_preset.addWidget(self.btn_preview_preset)
-        h_preset.addWidget(self.btn_save_custom_preset)
-        form_p.addRow("Preset Kiểu Chữ:", h_preset)
-
-        self.preview_lbl = DraggableAssetLabel()
-        self.preview_lbl.setFixedHeight(50)
-        self.preview_lbl.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border: 1px dashed {ThemeColors.BORDER_DEFAULT}; border-radius: 4px;")
-        form_p.addRow("Master Kéo-Thả:", self.preview_lbl)
-        
-        self.btn_install_presets = QPushButton("📥 Cài Đặt Toàn Bộ Tài Nguyên")
-        self.btn_copy_fusion = QPushButton("📋 Copy Fusion Node")
-        h_ins = QHBoxLayout()
-        h_ins.addWidget(self.btn_install_presets)
-        h_ins.addWidget(self.btn_copy_fusion)
-        form_p.addRow(h_ins)
-
-        # Legacy Compatibility
+        self.btn_preview_preset = QPushButton()
+        self.btn_save_custom_preset = QPushButton()
         self.combo_split_mode = QComboBox()
-        self.combo_split_mode.addItems(["characters", "words"])
-        self.txt_split_limit = QLineEdit("42")
-        self.txt_font = QLineEdit("Arial")
-        self.txt_size = QLineEdit("48")
-        self.txt_color = QLineEdit("#FFFFFF")
+        self.txt_split_limit = QLineEdit()
+        self.txt_font = QLineEdit()
+        self.txt_size = QLineEdit()
+        self.txt_color = QLineEdit()
         
-        self.txt_single_title = QLineEdit()
-        self.slide_title_dur = QSlider(Qt.Horizontal)
-        self.btn_insert_title_playhead = QPushButton("🚀 Chèn Playhead")
+        self.group_presets.hide()
+        self.check_subtitle.hide()
+        self.combo_text_preset.hide()
+        self.btn_preview_preset.hide()
+        self.btn_save_custom_preset.hide()
+        self.combo_split_mode.hide()
+        self.txt_split_limit.hide()
+        self.txt_font.hide()
+        self.txt_size.hide()
+        self.txt_color.hide()
+        # ====================================================================
+
+        # 1. Rail (78px)
+        self.rail = QFrame()
+        self.rail.setFixedWidth(78)
+        self.rail.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border-right: 1px solid {ThemeColors.BORDER_DEFAULT};")
+        rail_layout = QVBoxLayout(self.rail)
+        rail_layout.setContentsMargins(8, 10, 8, 10)
+        rail_layout.setSpacing(4)
         
-        h_split = QHBoxLayout()
-        sidebar = QFrame()
-        sidebar.setFixedWidth(200)
-        sidebar.setStyleSheet(f"background-color: transparent; border-right: 1px solid {ThemeColors.BORDER_DEFAULT};")
-        side_layout = QVBoxLayout(sidebar)
-        lbl_nav = QLabel("📂 DANH MỤC")
-        lbl_nav.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-weight: bold; padding: 10px 0;")
-        side_layout.addWidget(lbl_nav)
-        
-        self.nav_btns = {}
         cats = [
-            ("favorites", "❤️ Yêu thích"),
-            ("all", "Tất cả tài nguyên"), 
-            ("title", "Tiêu đề (Titles)"), 
-            ("transition", "Chuyển cảnh (Trans)"), 
-            ("color", "Màu sắc (LUTs)"),
-            ("local", "Thư viện Local")
+            ("all", "📦\nTất cả"), 
+            ("title", "🔤\nChữ"), 
+            ("transition", "🎬\nChuyển cảnh"), 
+            ("color", "🎨\nMàu LUT"),
+            ("sfx", "🔊\nÂm thanh"),
+            ("local", "📁\nLocal")
         ]
+        self.nav_btns = {}
         for cid, cname in cats:
             btn = QPushButton(cname)
             btn.setCheckable(True)
+            btn.setFixedSize(62, 62)
             btn.setStyleSheet(f"""
-                QPushButton {{ text-align: left; padding: 8px; border: none; color: {ThemeColors.TEXT_PRIMARY}; }}
-                QPushButton:checked {{ background-color: transparent; color: {ThemeColors.PRIMARY}; font-weight: bold; border-left: 3px solid {ThemeColors.PRIMARY}; }}
+                QPushButton {{
+                    border-radius: 10px; color: {ThemeColors.TEXT_MUTED}; font-size: 11.5px; text-align: center; border: none;
+                }}
+                QPushButton:hover {{
+                    color: {ThemeColors.TEXT_PRIMARY}; background: {ThemeColors.BG_CARD};
+                }}
+                QPushButton:checked {{
+                    color: {ThemeColors.TEXT_PRIMARY}; background: {ThemeColors.BG_CARD_ACTIVE};
+                    border-left: 3px solid {ThemeColors.PRIMARY};
+                }}
             """)
             btn.clicked.connect(lambda _, c=cid: self._filter_by_nav(c))
-            side_layout.addWidget(btn)
+            rail_layout.addWidget(btn)
             self.nav_btns[cid] = btn
+        
+        rail_layout.addStretch()
         self.nav_btns["all"].setChecked(True)
+
+        # 2. Cats (204px)
+        self.cats = QFrame()
+        self.cats.setFixedWidth(204)
+        self.cats.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border-right: 1px solid {ThemeColors.BORDER_DEFAULT};")
+        cats_layout = QVBoxLayout(self.cats)
+        cats_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.btn_scan_local = QPushButton("➕ Quét Thư mục Local")
-        self.btn_scan_local.setStyleSheet(f"background-color: {ThemeColors.BG_CARD}; color: {ThemeColors.TEXT_PRIMARY}; margin-top: 10px;")
+        self.lbl_cats_head = QLabel("Tất cả tài nguyên")
+        self.lbl_cats_head.setStyleSheet(f"padding: 16px 16px 10px; font-weight: bold; font-size: 14px; color: {ThemeColors.TEXT_PRIMARY};")
+        cats_layout.addWidget(self.lbl_cats_head)
+        
+        self.cats_list = QVBoxLayout()
+        self.cats_list.setSpacing(1)
+        self.cats_list.setContentsMargins(8, 0, 8, 0)
+        cats_layout.addLayout(self.cats_list)
+        cats_layout.addStretch()
+        
+        self.btn_scan_local = QPushButton("➕ Quét Local")
         self.btn_scan_local.clicked.connect(self._scan_local_folder)
-        side_layout.addWidget(self.btn_scan_local)
+        self.btn_scan_local.setStyleSheet(f"margin: 10px; background-color: {ThemeColors.BG_CARD}; padding: 8px; border-radius: 6px;")
+        cats_layout.addWidget(self.btn_scan_local)
+
+        # 3. Main Grid (flex 1)
+        self.main_section = QWidget()
+        self.main_section.setStyleSheet(f"background: {ThemeColors.BG_CARD};")
+        main_sec_layout = QVBoxLayout(self.main_section)
+        main_sec_layout.setContentsMargins(0, 0, 0, 0)
+        main_sec_layout.setSpacing(0)
         
-        side_layout.addWidget(self.group_presets)
-        side_layout.addStretch()
-        h_split.addWidget(sidebar)
+        main_head = QFrame()
+        main_head.setFixedHeight(53)
+        main_head.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border-bottom: 1px solid {ThemeColors.BORDER_DEFAULT};")
+        mh_layout = QHBoxLayout(main_head)
+        mh_layout.setContentsMargins(16, 10, 16, 10)
         
-        right_panel = QWidget()
-        r_layout = QVBoxLayout(right_panel)
+        self.lbl_main_cat = QLabel("Tất cả tài nguyên")
+        self.lbl_main_cat.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {ThemeColors.TEXT_PRIMARY};")
+        mh_layout.addWidget(self.lbl_main_cat)
+        
+        mh_layout.addStretch()
+        
         self.txt_search = QLineEdit()
-        self.txt_search.setPlaceholderText("🔍 Tìm hiệu ứng, âm thanh, hoặc LUT...")
+        self.txt_search.setPlaceholderText("Tìm kiếm...")
+        self.txt_search.setFixedWidth(300)
         self.txt_search.textChanged.connect(self._refresh_grid)
-        r_layout.addWidget(self.txt_search)
+        self.txt_search.setStyleSheet(f"background: {ThemeColors.BG_CARD}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 8px; padding: 4px 10px;")
+        mh_layout.addWidget(self.txt_search)
         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -356,10 +384,70 @@ class TabAssets(QWidget):
         self.grid_container.setStyleSheet("background: transparent;")
         self.grid = QGridLayout(self.grid_container)
         scroll.setWidget(self.grid_container)
-        r_layout.addWidget(scroll)
         
-        h_split.addWidget(right_panel, stretch=1)
-        main_layout.addLayout(h_split)
+        main_sec_layout.addWidget(main_head)
+        main_sec_layout.addWidget(scroll)
+
+        # 4. Inspector (336px)
+        self.inspector = QFrame()
+        self.inspector.setFixedWidth(336)
+        self.inspector.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border-left: 1px solid {ThemeColors.BORDER_DEFAULT};")
+        self.inspector_layout = QVBoxLayout(self.inspector)
+        self.inspector_layout.setContentsMargins(0, 0, 0, 0)
+        self.inspector_layout.setSpacing(0)
+        
+        self.insp_scroll = QScrollArea()
+        self.insp_scroll.setWidgetResizable(True)
+        self.insp_scroll.setStyleSheet("background: transparent; border: none;")
+        self.insp_content = QWidget()
+        self.insp_vbox = QVBoxLayout(self.insp_content)
+        self.insp_vbox.setContentsMargins(16, 16, 16, 16)
+        self.insp_vbox.setSpacing(18)
+        
+        self.preview_lbl = DraggableAssetLabel()
+        self.preview_lbl.setFixedHeight(50)
+        self.preview_lbl.setStyleSheet(f"background-color: {ThemeColors.BG_CARD}; border: 1px dashed {ThemeColors.BORDER_DEFAULT}; border-radius: 4px;")
+        self.insp_vbox.addWidget(QLabel("Master Kéo-Thả:"))
+        self.insp_vbox.addWidget(self.preview_lbl)
+        self.insp_vbox.addStretch()
+        self.insp_scroll.setWidget(self.insp_content)
+        
+        self.insp_acts = QWidget()
+        self.insp_acts.setStyleSheet(f"border-top: 1px solid {ThemeColors.BORDER_DEFAULT};")
+        acts_vbox = QVBoxLayout(self.insp_acts)
+        acts_vbox.setContentsMargins(16, 12, 16, 14)
+        acts_vbox.setSpacing(8)
+        
+        self.txt_single_title = QLineEdit()
+        self.txt_single_title.setPlaceholderText("Nhập Text mẫu...")
+        self.slide_title_dur = QSlider(Qt.Horizontal)
+        self.slide_title_dur.setRange(10, 100) # 1.0s to 10.0s
+        self.slide_title_dur.setValue(40) # default 4.0s
+        self.btn_insert_title_playhead = QPushButton("🚀 Chèn Playhead")
+        self.btn_insert_title_playhead.setStyleSheet(f"background-color: {ThemeColors.PRIMARY}; color: {ThemeColors.BG_CARD}; font-weight: bold; padding: 8px; border-radius: 6px;")
+        self.btn_insert_title_playhead.clicked.connect(self._on_insert_single_title_clicked)
+        
+        acts_vbox.addWidget(self.txt_single_title)
+        acts_vbox.addWidget(QLabel("Thời lượng (s):"))
+        acts_vbox.addWidget(self.slide_title_dur)
+        acts_vbox.addWidget(self.btn_insert_title_playhead)
+        
+        two_layout = QHBoxLayout()
+        self.btn_install_presets = QPushButton("📥 Cài Đặt")
+        self.btn_copy_fusion = QPushButton("📋 Copy Fusion")
+        self.btn_install_presets.clicked.connect(self._on_install_presets_clicked)
+        self.btn_copy_fusion.clicked.connect(self._on_copy_fusion_clicked)
+        two_layout.addWidget(self.btn_install_presets)
+        two_layout.addWidget(self.btn_copy_fusion)
+        acts_vbox.addLayout(two_layout)
+        
+        self.inspector_layout.addWidget(self.insp_scroll)
+        self.inspector_layout.addWidget(self.insp_acts)
+
+        main_layout.addWidget(self.rail)
+        main_layout.addWidget(self.cats)
+        main_layout.addWidget(self.main_section, stretch=1)
+        main_layout.addWidget(self.inspector)
         
         self._populate_cards()
 
@@ -432,15 +520,35 @@ class TabAssets(QWidget):
             is_local = isinstance(p, LocalAsset)
             is_color = is_local and getattr(p, 'type', '') == 'color'
             is_fav = p.id in self.favorites
-            
-            if self.current_category == "favorites" and not is_fav: continue
-            if self.current_category == "title" and not is_title: continue
-            if self.current_category == "transition" and not is_trans: continue
-            if self.current_category == "local" and not is_local: continue
-            if self.current_category == "color" and not is_color: continue
-            
             cat = p.category.lower() if hasattr(p, 'category') else ""
+            
+            if self.current_category == "favorites":
+                if not is_fav:
+                    c.setVisible(False)
+                    continue
+            elif self.current_category == "title":
+                if not is_title:
+                    c.setVisible(False)
+                    continue
+            elif self.current_category == "transition":
+                if not is_trans:
+                    c.setVisible(False)
+                    continue
+            elif self.current_category == "local":
+                if not is_local:
+                    c.setVisible(False)
+                    continue
+            elif self.current_category == "color":
+                if not is_color:
+                    c.setVisible(False)
+                    continue
+            elif self.current_category != "all":
+                if cat != self.current_category.lower():
+                    c.setVisible(False)
+                    continue
+            
             if query and query not in p.name.lower() and query not in cat:
+                c.setVisible(False)
                 continue
                 
             visible.append(c)
@@ -458,3 +566,22 @@ class TabAssets(QWidget):
             self.combo_text_preset.setCurrentIndex(idx)
         for c in self.card_widgets:
             c.set_selected(c.preset.id == preset_id)
+
+    def _on_insert_single_title_clicked(self):
+        text = self.txt_single_title.text().strip() or "ResolveFlow Title"
+        preset_id = self.combo_text_preset.currentData() or "karaoke_pop"
+        dur = float(self.slide_title_dur.value()) / 10.0 if hasattr(self, 'slide_title_dur') and self.slide_title_dur.value() > 0 else 3.0
+        self.insert_title_requested.emit(text, preset_id, dur)
+
+    def _on_install_presets_clicked(self):
+        from src.core.text_preset import FusionSettingGenerator
+        FusionSettingGenerator.install_presets_to_davinci_resolve()
+        self.install_presets_requested.emit()
+
+    def _on_copy_fusion_clicked(self):
+        preset_id = self.combo_text_preset.currentData() or "karaoke_pop"
+        self.copy_fusion_node_requested.emit(preset_id)
+
+    def _on_category_pill_clicked(self, category_id: str):
+        self._filter_by_nav(category_id)
+

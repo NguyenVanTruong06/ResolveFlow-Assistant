@@ -46,7 +46,7 @@ class StudioWindow(QMainWindow):
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(16, 0, 16, 0)
         
-        lbl_title = QLabel("🎨 Kho Hiệu Ứng (Studio Mode)")
+        lbl_title = QLabel("🎨 Kho Đạo Cụ (Studio Mode)")
         lbl_title.setStyleSheet(f"color: {ThemeColors.PRIMARY}; font-size: 16px; font-weight: bold;")
         h_layout.addWidget(lbl_title)
         
@@ -62,50 +62,9 @@ class StudioWindow(QMainWindow):
         
         main_layout.addWidget(header)
         
-        # Content (Splitter)
-        splitter = QSplitter(Qt.Horizontal)
+        # 4-Column Studio Layout (TabAssets)
+        main_layout.addWidget(self.tab_assets, stretch=1)
         
-        # Sidebar (danh mục) -> Chuyển hướng Tab
-        sidebar = QWidget()
-        sidebar.setFixedWidth(200)
-        sidebar.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border-right: 1px solid {ThemeColors.BORDER_DEFAULT};")
-        side_layout = QVBoxLayout(sidebar)
-        side_layout.setContentsMargins(10, 20, 10, 20)
-        side_layout.setSpacing(5)
-        
-        self.stack = QStackedWidget()
-        
-        # Dùng lại giao diện bên trong TabAssets
-        self.stack.addWidget(self.tab_assets)
-        self.stack.addWidget(self.tab_sfx)
-        
-        # Nút điều hướng
-        btn_assets = QPushButton("📦 Kho Hình / Chữ / Màu")
-        btn_sfx = QPushButton("🔊 Kho Âm Thanh (SFX)")
-        
-        for idx, btn in enumerate([btn_assets, btn_sfx]):
-            btn.setCheckable(True)
-            btn.setStyleSheet(f"""
-                QPushButton {{ text-align: left; padding: 12px; border: none; color: {ThemeColors.TEXT_PRIMARY}; border-radius: 6px; font-weight: bold; }}
-                QPushButton:checked {{ background-color: {ThemeColors.BG_INPUT}; color: {ThemeColors.PRIMARY}; border-left: 3px solid {ThemeColors.PRIMARY}; }}
-            """)
-            btn.clicked.connect(lambda _, i=idx: self._switch_tab(i))
-            side_layout.addWidget(btn)
-            
-        side_layout.addStretch()
-        btn_assets.setChecked(True)
-        
-        splitter.addWidget(sidebar)
-        splitter.addWidget(self.stack)
-        
-        main_layout.addWidget(splitter)
-        
-    def _switch_tab(self, index: int):
-        self.stack.setCurrentIndex(index)
-        for i, btn in enumerate(self.findChildren(QPushButton)):
-            if btn.text() in ["📦 Kho Hình / Chữ / Màu", "🔊 Kho Âm Thanh (SFX)"]:
-                btn.setChecked(i == index)
-                
     def _toggle_always_on_top(self):
         if self.btn_pin.isChecked():
             self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
