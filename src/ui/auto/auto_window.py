@@ -1464,36 +1464,31 @@ class AutoWindow(QMainWindow):
         l_vbox.setContentsMargins(16, 16, 16, 16)
         l_vbox.setSpacing(14)
 
-        # Dropzone
+        # Dropzone (Thuần túy là vùng nhận diện kéo thả)
         self.drop_frame = QFrame()
-        self.drop_frame.setCursor(Qt.PointingHandCursor)
         self.drop_frame.setStyleSheet("""
             QFrame {
                 border: 1.5px dashed #3f3f46;
                 border-radius: 10px;
                 background-color: #18181b;
-                padding: 16px;
+                padding: 16px 10px;
             }
             QFrame:hover {
                 border-color: #a78bfa;
-                background-color: rgba(139,92,246,0.1);
+                background-color: rgba(139,92,246,0.08);
             }
         """)
         drop_layout = QVBoxLayout(self.drop_frame)
-        drop_layout.setSpacing(4)
+        drop_layout.setSpacing(6)
         drop_layout.setAlignment(Qt.AlignCenter)
         lbl_drop_icon = QLabel("📥")
         lbl_drop_icon.setAlignment(Qt.AlignCenter)
-        lbl_drop_icon.setStyleSheet("font-size: 20px; color: #a1a1aa;")
+        lbl_drop_icon.setStyleSheet("font-size: 24px; color: #a1a1aa;")
         drop_layout.addWidget(lbl_drop_icon)
-        lbl_drop_txt = QLabel("Thả thư mục footage vào đây")
+        lbl_drop_txt = QLabel("Kéo & thả footage vào đây")
         lbl_drop_txt.setAlignment(Qt.AlignCenter)
-        lbl_drop_txt.setStyleSheet("font-size: 12.5px; font-weight: bold; color: #f4f4f5;")
+        lbl_drop_txt.setStyleSheet("font-size: 12px; font-weight: 600; color: #d4d4d8;")
         drop_layout.addWidget(lbl_drop_txt)
-        lbl_drop_hint = QLabel("hoặc chọn nguồn bên dưới")
-        lbl_drop_hint.setAlignment(Qt.AlignCenter)
-        lbl_drop_hint.setStyleSheet("font-size: 11px; color: #71717a;")
-        drop_layout.addWidget(lbl_drop_hint)
         l_vbox.addWidget(self.drop_frame)
 
         # 4 Nút Nguồn 2x2
@@ -2092,11 +2087,11 @@ class AutoWindow(QMainWindow):
         r_vbox.setContentsMargins(18, 18, 18, 18)
         r_vbox.setSpacing(12)
 
-        # Header Phần trăm lớn & ETA
+        # Header Phần trăm lớn & Trạng thái
         pct_row = QHBoxLayout()
-        self.lbl_pct_big = QLabel("46%")
-        self.lbl_pct_big.setStyleSheet("font-size: 32px; font-weight: bold; color: #f4f4f5;")
-        self.lbl_eta = QLabel("còn khoảng 3 phút")
+        self.lbl_pct_big = QLabel("0%")
+        self.lbl_pct_big.setStyleSheet("font-size: 32px; font-weight: bold; color: #71717a;")
+        self.lbl_eta = QLabel("Sẵn sàng")
         self.lbl_eta.setStyleSheet("color: #71717a; font-size: 12px; margin-top: 10px;")
         pct_row.addWidget(self.lbl_pct_big)
         pct_row.addStretch()
@@ -2107,7 +2102,7 @@ class AutoWindow(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(6)
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setValue(46)
+        self.progress_bar.setValue(0)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
                 background-color: #27272a;
@@ -2126,16 +2121,18 @@ class AutoWindow(QMainWindow):
         pipe_lay = QVBoxLayout(pipe_box)
         pipe_lay.setSpacing(6)
 
-        steps = [
-            ("✓ Nạp Whisper & Phân tích âm thanh", "#86efac"),
-            ("● Đạo diễn AI: Lọc vấp, dựng mạch, tìm Hook", "#c4b5fd"),
-            ("○ Chèn B-roll, Meme & SFX", "#71717a"),
-            ("○ Tạo phụ đề & Polish Timeline", "#71717a"),
+        self.step_names = [
+            "Nạp Whisper & Phân tích âm thanh",
+            "Cắt khoảng lặng & Lọc vấp",
+            "Đạo diễn AI & Dựng mạch kịch bản",
+            "Chèn B-roll, SFX & Xuất Timeline"
         ]
-        for st_name, st_col in steps:
-            lbl_st = QLabel(st_name)
-            lbl_st.setStyleSheet(f"color: {st_col}; font-size: 11.5px;")
+        self.step_labels = []
+        for name in self.step_names:
+            lbl_st = QLabel(f"○ {name}")
+            lbl_st.setStyleSheet("color: #71717a; font-size: 11.5px;")
             pipe_lay.addWidget(lbl_st)
+            self.step_labels.append(lbl_st)
         r_vbox.addWidget(pipe_box)
 
         # Nút Dừng
@@ -2894,6 +2891,17 @@ class AutoWindow(QMainWindow):
             self.txt_split_limit.setText("42")
 
     def _reset_workflow_phase(self):
+        if hasattr(self, "lbl_pct_big"):
+            self.lbl_pct_big.setText("0%")
+            self.lbl_pct_big.setStyleSheet("font-size: 32px; font-weight: bold; color: #71717a;")
+        if hasattr(self, "lbl_eta"):
+            self.lbl_eta.setText("Sẵn sàng")
+        if hasattr(self, "progress_bar"):
+            self.progress_bar.setValue(0)
+        if hasattr(self, "step_labels") and hasattr(self, "step_names"):
+            for i, lbl in enumerate(self.step_labels):
+                lbl.setText(f"○ {self.step_names[i]}")
+                lbl.setStyleSheet("color: #71717a; font-size: 11.5px;")
         """Đặt lại trạng thái kịch bản và xóa sạch cache phân đoạn cũ khi chọn video mới."""
         self.current_phase = 1
         self.clip_data_cache = []
@@ -3822,6 +3830,33 @@ class AutoWindow(QMainWindow):
         self.progress_bar.setValue(val)
         if hasattr(self, "lbl_pct_big"):
             self.lbl_pct_big.setText(f"{val}%")
+            self.lbl_pct_big.setStyleSheet("font-size: 32px; font-weight: bold; color: #f4f4f5;")
+        
+        # Cập nhật trạng thái từng bước trên danh sách bước bên phải
+        if hasattr(self, "step_labels") and len(self.step_labels) == 4:
+            if val < 25:
+                active_idx = 0
+            elif val < 50:
+                active_idx = 1
+            elif val < 80:
+                active_idx = 2
+            else:
+                active_idx = 3
+
+            for i, lbl in enumerate(self.step_labels):
+                if val >= 100:
+                    lbl.setText(f"✓ {self.step_names[i]}")
+                    lbl.setStyleSheet("color: #86efac; font-size: 11.5px; font-weight: 500;")
+                elif i < active_idx:
+                    lbl.setText(f"✓ {self.step_names[i]}")
+                    lbl.setStyleSheet("color: #86efac; font-size: 11.5px;")
+                elif i == active_idx:
+                    lbl.setText(f"● {self.step_names[i]}")
+                    lbl.setStyleSheet("color: #c4b5fd; font-size: 11.5px; font-weight: bold;")
+                else:
+                    lbl.setText(f"○ {self.step_names[i]}")
+                    lbl.setStyleSheet("color: #71717a; font-size: 11.5px;")
+
         status_txt = self.lbl_eta.text() if hasattr(self, "lbl_eta") else ""
         if hasattr(self, "lbl_progress_status"):
             status_txt = self.lbl_progress_status.text()
