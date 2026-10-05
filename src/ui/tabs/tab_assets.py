@@ -272,6 +272,8 @@ class TabAssets(QWidget):
         self.btn_preview_preset = QPushButton()
         self.btn_save_custom_preset = QPushButton()
         self.combo_split_mode = QComboBox()
+        self.combo_split_mode.addItem('Words', 'words')
+        self.combo_split_mode.addItem('Sentences', 'sentences')
         self.txt_split_limit = QLineEdit()
         self.txt_font = QLineEdit()
         self.txt_size = QLineEdit()
