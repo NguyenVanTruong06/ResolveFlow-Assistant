@@ -1413,7 +1413,7 @@ class AutoWindow(QMainWindow):
         window_layout.setSpacing(0)
 
         # === Khởi tạo các dummy/legacy widgets để backend không bị lỗi ===
-        self._init_legacy_dummies()
+
         
         # --- HEADER ---
         header = QWidget()
@@ -1505,6 +1505,51 @@ class AutoWindow(QMainWindow):
         c_vbox.addWidget(QLabel("Mức độ cắt vấp (1-3):"))
         c_vbox.addWidget(self.slide_master_intensity)
         c_vbox.addStretch()
+        # === RESTORED TABS FOR LEGACY FEATURES ===
+        self.tab_widget = QTabWidget()
+        self.tab_copilot = TabCopilot()
+        self.tab_autocut = TabAutoCut()
+        self.tab_titles = TabAssets()
+        self.tab_sfx = TabSFX()
+        self.tab_export = TabExport()
+
+        self.tab_widget.addTab(self.tab_copilot, "Kịch Bản AI")
+        self.tab_widget.addTab(self.tab_autocut, "Auto Cut")
+        self.tab_widget.addTab(self.tab_titles, "Chữ & Đồ Họa")
+        self.tab_widget.addTab(self.tab_sfx, "SFX Soundboard")
+        self.tab_widget.addTab(self.tab_export, "Polish & Export")
+        
+        self.btn_toggle_legacy = QPushButton("⚙️ Hiển thị Cấu hình Chuyên sâu (Legacy)")
+        self.btn_toggle_legacy.setCheckable(True)
+        self.btn_toggle_legacy.setStyleSheet("background-color: #27272a; color: #a1a1aa; padding: 6px; border-radius: 4px;")
+        self.btn_toggle_legacy.clicked.connect(lambda c: self.tab_widget.setVisible(c))
+        
+        c_vbox.addWidget(self.btn_toggle_legacy)
+        c_vbox.addWidget(self.tab_widget)
+        self.tab_widget.hide()
+        
+        # === TOP LEVEL DUMMIES / MISSING CONTROLS ===
+        self.combo_model = QComboBox()
+        self.combo_model.addItem('large-v3')
+        self.combo_lang = QComboBox()
+        self.combo_lang.addItem('vi')
+        self.combo_llm_provider = QComboBox()
+        self.btn_auto_resolve = QPushButton()
+        self.btn_story_save = QPushButton()
+        self.btn_scan_luts = QPushButton()
+        self.combo_lut_scope = QComboBox()
+        self.check_lut_skip_existing = QCheckBox()
+        self.btn_s1_auto_resolve = QPushButton()
+        self.btn_s1_drive = QPushButton()
+        self.btn_stage1_main_scan = QPushButton()
+        self.btn_s1_skip_stage2 = QPushButton()
+        self.btn_back_to_stage1 = QPushButton()
+        self.btn_scan_only = QPushButton()
+        self.btn_instant_export = QPushButton()
+        
+        self.check_cache = QCheckBox()
+        self._bind_tab_delegates()
+
         
         # 3. RIGHT (340px)
         a_right = QFrame()
@@ -1552,74 +1597,91 @@ class AutoWindow(QMainWindow):
         window_layout.addWidget(header)
         window_layout.addWidget(auto_widget, stretch=1)
         
-    def _init_legacy_dummies(self):
-        self.banner_onboarding = QLabel()
-        self.group_wf = QGroupBox()
-        self.group_recipe = QGroupBox()
-        self.combo_recipes = QComboBox()
-        self.btn_save_recipe = QPushButton()
-        self.btn_delete_recipe = QPushButton()
-        self.group_master = QGroupBox()
-        self.combo_pacing = QComboBox()
-        self.combo_video_type = QComboBox()
-        self.check_hide_weak_subs = QCheckBox()
-        self.check_scene_guard = QCheckBox()
-        self.check_fill_gaps = QCheckBox()
-        self.combo_hook_total = QComboBox()
-        self.combo_story_intent = QComboBox()
-        self.combo_story_target = QComboBox()
-        self.txt_api_key = QLineEdit()
-        self.check_repeats = QCheckBox()
-        self.lbl_master_intensity = QLabel()
-        self.group_timeline = QGroupBox()
-        self.mini_timeline = QWidget()
-        self.btn_toggle_advanced = QPushButton()
-        self.advanced_container = QWidget()
-        self.group_ai = QGroupBox()
-        self.group_director = QGroupBox()
-        self.combo_ai_mode = QComboBox()
-        self.check_bad_takes = QCheckBox()
-        self.txt_confidence_threshold = QLineEdit()
-        self.group_vlog_hook = QGroupBox()
-        self.check_vlog_hook = QCheckBox()
-        self.combo_hook_dur = QComboBox()
-        self.group_v4 = QGroupBox()
-        self.group_cut = QGroupBox()
-        self.check_speedup = QCheckBox()
-        self.slide_db = QSlider()
-        self.lbl_db = QLabel()
-        self.slide_dur = QSlider()
-        self.lbl_dur = QLabel()
-        self.combo_audio_track = QComboBox()
-        self.group_presets = QGroupBox()
-        self.combo_text_preset = QComboBox()
-        self.btn_preview_preset = QPushButton()
-        self.btn_save_custom_preset = QPushButton()
-        self.combo_split_mode = QComboBox()
-        self.txt_split_limit = QLineEdit()
-        self.txt_font = QLineEdit()
-        self.txt_size = QLineEdit()
-        self.txt_color = QLineEdit()
-        self.preview_lbl = QLabel()
-        self.txt_single_title = QLineEdit()
-        self.slide_title_dur = QSlider()
-        self.btn_insert_title_playhead = QPushButton()
-        self.btn_install_presets = QPushButton()
-        self.btn_copy_fusion = QPushButton()
-        self.combo_target_track = QComboBox()
-        self.slide_volume_offset = QSlider()
-        self.btn_insert_playhead = QPushButton()
-        self.check_loudnorm = QCheckBox()
-        self.combo_loudnorm_preset = QComboBox()
-        self.combo_lut = QComboBox()
-        self.btn_apply_lut = QPushButton()
-        self.combo_render_preset = QComboBox()
-        self.btn_start_render = QPushButton()
-        self.btn_s1_browse_folder = QPushButton()
-        self.btn_s1_browse_files = QPushButton()
-        
     def _bind_tab_delegates(self):
-        pass
+        """Liên kết các thuộc tính widget trên các Tab để duy trì tính tương thích 100%."""
+        # Tab 1: Auto Cut Delegates
+        self.banner_onboarding = self.tab_autocut.banner_onboarding
+        self.group_wf = self.tab_autocut.group_wf
+        self.combo_workflow = self.tab_autocut.combo_workflow
+        self.group_recipe = self.tab_autocut.group_recipe
+        self.combo_recipes = self.tab_autocut.combo_recipes
+        self.btn_save_recipe = self.tab_autocut.btn_save_recipe
+        self.btn_delete_recipe = self.tab_autocut.btn_delete_recipe
+        self.group_master = self.tab_autocut.group_master
+        self.slide_master_intensity = self.tab_autocut.slide_master_intensity
+        self.combo_pacing = self.tab_autocut.combo_pacing
+        self.combo_video_type = self.tab_autocut.combo_video_type
+        self.check_hide_weak_subs = self.tab_autocut.check_hide_weak_subs
+        self.check_scene_guard = self.tab_autocut.check_scene_guard
+        self.check_fill_gaps = self.tab_autocut.check_fill_gaps
+        self.combo_hook_total = self.tab_autocut.combo_hook_total
+        self.combo_story_intent = self.tab_autocut.combo_story_intent
+        self.combo_story_target = self.tab_autocut.combo_story_target
+        self.txt_api_key = self.tab_autocut.txt_api_key
+        self.check_repeats = self.tab_autocut.check_repeats
+        self.lbl_master_intensity = self.tab_autocut.lbl_master_intensity
+        self.group_timeline = self.tab_autocut.group_timeline
+        self.mini_timeline = self.tab_autocut.mini_timeline
+        self.btn_toggle_advanced = self.tab_autocut.btn_toggle_advanced
+        self.advanced_container = self.tab_autocut.advanced_container
+        self.group_ai = self.tab_autocut.group_ai
+        # Giữ liên kết hai chiều cho các điều khiển Whisper ở Stage 1
+        self.tab_autocut.combo_model = self.combo_model
+        self.tab_autocut.combo_lang = self.combo_lang
+        self.tab_autocut.check_cache = self.check_cache
+        self.tab_autocut.check_fill_gaps = self.check_fill_gaps
+        self.group_director = self.tab_autocut.group_director
+        self.combo_ai_mode = self.tab_autocut.combo_ai_mode
+        self.check_bad_takes = self.tab_autocut.check_bad_takes
+        self.check_punch_in = self.tab_autocut.check_punch_in
+        self.txt_confidence_threshold = self.tab_autocut.txt_confidence_threshold
+        self.group_vlog_hook = self.tab_autocut.group_vlog_hook
+        self.check_vlog_hook = self.tab_autocut.check_vlog_hook
+        self.combo_hook_dur = self.tab_autocut.combo_hook_dur
+        self.group_v4 = self.tab_autocut.group_v4
+        self.check_reframe = self.tab_autocut.check_reframe
+        self.check_broll = self.tab_autocut.check_broll
+        self.check_sfx = self.tab_autocut.check_sfx
+        self.group_cut = self.tab_autocut.group_cut
+        self.check_cut = self.tab_autocut.check_cut
+        self.check_speedup = self.tab_autocut.check_speedup
+        self.slide_db = self.tab_autocut.slide_db
+        self.lbl_db = self.tab_autocut.lbl_db
+        self.slide_dur = self.tab_autocut.slide_dur
+        self.lbl_dur = self.tab_autocut.lbl_dur
+        self.combo_audio_track = self.tab_autocut.combo_audio_track
+
+        # Tab 2: Titles Delegates
+        self.group_sub = self.tab_titles.group_presets
+        self.check_subtitle = self.tab_titles.check_subtitle
+        self.combo_text_preset = self.tab_titles.combo_text_preset
+        self.btn_preview_preset = self.tab_titles.btn_preview_preset
+        self.btn_save_custom_preset = self.tab_titles.btn_save_custom_preset
+        self.combo_split_mode = self.tab_titles.combo_split_mode
+        self.txt_split_limit = self.tab_titles.txt_split_limit
+        self.txt_font = self.tab_titles.txt_font
+        self.txt_size = self.tab_titles.txt_size
+        self.txt_color = self.tab_titles.txt_color
+        self.preview_lbl = self.tab_titles.preview_lbl
+        self.txt_single_title = self.tab_titles.txt_single_title
+        self.slide_title_dur = self.tab_titles.slide_title_dur
+        self.btn_insert_title_playhead = self.tab_titles.btn_insert_title_playhead
+        self.btn_install_presets = self.tab_titles.btn_install_presets
+        self.btn_copy_fusion = self.tab_titles.btn_copy_fusion
+
+        # Tab 3: SFX & Audio Enhancer Delegates
+        self.combo_sfx_track = self.tab_sfx.combo_target_track
+        self.slide_volume_offset = self.tab_sfx.slide_volume_offset
+        self.btn_insert_sfx_playhead = self.tab_sfx.btn_insert_playhead
+        self.check_loudnorm = self.tab_sfx.check_loudnorm
+        self.combo_loudnorm_preset = self.tab_sfx.combo_loudnorm_preset
+
+        # Tab 4: Export Delegates
+        self.combo_lut = self.tab_export.combo_lut
+        self.btn_apply_lut = self.tab_export.btn_apply_lut
+        self.combo_render_preset = self.tab_export.combo_render_preset
+        self.btn_start_render = self.tab_export.btn_start_render
+
 
     def _get_current_active_preset(self) -> Optional[TextStylePreset]:
         """Lấy đối tượng TextStylePreset hiện tại từ giao diện."""
@@ -3731,3 +3793,4 @@ def start_gui(): # DEPRECATED
     window = ChunDVCApp()
     window.show()
     sys.exit(app.exec())
+
