@@ -1456,6 +1456,15 @@ class AutoWindow(QMainWindow):
         self.lbl_cache_badge = QLabel("Bộ nhớ đệm: 0 / 0 clip")
         self.lbl_cache_badge.setStyleSheet("color: #a1a1aa; font-size: 12px; margin-top: 10px;")
         l_vbox.addWidget(self.lbl_cache_badge)
+        
+        # Thêm nút quét cache và tải JSON (vì HTML gốc không vẽ, nhưng backend cần)
+        self.btn_scan_only = QPushButton("🔍 Quét Cache")
+        self.btn_scan_only.clicked.connect(self._start_phase_1_scan)
+        self.btn_load_json_plan = QPushButton("📜 Tải JSON Kịch Bản")
+        self.btn_load_json_plan.clicked.connect(self._load_json_plan_from_disk)
+        
+        l_vbox.addWidget(self.btn_scan_only)
+        l_vbox.addWidget(self.btn_load_json_plan)
         l_vbox.addStretch()
         
         # 2. CENTER (expanding)
