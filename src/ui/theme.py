@@ -6,39 +6,40 @@ Chuẩn hóa màu sắc, kích thước, font chữ và các giải thích thu�
 from typing import Dict
 
 class ThemeColors:
-    # Backgrounds
-    BG_MAIN = "#0F0F13"
-    BG_CARD = "#17171E"
-    BG_CARD_ACTIVE = "#1A1E24"
-    BG_INPUT = "#1E1E28"
-    BG_CONSOLE = "#0A0A0D"
-    BG_HEADER = "#13131A"
+    # Scooter Palette (taste-skill applied)
+    BG_MAIN = "#021416"        # scooter-1400
+    BG_CARD = "#031e22"        # scooter-1300
+    BG_CARD_ACTIVE = "#05282d" # scooter-1200
+    BG_INPUT = "#083338"       # scooter-1100
+    BG_CONSOLE = "#021416"     # scooter-1400
+    BG_HEADER = "#0c3d44"      # scooter-1000
     
     # Borders
-    BORDER_DEFAULT = "#2A2A38"
-    BORDER_ACTIVE = "#00C853"
-    BORDER_ACTIVE_BLUE = "#1E88E5"
-    BORDER_FOCUS = "#2979FF"
-    BORDER_HOVER = "#3D3D52"
+    BORDER_DEFAULT = "#0c3d44" # scooter-1000
+    BORDER_ACTIVE = "#33b0c1"  # scooter-400
+    BORDER_ACTIVE_BLUE = "#39c1d3" # scooter-300
+    BORDER_FOCUS = "#3dcee1"   # scooter-200
+    BORDER_HOVER = "#1e737e"   # scooter-700
     
     # Text
-    TEXT_PRIMARY = "#F2F2F7"
-    TEXT_SECONDARY = "#9E9EB8"
-    TEXT_MUTED = "#6C6C85"
-    TEXT_ACCENT = "#64B5F6"
-    TEXT_SUCCESS = "#69F0AE"
+    TEXT_PRIMARY = "#d5f7fe"   # scooter-50
+    TEXT_SECONDARY = "#84ebfc" # scooter-100
+    TEXT_MUTED = "#39c1d3"     # scooter-300
+    TEXT_ACCENT = "#3dcee1"    # scooter-200
+    TEXT_SUCCESS = "#84ebfc"   # scooter-100
     TEXT_WARNING = "#FFD54F"
     TEXT_ERROR = "#FF5252"
     
-    # Accents & Brand
-    PRIMARY = "#1976D2"
-    PRIMARY_HOVER = "#2196F3"
-    PRIMARY_PRESSED = "#0D47A1"
+    # Accents & Brand (Single saturated pop)
+    PRIMARY = "#33b0c1"        # scooter-400
+    PRIMARY_HOVER = "#2c9dac"  # scooter-500
+    PRIMARY_PRESSED = "#258895" # scooter-600
+    PRIMARY_TEXT = "#021416"   # scooter-1400 (Contrast check pass)
     
-    SUCCESS = "#2E7D32"
-    SUCCESS_HOVER = "#388E3C"
-    SUCCESS_PRESSED = "#1B5E20"
-    SUCCESS_LIGHT = "#00C853"
+    SUCCESS = "#175e67"        # scooter-800
+    SUCCESS_HOVER = "#1e737e"  # scooter-700
+    SUCCESS_PRESSED = "#0f4850" # scooter-900
+    SUCCESS_LIGHT = "#3dcee1"  # scooter-200
     
     DANGER = "#C62828"
     DANGER_HOVER = "#D32F2F"
@@ -77,7 +78,7 @@ TOOLTIPS: Dict[str, str] = {
     "ai_mode": "Kịch bản AI: Lọc sạch nói vấp (Clean Talk), Trích xuất clip ngắn (Viral Shorts), Tóm tắt (Summary) hoặc Chỉ cắt im lặng cơ bản.",
     "bad_takes": "Tự động phát hiện khi bạn nói sai, vấp rồi thử nói lại câu đó, AI sẽ tự cắt bỏ các câu nói hỏng trước đó.",
     "punch_in": "Tự động phóng to nhẹ khung hình (1.15x) luân phiên giữa các câu thoại để tạo hiệu ứng như đang quay 2 góc máy.",
-    "confidence_threshold": "Mức độ chắc chắn của AI để quyết định cắt câu nói vấp (0.0 đến 1.0, khuyên dùng 0.70).",
+    "confidence_threshold": "Ngưỡng độ tin cậy của chữ nhận dạng (0.0 đến 1.0). Câu dưới ngưỡng chỉ được TÔ VÀNG trong bảng duyệt để bạn xem lại; KHÔNG bị tự cắt.",
     
     "vlog_hook": "Tự động tìm kiếm các câu thoại gay cấn/đắt giá nhất trong video và trích xuất làm đoạn giới thiệu Teaser 10-30s mở đầu.",
     "hook_duration": "Thời lượng trích xuất cho mỗi phân đoạn highlight trong đoạn giới thiệu Teaser.",
@@ -132,12 +133,12 @@ def get_application_stylesheet() -> str:
         background-color: {ThemeColors.BG_MAIN};
         width: 8px;
         margin: 0px;
-        border-radius: 4px;
+        border-radius: 6px;
     }}
     QScrollBar::handle:vertical {{
         background-color: {ThemeColors.BORDER_DEFAULT};
         min-height: 24px;
-        border-radius: 4px;
+        border-radius: 6px;
     }}
     QScrollBar::handle:vertical:hover {{
         background-color: {ThemeColors.BORDER_HOVER};
@@ -150,7 +151,7 @@ def get_application_stylesheet() -> str:
     QGroupBox {{
         background-color: {ThemeColors.BG_CARD};
         border: 1.5px solid {ThemeColors.BORDER_DEFAULT};
-        border-radius: 8px;
+        border-radius: 6px;
         margin-top: 14px;
         padding-top: 12px;
         padding-bottom: 8px;
@@ -168,7 +169,7 @@ def get_application_stylesheet() -> str:
         top: 2px;
         padding: 0 6px;
         background-color: {ThemeColors.BG_CARD};
-        border-radius: 3px;
+        border-radius: 6px;
     }}
     
     QGroupBox[active="true"] {{
@@ -210,14 +211,14 @@ def get_application_stylesheet() -> str:
         font-size: 10px;
         font-weight: bold;
         padding: 1px 4px;
-        border-radius: 3px;
+        border-radius: 6px;
         background-color: rgba(0, 200, 83, 0.15);
     }}
     QLabel.badge_inactive {{
         color: {ThemeColors.TEXT_MUTED};
         font-size: 10px;
         padding: 1px 4px;
-        border-radius: 3px;
+        border-radius: 6px;
         background-color: rgba(108, 108, 133, 0.15);
     }}
 
@@ -225,7 +226,7 @@ def get_application_stylesheet() -> str:
     QLineEdit, QComboBox {{
         background-color: {ThemeColors.BG_INPUT};
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
-        border-radius: 5px;
+        border-radius: 6px;
         padding: 6px 8px;
         color: {ThemeColors.TEXT_PRIMARY};
         selection-background-color: {ThemeColors.PRIMARY};
@@ -250,7 +251,7 @@ def get_application_stylesheet() -> str:
         border: 1px solid {ThemeColors.BORDER_HOVER};
         color: {ThemeColors.TEXT_PRIMARY};
         selection-background-color: {ThemeColors.PRIMARY};
-        selection-color: #FFFFFF;
+        selection-color: {ThemeColors.PRIMARY_TEXT};
         outline: none;
         padding: 4px;
     }}
@@ -264,7 +265,7 @@ def get_application_stylesheet() -> str:
     QCheckBox::indicator {{
         width: 16px;
         height: 16px;
-        border-radius: 4px;
+        border-radius: 6px;
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
         background-color: {ThemeColors.BG_INPUT};
     }}
@@ -282,11 +283,11 @@ def get_application_stylesheet() -> str:
         border: none;
         height: 6px;
         background: {ThemeColors.BG_INPUT};
-        border-radius: 3px;
+        border-radius: 6px;
     }}
     QSlider::sub-page:horizontal {{
         background: {ThemeColors.PRIMARY};
-        border-radius: 3px;
+        border-radius: 6px;
     }}
     QSlider::handle:horizontal {{
         background: #FFFFFF;
@@ -294,7 +295,7 @@ def get_application_stylesheet() -> str:
         width: 16px;
         height: 16px;
         margin: -5px 0;
-        border-radius: 8px;
+        border-radius: 6px;
     }}
     QSlider::handle:horizontal:hover {{
         background: {ThemeColors.PRIMARY_HOVER};
@@ -304,7 +305,7 @@ def get_application_stylesheet() -> str:
     /* --- BUTTONS --- */
     QPushButton {{
         background-color: {ThemeColors.PRIMARY};
-        color: #FFFFFF;
+        color: {ThemeColors.PRIMARY_TEXT};
         border: none;
         border-radius: 6px;
         padding: 8px 14px;
@@ -326,9 +327,9 @@ def get_application_stylesheet() -> str:
     /* Nút chính Bắt đầu xử lý (Primary Run Button >= 44px) */
     QPushButton#btn_run {{
         background-color: {ThemeColors.SUCCESS};
-        color: #FFFFFF;
+        color: {ThemeColors.PRIMARY_TEXT};
         padding: 12px 20px;
-        border-radius: 8px;
+        border-radius: 6px;
         font-size: 14px;
         font-weight: bold;
         min-height: 44px;
@@ -357,17 +358,17 @@ def get_application_stylesheet() -> str:
     /* --- PROGRESS BAR --- */
     QProgressBar {{
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
-        border-radius: 5px;
+        border-radius: 6px;
         text-align: center;
         background-color: {ThemeColors.BG_INPUT};
-        color: #FFFFFF;
+        color: {ThemeColors.PRIMARY_TEXT};
         font-weight: bold;
         font-size: 11px;
         height: 18px;
     }}
     QProgressBar::chunk {{
         background-color: {ThemeColors.SUCCESS_LIGHT};
-        border-radius: 4px;
+        border-radius: 6px;
     }}
 
     /* --- CONSOLE LOGS --- */
@@ -399,14 +400,14 @@ def get_application_stylesheet() -> str:
     }}
     QTableWidget::item:selected {{
         background-color: {ThemeColors.PRIMARY};
-        color: #FFFFFF;
+        color: {ThemeColors.PRIMARY_TEXT};
     }}
 
     /* --- TAB WIDGET & TAB BAR --- */
     QTabWidget::pane {{
         border: 1.5px solid {ThemeColors.BORDER_DEFAULT};
         background-color: {ThemeColors.BG_MAIN};
-        border-radius: 8px;
+        border-radius: 6px;
         top: -1px;
     }}
     QTabBar::tab {{
@@ -438,7 +439,7 @@ def get_application_stylesheet() -> str:
         background-color: #20202C;
         width: 6px;
         margin: 2px;
-        border-radius: 3px;
+        border-radius: 6px;
     }}
     QSplitter::handle:hover {{
         background-color: #3B82F6;
@@ -448,7 +449,7 @@ def get_application_stylesheet() -> str:
     QPushButton.sfx_pad_btn {{
         background-color: #181B26;
         border: 1.5px solid #282E40;
-        border-radius: 8px;
+        border-radius: 6px;
         color: #E2E8F0;
         font-size: 12px;
         font-weight: bold;
@@ -474,7 +475,7 @@ def get_application_stylesheet() -> str:
     QFrame.technique_card {{
         background-color: #12151F;
         border: 1.5px solid #232A3B;
-        border-radius: 10px;
+        border-radius: 6px;
         padding: 10px;
     }}
     QFrame.technique_card:hover {{
@@ -489,7 +490,7 @@ def get_application_stylesheet() -> str:
     QPushButton.category_pill {{
         background-color: #161A26;
         border: 1px solid #283144;
-        border-radius: 14px;
+        border-radius: 6px;
         color: #94A3B8;
         font-size: 11px;
         font-weight: bold;
@@ -503,13 +504,13 @@ def get_application_stylesheet() -> str:
     QPushButton.category_pill[active="true"] {{
         background-color: #2563EB;
         border-color: #60A5FA;
-        color: #FFFFFF;
+        color: {ThemeColors.PRIMARY_TEXT};
     }}
 
     QLabel.tag_chip {{
         background-color: #1E2433;
         border: 1px solid #2D3748;
-        border-radius: 4px;
+        border-radius: 6px;
         color: #94A3B8;
         font-size: 10px;
         padding: 2px 6px;
@@ -520,7 +521,7 @@ def get_application_stylesheet() -> str:
         background-color: #1F1F2B;
         color: #F2F2F7;
         border: 1px solid #454560;
-        border-radius: 5px;
+        border-radius: 6px;
         padding: 6px 10px;
         font-size: 12px;
         line-height: 1.3;

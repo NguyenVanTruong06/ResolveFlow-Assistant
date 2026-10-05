@@ -1427,10 +1427,10 @@ class ChunDVCApp(QMainWindow):
         title_font = QFont("Segoe UI", 16)
         title_font.setBold(True)
         title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #38BDF8; letter-spacing: 1.5px;")
+        title_label.setStyleSheet("color: #3dcee1; letter-spacing: 1.5px;")
         
         subtitle_label = QLabel("AI Director, Text+ Presets, SFX Soundboard & Timeline Automation Suite")
-        subtitle_label.setStyleSheet("color: #94A3B8; font-size: 11px;")
+        subtitle_label.setStyleSheet("color: #39c1d3; font-size: 11px;")
         title_vbox.addWidget(title_label)
         title_vbox.addWidget(subtitle_label)
 
@@ -1441,18 +1441,18 @@ class ChunDVCApp(QMainWindow):
         self.btn_minimize_bubble.setToolTip("Thu nhỏ thành Bong bóng nổi luôn trên cùng (Always-on-Top Floating Bubble)")
         self.btn_minimize_bubble.setStyleSheet(f"""
             QPushButton {{
-                background-color: #1E293B;
-                color: #38BDF8;
-                border: 1px solid #334155;
+                background-color: #031e22;
+                color: #3dcee1;
+                border: 1px solid #0c3d44;
                 border-radius: 6px;
                 padding: 7px 14px;
                 font-size: 11px;
                 font-weight: bold;
             }}
             QPushButton:hover {{
-                background-color: #0F172A;
-                border-color: #38BDF8;
-                color: #7DD3FC;
+                background-color: #021416;
+                border-color: #3dcee1;
+                color: #84ebfc;
             }}
         """)
         self.btn_minimize_bubble.clicked.connect(self._minimize_to_bubble)
@@ -1498,25 +1498,25 @@ class ChunDVCApp(QMainWindow):
             "<i>Sau khi nạp xong, bạn sẽ chuyển sang <b>Bước 2</b> để chọn dựng tự động bằng AI Copilot hoặc cắt thô offline!</i>"
         )
         lbl_s1_desc.setWordWrap(True)
-        lbl_s1_desc.setStyleSheet("color: #CBD5E1; font-size: 12px; line-height: 1.4;")
+        lbl_s1_desc.setStyleSheet("color: #d5f7fe; font-size: 12px; line-height: 1.4;")
         v_s1_intro.addWidget(lbl_s1_desc)
         v_s1_intro.addSpacing(6)
 
         s1_btn_row = QHBoxLayout()
         self.btn_s1_browse_folder = QPushButton("📂 Chọn Thư Mục Dự Án")
-        self.btn_s1_browse_folder.setStyleSheet("background-color: #3182CE; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
+        self.btn_s1_browse_folder.setStyleSheet("background-color: #258895; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
         self.btn_s1_browse_folder.clicked.connect(self._browse_folder)
 
         self.btn_s1_browse_files = QPushButton("🎬 Chọn Tệp Video")
-        self.btn_s1_browse_files.setStyleSheet("background-color: #2B6CB0; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
+        self.btn_s1_browse_files.setStyleSheet("background-color: #1e737e; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
         self.btn_s1_browse_files.clicked.connect(self._browse_file)
 
         self.btn_s1_auto_resolve = QPushButton("🎯 Tự Lấy Từ DaVinci")
-        self.btn_s1_auto_resolve.setStyleSheet("background-color: #4A5568; color: white; padding: 11px; border-radius: 6px; font-size: 12px;")
+        self.btn_s1_auto_resolve.setStyleSheet("background-color: #0c3d44; color: white; padding: 11px; border-radius: 6px; font-size: 12px;")
         self.btn_s1_auto_resolve.clicked.connect(self._auto_detect_video)
 
         self.btn_s1_drive = QPushButton("☁ Google Drive")
-        self.btn_s1_drive.setStyleSheet("background-color: #374151; color: #93C5FD; padding: 11px; border-radius: 6px; font-size: 12px;")
+        self.btn_s1_drive.setStyleSheet("background-color: #083338; color: #84ebfc; padding: 11px; border-radius: 6px; font-size: 12px;")
         self.btn_s1_drive.clicked.connect(self._open_google_drive_dialog)
 
         s1_btn_row.addWidget(self.btn_s1_browse_folder, stretch=3)
@@ -1526,7 +1526,7 @@ class ChunDVCApp(QMainWindow):
         v_s1_intro.addLayout(s1_btn_row)
 
         self.lbl_s1_media_info = QLabel("⚪ Chưa chọn tệp video nào. Hãy chọn thư mục hoặc video ở trên.")
-        self.lbl_s1_media_info.setStyleSheet("color: #94A3B8; font-size: 12px; padding: 4px 0;")
+        self.lbl_s1_media_info.setStyleSheet("color: #39c1d3; font-size: 12px; padding: 4px 0;")
         v_s1_intro.addWidget(self.lbl_s1_media_info)
         s1_layout.addWidget(card_scan_intro)
 
@@ -1561,12 +1561,12 @@ class ChunDVCApp(QMainWindow):
 
         lbl_s1_cfg_hint = QLabel("💡 <b>Mẹo tối ưu:</b> Với video dài >20 phút, nên chọn model <b>'small'</b> hoặc <b>'base'</b> để quét nhanh gấp 5-10 lần mà vẫn nhận diện lời thoại cực chuẩn.")
         lbl_s1_cfg_hint.setWordWrap(True)
-        lbl_s1_cfg_hint.setStyleSheet("color: #38BDF8; font-size: 11px;")
+        lbl_s1_cfg_hint.setStyleSheet("color: #3dcee1; font-size: 11px;")
         v_s1_cfg.addWidget(lbl_s1_cfg_hint)
         v_s1_cfg.addSpacing(6)
 
         self.lbl_s1_cache_status = QLabel("⚪ Đang chờ chọn nguồn video để kiểm tra Cache...")
-        self.lbl_s1_cache_status.setStyleSheet("background-color: #1E293B; color: #94A3B8; border: 1px solid #334155; border-radius: 6px; padding: 8px; font-size: 12px;")
+        self.lbl_s1_cache_status.setStyleSheet("background-color: #031e22; color: #39c1d3; border: 1px solid #0c3d44; border-radius: 6px; padding: 8px; font-size: 12px;")
         v_s1_cfg.addWidget(self.lbl_s1_cache_status)
         s1_layout.addWidget(card_scan_cfg)
 
@@ -1579,15 +1579,15 @@ class ChunDVCApp(QMainWindow):
         self.btn_stage1_main_scan.setCursor(Qt.PointingHandCursor)
         self.btn_stage1_main_scan.setStyleSheet("""
             QPushButton {
-                background-color: #0284C7;
+                background-color: #2c9dac;
                 color: white;
                 font-size: 14px;
                 font-weight: bold;
                 padding: 14px;
-                border-radius: 8px;
+                border-radius: 6px;
             }
             QPushButton:hover {
-                background-color: #0369A1;
+                background-color: #1e737e;
             }
         """)
         self.btn_stage1_main_scan.clicked.connect(self._start_phase_1_scan)
@@ -1596,7 +1596,7 @@ class ChunDVCApp(QMainWindow):
         # Chuyển bước dựng
         self.btn_s1_skip_stage2 = QPushButton("⏩ Sang Bước 2: Chọn Kiểu Dựng")
         self.btn_s1_skip_stage2.setCursor(Qt.PointingHandCursor)
-        self.btn_s1_skip_stage2.setStyleSheet("background-color: #334155; color: #CBD5E1; padding: 11px; border-radius: 6px; font-weight: bold;")
+        self.btn_s1_skip_stage2.setStyleSheet("background-color: #0c3d44; color: #d5f7fe; padding: 11px; border-radius: 6px; font-weight: bold;")
         self.btn_s1_skip_stage2.clicked.connect(lambda: self._set_workflow_stage(2))
         v_s1_act.addWidget(self.btn_s1_skip_stage2)
         s1_layout.addWidget(card_s1_actions)
@@ -1621,17 +1621,17 @@ class ChunDVCApp(QMainWindow):
         self.btn_back_to_stage1.setCursor(Qt.PointingHandCursor)
         self.btn_back_to_stage1.setStyleSheet("""
             QPushButton {
-                background-color: #1E293B;
-                color: #38BDF8;
-                border: 1px solid #334155;
+                background-color: #031e22;
+                color: #3dcee1;
+                border: 1px solid #0c3d44;
                 border-radius: 6px;
                 padding: 6px 12px;
                 font-size: 11px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #334155;
-                color: #7DD3FC;
+                background-color: #0c3d44;
+                color: #84ebfc;
             }
         """)
         self.btn_back_to_stage1.clicked.connect(lambda: self._set_workflow_stage(1))
@@ -1739,10 +1739,10 @@ class ChunDVCApp(QMainWindow):
         self.lbl_file.setReadOnly(True)
         self.lbl_file.setStyleSheet("""
             QLineEdit {
-                background-color: #0F172A;
-                color: #38BDF8;
+                background-color: #021416;
+                color: #3dcee1;
                 font-weight: bold;
-                border: 1px solid #334155;
+                border: 1px solid #0c3d44;
                 border-radius: 6px;
                 padding: 7px;
             }
@@ -1750,9 +1750,9 @@ class ChunDVCApp(QMainWindow):
 
         h_badge_row = QHBoxLayout()
         self.lbl_cache_badge = QLabel("⚪ Chưa chọn nguồn")
-        self.lbl_cache_badge.setStyleSheet("background-color: #1E293B; color: #94A3B8; border: 1px solid #334155; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        self.lbl_cache_badge.setStyleSheet("background-color: #031e22; color: #39c1d3; border: 1px solid #0c3d44; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;")
         
-        h_badge_row.addWidget(QLabel("<b style='color: #94A3B8;'>Trạng thái Cache:</b>"))
+        h_badge_row.addWidget(QLabel("<b style='color: #39c1d3;'>Trạng thái Cache:</b>"))
         h_badge_row.addWidget(self.lbl_cache_badge)
         h_badge_row.addStretch(1)
 
@@ -1854,12 +1854,12 @@ class ChunDVCApp(QMainWindow):
         self.btn_run.setCursor(Qt.PointingHandCursor)
         self.btn_run.setStyleSheet("""
             QPushButton#btn_run {
-                background-color: #1E293B;
-                color: #64748B;
+                background-color: #031e22;
+                color: #1e737e;
                 padding: 10px;
                 border-radius: 6px;
                 font-weight: bold;
-                border: 1px solid #334155;
+                border: 1px solid #0c3d44;
             }
         """)
         self.btn_run.clicked.connect(self._toggle_pipeline_execution)
@@ -2625,10 +2625,10 @@ class ChunDVCApp(QMainWindow):
         if not raw_paths:
             if hasattr(self, "lbl_s1_cache_status"):
                 self.lbl_s1_cache_status.setText("⚪ Chưa chọn video. Vui lòng chọn tệp hoặc thư mục.")
-                self.lbl_s1_cache_status.setStyleSheet("background-color: #1E293B; color: #94A3B8; border: 1px solid #334155; border-radius: 6px; padding: 8px; font-size: 12px;")
+                self.lbl_s1_cache_status.setStyleSheet("background-color: #031e22; color: #39c1d3; border: 1px solid #0c3d44; border-radius: 6px; padding: 8px; font-size: 12px;")
             if hasattr(self, "lbl_cache_badge"):
                 self.lbl_cache_badge.setText("⚪ Chưa chọn video")
-                self.lbl_cache_badge.setStyleSheet("background-color: #1E293B; color: #94A3B8; border: 1px solid #334155; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;")
+                self.lbl_cache_badge.setStyleSheet("background-color: #031e22; color: #39c1d3; border: 1px solid #0c3d44; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;")
             return
 
         cache_mgr = ScanCacheManager()
@@ -2645,19 +2645,19 @@ class ChunDVCApp(QMainWindow):
             status_msg = f"🎉 ĐÃ CÓ SẴN CACHE (100% - {total}/{total} clips)! Dữ liệu đã sẵn sàng. Bạn có thể sang Bước 2 hoặc nạp JSON để xuất timeline ngay trong 0.1s!"
             status_style = "background-color: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid #10B981; border-radius: 6px; padding: 8px; font-weight: bold; font-size: 12px;"
             badge_txt = f"⚡ Cache: 100% ({total}/{total})"
-            badge_style = "background-color: #065F46; color: #34D399; border: 1px solid #10B981; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
+            badge_style = "background-color: #065F46; color: #34D399; border: 1px solid #10B981; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;"
             if hasattr(self, "btn_s1_skip_stage2"):
                 self.btn_s1_skip_stage2.setStyleSheet("background-color: #059669; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
         elif cached_count > 0:
             status_msg = f"⚡ Đã có cache một phần ({cached_count}/{total} clips). Bấm Quét để hoàn tất {total - cached_count} clips còn lại."
             status_style = "background-color: rgba(245, 158, 11, 0.15); color: #FBBF24; border: 1px solid #F59E0B; border-radius: 6px; padding: 8px; font-size: 12px;"
             badge_txt = f"⚡ Cache: {cached_count}/{total}"
-            badge_style = "background-color: #78350F; color: #FBBF24; border: 1px solid #F59E0B; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
+            badge_style = "background-color: #78350F; color: #FBBF24; border: 1px solid #F59E0B; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;"
         else:
             status_msg = f"🔍 Chưa có Cache ({total} clips). Hãy bấm nút 'Bắt đầu quét' bên dưới để nhận diện lời thoại 1 lần duy nhất."
-            status_style = "background-color: rgba(56, 189, 248, 0.1); color: #38BDF8; border: 1px solid #0284C7; border-radius: 6px; padding: 8px; font-size: 12px;"
+            status_style = "background-color: rgba(56, 189, 248, 0.1); color: #3dcee1; border: 1px solid #2c9dac; border-radius: 6px; padding: 8px; font-size: 12px;"
             badge_txt = f"🔍 Chưa có Cache ({total} clips)"
-            badge_style = "background-color: #1E293B; color: #38BDF8; border: 1px solid #334155; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
+            badge_style = "background-color: #031e22; color: #3dcee1; border: 1px solid #0c3d44; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;"
 
         if hasattr(self, "lbl_s1_cache_status"):
             self.lbl_s1_cache_status.setText(status_msg)
@@ -3279,12 +3279,12 @@ class ChunDVCApp(QMainWindow):
             self.btn_run.setText("⏹ DỪNG LẠI (STOP / CANCEL)")
             self.btn_run.setStyleSheet("""
                 QPushButton#btn_run {
-                    background-color: #1E293B;
-                    color: #64748B;
+                    background-color: #031e22;
+                    color: #1e737e;
                     padding: 10px;
                     border-radius: 6px;
                     font-weight: bold;
-                    border: 1px solid #334155;
+                    border: 1px solid #0c3d44;
                 }
             """)
 
@@ -3301,10 +3301,10 @@ class ChunDVCApp(QMainWindow):
             if hasattr(self, "btn_stage_1"):
                 self.btn_stage_1.setStyleSheet("""
                     QPushButton {
-                        background-color: #0284C7;
+                        background-color: #2c9dac;
                         color: white;
                         font-weight: bold;
-                        border: 2px solid #38BDF8;
+                        border: 2px solid #3dcee1;
                         border-radius: 6px;
                         padding: 8px 12px;
                         font-size: 12px;
@@ -3313,15 +3313,15 @@ class ChunDVCApp(QMainWindow):
             if hasattr(self, "btn_stage_2"):
                 self.btn_stage_2.setStyleSheet("""
                     QPushButton {
-                        background-color: #1E293B;
-                        color: #94A3B8;
-                        border: 1px solid #334155;
+                        background-color: #031e22;
+                        color: #39c1d3;
+                        border: 1px solid #0c3d44;
                         border-radius: 6px;
                         padding: 8px 12px;
                         font-size: 12px;
                     }
                     QPushButton:hover {
-                        background-color: #334155;
+                        background-color: #0c3d44;
                         color: #E2E8F0;
                     }
                 """)
@@ -3335,15 +3335,15 @@ class ChunDVCApp(QMainWindow):
             if hasattr(self, "btn_stage_1"):
                 self.btn_stage_1.setStyleSheet("""
                     QPushButton {
-                        background-color: #1E293B;
-                        color: #94A3B8;
-                        border: 1px solid #334155;
+                        background-color: #031e22;
+                        color: #39c1d3;
+                        border: 1px solid #0c3d44;
                         border-radius: 6px;
                         padding: 8px 12px;
                         font-size: 12px;
                     }
                     QPushButton:hover {
-                        background-color: #334155;
+                        background-color: #0c3d44;
                         color: #E2E8F0;
                     }
                 """)

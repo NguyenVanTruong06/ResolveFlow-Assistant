@@ -91,8 +91,8 @@ class AssetCard(QFrame):
         cat_str = self.preset.category.upper() if hasattr(self.preset, 'category') else "EFFECT"
         cat_badge = QLabel(cat_str)
         cat_badge.setStyleSheet("""
-            background-color: #1E293B; border: 1px solid #334155;
-            color: #38BDF8; font-size: 9px; font-weight: bold;
+            background-color: #031e22; border: 1px solid #0c3d44;
+            color: #3dcee1; font-size: 9px; font-weight: bold;
             padding: 2px 6px; border-radius: 4px;
         """)
 
@@ -105,7 +105,7 @@ class AssetCard(QFrame):
         self.preview_box.preset_getter = lambda: self.preset
         self.preview_box.sample_text_getter = self.sample_text_func
         self.preview_box.setFixedHeight(60)
-        self.preview_box.setStyleSheet("background-color: #0A0D14; border: 1.5px dashed #2C354D; border-radius: 6px;")
+        self.preview_box.setStyleSheet("background-color: #021416; border: 1.5px dashed #0c3d44; border-radius: 6px;")
         
         if isinstance(self.preset, TextStylePreset):
             self.preview_box.setText("T: Text+ Macro\n(Kéo thả)")
@@ -117,9 +117,9 @@ class AssetCard(QFrame):
     def set_selected(self, selected: bool):
         self.is_selected = selected
         if selected:
-            self.setStyleSheet("QFrame.asset_card { background-color: #1A2436; border: 2px solid #3B82F6; border-radius: 10px; }")
+            self.setStyleSheet("QFrame.asset_card { background-color: #05282d; border: 2px solid #33b0c1; border-radius: 10px; }")
         else:
-            self.setStyleSheet("QFrame.asset_card { background-color: #12151F; border: 1.5px solid #232A3B; border-radius: 10px; }")
+            self.setStyleSheet("QFrame.asset_card { background-color: #031e22; border: 1.5px solid #0c3d44; border-radius: 10px; }")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -168,7 +168,7 @@ class TabAssets(QWidget):
 
         self.preview_lbl = DraggableAssetLabel()
         self.preview_lbl.setFixedHeight(50)
-        self.preview_lbl.setStyleSheet("background-color: #0B0E14; border: 1px dashed #2B354D; border-radius: 4px;")
+        self.preview_lbl.setStyleSheet("background-color: #021416; border: 1px dashed #0c3d44; border-radius: 4px;")
         form_p.addRow("Master Kéo-Thả:", self.preview_lbl)
         
         self.btn_install_presets = QPushButton("📥 Cài Đặt Toàn Bộ Tài Nguyên (Library)")
@@ -196,10 +196,10 @@ class TabAssets(QWidget):
         h_split = QHBoxLayout()
         sidebar = QFrame()
         sidebar.setFixedWidth(180)
-        sidebar.setStyleSheet("background-color: #0E1726; border-right: 1px solid #1E2638;")
+        sidebar.setStyleSheet("background-color: #021416; border-right: 1px solid #0c3d44;")
         side_layout = QVBoxLayout(sidebar)
         lbl_nav = QLabel("📂 DANH MỤC")
-        lbl_nav.setStyleSheet("color: #94A3B8; font-weight: bold; padding: 10px 0;")
+        lbl_nav.setStyleSheet("color: #39c1d3; font-weight: bold; padding: 10px 0;")
         side_layout.addWidget(lbl_nav)
         
         self.nav_btns = {}
@@ -208,8 +208,8 @@ class TabAssets(QWidget):
             btn = QPushButton(cname)
             btn.setCheckable(True)
             btn.setStyleSheet("""
-                QPushButton { text-align: left; padding: 8px; border: none; color: #CBD5E1; }
-                QPushButton:checked { background-color: #1E293B; color: #38BDF8; font-weight: bold; border-left: 3px solid #38BDF8; }
+                QPushButton { text-align: left; padding: 8px; border: none; color: #d5f7fe; }
+                QPushButton:checked { background-color: #031e22; color: #3dcee1; font-weight: bold; border-left: 3px solid #3dcee1; }
             """)
             btn.clicked.connect(lambda _, c=cid: self._filter_by_nav(c))
             side_layout.addWidget(btn)
