@@ -1494,7 +1494,6 @@ class AutoWindow(QMainWindow):
         lbl_drop_hint.setAlignment(Qt.AlignCenter)
         lbl_drop_hint.setStyleSheet("font-size: 11px; color: #71717a;")
         drop_layout.addWidget(lbl_drop_hint)
-        self.drop_frame.mousePressEvent = lambda e: self._browse_folder()
         l_vbox.addWidget(self.drop_frame)
 
         # 4 Nút Nguồn 2x2
@@ -1531,20 +1530,20 @@ class AutoWindow(QMainWindow):
 
         proj_top = QHBoxLayout()
         lbl_p_icon = QLabel("📁")
-        self.lbl_proj_name = QLabel("ResolveFlow_H264")
-        self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #f4f4f5; font-size: 12.5px;")
+        self.lbl_proj_name = QLabel("Chưa chọn dự án")
+        self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #a1a1aa; font-size: 12.5px;")
         proj_top.addWidget(lbl_p_icon)
         proj_top.addWidget(self.lbl_proj_name, stretch=1)
         proj_layout.addLayout(proj_top)
 
-        self.lbl_proj_meta = QLabel("67 clip · 3h 30m footage")
+        self.lbl_proj_meta = QLabel("Chọn thư mục hoặc tệp video bên trên")
         self.lbl_proj_meta.setStyleSheet("color: #71717a; font-size: 11px;")
         proj_layout.addWidget(self.lbl_proj_meta)
 
         cache_row = QHBoxLayout()
         lbl_c_title = QLabel("Bộ nhớ đệm")
         lbl_c_title.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
-        self.lbl_cache_badge = QLabel("52 / 67 clip")
+        self.lbl_cache_badge = QLabel("0 / 0 clip")
         self.lbl_cache_badge.setStyleSheet("color: #22d3ee; font-size: 11.5px; font-weight: bold;")
         cache_row.addWidget(lbl_c_title)
         cache_row.addStretch()
@@ -1554,7 +1553,7 @@ class AutoWindow(QMainWindow):
         self.cache_progress_bar = QProgressBar()
         self.cache_progress_bar.setFixedHeight(5)
         self.cache_progress_bar.setTextVisible(False)
-        self.cache_progress_bar.setValue(78)
+        self.cache_progress_bar.setValue(0)
         self.cache_progress_bar.setStyleSheet("""
             QProgressBar {
                 background-color: #27272a;
@@ -1619,16 +1618,7 @@ class AutoWindow(QMainWindow):
                 color: #fff;
             }
         """)
-        sample_chaps = [
-            ("● 01_Cay_Tung_Bu", "7 clip · 5:26"),
-            ("● 02_Cau_Khi", "3 clip · 11:26"),
-            ("● 03_Mua_Ve_Pha", "8 clip · 12:33"),
-            ("● 04_Mua_Do_Nhau", "5 clip · 5:59"),
-            ("● 05_Dap_Xe_Mua", "5 clip · 9:32"),
-            ("● 06_Nhau", "5 clip · 2h 39m")
-        ]
-        for name, dur in sample_chaps:
-            self.list_chapters.addItem(f"{name}  ({dur})")
+        self.list_chapters.addItem("(Chưa có danh sách chương)")
         l_vbox.addWidget(self.list_chapters, stretch=1)
 
         workspace_layout.addWidget(a_left)
@@ -2928,6 +2918,15 @@ class AutoWindow(QMainWindow):
             else:
                 self.lbl_file.setText("; ".join(file_paths))
                 self.txt_console.appendPlainText(f"📁 Đã chọn hàng loạt {len(file_paths)} tệp video.")
+            if hasattr(self, "lbl_proj_name"):
+                self.lbl_proj_name.setText(os.path.basename(os.path.dirname(file_paths[0])) or "Dự án lẻ")
+                self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #f4f4f5; font-size: 12.5px;")
+            if hasattr(self, "lbl_proj_meta"):
+                self.lbl_proj_meta.setText(f"{len(file_paths)} tệp video")
+            if hasattr(self, "list_chapters"):
+                self.list_chapters.clear()
+                for fp in file_paths:
+                    self.list_chapters.addItem(f"● {os.path.basename(fp)}")
             self._update_default_chars_limit(file_paths[0])
             self._suggest_whisper_model_for_file(file_paths[0])
             self._check_project_cache_status()
@@ -2947,6 +2946,15 @@ class AutoWindow(QMainWindow):
         
         self.selected_files = proj.all_video_paths
         self.lbl_file.setText(f"📂 [{proj.root_name}] {len(proj.groups)} nhóm • {proj.total_files} video ({proj.root_path})")
+        if hasattr(self, "lbl_proj_name"):
+            self.lbl_proj_name.setText(proj.root_name)
+            self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #f4f4f5; font-size: 12.5px;")
+        if hasattr(self, "lbl_proj_meta"):
+            self.lbl_proj_meta.setText(f"{len(proj.groups)} nhóm · {proj.total_files} video")
+        if hasattr(self, "list_chapters"):
+            self.list_chapters.clear()
+            for grp in proj.groups:
+                self.list_chapters.addItem(f"● {grp.name}  ({len(grp.video_paths)} clips)")
         self.txt_console.appendPlainText("\n" + "="*60)
         self.txt_console.appendPlainText("🚀 [CẤU TRÚC THƯ MỤC DỰ ÁN PHÂN TẦNG ĐÃ NẠP]")
         self.txt_console.appendPlainText(proj.summary_tree())
@@ -3041,6 +3049,11 @@ class AutoWindow(QMainWindow):
             status_msg = f"🎉 ĐÃ CÓ SẴN CACHE (100% - {total}/{total} clips)! Dữ liệu đã sẵn sàng. Bạn có thể sang Bước 2 hoặc nạp JSON để xuất timeline ngay trong 0.1s!"
             status_style = "background-color: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid #10B981; border-radius: 6px; padding: 8px; font-weight: bold; font-size: 12px;"
             badge_txt = f"⚡ Cache: 100% ({total}/{total})"
+        if hasattr(self, "lbl_cache_badge"):
+            self.lbl_cache_badge.setText(f"{cached_count} / {total} clip")
+        if hasattr(self, "cache_progress_bar"):
+            p = int(cached_count / total * 100) if total else 0
+            self.cache_progress_bar.setValue(p)
             badge_style = "background-color: #065F46; color: #34D399; border: 1px solid #10B981; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;"
             if hasattr(self, "btn_s1_skip_stage2"):
                 self.btn_s1_skip_stage2.setStyleSheet("background-color: #059669; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
@@ -3616,6 +3629,13 @@ class AutoWindow(QMainWindow):
             pass
 
     def _toggle_pipeline_execution(self):
+        # Nếu người dùng đã dán sẵn JSON kịch bản vào ô txt_json_input, ưu tiên chạy từ kịch bản này!
+        if hasattr(self, "txt_json_input"):
+            json_text = self.txt_json_input.toPlainText().strip()
+            if json_text.startswith("{") and ("timeline" in json_text or "timeline_segments" in json_text):
+                self.txt_console.appendPlainText("🚀 [Phát hiện Kịch bản JSON] Tự động áp dụng kịch bản và xuất Timeline...")
+                self._apply_json_text_plan(json_text)
+                return
         if self.is_processing:
             self._stop_pipeline()
         else:
