@@ -4,7 +4,7 @@ import json
 import tempfile
 import uuid
 import traceback
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Sequence, Tuple
 
 from src.core.validator import DryRunValidator
 from src.core.transcriber import ModelConfig, ResolveTranscriber
@@ -15,10 +15,10 @@ from src.core.resolve_api import (
     map_time_with_speedup_segments, map_subtitles_with_speedup_segments,
     is_vertical_video
 )
-from src.core.autocut import AudioCutConfig, SilenceDetector, EDLGenerator, get_media_metadata
+from src.core.autocut import AudioCutConfig, SilenceDetector, EDLGenerator, get_media_metadata, seconds_to_timecode
 from src.core.ai_director import AIDirector, AIDirectorConfig, ProposedSegment
 from src.core.vision_reframer import VisionReframer, ReframeConfig
-from src.core.broll_sfx import BRollAnalyzer, SFXEngine
+from src.core.broll_sfx import BRollAnalyzer, SFXEngine, GlobalAssetPool
 from src.core.vlog_hook import VlogHookGenerator, HookSegment
 from src.core.audio import AudioExtractor
 from src.core.fcpxml_generator import FCPXMLGenerator
@@ -27,11 +27,21 @@ from src.core.text_preset import TextStylePreset, PresetManager, TextPreviewRend
 from src.core.recipe_manager import Recipe, RecipeManager
 from src.core.cache_manager import ScanCacheManager, compute_file_checksum
 from src.core.proxy_manager import ProxyManager, ParallelScanPipeline, suggest_whisper_model
-from src.core.review_state import ReviewState
+from src.core.review_state import ReviewState, StoryReviewState
+from src.core.story_arranger import ROLE_LABELS, ROLE_COLORS, Arrangement, ArrangedItem, Block
+from src.core.transcript_quality import drop_low_confidence_subs
 from src.core.scene_activity import compute_visual_activity
 from src.core.edit_policy import POLICIES, classify_video, apply_edit_policy
 from src.core import story_planner
 from src.core.audio_normalizer import AudioNormalizer, LOUDNESS_PRESETS, LoudnessTarget
+from src.core.marketing_engine import MarketingViralPackGenerator
+from src.core.folder_scanner import ProjectFolderStructure, FolderGroup, scan_project_folder, collect_video_paths
+from src.core.cloud_downloader import GoogleDriveDownloader, parse_google_drive_url
+from src.core.story_copilot import StoryCopilot, CopilotDirectorPlan
+from src.ui.widgets.drive_dialog import GoogleDriveImportDialog
+from src.ui.widgets.copilot_dialog import StoryCopilotDialog
+from src.ui.widgets.floating_bubble import FloatingBubbleWidget
+from src.ui.widgets.section_card import SectionCard
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -44,7 +54,7 @@ from PySide6.QtCore import QThread, Signal as pyqtSignal, Slot as pyqtSlot, Qt
 from PySide6.QtGui import QFont, QColor, QPixmap, QIcon, QShortcut, QKeySequence
 
 from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS, MODULE_DESCRIPTIONS, get_application_stylesheet
-from src.ui.tabs import TabAutoCut, TabTitles, TabSFX, TabExport
+from src.ui.tabs import TabCopilot, TabAutoCut, TabAssets, TabSFX, TabExport
 
 class PreviewDialog(QDialog):
     """Hộp thoại hiển thị xem trước nhanh (Quick Preview) kiểu chữ phụ đề Text+."""
@@ -83,6 +93,54 @@ class PreviewDialog(QDialog):
         btn_close = QPushButton("Đóng (Close)")
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
+
+
+class LLMDirectorWorker(QThread):
+    """
+    Worker Thread để chạy gọi Local Ollama hoặc Cloud API ngầm
+    tránh làm đơ (freeze) giao diện người dùng.
+    """
+    log_signal = pyqtSignal(str)
+    finished_signal = pyqtSignal(bool, str, str)  # success, message, raw_json
+
+    def __init__(
+        self,
+        engine_mode: str,  # "ollama" or "cloud"
+        prompt: str,
+        model: str = "qwen2.5:7b-instruct",
+        endpoint: str = "http://localhost:11434",
+        api_key: str = "",
+        provider: str = "deepseek",
+        parent=None
+    ):
+        super().__init__(parent)
+        self.engine_mode = engine_mode
+        self.prompt = prompt
+        self.model = model
+        self.endpoint = endpoint
+        self.api_key = api_key
+        self.provider = provider
+
+    def run(self):
+        try:
+            if self.engine_mode == "ollama":
+                self.log_signal.emit(f"🤖 [Local AI] Đang gửi dữ liệu sang Ollama ({self.model}) tại {self.endpoint}...")
+                plan, raw_json = StoryCopilot.run_ollama_inference(
+                    prompt=self.prompt,
+                    model=self.model,
+                    endpoint=self.endpoint
+                )
+            else:
+                self.log_signal.emit(f"⚡ [Cloud AI] Đang gửi dữ liệu sang {self.provider.upper()} API ({self.model})...")
+                plan, raw_json = StoryCopilot.run_cloud_api_inference(
+                    prompt=self.prompt,
+                    api_key=self.api_key,
+                    provider=self.provider,
+                    model=self.model
+                )
+            self.finished_signal.emit(True, "Thành công!", raw_json)
+        except Exception as e:
+            self.finished_signal.emit(False, str(e), "")
 
 
 class PipelineWorker(QThread):
@@ -136,7 +194,10 @@ class PipelineWorker(QThread):
         vlog_hook_total=20.0,
         story_intent="keep",
         story_target=60.0,
-        video_type="auto"
+        video_type="auto",
+        hide_weak_subs=True,
+        story_arrangement_override=None,
+        project_structure=None
     ):
         super().__init__()
         self.video_paths = video_paths
@@ -177,11 +238,16 @@ class PipelineWorker(QThread):
         self.vlog_hook_total = vlog_hook_total
         self.story_intent = story_intent
         self.video_type = video_type
+        self.hide_weak_subs = hide_weak_subs
         self.story_target = story_target
+        self.story_arrangement_override = story_arrangement_override
+        self.project_structure = project_structure
         
         self.proposed_segments = []
         self.clip_data_out_cache = []
         self.validation_warnings = []
+        self.story_blocks_out = []
+        self.story_arrangement_out = None
         
         # Cờ kiểm soát ngắt luồng an toàn
         self.is_interrupted = False
@@ -223,8 +289,28 @@ class PipelineWorker(QThread):
                         self.log_signal.emit(f"   - {warn}")
                 self.step_signal.emit("validate", "done")
 
+            cache_mgr = ScanCacheManager()
+
             if self.phase == 2:
-                clip_data_list = self.clip_data_cache or []
+                clip_data_list = list(self.clip_data_cache) if self.clip_data_cache else []
+                if not clip_data_list and self.use_cache:
+                    for vp in self.video_paths:
+                        cached = cache_mgr.get_cached_scan(vp, self.model_size, self.language)
+                        if cached:
+                            raw_subs = cached.get("raw_subtitles", [])
+                            dur = cached.get("clip_dur", 0.0)
+                            clip_subs = split_subtitles(raw_subs, limit=self.split_limit, mode=self.split_mode)
+                            clip_data_list.append({
+                                "video_path": vp,
+                                "clip_dur": dur,
+                                "raw_subtitles": raw_subs,
+                                "clip_subs": clip_subs,
+                                "silence_keep_intervals": cached.get("silence_keep_intervals", [(0.0, dur)]),
+                                "speedup_segments": cached.get("speedup_segments", []),
+                                "cut_segments": cached.get("cut_segments", []),
+                                "visual_activity": cached.get("visual_activity", None),
+                                "audio_energy_db": cached.get("audio_energy_db", None)
+                            })
                 self.log_signal.emit(f"🎬 Khôi phục dữ liệu cache từ Phase 1 cho {len(clip_data_list)} clips...")
             else:
                 clip_data_list = []
@@ -313,13 +399,33 @@ class PipelineWorker(QThread):
             uncut_cumulative_seconds = 0.0
 
             first_video = self.video_paths[0]
-            base_dir = os.path.dirname(first_video)
+            if self.project_structure and getattr(self.project_structure, "root_path", None):
+                project_root_dir = self.project_structure.root_path
+            else:
+                try:
+                    common = os.path.commonpath([os.path.abspath(p) for p in self.video_paths])
+                    project_root_dir = common if os.path.isdir(common) else os.path.dirname(common)
+                except Exception:
+                    project_root_dir = os.path.dirname(os.path.abspath(first_video))
+
+            base_dir = project_root_dir
+            output_dir = os.path.join(project_root_dir, "_TIMELINE_IMPORT")
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Đăng ký tài nguyên dự án và toàn cục
+            asset_pool = GlobalAssetPool.get_instance()
+            n_pm, n_ps = asset_pool.register_project_assets(project_root_dir)
+            if n_pm > 0 or n_ps > 0:
+                self.log_signal.emit(f"📦 [Project Assets Pool] Đã nạp {n_pm} video B-roll/Meme và {n_ps} file âm thanh SFX từ thư mục dự án.")
+
             try:
                 fps = EDLGenerator.get_video_fps(first_video)
             except Exception:
                 fps = 30.0
             
-            if len(self.video_paths) == 1:
+            if self.project_structure and getattr(self.project_structure, "root_name", None):
+                stamped_name = f"ResolveFlow_{self.project_structure.root_name}"
+            elif len(self.video_paths) == 1:
                 stamped_name = os.path.splitext(os.path.basename(first_video))[0]
             else:
                 stamped_name = f"ResolveFlow_Merged_{len(self.video_paths)}clips"
@@ -409,7 +515,20 @@ class PipelineWorker(QThread):
                         if visual_activity is None:
                             self.log_signal.emit("   ⚠ Không đo được chuyển động hình ảnh (kiểm tra FFmpeg). Bỏ qua bảo vệ cảnh quay.")
 
-                    if self.run_cut:
+                    # Kiểm tra xem clip có thuộc nhóm B-Roll của dự án hay không
+                    is_clip_broll = False
+                    if self.project_structure and getattr(self.project_structure, "groups", None):
+                        for grp in self.project_structure.groups:
+                            if grp.is_broll and any(os.path.normcase(os.path.abspath(video_path)) == os.path.normcase(os.path.abspath(gv)) for gv in grp.video_paths):
+                                is_clip_broll = True
+                                break
+
+                    if is_clip_broll:
+                        self.log_signal.emit("   🎥 [B-Roll / Footage Group] Nhận diện clip là cảnh chèn minh họa (B-Roll), bảo tồn nguyên vẹn toàn cảnh.")
+                        from src.core.autocut import CutSegment
+                        cut_segments = [CutSegment(start=0.0, end=clip_dur, action="keep", speed=1.0)]
+                        keep_intervals = [(0.0, clip_dur)]
+                    elif self.run_cut:
                         if not os.path.exists(temp_wav) or os.path.getsize(temp_wav) == 0:
                             AudioExtractor.extract_audio(video_path, temp_wav)
 
@@ -497,13 +616,27 @@ class PipelineWorker(QThread):
                             cut_segments = [CutSegment(start=0.0, end=clip_dur, action="keep", speed=1.0)]
                             keep_intervals = [(0.0, clip_dur)]
 
+                    # Tính audio_energy_db nếu có temp_wav
+                    energy_list = None
+                    if os.path.exists(temp_wav):
+                        try:
+                            energy_db_arr = VlogHookGenerator.audio_energy_db(temp_wav)
+                            if energy_db_arr is not None:
+                                energy_list = energy_db_arr.tolist()
+                        except Exception:
+                            energy_list = None
+
                     # Lưu vào Cache nếu vừa mới quét
                     if self.use_cache and not cached_data and needs_transcription:
                         cache_mgr.save_scan_result(
                             file_path=video_path,
                             scan_data={
                                 "raw_subtitles": raw_subtitles,
-                                "clip_dur": clip_dur
+                                "clip_dur": clip_dur,
+                                "visual_activity": visual_activity.tolist() if visual_activity is not None else None,
+                                "audio_energy_db": energy_list,
+                                "silence_keep_intervals": keep_intervals,
+                                "speedup_segments": speedup_segments
                             },
                             model_size=self.model_size,
                             language=self.language
@@ -518,7 +651,8 @@ class PipelineWorker(QThread):
                         "silence_keep_intervals": keep_intervals,
                         "speedup_segments": speedup_segments,
                         "cut_segments": cut_segments,
-                        "visual_activity": visual_activity.tolist() if visual_activity is not None else None
+                        "visual_activity": visual_activity.tolist() if visual_activity is not None else (cached_data.get("visual_activity") if cached_data else None),
+                        "audio_energy_db": energy_list if energy_list is not None else (cached_data.get("audio_energy_db") if cached_data else None)
                     })
 
                     if self.enable_loudnorm:
@@ -527,9 +661,9 @@ class PipelineWorker(QThread):
                         self.log_signal.emit(f"   🎚 [Loudness 2-Pass] Chuẩn hóa âm lượng EBU R128 / YouTube ({self.loudnorm_preset})...")
                         norm_wav = os.path.normpath(os.path.join(base_dir, f"{clip_base_name}_Normalized.wav"))
                         norm_metrics = AudioNormalizer.normalize_audio_file(
-                            input_audio=temp_wav,
-                            output_audio=norm_wav,
-                            target=self.loudnorm_preset
+                            input_audio_path=temp_wav,
+                            output_audio_path=norm_wav,
+                            target=LOUDNESS_PRESETS.get(self.loudnorm_preset, LOUDNESS_PRESETS["youtube_tiktok"])
                         )
                         if norm_metrics:
                             audit_reporter.record_audio_normalization(
@@ -647,16 +781,21 @@ class PipelineWorker(QThread):
                 # Tín hiệu âm thanh + chuyển động của clip: dùng chung cho Vlog Hook và Story Arranger
                 if self.enable_vlog_hook or self.story_intent != "keep":
                     import numpy as np
-                    temp_wav = os.path.normpath(os.path.join(temp_audio_dir, f"hook_{uuid.uuid4().hex[:8]}.wav"))
-                    temp_files_to_clean.append(temp_wav)
-                    AudioExtractor.extract_audio(video_path, temp_wav)
-                    energy_db = VlogHookGenerator.audio_energy_db(temp_wav)
                     act_list = cdata.get("visual_activity")
                     act_arr = np.asarray(act_list, dtype=np.float32) if act_list else None
-                    if energy_db is not None:
-                        arrange_energy[video_path] = energy_db
                     if act_arr is not None:
                         arrange_activity[video_path] = act_arr
+
+                    energy_list = cdata.get("audio_energy_db")
+                    if energy_list is not None:
+                        energy_db = np.asarray(energy_list, dtype=np.float32)
+                    else:
+                        temp_wav = os.path.normpath(os.path.join(temp_audio_dir, f"hook_{uuid.uuid4().hex[:8]}.wav"))
+                        temp_files_to_clean.append(temp_wav)
+                        AudioExtractor.extract_audio(video_path, temp_wav)
+                        energy_db = VlogHookGenerator.audio_energy_db(temp_wav)
+                    if energy_db is not None:
+                        arrange_energy[video_path] = energy_db
 
                 if self.enable_vlog_hook:
                     cands = VlogHookGenerator.find_moment_candidates(
@@ -671,12 +810,6 @@ class PipelineWorker(QThread):
                     hook_pool.extend(cands)
                     hook_video_order.append(video_path)
                     self.log_signal.emit(f"   ✨ [Vlog Hook] Đã đọc toàn clip, tìm được {len(cands)} khoảnh khắc ứng viên.")
-                if self.enable_vlog_hook or self.story_intent != "keep":
-                    try:
-                        if os.path.exists(temp_wav):
-                            os.remove(temp_wav)
-                    except Exception:
-                        pass
 
                 # Áp dụng Đạo diễn AI
                 ai_punch_events = []
@@ -795,7 +928,12 @@ class PipelineWorker(QThread):
 
                     cumulative_record_seconds = rec_end
 
-                mapped_clip_subs = map_subtitles_to_timeline(clip_subs, cut_segments, clip_start_rec)
+                display_subs = clip_subs
+                if self.hide_weak_subs:
+                    display_subs, hidden = drop_low_confidence_subs(clip_subs, 0.35)
+                    if hidden:
+                        self.log_signal.emit(f"   💬 Ẩn phụ đề của {hidden} câu Whisper không chắc chữ (hình và tiếng vẫn giữ nguyên).")
+                mapped_clip_subs = map_subtitles_to_timeline(display_subs, cut_segments, clip_start_rec)
                 merged_cut_subtitles.extend(mapped_clip_subs)
 
                 # Record clip audit
@@ -845,6 +983,7 @@ class PipelineWorker(QThread):
             if self.enable_vlog_hook and vlog_hook_segments:
                 output_teaser_edl = os.path.join(base_dir, f"{stamped_name}_Timeline_Intro_Teaser.edl")
                 output_teaser_fcpxml = os.path.join(base_dir, f"{stamped_name}_Timeline_Intro_Teaser.fcpxml")
+                output_teaser_fcp7xml = os.path.join(base_dir, f"{stamped_name}_Timeline_Intro_Teaser.xml")
                 teaser_timeline_name = f"{stamped_name}_Timeline_Intro_Teaser"
                 
                 self.log_signal.emit(f"\n🎬 [Vlog Hook Generator] Đang tạo Timeline Highlight Teaser ({len(vlog_hook_segments)} clips)...")
@@ -878,7 +1017,26 @@ class PipelineWorker(QThread):
                     font_size=self.font_size,
                     preset=self.text_preset_id
                 )
-                self.log_signal.emit(f"   👉 Tệp FCPXML Teaser (Khuyên dùng): {os.path.basename(output_teaser_fcpxml)}")
+                FCPXMLGenerator.generate_fcp7_xml(
+                    events=teaser_events,
+                    output_xml_path=output_teaser_fcp7xml,
+                    timeline_name=teaser_timeline_name,
+                    fps=fps,
+                    aspect_ratio=target_aspect
+                )
+
+                # Đồng bộ bản sao sang output_dir (_TIMELINE_IMPORT)
+                if output_dir != base_dir:
+                    try:
+                        import shutil
+                        shutil.copy2(output_teaser_fcpxml, os.path.join(output_dir, os.path.basename(output_teaser_fcpxml)))
+                        shutil.copy2(output_teaser_edl, os.path.join(output_dir, os.path.basename(output_teaser_edl)))
+                        shutil.copy2(output_teaser_fcp7xml, os.path.join(output_dir, os.path.basename(output_teaser_fcp7xml)))
+                    except Exception:
+                        pass
+
+                self.log_signal.emit(f"   👉 Tệp FCP7 XML Teaser (DaVinci Windows): {os.path.basename(output_teaser_fcp7xml)}")
+                self.log_signal.emit(f"   👉 Tệp FCPXML Teaser: {os.path.basename(output_teaser_fcpxml)}")
                 self.log_signal.emit(f"   👉 Tệp EDL Teaser: {os.path.basename(output_teaser_edl)}")
                 
                 resolve_auto.import_edl_to_timeline(
@@ -887,7 +1045,8 @@ class PipelineWorker(QThread):
                     timeline_name=teaser_timeline_name,
                     log_callback=self.log_signal.emit
                 )
-                audit_reporter.add_output_file("Timeline Teaser (FCPXML)", output_teaser_fcpxml, "Timeline 10–30s FCPXML tự động link media")
+                audit_reporter.add_output_file("Timeline Teaser (FCP7 XML - Windows)", output_teaser_fcp7xml, "Timeline 10–30s FCP7 XML chuẩn DaVinci Resolve Windows")
+                audit_reporter.add_output_file("Timeline Teaser (FCPXML)", output_teaser_fcpxml, "Timeline 10–30s FCPXML v1.9")
                 audit_reporter.add_output_file("Timeline Teaser (EDL)", output_teaser_edl, "Timeline 10–30s định dạng EDL CMX3600")
                 audit_reporter.add_timeline(teaser_timeline_name, "Timeline Teaser/Hook mở đầu Vlog (10-30s)")
 
@@ -895,10 +1054,12 @@ class PipelineWorker(QThread):
                 if self.run_cut:
                     timeline_name = f"{stamped_name}_Timeline_CatLoc"
                     output_timeline_fcpxml = os.path.join(base_dir, f"{stamped_name}_Timeline_CatLoc.fcpxml")
+                    output_timeline_fcp7xml = os.path.join(base_dir, f"{stamped_name}_Timeline_CatLoc.xml")
                     output_edl = os.path.join(base_dir, f"{stamped_name}_Timeline_CatLoc.edl")
                 else:
                     timeline_name = f"{stamped_name}_Timeline_Goc_CoSub"
                     output_timeline_fcpxml = os.path.join(base_dir, f"{stamped_name}_Timeline_Goc_CoSub.fcpxml")
+                    output_timeline_fcp7xml = os.path.join(base_dir, f"{stamped_name}_Timeline_Goc_CoSub.xml")
                     output_edl = os.path.join(base_dir, f"{stamped_name}_Timeline_Goc_CoSub.edl")
 
                 subs_to_embed = merged_cut_subtitles if self.enable_subtitles else None
@@ -915,9 +1076,33 @@ class PipelineWorker(QThread):
                     preset=self.text_preset_id
                 )
 
+                FCPXMLGenerator.generate_fcp7_xml(
+                    events=merged_edl_events,
+                    output_xml_path=output_timeline_fcp7xml,
+                    timeline_name=timeline_name,
+                    fps=fps,
+                    aspect_ratio=target_aspect,
+                    broll_inserts=all_broll_cues if self.enable_broll else None,
+                    sfx_inserts=all_sfx_cues if self.enable_sfx else None,
+                    markers=merged_markers
+                )
+
                 EDLGenerator.create_multi_clip_edl(merged_edl_events, output_edl, markers=merged_markers)
+
+                # Đồng bộ sang output_dir (_TIMELINE_IMPORT)
+                if output_dir != base_dir:
+                    try:
+                        import shutil
+                        shutil.copy2(output_timeline_fcpxml, os.path.join(output_dir, os.path.basename(output_timeline_fcpxml)))
+                        shutil.copy2(output_timeline_fcp7xml, os.path.join(output_dir, os.path.basename(output_timeline_fcp7xml)))
+                        shutil.copy2(output_edl, os.path.join(output_dir, os.path.basename(output_edl)))
+                    except Exception:
+                        pass
                 
-                self.log_signal.emit(f"\n📝 Đang tạo tệp Timeline DaVinci Resolve:\n      👉 FCPXML (Khuyên dùng): {os.path.abspath(output_timeline_fcpxml)}\n      👉 EDL (Dự phòng): {os.path.abspath(output_edl)}")
+                self.log_signal.emit(f"\n📁 ĐÃ TẠO TẤT CẢ FILE TIMELINE TẠI THƯ MỤC IMPORT:\n      📂 {os.path.abspath(output_dir)}")
+                self.log_signal.emit(f"      👉 FCP7 Multi-Track XML (DaVinci Windows): {os.path.abspath(output_timeline_fcp7xml)}")
+                self.log_signal.emit(f"      👉 Apple FCPXML v1.9: {os.path.abspath(output_timeline_fcpxml)}")
+                self.log_signal.emit(f"      👉 EDL CMX3600 (Dự phòng): {os.path.abspath(output_edl)}")
                 val_res = DryRunValidator.validate_fcpxml_integrity(
                     output_timeline_fcpxml,
                     expected_media_paths=self.video_paths,
@@ -937,10 +1122,12 @@ class PipelineWorker(QThread):
                 )
 
                 if self.run_cut:
+                    audit_reporter.add_output_file("Timeline Cắt Lọc (FCP7 XML - Windows)", output_timeline_fcp7xml, "Timeline chính FCP7 XML Multi-Track (V1, V2 B-Roll, A1/A2, A3 SFX)")
                     audit_reporter.add_output_file("Timeline Cắt Lọc (FCPXML - Khuyên Dùng)", output_timeline_fcpxml, "Timeline chính FCPXML v1.9 link media tự động tuyệt đối chính xác")
                     audit_reporter.add_output_file("Timeline Cắt Lọc (EDL)", output_edl, "Timeline chính đã lọc sạch khoảng lặng và tua nhanh")
                     audit_reporter.add_timeline(timeline_name, "Timeline chính đã biên tập âm thanh & thị giác")
                 else:
+                    audit_reporter.add_output_file("Timeline Gốc (FCP7 XML - Windows)", output_timeline_fcp7xml, "Timeline gốc FCP7 XML chứa video gốc và phụ đề")
                     audit_reporter.add_output_file("Timeline Gốc (FCPXML - Khuyên Dùng)", output_timeline_fcpxml, "Timeline gốc FCPXML v1.9 chứa video gốc và phụ đề")
                     audit_reporter.add_output_file("Timeline Gốc (EDL)", output_edl, "Timeline gốc đã link media")
                     audit_reporter.add_timeline(timeline_name, "Timeline video gốc tích hợp phụ đề")
@@ -959,6 +1146,14 @@ class PipelineWorker(QThread):
                         markers=merged_markers,
                         preset=self.text_preset_id
                     )
+
+                    if output_dir != base_dir:
+                        try:
+                            import shutil
+                            shutil.copy2(output_cut_srt, os.path.join(output_dir, os.path.basename(output_cut_srt)))
+                            shutil.copy2(output_cut_fcpxml, os.path.join(output_dir, os.path.basename(output_cut_fcpxml)))
+                        except Exception:
+                            pass
                     
                     if self.run_cut:
                         audit_reporter.add_output_file("Phụ đề Video Đã Cắt (SRT)", output_cut_srt, "Phụ đề chuẩn cho timeline đã qua cắt gọt")
@@ -993,6 +1188,21 @@ class PipelineWorker(QThread):
                         bf.write(f"    - Từ khóa: {bc.keyword}\n")
                         bf.write(f"    - Tìm kiếm: {bc.search_prompt}\n\n")
                 audit_reporter.add_output_file("Gợi ý B-Roll (TXT)", output_broll_file, "Danh sách từ khóa và mốc thời gian gợi ý chèn footage minh họa")
+                if output_dir != base_dir:
+                    try:
+                        import shutil
+                        shutil.copy2(output_broll_file, os.path.join(output_dir, os.path.basename(output_broll_file)))
+                    except Exception:
+                        pass
+                with open(output_broll_file, "w", encoding="utf-8") as bf:
+                    bf.write(f"DANH SÁCH GỢI Ý CẢNH MINH HỌA B-ROLL (TRACK VIDEO 2)\n")
+                    bf.write(f"Dự án: {stamped_name}\n")
+                    bf.write("="*60 + "\n")
+                    for bc_idx, bc in enumerate(all_broll_cues, 1):
+                        bf.write(f"{bc_idx:02d}. [{bc.start}s - {bc.end}s] ({bc.duration}s)\n")
+                        bf.write(f"    - Từ khóa: {bc.keyword}\n")
+                        bf.write(f"    - Tìm kiếm: {bc.search_prompt}\n\n")
+                audit_reporter.add_output_file("Gợi ý B-Roll (TXT)", output_broll_file, "Danh sách từ khóa và mốc thời gian gợi ý chèn footage minh họa")
 
             if self.enable_subtitles and self.run_cut:
                 output_orig_srt = os.path.join(base_dir, f"{stamped_name}_PhuDe_VideoGoc.srt")
@@ -1013,6 +1223,21 @@ class PipelineWorker(QThread):
             output_report_md = os.path.join(base_dir, f"{stamped_name}_BaoCao_NhatKyXuLy.md")
             audit_reporter.export_markdown_report(output_report_md)
             audit_reporter.add_output_file("Báo cáo Nhật ký Xử lý (MD)", output_report_md, "Thống kê chi tiết")
+
+            try:
+                subs_for_marketing = merged_cut_subtitles if merged_cut_subtitles else merged_orig_subtitles
+                if subs_for_marketing:
+                    viral_pack = MarketingViralPackGenerator.generate_viral_pack(
+                        project_name=stamped_name,
+                        subtitles=subs_for_marketing,
+                        video_duration=total_initial_duration
+                    )
+                    output_viral_pack_md = os.path.join(base_dir, f"{stamped_name}_GoiY_Marketing_ViralPack.md")
+                    MarketingViralPackGenerator.export_markdown_report(viral_pack, output_viral_pack_md)
+                    audit_reporter.add_output_file("Gợi Ý Marketing & Viral Pack (MD)", output_viral_pack_md, "Bộ 5 Tiêu đề CTR cao, Hook mở đầu, Kịch bản CTA & SEO Description")
+                    self.log_signal.emit(f"   🚀 [Marketing Viral Pack] Đã tạo gói gợi ý Tiêu đề & Kịch bản chuyển đổi: {os.path.basename(output_viral_pack_md)}")
+            except Exception as e:
+                self.log_signal.emit(f"   ⚠ Lỗi khi tạo Viral Marketing Pack: {e}")
 
             self.progress_signal.emit(100)
             console_summary = audit_reporter.generate_console_summary()
@@ -1061,16 +1286,40 @@ class PipelineWorker(QThread):
         self.log_signal.emit(f"\n🧭 [Story Arranger] Ý đồ: {sa.INTENTS.get(self.story_intent, self.story_intent)}")
         try:
             blocks = sa.build_blocks(events, subtitles, energy_by_video, activity_by_video)
-            roles_override = None
-            if self.api_key:
-                try:
-                    roles_override, why = sa.llm_assign_roles(blocks, self.story_intent, self.api_key)
-                    self.log_signal.emit(f"   🤖 LLM đã gán vai trò cho {len(roles_override)} khối. {why[:160]}")
-                except Exception as e:
-                    self.log_signal.emit(f"   ⚠ Không dùng được LLM ({str(e)[:100]}), chuyển sang chấm điểm cục bộ.")
-            sa.tag_roles(blocks, roles_override)
-            arrangement = sa.arrange(blocks, self.story_intent, target_seconds=self.story_target)
-            if not arrangement.changed:
+            if self.story_arrangement_override:
+                arrangement = self.story_arrangement_override
+                self.log_signal.emit(f"   🧭 [Story Arranger] Áp dụng cấu hình kịch bản do bạn tinh chỉnh ({len(arrangement.items)} mục)...")
+            else:
+                roles_override = None
+                if self.api_key:
+                    try:
+                        roles_override, why = sa.llm_assign_roles(blocks, self.story_intent, self.api_key)
+                        self.log_signal.emit(f"   🤖 LLM đã gán vai trò cho {len(roles_override)} khối. {why[:160]}")
+                    except Exception as e:
+                        self.log_signal.emit(f"   ⚠ Không dùng được LLM ({str(e)[:100]}), chuyển sang chấm điểm cục bộ.")
+
+                if not roles_override and self.project_structure and getattr(self.project_structure, "groups", None):
+                    folder_hints = {}
+                    for b in blocks:
+                        src_v = b.first_src[0] if b.first_src else None
+                        if src_v:
+                            for grp in self.project_structure.groups:
+                                if grp.role_hint in ("intro", "outro", "climax", "build") and any(
+                                    os.path.normcase(os.path.abspath(src_v)) == os.path.normcase(os.path.abspath(gv)) for gv in grp.video_paths
+                                ):
+                                    folder_hints[b.id] = grp.role_hint
+                                    break
+                    if folder_hints:
+                        roles_override = folder_hints
+                        self.log_signal.emit(f"   📂 Tự động phân vai trò cho {len(folder_hints)} khối theo cấu trúc thư mục ({len(self.project_structure.groups)} nhóm).")
+
+                sa.tag_roles(blocks, roles_override)
+                arrangement = sa.arrange(blocks, self.story_intent, target_seconds=self.story_target)
+
+            self.story_blocks_out = blocks
+            self.story_arrangement_out = arrangement
+
+            if not arrangement.changed and not self.story_arrangement_override:
                 self.log_signal.emit("   ℹ Không tìm được cách sắp xếp khác thứ tự gốc (ít cảnh / không có Hook rõ). Giữ nguyên timeline.")
                 return
 
@@ -1084,6 +1333,7 @@ class PipelineWorker(QThread):
 
             timeline_name = f"{stamped_name}_Timeline_SapXep"
             out_fcpxml = os.path.join(base_dir, f"{timeline_name}.fcpxml")
+            out_fcp7xml = os.path.join(base_dir, f"{timeline_name}.xml")
             out_edl = os.path.join(base_dir, f"{timeline_name}.edl")
             out_plan = os.path.join(base_dir, f"{stamped_name}_KeHoach_SapXep.txt")
             FCPXMLGenerator.generate_timeline_fcpxml(
@@ -1091,14 +1341,24 @@ class PipelineWorker(QThread):
                 aspect_ratio=target_aspect, subtitles=new_subs if self.enable_subtitles else None,
                 font_name=self.font_name, font_size=self.font_size, preset=self.text_preset_id
             )
+            FCPXMLGenerator.generate_fcp7_xml(
+                events=new_events,
+                output_xml_path=out_fcp7xml,
+                timeline_name=timeline_name,
+                fps=fps,
+                aspect_ratio=target_aspect,
+                markers=new_markers
+            )
             EDLGenerator.create_multi_clip_edl(new_events, out_edl, markers=new_markers)
             with open(out_plan, "w", encoding="utf-8") as f:
                 f.write(f"Ý đồ: {sa.INTENTS.get(self.story_intent, self.story_intent)}\n\n" + "\n".join(plan_lines))
-            self.log_signal.emit(f"   👉 Timeline đã sắp xếp: {os.path.basename(out_fcpxml)}")
+            self.log_signal.emit(f"   👉 Timeline đã sắp xếp (FCP7 XML - Windows): {os.path.basename(out_fcp7xml)}")
+            self.log_signal.emit(f"   👉 Timeline đã sắp xếp (FCPXML): {os.path.basename(out_fcpxml)}")
             resolve_auto.import_edl_to_timeline(
                 edl_path=out_fcpxml, video_path=self.video_paths, timeline_name=timeline_name,
                 log_callback=self.log_signal.emit
             )
+            audit_reporter.add_output_file("Timeline Sắp Xếp Có Ý Đồ (FCP7 XML - Windows)", out_fcp7xml, f"Ý đồ: {sa.INTENTS.get(self.story_intent)}")
             audit_reporter.add_output_file("Timeline Sắp Xếp Có Ý Đồ (FCPXML)", out_fcpxml, f"Ý đồ: {sa.INTENTS.get(self.story_intent)}")
             audit_reporter.add_output_file("Kế hoạch sắp xếp (TXT)", out_plan, "Danh sách khối, vai trò và thứ tự mới để duyệt")
             audit_reporter.add_timeline(timeline_name, "Timeline đã sắp xếp theo ý đồ (timeline gốc vẫn được giữ)")
@@ -1130,66 +1390,291 @@ class ResolveFlowApp(QMainWindow):
         self.clip_data_cache = []
         self.proposed_segments = []
         self.validation_warnings = []
+        self.project_structure: Optional[ProjectFolderStructure] = None
 
         self.preset_mgr = PresetManager()
         self.recipe_mgr = RecipeManager()
         self.setAcceptDrops(True)
 
+        self.bubble = FloatingBubbleWidget()
+        self.bubble.restore_requested.connect(self._restore_from_bubble)
+        self.bubble.stop_requested.connect(self._stop_pipeline)
+
+        self.workflow_stage = 1
         self._init_ui()
         self._apply_stylesheet()
         self._load_presets_to_combo()
         self._load_recipes_to_combo()
+        self._set_workflow_stage(1)
 
     def _init_ui(self):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        main_layout = QHBoxLayout(main_widget)
-        main_layout.setContentsMargins(8, 8, 8, 8)
+        window_layout = QVBoxLayout(main_widget)
+        window_layout.setContentsMargins(8, 8, 8, 8)
+        window_layout.setSpacing(6)
+
+        # -------------------------------------------------------------
+        # Header Title Bar (Toàn chiều rộng cửa sổ: Brand trái - Nút Bong bóng góc phải)
+        # -------------------------------------------------------------
+        top_header_widget = QWidget()
+        top_header_layout = QHBoxLayout(top_header_widget)
+        top_header_layout.setContentsMargins(4, 2, 4, 4)
+
+        title_vbox = QVBoxLayout()
+        title_vbox.setSpacing(1)
+        title_label = QLabel("RESOLVEFLOW v4.2")
+        title_font = QFont("Segoe UI", 16)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setStyleSheet("color: #38BDF8; letter-spacing: 1.5px;")
+        
+        subtitle_label = QLabel("AI Director, Text+ Presets, SFX Soundboard & Timeline Automation Suite")
+        subtitle_label.setStyleSheet("color: #94A3B8; font-size: 11px;")
+        title_vbox.addWidget(title_label)
+        title_vbox.addWidget(subtitle_label)
+
+        top_header_layout.addLayout(title_vbox, stretch=1)
+
+        self.btn_minimize_bubble = QPushButton("🫧 Thu Nhỏ Bong Bóng")
+        self.btn_minimize_bubble.setCursor(Qt.PointingHandCursor)
+        self.btn_minimize_bubble.setToolTip("Thu nhỏ thành Bong bóng nổi luôn trên cùng (Always-on-Top Floating Bubble)")
+        self.btn_minimize_bubble.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #1E293B;
+                color: #38BDF8;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 7px 14px;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #0F172A;
+                border-color: #38BDF8;
+                color: #7DD3FC;
+            }}
+        """)
+        self.btn_minimize_bubble.clicked.connect(self._minimize_to_bubble)
+        top_header_layout.addWidget(self.btn_minimize_bubble)
+
+        window_layout.addWidget(top_header_widget)
 
         # -------------------------------------------------------------
         # Splitter Chính: Chia Cột Trái (Thao tác rộng) & Cột Phải (Giám sát)
         # -------------------------------------------------------------
         self.main_splitter = QSplitter(Qt.Horizontal)
+        window_layout.addWidget(self.main_splitter, stretch=1)
 
         # -------------------------------------------------------------
-        # Cột trái: Tab Widget 4 Chức Năng (Workflow Tabs - Rộng ~65%)
+        # Cột trái: Workspace Từng Bước (Workflow Steps - Rộng ~65%)
         # -------------------------------------------------------------
         left_container = QWidget()
         left_panel = QVBoxLayout(left_container)
         left_panel.setContentsMargins(0, 0, 6, 0)
-        
-        # Header Title
-        title_label = QLabel("RESOLVEFLOW v4.1")
-        title_font = QFont("Segoe UI", 18)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #1976D2; letter-spacing: 2px;")
-        
-        subtitle_label = QLabel("AI Director, Text+ Presets, SFX Soundboard & Export Suite")
-        subtitle_label.setStyleSheet("color: #90A4AE; font-size: 11px;")
-        left_panel.addWidget(title_label)
-        left_panel.addWidget(subtitle_label)
-        left_panel.addSpacing(6)
 
-        # 4 Tabs Widget
+        # Giữ lại các nút điều hướng ẩn để duy trì tương thích 100%
+        self.btn_stage_1 = QPushButton()
+        self.btn_stage_1.clicked.connect(lambda: self._set_workflow_stage(1))
+        self.btn_stage_2 = QPushButton()
+        self.btn_stage_2.clicked.connect(lambda: self._set_workflow_stage(2))
+
+        # -------------------------------------------------------------
+        # GIAI ĐOẠN 1: SCAN & INGEST HUB (Chỉ hiện khi ở Bước 1)
+        # -------------------------------------------------------------
+        self.stage_1_container = QWidget()
+        s1_layout = QVBoxLayout(self.stage_1_container)
+        s1_layout.setContentsMargins(0, 0, 0, 0)
+        s1_layout.setSpacing(10)
+
+        # Card 1: Chọn Tệp hoặc Thư Mục
+        card_scan_intro = SectionCard("📁 BƯỚC 1: CHỌN NGUỒN MEDIA (THƯ MỤC HOẶC TỆP VIDEO)", accent_color=ThemeColors.PRIMARY)
+        v_s1_intro = QVBoxLayout()
+        card_scan_intro.set_body_layout(v_s1_intro)
+
+        lbl_s1_desc = QLabel(
+            "<b>👋 Chào bạn! Hãy bắt đầu bằng cách chọn Thư mục Dự án hoặc Video nguồn:</b><br>"
+            "ResolveFlow sẽ tự động nhận diện lời thoại Whisper, khoảng lặng và chuyển động hình ảnh 1 lần duy nhất vào bộ nhớ Cache.<br>"
+            "<i>Sau khi nạp xong, bạn sẽ chuyển sang <b>Bước 2</b> để chọn dựng tự động bằng AI Copilot hoặc cắt thô offline!</i>"
+        )
+        lbl_s1_desc.setWordWrap(True)
+        lbl_s1_desc.setStyleSheet("color: #CBD5E1; font-size: 12px; line-height: 1.4;")
+        v_s1_intro.addWidget(lbl_s1_desc)
+        v_s1_intro.addSpacing(6)
+
+        s1_btn_row = QHBoxLayout()
+        self.btn_s1_browse_folder = QPushButton("📂 Chọn Thư Mục Dự Án")
+        self.btn_s1_browse_folder.setStyleSheet("background-color: #3182CE; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
+        self.btn_s1_browse_folder.clicked.connect(self._browse_folder)
+
+        self.btn_s1_browse_files = QPushButton("🎬 Chọn Tệp Video")
+        self.btn_s1_browse_files.setStyleSheet("background-color: #2B6CB0; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
+        self.btn_s1_browse_files.clicked.connect(self._browse_file)
+
+        self.btn_s1_auto_resolve = QPushButton("🎯 Tự Lấy Từ DaVinci")
+        self.btn_s1_auto_resolve.setStyleSheet("background-color: #4A5568; color: white; padding: 11px; border-radius: 6px; font-size: 12px;")
+        self.btn_s1_auto_resolve.clicked.connect(self._auto_detect_video)
+
+        self.btn_s1_drive = QPushButton("☁ Google Drive")
+        self.btn_s1_drive.setStyleSheet("background-color: #374151; color: #93C5FD; padding: 11px; border-radius: 6px; font-size: 12px;")
+        self.btn_s1_drive.clicked.connect(self._open_google_drive_dialog)
+
+        s1_btn_row.addWidget(self.btn_s1_browse_folder, stretch=3)
+        s1_btn_row.addWidget(self.btn_s1_browse_files, stretch=3)
+        s1_btn_row.addWidget(self.btn_s1_auto_resolve, stretch=2)
+        s1_btn_row.addWidget(self.btn_s1_drive, stretch=2)
+        v_s1_intro.addLayout(s1_btn_row)
+
+        self.lbl_s1_media_info = QLabel("⚪ Chưa chọn tệp video nào. Hãy chọn thư mục hoặc video ở trên.")
+        self.lbl_s1_media_info.setStyleSheet("color: #94A3B8; font-size: 12px; padding: 4px 0;")
+        v_s1_intro.addWidget(self.lbl_s1_media_info)
+        s1_layout.addWidget(card_scan_intro)
+
+        # Card 2: Cấu hình Quét & Cache
+        card_scan_cfg = SectionCard("🎙 CẤU HÌNH NHẬN DIỆN LỜI THOẠI & BỘ NHỚ ĐỆM (CACHE)", accent_color=ThemeColors.TEXT_ACCENT)
+        v_s1_cfg = QVBoxLayout()
+        card_scan_cfg.set_body_layout(v_s1_cfg)
+
+        form_s1_whisper = QFormLayout()
+        self.combo_model = QComboBox()
+        self.combo_model.addItems(["tiny", "base", "small", "medium", "large-v3"])
+        self.combo_model.setCurrentText("small")
+        self.combo_model.setToolTip(TOOLTIPS.get("whisper_model", "Kích thước model Whisper"))
+        form_s1_whisper.addRow("Kích thước Model Whisper:", self.combo_model)
+
+        self.combo_lang = QComboBox()
+        self.combo_lang.addItems(["Tiếng Việt", "Auto", "Tiếng Anh"])
+        self.combo_lang.setCurrentText("Tiếng Việt")
+        self.combo_lang.setToolTip(TOOLTIPS.get("language", "Ngôn ngữ trong video"))
+        form_s1_whisper.addRow("Ngôn ngữ đầu vào:", self.combo_lang)
+
+        self.check_cache = QCheckBox("⚡ Bật Scan Cache (Bỏ qua transcribe nếu file không đổi)")
+        self.check_cache.setChecked(True)
+        self.check_cache.setToolTip(TOOLTIPS.get("scan_cache", "Bật Scan Cache"))
+        form_s1_whisper.addRow(self.check_cache)
+
+        self.check_fill_gaps = QCheckBox("🔍 Quét bổ sung vùng Whisper bỏ sót (chậm hơn, cho video ồn/dài)")
+        self.check_fill_gaps.setChecked(False)
+        form_s1_whisper.addRow(self.check_fill_gaps)
+
+        v_s1_cfg.addLayout(form_s1_whisper)
+
+        lbl_s1_cfg_hint = QLabel("💡 <b>Mẹo tối ưu:</b> Với video dài >20 phút, nên chọn model <b>'small'</b> hoặc <b>'base'</b> để quét nhanh gấp 5-10 lần mà vẫn nhận diện lời thoại cực chuẩn.")
+        lbl_s1_cfg_hint.setWordWrap(True)
+        lbl_s1_cfg_hint.setStyleSheet("color: #38BDF8; font-size: 11px;")
+        v_s1_cfg.addWidget(lbl_s1_cfg_hint)
+        v_s1_cfg.addSpacing(6)
+
+        self.lbl_s1_cache_status = QLabel("⚪ Đang chờ chọn nguồn video để kiểm tra Cache...")
+        self.lbl_s1_cache_status.setStyleSheet("background-color: #1E293B; color: #94A3B8; border: 1px solid #334155; border-radius: 6px; padding: 8px; font-size: 12px;")
+        v_s1_cfg.addWidget(self.lbl_s1_cache_status)
+        s1_layout.addWidget(card_scan_cfg)
+
+        # Card 3: Nút Hành Động Bước 1
+        card_s1_actions = SectionCard("🚀 TIẾN HÀNH QUÉT HOẶC CHUYỂN BƯỚC DỰNG", accent_color="#10B981")
+        v_s1_act = QVBoxLayout()
+        card_s1_actions.set_body_layout(v_s1_act)
+
+        self.btn_stage1_main_scan = QPushButton("🔍 1. BẮT ĐẦU QUÉT NGUỒN & NẠP CACHE (PHASE 1)")
+        self.btn_stage1_main_scan.setCursor(Qt.PointingHandCursor)
+        self.btn_stage1_main_scan.setStyleSheet("""
+            QPushButton {
+                background-color: #0284C7;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 14px;
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background-color: #0369A1;
+            }
+        """)
+        self.btn_stage1_main_scan.clicked.connect(self._start_phase_1_scan)
+        v_s1_act.addWidget(self.btn_stage1_main_scan)
+
+        # Chuyển bước dựng
+        self.btn_s1_skip_stage2 = QPushButton("⏩ Sang Bước 2: Chọn Kiểu Dựng")
+        self.btn_s1_skip_stage2.setCursor(Qt.PointingHandCursor)
+        self.btn_s1_skip_stage2.setStyleSheet("background-color: #334155; color: #CBD5E1; padding: 11px; border-radius: 6px; font-weight: bold;")
+        self.btn_s1_skip_stage2.clicked.connect(lambda: self._set_workflow_stage(2))
+        v_s1_act.addWidget(self.btn_s1_skip_stage2)
+        s1_layout.addWidget(card_s1_actions)
+        s1_layout.addStretch(1)
+
+        left_panel.addWidget(self.stage_1_container)
+
+        # -------------------------------------------------------------
+        # GIAI ĐOẠN 2: 5 TABS DỰNG & BIÊN TẬP (Chỉ hiện khi ở Bước 2)
+        # -------------------------------------------------------------
+        self.stage_2_wrapper = QWidget()
+        s2_layout = QVBoxLayout(self.stage_2_wrapper)
+        s2_layout.setContentsMargins(0, 0, 0, 0)
+        s2_layout.setSpacing(6)
+
+        # Thanh điều hướng Breadcrumb ở đỉnh Bước 2
+        s2_breadcrumb = QWidget()
+        s2_bc_layout = QHBoxLayout(s2_breadcrumb)
+        s2_bc_layout.setContentsMargins(0, 0, 0, 4)
+
+        self.btn_back_to_stage1 = QPushButton("📁 ⬅ Đổi Nguồn / Quét Dự Án Khác")
+        self.btn_back_to_stage1.setCursor(Qt.PointingHandCursor)
+        self.btn_back_to_stage1.setStyleSheet("""
+            QPushButton {
+                background-color: #1E293B;
+                color: #38BDF8;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #334155;
+                color: #7DD3FC;
+            }
+        """)
+        self.btn_back_to_stage1.clicked.connect(lambda: self._set_workflow_stage(1))
+
+        lbl_s2_status_title = QLabel("🎬 <b>BƯỚC 2: CHỌN PHƯƠNG THỨC DỰNG & BIÊN TẬP</b>")
+        lbl_s2_status_title.setStyleSheet("color: #10B981; font-size: 12px;")
+
+        s2_bc_layout.addWidget(self.btn_back_to_stage1)
+        s2_bc_layout.addSpacing(10)
+        s2_bc_layout.addWidget(lbl_s2_status_title)
+        s2_bc_layout.addStretch(1)
+        s2_layout.addWidget(s2_breadcrumb)
+
         self.tab_widget = QTabWidget()
+        self.tab_copilot = TabCopilot()
         self.tab_autocut = TabAutoCut()
-        self.tab_titles = TabTitles()
+        self.tab_titles = TabAssets()  # Keep variable name to not break _bind_tab_delegates
         self.tab_sfx = TabSFX()
         self.tab_export = TabExport()
 
-        self.tab_widget.addTab(self.tab_autocut, "✂ 1. Dựng Thô (Auto Cut)")
-        self.tab_widget.addTab(self.tab_titles, "📝 2. Chữ & Phụ Đề")
-        self.tab_widget.addTab(self.tab_sfx, "🔊 3. SFX Soundboard")
-        self.tab_widget.addTab(self.tab_export, "🚀 4. Polish & Export")
+        self.tab_widget.addTab(self.tab_copilot, "🧠 1. Kịch Bản AI Copilot")
+        self.tab_widget.addTab(self.tab_autocut, "✂ 2. Cắt Thô (Auto Cut)")
+        self.tab_widget.addTab(self.tab_titles, "🗂️ 3. Asset Hub (Tài Nguyên)")
+        self.tab_widget.addTab(self.tab_sfx, "🔊 4. SFX Soundboard")
+        self.tab_widget.addTab(self.tab_export, "🚀 5. Polish & Export")
 
-        left_panel.addWidget(self.tab_widget)
+        s2_layout.addWidget(self.tab_widget)
+        left_panel.addWidget(self.stage_2_wrapper)
         self.main_splitter.addWidget(left_container)
 
         # Liên kết delegates để tương thích 100% với mã nguồn & unit tests
         self._bind_tab_delegates()
 
-        # Kết nối sự kiện tương tác Tab 1
+        # Kết nối sự kiện tương tác Tab Copilot
+        self.tab_copilot.open_copilot_dialog_requested.connect(self._open_story_copilot_dialog)
+        self.tab_copilot.quick_copy_prompt_requested.connect(self._quick_copy_copilot_prompt)
+        self.tab_copilot.browse_json_requested.connect(self._load_json_plan_from_disk)
+        self.tab_copilot.apply_json_text_requested.connect(self._apply_json_text_plan)
+        self.tab_copilot.run_local_ai_requested.connect(self._run_local_ollama_pipeline)
+        self.tab_copilot.run_cloud_api_requested.connect(self._run_cloud_api_pipeline)
+        self.tab_autocut.run_autocut_requested.connect(self._start_instant_export)
+
+        # Kết nối sự kiện tương tác Tab 1 Auto Cut
         self.combo_workflow.currentIndexChanged.connect(self._on_workflow_mode_changed)
         self.combo_recipes.currentIndexChanged.connect(self._on_recipe_selected)
         self.btn_save_recipe.clicked.connect(self._save_current_as_recipe)
@@ -1198,7 +1683,7 @@ class ResolveFlowApp(QMainWindow):
         self.btn_toggle_advanced.clicked.connect(self._toggle_advanced_panel)
         self.mini_timeline.playhead_changed.connect(self._on_mini_timeline_playhead_changed)
 
-        # Kết nối sự kiện tương tác Tab 2
+        # Kết nối sự kiện tương tác Tab 2 Titles
         self.tab_titles.set_preset_provider(self._get_current_active_preset)
         self.combo_text_preset.currentIndexChanged.connect(self._on_preset_changed)
         self.btn_preview_preset.clicked.connect(self._show_quick_preview)
@@ -1209,7 +1694,7 @@ class ResolveFlowApp(QMainWindow):
         self.tab_titles.install_presets_requested.connect(lambda: self.txt_console.appendPlainText("🎉 [Effects Library] Đã cài đặt 7 Presets Fusion Text+ vào DaVinci Resolve!"))
         self.tab_titles.copy_fusion_node_requested.connect(lambda pid: self.txt_console.appendPlainText(f"📋 [Clipboard] Đã copy Fusion Node của preset '{pid}'. Hãy chuyển sang DaVinci Resolve và ấn Ctrl+V để chèn!"))
 
-        # Kết nối sự kiện tương tác Tab 3 & 4
+        # Kết nối sự kiện tương tác Tab 3 SFX & Tab 4 Export
         self.tab_sfx.insert_sfx_requested.connect(self._on_insert_sfx_at_playhead)
         self.tab_export.apply_lut_requested.connect(self._on_apply_lut_to_timeline)
         self.tab_export.btn_scan_luts.clicked.connect(self._on_scan_existing_luts)
@@ -1244,26 +1729,44 @@ class ResolveFlowApp(QMainWindow):
         right_panel = QVBoxLayout(right_container)
         right_panel.setContentsMargins(6, 0, 0, 0)
 
-        # 1. Card Tệp Video Nguồn
-        self.group_file = QGroupBox("📁 TỆP VIDEO NGUỒN (SOURCE MEDIA)")
+        # 1. Card Tóm Tắt Nguồn Media & Trạng Thái Cache
+        self.group_file = QGroupBox("📊 THÔNG TIN DỰ ÁN & TIẾN TRÌNH")
         form_file = QVBoxLayout(self.group_file)
         
-        file_layout = QHBoxLayout()
+        file_layout = QVBoxLayout()
         self.lbl_file = QLineEdit()
-        self.lbl_file.setPlaceholderText("Kéo-thả tệp video vào đây hoặc bấm 'Chọn Video'...")
+        self.lbl_file.setPlaceholderText("Kéo-thả thư mục hoặc tệp video vào đây...")
         self.lbl_file.setReadOnly(True)
+        self.lbl_file.setStyleSheet("""
+            QLineEdit {
+                background-color: #0F172A;
+                color: #38BDF8;
+                font-weight: bold;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 7px;
+            }
+        """)
+
+        h_badge_row = QHBoxLayout()
+        self.lbl_cache_badge = QLabel("⚪ Chưa chọn nguồn")
+        self.lbl_cache_badge.setStyleSheet("background-color: #1E293B; color: #94A3B8; border: 1px solid #334155; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;")
         
-        btn_auto = QPushButton("Tự lấy Resolve")
-        btn_auto.clicked.connect(self._auto_detect_video)
-        
-        btn_browse = QPushButton("Chọn Video")
-        btn_browse.clicked.connect(self._browse_file)
-        
-        file_layout.addWidget(self.lbl_file, stretch=3)
-        file_layout.addWidget(btn_auto, stretch=2)
-        file_layout.addWidget(btn_browse, stretch=2)
+        h_badge_row.addWidget(QLabel("<b style='color: #94A3B8;'>Trạng thái Cache:</b>"))
+        h_badge_row.addWidget(self.lbl_cache_badge)
+        h_badge_row.addStretch(1)
+
+        file_layout.addWidget(self.lbl_file)
+        file_layout.addLayout(h_badge_row)
         form_file.addLayout(file_layout)
         right_panel.addWidget(self.group_file)
+
+        # Delegate shortcuts để tương thích tuyệt đối với các unit tests & legacy callers
+        self.btn_browse = self.btn_s1_browse_files
+        self.btn_browse_folder = self.btn_s1_browse_folder
+        self.btn_drive = self.btn_s1_drive
+        self.btn_copilot = self.tab_copilot.btn_open_copilot
+        self.btn_load_json_plan = self.tab_copilot.btn_load_file
 
         # 2. Review Table (Pha 1 AI Đạo Diễn)
         self.table_review = QTableWidget()
@@ -1295,17 +1798,47 @@ class ResolveFlowApp(QMainWindow):
         sc_redo.setContext(Qt.WidgetShortcut)
         sc_redo.activated.connect(self._review_redo)
 
-        # 3. Card Điều Khiển & Tiến Trình Thực Thi
-        self.group_exec = QGroupBox("⚡ ĐIỀU KHIỂN & TIẾN TRÌNH THỰC THI")
-        vbox_exec = QVBoxLayout(self.group_exec)
+        # 2.5 Story Blocks Review Table (Duyệt & Tinh chỉnh Kịch bản Sắp xếp)
+        self.table_story_review = QTableWidget()
+        self.table_story_review.setColumnCount(6)
+        self.table_story_review.setHorizontalHeaderLabels([
+            "Bật", "STT", "Vai trò", "Thời lượng", "Lý do / Đặc tính", "Nội dung thoại"
+        ])
+        self.table_story_review.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.table_story_review.horizontalHeader().setStretchLastSection(True)
+        self.table_story_review.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_story_review.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_story_review.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table_story_review.hide()
 
-        self.btn_run = QPushButton("🚀 BẮT ĐẦU XỬ LÝ (RUN)")
-        self.btn_run.setObjectName("btn_run")
-        btn_font = QFont("Segoe UI", 12)
-        btn_font.setBold(True)
-        self.btn_run.setFont(btn_font)
-        self.btn_run.clicked.connect(self._toggle_pipeline_execution)
-        vbox_exec.addWidget(self.btn_run)
+        self.story_review_state: Optional[StoryReviewState] = None
+        self.story_arrangement = None
+        self.story_blocks = []
+        self.story_review_toolbar = self._build_story_review_toolbar()
+        self.story_review_toolbar.hide()
+        right_panel.addWidget(self.story_review_toolbar)
+        right_panel.addWidget(self.table_story_review)
+
+        self.table_story_review.itemSelectionChanged.connect(self._on_story_review_selection_changed)
+        sc_story_toggle = QShortcut(QKeySequence(Qt.Key_Space), self.table_story_review)
+        sc_story_toggle.setContext(Qt.WidgetShortcut)
+        sc_story_toggle.activated.connect(self._story_toggle_selected)
+        sc_story_up = QShortcut(QKeySequence(Qt.ALT | Qt.Key_Up), self.table_story_review)
+        sc_story_up.setContext(Qt.WidgetShortcut)
+        sc_story_up.activated.connect(self._on_story_move_up)
+        sc_story_down = QShortcut(QKeySequence(Qt.ALT | Qt.Key_Down), self.table_story_review)
+        sc_story_down.setContext(Qt.WidgetShortcut)
+        sc_story_down.activated.connect(self._on_story_move_down)
+        sc_story_undo = QShortcut(QKeySequence.Undo, self.table_story_review)
+        sc_story_undo.setContext(Qt.WidgetShortcut)
+        sc_story_undo.activated.connect(self._story_undo)
+        sc_story_redo = QShortcut(QKeySequence.Redo, self.table_story_review)
+        sc_story_redo.setContext(Qt.WidgetShortcut)
+        sc_story_redo.activated.connect(self._story_redo)
+
+        # 3. Card Tiến Trình Thực Thi & Giám Sát (Execution Monitor)
+        self.group_exec = QGroupBox("⚡ TIẾN TRÌNH THỰC THI (EXECUTION MONITOR)")
+        vbox_exec = QVBoxLayout(self.group_exec)
 
         self.lbl_progress_status = QLabel("Trạng thái: Sẵn sàng làm việc.")
         self.lbl_progress_status.setStyleSheet(f"color: {ThemeColors.TEXT_ACCENT}; font-size: 11px; font-weight: bold;")
@@ -1314,6 +1847,30 @@ class ResolveFlowApp(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         vbox_exec.addWidget(self.progress_bar)
+
+        self.btn_run = QPushButton("⏹ DỪNG LẠI (STOP / CANCEL)")
+        self.btn_run.setObjectName("btn_run")
+        self.btn_run.setEnabled(False)
+        self.btn_run.setCursor(Qt.PointingHandCursor)
+        self.btn_run.setStyleSheet("""
+            QPushButton#btn_run {
+                background-color: #1E293B;
+                color: #64748B;
+                padding: 10px;
+                border-radius: 6px;
+                font-weight: bold;
+                border: 1px solid #334155;
+            }
+        """)
+        self.btn_run.clicked.connect(self._toggle_pipeline_execution)
+        vbox_exec.addWidget(self.btn_run)
+
+        # Giữ lại các widget ẩn để duy trì tương thích ngược 100%
+        self.btn_scan_only = QPushButton()
+        self.btn_scan_only.clicked.connect(self._start_phase_1_scan)
+        self.btn_instant_export = QPushButton()
+        self.btn_instant_export.clicked.connect(self._start_instant_export)
+
         right_panel.addWidget(self.group_exec)
 
         # 3.5 Visual Step Progress
@@ -1346,7 +1903,6 @@ class ResolveFlowApp(QMainWindow):
         self.main_splitter.setStretchFactor(1, 4)
         self.main_splitter.setSizes([800, 440])
 
-        main_layout.addWidget(self.main_splitter)
         self.setAcceptDrops(True)
 
     def _bind_tab_delegates(self):
@@ -1363,6 +1919,7 @@ class ResolveFlowApp(QMainWindow):
         self.slide_master_intensity = self.tab_autocut.slide_master_intensity
         self.combo_pacing = self.tab_autocut.combo_pacing
         self.combo_video_type = self.tab_autocut.combo_video_type
+        self.check_hide_weak_subs = self.tab_autocut.check_hide_weak_subs
         self.check_scene_guard = self.tab_autocut.check_scene_guard
         self.check_fill_gaps = self.tab_autocut.check_fill_gaps
         self.combo_hook_total = self.tab_autocut.combo_hook_total
@@ -1376,9 +1933,11 @@ class ResolveFlowApp(QMainWindow):
         self.btn_toggle_advanced = self.tab_autocut.btn_toggle_advanced
         self.advanced_container = self.tab_autocut.advanced_container
         self.group_ai = self.tab_autocut.group_ai
-        self.combo_model = self.tab_autocut.combo_model
-        self.combo_lang = self.tab_autocut.combo_lang
-        self.check_cache = self.tab_autocut.check_cache
+        # Giữ liên kết hai chiều cho các điều khiển Whisper ở Stage 1
+        self.tab_autocut.combo_model = self.combo_model
+        self.tab_autocut.combo_lang = self.combo_lang
+        self.tab_autocut.check_cache = self.check_cache
+        self.tab_autocut.check_fill_gaps = self.check_fill_gaps
         self.group_director = self.tab_autocut.group_director
         self.combo_ai_mode = self.tab_autocut.combo_ai_mode
         self.check_bad_takes = self.tab_autocut.check_bad_takes
@@ -1733,6 +2292,7 @@ class ResolveFlowApp(QMainWindow):
         self.check_repeats.setChecked(recipe.remove_repeated_phrases)
         self.check_scene_guard.setChecked(recipe.scene_guard)
         self.check_fill_gaps.setChecked(recipe.fill_gaps)
+        self.check_hide_weak_subs.setChecked(recipe.hide_weak_subs)
         idx_vt = self.combo_video_type.findData(recipe.video_type)
         if idx_vt >= 0:
             self.combo_video_type.setCurrentIndex(idx_vt)
@@ -1805,6 +2365,7 @@ class ResolveFlowApp(QMainWindow):
                 story_intent=self.combo_story_intent.currentData() or "keep",
                 story_target=float(self.combo_story_target.currentData() or 60.0),
                 video_type=self.combo_video_type.currentData() or "auto",
+                hide_weak_subs=self.check_hide_weak_subs.isChecked(),
                 pacing=self.combo_pacing.currentData() or "balanced",
                 enable_punch_in=self.check_punch_in.isChecked(),
                 punch_in_scale=1.15,
@@ -1963,6 +2524,7 @@ class ResolveFlowApp(QMainWindow):
         )
         if file_paths:
             self._reset_workflow_phase()
+            self.project_structure = None
             self.selected_files = file_paths
             if len(file_paths) == 1:
                 self.lbl_file.setText(file_paths[0])
@@ -1972,6 +2534,626 @@ class ResolveFlowApp(QMainWindow):
                 self.txt_console.appendPlainText(f"📁 Đã chọn hàng loạt {len(file_paths)} tệp video.")
             self._update_default_chars_limit(file_paths[0])
             self._suggest_whisper_model_for_file(file_paths[0])
+            self._check_project_cache_status()
+
+    def _browse_folder(self):
+        folder_path = QFileDialog.getExistingDirectory(self, "Chọn Thư mục Dự án chứa các video con", "")
+        if folder_path and os.path.exists(folder_path):
+            self._load_project_folder(folder_path)
+
+    def _load_project_folder(self, folder_path: str):
+        self._reset_workflow_phase()
+        proj = scan_project_folder(folder_path)
+        self.project_structure = proj
+        if not proj.all_video_paths:
+            self.txt_console.appendPlainText(f"⚠ Không tìm thấy video hợp lệ trong thư mục: {folder_path}")
+            return
+        
+        self.selected_files = proj.all_video_paths
+        self.lbl_file.setText(f"📂 [{proj.root_name}] {len(proj.groups)} nhóm • {proj.total_files} video ({proj.root_path})")
+        self.txt_console.appendPlainText("\n" + "="*60)
+        self.txt_console.appendPlainText("🚀 [CẤU TRÚC THƯ MỤC DỰ ÁN PHÂN TẦNG ĐÃ NẠP]")
+        self.txt_console.appendPlainText(proj.summary_tree())
+        self.txt_console.appendPlainText("="*60 + "\n")
+        
+        first_video = proj.main_video_paths[0] if proj.main_video_paths else proj.all_video_paths[0]
+        self._update_default_chars_limit(first_video)
+        self._suggest_whisper_model_for_file(first_video)
+        self._check_project_cache_status()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            paths = [u.toLocalFile() for u in urls if u.isLocalFile()]
+            if not paths:
+                return
+            event.acceptProposedAction()
+            
+            if len(paths) == 1 and os.path.isdir(paths[0]):
+                self._load_project_folder(paths[0])
+            else:
+                videos, proj = collect_video_paths(paths)
+                if proj:
+                    self._load_project_folder(proj.root_path)
+                elif videos:
+                    self._reset_workflow_phase()
+                    self.project_structure = None
+                    self.selected_files = videos
+                    if len(videos) == 1:
+                        self.lbl_file.setText(videos[0])
+                        self.txt_console.appendPlainText(f"📁 Đã kéo-thả tệp: {videos[0]}")
+                    else:
+                        self.lbl_file.setText("; ".join(videos))
+                        self.txt_console.appendPlainText(f"📁 Đã kéo-thả {len(videos)} tệp video.")
+                    self._update_default_chars_limit(videos[0])
+                    self._suggest_whisper_model_for_file(videos[0])
+                    self._check_project_cache_status()
+                else:
+                    self.txt_console.appendPlainText("⚠ Không phát hiện file video hợp lệ từ các tệp được thả vào.")
+        else:
+            super().dropEvent(event)
+
+    def _open_google_drive_dialog(self):
+        """Mở hộp thoại nhập liên kết Google Drive."""
+        dlg = GoogleDriveImportDialog(self)
+        dlg.import_completed.connect(self._on_google_drive_import_completed)
+        dlg.exec()
+
+    def _on_google_drive_import_completed(self, local_path: str, is_folder: bool):
+        """Xử lý sau khi tải tệp/thư mục từ Google Drive thành công."""
+        if is_folder:
+            self._load_project_folder(local_path)
+        else:
+            self._reset_workflow_phase()
+            self.project_structure = None
+            self.selected_files = [local_path]
+            self.lbl_file.setText(local_path)
+            self.txt_console.appendPlainText(f"\n☁ [Google Drive] Đã tải về và nạp tệp thành công:\n👉 {local_path}\n")
+            self._update_default_chars_limit(local_path)
+            self._suggest_whisper_model_for_file(local_path)
+            self._check_project_cache_status()
+
+    def _check_project_cache_status(self):
+        """Kiểm tra xem toàn bộ các video trong dự án đã có cache trong máy hay chưa và cập nhật UI."""
+        raw_paths = getattr(self, "selected_files", [])
+        if not raw_paths:
+            if hasattr(self, "lbl_s1_cache_status"):
+                self.lbl_s1_cache_status.setText("⚪ Chưa chọn video. Vui lòng chọn tệp hoặc thư mục.")
+                self.lbl_s1_cache_status.setStyleSheet("background-color: #1E293B; color: #94A3B8; border: 1px solid #334155; border-radius: 6px; padding: 8px; font-size: 12px;")
+            if hasattr(self, "lbl_cache_badge"):
+                self.lbl_cache_badge.setText("⚪ Chưa chọn video")
+                self.lbl_cache_badge.setStyleSheet("background-color: #1E293B; color: #94A3B8; border: 1px solid #334155; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;")
+            return
+
+        cache_mgr = ScanCacheManager()
+        model = self.combo_model.currentText()
+        lang = self.combo_lang.currentText()
+
+        cached_count = 0
+        for vp in raw_paths:
+            if cache_mgr.get_cached_scan(vp, model, lang) is not None:
+                cached_count += 1
+
+        total = len(raw_paths)
+        if total > 0 and cached_count == total:
+            status_msg = f"🎉 ĐÃ CÓ SẴN CACHE (100% - {total}/{total} clips)! Dữ liệu đã sẵn sàng. Bạn có thể sang Bước 2 hoặc nạp JSON để xuất timeline ngay trong 0.1s!"
+            status_style = "background-color: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid #10B981; border-radius: 6px; padding: 8px; font-weight: bold; font-size: 12px;"
+            badge_txt = f"⚡ Cache: 100% ({total}/{total})"
+            badge_style = "background-color: #065F46; color: #34D399; border: 1px solid #10B981; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
+            if hasattr(self, "btn_s1_skip_stage2"):
+                self.btn_s1_skip_stage2.setStyleSheet("background-color: #059669; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
+        elif cached_count > 0:
+            status_msg = f"⚡ Đã có cache một phần ({cached_count}/{total} clips). Bấm Quét để hoàn tất {total - cached_count} clips còn lại."
+            status_style = "background-color: rgba(245, 158, 11, 0.15); color: #FBBF24; border: 1px solid #F59E0B; border-radius: 6px; padding: 8px; font-size: 12px;"
+            badge_txt = f"⚡ Cache: {cached_count}/{total}"
+            badge_style = "background-color: #78350F; color: #FBBF24; border: 1px solid #F59E0B; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
+        else:
+            status_msg = f"🔍 Chưa có Cache ({total} clips). Hãy bấm nút 'Bắt đầu quét' bên dưới để nhận diện lời thoại 1 lần duy nhất."
+            status_style = "background-color: rgba(56, 189, 248, 0.1); color: #38BDF8; border: 1px solid #0284C7; border-radius: 6px; padding: 8px; font-size: 12px;"
+            badge_txt = f"🔍 Chưa có Cache ({total} clips)"
+            badge_style = "background-color: #1E293B; color: #38BDF8; border: 1px solid #334155; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 11px;"
+
+        if hasattr(self, "lbl_s1_cache_status"):
+            self.lbl_s1_cache_status.setText(status_msg)
+            self.lbl_s1_cache_status.setStyleSheet(status_style)
+        if hasattr(self, "lbl_cache_badge"):
+            self.lbl_cache_badge.setText(badge_txt)
+            self.lbl_cache_badge.setStyleSheet(badge_style)
+        if hasattr(self, "lbl_s1_media_info"):
+            proj_title = self.project_structure.root_name if self.project_structure else (os.path.basename(raw_paths[0]) if total == 1 else f"{total} videos")
+            self.lbl_s1_media_info.setText(f"📁 <b>Dự án:</b> {proj_title} | <b>Tổng cộng:</b> {total} video tệp")
+
+    def _build_copilot_clips_data(self) -> Tuple[str, List[Dict[str, Any]]]:
+        """Tổng hợp danh sách clip và transcript từ cache để phục vụ các động cơ AI."""
+        if not hasattr(self, "selected_files") or not self.selected_files:
+            return "", []
+
+        clips_data = []
+        cache_mgr = ScanCacheManager()
+        
+        for idx, vp in enumerate(self.selected_files):
+            clip_name = os.path.basename(vp)
+            chapter_name = "Chung"
+            if self.project_structure:
+                for grp in self.project_structure.groups:
+                    if vp in grp.video_paths:
+                        chapter_name = grp.name
+                        break
+            
+            cached = cache_mgr.get_cached_scan(vp, self.combo_model.currentText(), self.combo_lang.currentText())
+            dur = 0.0
+            if cached:
+                dur = float(cached.get("clip_dur", 0.0) or cached.get("duration", 0.0))
+            if dur <= 0:
+                try:
+                    dur = EDLGenerator.get_video_duration(vp)
+                except Exception:
+                    dur = 0.0
+            
+            raw_subs = cached.get("raw_subtitles", []) if cached else []
+            transcript_text = " ".join(s.get("text", "").strip() for s in raw_subs)
+            
+            clips_data.append({
+                "id": idx + 1,
+                "name": clip_name,
+                "path": vp,
+                "chapter": chapter_name,
+                "duration": dur,
+                "audio_peak_sec": dur * 0.5,
+                "visual_motion": "vừa",
+                "speech": transcript_text
+            })
+
+        proj_name = self.project_structure.root_name if self.project_structure else (os.path.splitext(os.path.basename(self.selected_files[0]))[0] if len(self.selected_files) == 1 else "Vlog_Project")
+        return proj_name, clips_data
+
+    def _quick_copy_copilot_prompt(self):
+        """Tạo nhanh prompt đạo diễn kịch bản từ các clips và copy vào Clipboard."""
+        proj_name, clips_data = self._build_copilot_clips_data()
+        if not clips_data:
+            QMessageBox.warning(self, "Chưa chọn video", "Vui lòng chọn video nguồn hoặc thư mục dự án trước khi copy Prompt Đạo Diễn.")
+            return
+
+        fmt = "travel_vlog"
+        if hasattr(self.tab_copilot, "combo_story_format"):
+            fmt = self.tab_copilot.combo_story_format.currentData() or "travel_vlog"
+
+        prompt = StoryCopilot.generate_copilot_prompt(
+            project_name=proj_name,
+            clips_data=clips_data,
+            project_structure=self.project_structure,
+            story_intent=fmt
+        )
+
+        QApplication.clipboard().setText(prompt)
+        self.txt_console.appendPlainText("\n" + "="*60)
+        self.txt_console.appendPlainText("📋 [AI Story Copilot] ĐÃ COPY TOÀN BỘ PROMPT ĐẠO DIỄN VÀO CLIPBOARD!")
+        self.txt_console.appendPlainText(f"👉 Định dạng: {fmt.upper()} (Đã tích hợp Framework Marketing & Kho Meme).")
+        self.txt_console.appendPlainText("👉 Hãy chuyển sang trình duyệt (Claude.ai hoặc ChatGPT), bấm Ctrl+V để gửi.")
+        self.txt_console.appendPlainText("👉 Khi nhận được đoạn kịch bản JSON, hãy dán vào ô bên dưới và bấm 'THI CÔNG TIMELINE'!")
+        self.txt_console.appendPlainText("="*60 + "\n")
+        QMessageBox.information(
+            self,
+            "Đã Copy Prompt Đạo Diễn!",
+            "📋 Đã copy toàn bộ Prompt Đạo Diễn chứa đầy đủ Lời thoại (Transcript) và Cấu trúc Clips vào Clipboard!\n\n"
+            "👉 Bước tiếp theo:\n"
+            "1. Mở Claude 3.7 Sonnet (claude.ai) hoặc ChatGPT.\n"
+            "2. Dán prompt vào (Ctrl+V) và gửi.\n"
+            "3. Copy đoạn JSON kịch bản trả về, dán vào ô Kịch Bản JSON bên dưới và bấm 'THI CÔNG TIMELINE'!"
+        )
+
+    def _run_local_ollama_pipeline(self, fmt: str, model: str, endpoint: str):
+        """Chạy AI Đạo Diễn qua Local Ollama ngầm không làm đơ giao diện."""
+        proj_name, clips_data = self._build_copilot_clips_data()
+        if not clips_data:
+            QMessageBox.warning(self, "Chưa chọn video", "Vui lòng chọn video nguồn hoặc quét Cache ở Bước 1 trước khi chạy AI.")
+            return
+
+        prompt = StoryCopilot.generate_copilot_prompt(
+            project_name=proj_name,
+            clips_data=clips_data,
+            project_structure=self.project_structure,
+            story_intent=fmt
+        )
+        self.txt_console.appendPlainText(f"\n🧠 [Local AI] Bắt đầu yêu cầu kịch bản từ Ollama ({model})...")
+        self.btn_run.setEnabled(False)
+
+        self._llm_worker = LLMDirectorWorker(
+            engine_mode="ollama",
+            prompt=prompt,
+            model=model,
+            endpoint=endpoint,
+            parent=self
+        )
+        self._llm_worker.log_signal.connect(self.txt_console.appendPlainText)
+        self._llm_worker.finished_signal.connect(self._on_llm_worker_finished)
+        self._llm_worker.start()
+
+    def _run_cloud_api_pipeline(self, fmt: str, provider: str, api_key: str):
+        """Chạy AI Đạo Diễn qua Cloud API ngầm không làm đơ giao diện."""
+        proj_name, clips_data = self._build_copilot_clips_data()
+        if not clips_data:
+            QMessageBox.warning(self, "Chưa chọn video", "Vui lòng chọn video nguồn hoặc quét Cache ở Bước 1 trước khi chạy AI.")
+            return
+
+        prompt = StoryCopilot.generate_copilot_prompt(
+            project_name=proj_name,
+            clips_data=clips_data,
+            project_structure=self.project_structure,
+            story_intent=fmt
+        )
+        self.txt_console.appendPlainText(f"\n⚡ [Cloud AI] Bắt đầu gửi kịch bản sang {provider.upper()} API...")
+        self.btn_run.setEnabled(False)
+
+        self._llm_worker = LLMDirectorWorker(
+            engine_mode="cloud",
+            prompt=prompt,
+            api_key=api_key,
+            provider=provider,
+            parent=self
+        )
+        self._llm_worker.log_signal.connect(self.txt_console.appendPlainText)
+        self._llm_worker.finished_signal.connect(self._on_llm_worker_finished)
+        self._llm_worker.start()
+
+    def _on_llm_worker_finished(self, success: bool, message: str, raw_json: str):
+        """Xử lý khi LLM Worker hoàn tất phản hồi."""
+        self.btn_run.setEnabled(True)
+        if not success:
+            QMessageBox.critical(self, "Lỗi AI Director", f"Không thể lấy kịch bản từ AI:\n{message}")
+            self.txt_console.appendPlainText(f"❌ [Lỗi AI Director] {message}")
+            return
+
+        self.txt_console.appendPlainText("🎉 [AI Director] Đã nhận được kịch bản thành công! Đang tự động nạp Timeline...")
+        self.tab_copilot.txt_json_input.setPlainText(raw_json)
+        self._apply_json_text_plan(raw_json)
+
+    def _apply_json_text_plan(self, json_text: str):
+        """Phân tích và thi công kịch bản JSON nhập từ ô văn bản TabCopilot."""
+        if not json_text or not json_text.strip():
+            QMessageBox.warning(self, "Chưa có kịch bản JSON", "Vui lòng dán đoạn mã JSON kịch bản trước khi thi công.")
+            return
+
+        try:
+            plan = StoryCopilot.parse_copilot_response(json_text)
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi phân tích JSON", f"Không thể phân tích đoạn kịch bản JSON:\n{e}")
+            return
+
+        self._on_copilot_plan_applied(plan)
+
+    def _load_json_plan_from_disk(self):
+        """Mở tệp JSON kịch bản (AI Copilot Director Plan) và xuất Timeline ngay lập tức trong 0.1s."""
+        f_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Chọn Tệp Kịch Bản JSON (AI Story Copilot Plan)",
+            "",
+            "JSON Files (*.json);;Text Files (*.txt);;All Files (*.*)"
+        )
+        if not f_path or not os.path.exists(f_path):
+            return
+
+        try:
+            with open(f_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            plan = StoryCopilot.parse_copilot_response(content)
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi đọc tệp JSON", f"Không thể đọc hoặc phân tích tệp kịch bản JSON:\n{e}")
+            return
+
+        # Nếu chưa chọn files hoặc thư mục, tự động tìm kiếm video trong thư mục chứa file JSON hoặc thư mục con
+        if not hasattr(self, "selected_files") or not self.selected_files:
+            json_dir = os.path.dirname(os.path.abspath(f_path))
+            detected_videos = []
+            for root, _, files in os.walk(json_dir):
+                for fn in files:
+                    if fn.lower().endswith(('.mp4', '.mov', '.mkv', '.avi', '.m4v')):
+                        detected_videos.append(os.path.join(root, fn))
+            if detected_videos:
+                self.selected_files = detected_videos
+                self.lbl_file.setText(f"{len(detected_videos)} tệp video tại {json_dir}")
+
+        if not hasattr(self, "selected_files") or not self.selected_files:
+            QMessageBox.warning(self, "Chưa có Video", "Vui lòng chọn video nguồn hoặc thư mục dự án để khớp với kịch bản JSON.")
+            return
+
+        self.txt_console.appendPlainText(f"\n📂 [Nạp Kịch Bản JSON Trực Tiếp] Đã đọc thành công tệp: {os.path.basename(f_path)}")
+        self._on_copilot_plan_applied(plan)
+
+    def _open_story_copilot_dialog(self):
+        """Mở hộp thoại AI Story Copilot để xuất Prompt cho Claude/ChatGPT và nạp bản vẽ kịch bản."""
+        if not hasattr(self, "selected_files") or not self.selected_files:
+            QMessageBox.warning(self, "Chưa chọn video", "Vui lòng chọn tệp video hoặc thư mục dự án trước khi mở AI Copilot.")
+            return
+
+        # Chuẩn bị dữ liệu danh sách clips siêu tốc từ Cache
+        clips_data = []
+        cache_mgr = ScanCacheManager()
+        
+        for idx, vp in enumerate(self.selected_files):
+            clip_name = os.path.basename(vp)
+            chapter_name = "Chung"
+            if self.project_structure:
+                for grp in self.project_structure.groups:
+                    if vp in grp.video_paths:
+                        chapter_name = grp.name
+                        break
+            
+            # Đọc từ cache
+            cached = cache_mgr.get_cached_scan(vp, self.combo_model.currentText(), self.combo_lang.currentText())
+            dur = 0.0
+            if cached:
+                dur = float(cached.get("clip_dur", 0.0) or cached.get("duration", 0.0))
+            
+            # Nếu chưa có cache, lấy độ dài nhanh hoặc ước lượng nhẹ để không block UI
+            if dur <= 0:
+                try:
+                    dur = EDLGenerator.get_video_duration(vp)
+                except Exception:
+                    dur = 0.0
+            
+            raw_subs = cached.get("raw_subtitles", []) if cached else []
+            transcript_text = " ".join(s.get("text", "").strip() for s in raw_subs)
+            
+            clips_data.append({
+                "id": idx + 1,
+                "name": clip_name,
+                "path": vp,
+                "chapter": chapter_name,
+                "duration": dur,
+                "audio_peak_sec": dur * 0.5,
+                "visual_motion": "vừa",
+                "speech": transcript_text
+            })
+
+        proj_name = self.project_structure.root_name if self.project_structure else (os.path.splitext(os.path.basename(self.selected_files[0]))[0] if len(self.selected_files) == 1 else "Vlog_Project")
+
+        dlg = StoryCopilotDialog(
+            project_name=proj_name,
+            clips_data=clips_data,
+            project_structure=self.project_structure,
+            parent=self
+        )
+        dlg.plan_applied_signal.connect(self._on_copilot_plan_applied)
+        dlg.exec()
+
+    def _on_copilot_plan_applied(self, plan: CopilotDirectorPlan):
+        """Áp dụng bản vẽ từ Copilot và dựng trực tiếp lên DaVinci Resolve (Hỗ trợ cả bản Free & Studio)."""
+        self.txt_console.appendPlainText("\n" + "="*60)
+        self.txt_console.appendPlainText(f"🧠 [AI Copilot Plan Received] Đang thi công kịch bản của Đạo diễn Cloud AI...")
+        self.txt_console.appendPlainText(f"🎯 Chiến lược: {plan.strategy_summary}")
+        if plan.global_hook:
+            self.txt_console.appendPlainText(f"🔥 Global Hook: Clip {plan.global_hook.clip_index} ({plan.global_hook.start_sec}s - {plan.global_hook.end_sec}s) ➔ \"{plan.global_hook.hook_title}\"")
+        self.txt_console.appendPlainText(f"🎬 Số phân đoạn Timeline: {len(plan.timeline_segments)} cuts")
+        if plan.broll_inserts:
+            self.txt_console.appendPlainText(f"🎞 Số điểm chèn B-Roll/Meme: {len(plan.broll_inserts)} cues")
+        if plan.sfx_inserts:
+            self.txt_console.appendPlainText(f"🔊 Số hiệu ứng SFX: {len(plan.sfx_inserts)} cues")
+        self.txt_console.appendPlainText("="*60 + "\n")
+
+        # Xác định thư mục gốc dự án
+        first_v = self.selected_files[0] if hasattr(self, "selected_files") and self.selected_files else ""
+        if self.project_structure and getattr(self.project_structure, "root_path", None):
+            project_root_dir = self.project_structure.root_path
+        else:
+            try:
+                common = os.path.commonpath([os.path.abspath(p) for p in self.selected_files])
+                project_root_dir = common if os.path.isdir(common) else os.path.dirname(common)
+            except Exception:
+                project_root_dir = os.path.dirname(os.path.abspath(first_v)) if first_v else os.getcwd()
+
+        base_d = project_root_dir
+        output_dir = os.path.join(project_root_dir, "_TIMELINE_IMPORT")
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Nạp kho tài nguyên B-Roll / SFX của dự án
+        asset_pool = GlobalAssetPool.get_instance()
+        n_pm, n_ps = asset_pool.register_project_assets(project_root_dir)
+        if n_pm > 0 or n_ps > 0:
+            self.txt_console.appendPlainText(f"📦 [Project Assets Pool] Đã nạp {n_pm} video B-roll/Meme và {n_ps} file SFX từ thư mục dự án.")
+
+        # Ánh xạ phong phú index, filename, stem, relative path -> video_path
+        path_map: Dict[Any, str] = {}
+        for idx, vp in enumerate(getattr(self, "selected_files", [])):
+            p_abs = os.path.abspath(vp)
+            b_name = os.path.basename(p_abs).lower()
+            s_name = os.path.splitext(b_name)[0]
+            path_map[idx + 1] = p_abs
+            path_map[str(idx + 1)] = p_abs
+            path_map[idx] = p_abs
+            path_map[str(idx)] = p_abs
+            path_map[f"clip_{idx+1}"] = p_abs
+            path_map[f"clip {idx+1}"] = p_abs
+            path_map[f"clip{idx+1}"] = p_abs
+            path_map[b_name] = p_abs
+            path_map[s_name] = p_abs
+            try:
+                p_rel = os.path.relpath(p_abs, project_root_dir).replace('\\', '/').lower()
+                path_map[p_rel] = p_abs
+            except Exception:
+                pass
+
+        if self.project_structure and hasattr(self.project_structure, "all_video_paths"):
+            for vp in self.project_structure.all_video_paths:
+                p_abs = os.path.abspath(vp)
+                b_name = os.path.basename(p_abs).lower()
+                s_name = os.path.splitext(b_name)[0]
+                path_map[b_name] = p_abs
+                path_map[s_name] = p_abs
+                try:
+                    p_rel = os.path.relpath(p_abs, project_root_dir).replace('\\', '/').lower()
+                    path_map[p_rel] = p_abs
+                except Exception:
+                    pass
+
+        events, subs, markers = StoryCopilot.convert_plan_to_resolve_timeline(plan, path_map)
+
+        if not events:
+            QMessageBox.warning(self, "Không có phân đoạn", "Bản vẽ không tìm thấy phân đoạn video hợp lệ nào.")
+            return
+
+        proj_name = self.project_structure.root_name if self.project_structure else "Copilot_Director_Cut"
+        timeline_name = f"{proj_name}_Copilot_Cut"
+
+        # Đặt toàn bộ file xuất TRỰC TIẾP trong thư mục _TIMELINE_IMPORT
+        out_fcpxml = os.path.join(output_dir, f"{timeline_name}.fcpxml")
+        out_fcp7xml = os.path.join(output_dir, f"{timeline_name}.xml")
+        out_edl = os.path.join(output_dir, f"{timeline_name}.edl")
+
+        # Lọc danh sách events cho track 1 chính (A-Roll)
+        v1_events = [e for e in events if e.get("track", 1) == 1 and not e.get("is_broll_overlay") and not e.get("is_sfx")]
+        if not v1_events:
+            v1_events = events
+
+        fps = 30.0
+        if first_v:
+            try:
+                fps = EDLGenerator.get_video_fps(first_v)
+            except Exception:
+                fps = 30.0
+
+        # 1. Sinh FCPXML v1.9 (Apple Final Cut Pro / Resolve)
+        FCPXMLGenerator.generate_timeline_fcpxml(
+            events=v1_events,
+            output_xml_path=out_fcpxml,
+            timeline_name=timeline_name,
+            fps=fps,
+            aspect_ratio="16:9",
+            markers=markers
+        )
+
+        # 2. Sinh FCP7 XML (Multi-Track V1, V2 Meme, A1/A2 Audio, A3 SFX chuẩn DaVinci Resolve Windows)
+        FCPXMLGenerator.generate_fcp7_xml(
+            events=v1_events,
+            output_xml_path=out_fcp7xml,
+            timeline_name=timeline_name,
+            fps=fps,
+            aspect_ratio="16:9",
+            broll_inserts=plan.broll_inserts,
+            sfx_inserts=plan.sfx_inserts,
+            markers=markers
+        )
+
+        # 3. Sinh EDL CMX3600
+        EDLGenerator.create_multi_clip_edl(v1_events, out_edl, markers=markers)
+
+        # 4. Tách riêng Timeline Hook (Intro Highlight Teaser) độc lập
+        out_hook_fcp7xml = None
+        out_hook_fcpxml = None
+        hook_events = [e for e in events if e.get("is_hook")]
+        if not hook_events and plan.global_hook:
+            h = plan.global_hook
+            vpath = StoryCopilot._find_clip_path(h.clip_index, h.clip_name, path_map)
+            if vpath and os.path.exists(vpath):
+                dur = max(0.5, h.end_sec - h.start_sec)
+                hook_events.append({
+                    "video_path": vpath,
+                    "src_in": h.start_sec,
+                    "src_out": h.end_sec,
+                    "rec_in": 0.0,
+                    "rec_out": dur,
+                    "speed": 1.0,
+                    "punch_in": h.punch_in,
+                    "punch_in_scale": 1.15,
+                    "is_hook": True,
+                    "track": 1,
+                    "reason": h.reason
+                })
+
+        if hook_events:
+            hook_timeline_name = f"{proj_name}_Timeline_Intro_Hook"
+            out_hook_fcp7xml = os.path.join(output_dir, f"{hook_timeline_name}.xml")
+            out_hook_fcpxml = os.path.join(output_dir, f"{hook_timeline_name}.fcpxml")
+            out_hook_edl = os.path.join(output_dir, f"{hook_timeline_name}.edl")
+            
+            hook_markers = [
+                {
+                    "time": 0.0,
+                    "duration": hook_events[0]["rec_out"] - hook_events[0]["rec_in"],
+                    "name": f"🔥 GLOBAL HOOK: {plan.global_hook.hook_title if plan.global_hook else 'Intro Hook'}",
+                    "color": "Magenta",
+                    "note": plan.global_hook.reason if plan.global_hook else ""
+                }
+            ]
+            FCPXMLGenerator.generate_fcp7_xml(
+                events=hook_events,
+                output_xml_path=out_hook_fcp7xml,
+                timeline_name=hook_timeline_name,
+                fps=fps,
+                aspect_ratio="16:9",
+                markers=hook_markers
+            )
+            FCPXMLGenerator.generate_timeline_fcpxml(
+                events=hook_events,
+                output_xml_path=out_hook_fcpxml,
+                timeline_name=hook_timeline_name,
+                fps=fps,
+                aspect_ratio="16:9",
+                markers=hook_markers
+            )
+            EDLGenerator.create_multi_clip_edl(hook_events, out_hook_edl, markers=hook_markers)
+
+        self.txt_console.appendPlainText(f"📁 [Xuất Toàn Bộ Timeline Vào Thư Mục _TIMELINE_IMPORT]:")
+        self.txt_console.appendPlainText(f"   🎬 1. Master Timeline Multi-Track XML (DaVinci): {out_fcp7xml}")
+        self.txt_console.appendPlainText(f"   🎬 1. Master Timeline Apple FCPXML: {out_fcpxml}")
+        if out_hook_fcp7xml:
+            self.txt_console.appendPlainText(f"   🔥 2. Dedicated Intro Hook Timeline XML: {out_hook_fcp7xml}")
+            self.txt_console.appendPlainText(f"   🔥 2. Dedicated Intro Hook Timeline FCPXML: {out_hook_fcpxml}")
+        self.txt_console.appendPlainText(f"   📂 Toàn bộ file lưu tập trung tại: {output_dir}")
+
+        resolve_auto = ResolveAutomation()
+        connected = resolve_auto.connect()
+
+        if connected:
+            success = resolve_auto.import_fcpxml_timeline(out_fcp7xml if os.path.exists(out_fcp7xml) else out_fcpxml)
+            if success:
+                self.txt_console.appendPlainText(f"🎉 Đã nạp thành công Master Timeline '{timeline_name}' vào DaVinci Resolve Studio!")
+                QMessageBox.information(
+                    self,
+                    "Dựng Phim Hoàn Tất!",
+                    f"🎉 Đã nạp thành công Master Timeline '{timeline_name}' lên DaVinci Resolve theo đúng 100% kịch bản của AI Copilot!"
+                )
+                return
+
+        # Dành cho DaVinci Resolve Free (hoặc khi chưa kết nối API Studio)
+        self.txt_console.appendPlainText("💡 [DaVinci Resolve Free Mode] File Timeline FCP7 XML / FCPXML đã sẵn sàng để nạp vào DaVinci Resolve.")
+        
+        hook_info_html = ""
+        if out_hook_fcp7xml:
+            hook_info_html = f"🔥 <b>File Intro Hook Riêng Biệt:</b> <code>{os.path.basename(out_hook_fcp7xml)}</code><br>"
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("🎉 Đã Tạo Xong Timeline Kịch Bản AI!")
+        msg_box.setText(
+            f"<b>✔ Toàn bộ file Timeline đã được tạo tập trung trong thư mục <code>_TIMELINE_IMPORT</code>!</b><br><br>"
+            f"📁 <b>Thư mục chứa:</b> <code>{output_dir}</code><br>"
+            f"🎬 <b>File Master Timeline XML:</b> <code>{os.path.basename(out_fcp7xml)}</code><br>"
+            f"{hook_info_html}<br>"
+            f"<b>🎬 Cách đưa vào DaVinci Resolve (Bản Free & Studio):</b><br>"
+            f"1. Mở <b>DaVinci Resolve</b>.<br>"
+            f"2. Bấm phím tắt <b>Ctrl + Shift + I</b> <i>(hoặc File ➔ Import Timeline ➔ Import AAF, EDL, XML...)</i>.<br>"
+            f"3. Chọn file <b><code>{os.path.basename(out_fcp7xml)}</code></b> (hoặc <code>{os.path.basename(out_hook_fcp7xml) if out_hook_fcp7xml else ''}</code>).<br><br>"
+            f"✨ <i>Âm thanh đối thoại Track A1/A2, Tiếng động SFX Track A3, B-Roll Track V2 và Markers đã được liên kết chuẩn 100%!</i>"
+        )
+        msg_box.setIcon(QMessageBox.Information)
+        btn_open_folder = msg_box.addButton("📂 Mở Thư Mục Chứa File", QMessageBox.ActionRole)
+        btn_copy_path = msg_box.addButton("📋 Copy Đường Dẫn", QMessageBox.ActionRole)
+        btn_ok = msg_box.addButton("Đồng Ý (OK)", QMessageBox.AcceptRole)
+        
+        msg_box.exec()
+        
+        if msg_box.clickedButton() == btn_open_folder:
+            import subprocess
+            subprocess.run(f'explorer /select,"{os.path.abspath(out_fcp7xml)}"', shell=True)
+        elif msg_box.clickedButton() == btn_copy_path:
+            QApplication.clipboard().setText(os.path.abspath(out_fcp7xml))
+
 
     def _auto_detect_video(self):
         resolve_auto = ResolveAutomation()
@@ -1993,6 +3175,7 @@ class ResolveFlowApp(QMainWindow):
                 self.txt_console.appendPlainText(f"✔ Tự động phát hiện {len(file_paths)} video từ Resolve thành công!")
             self._update_default_chars_limit(file_paths[0])
             self._suggest_whisper_model_for_file(file_paths[0])
+            self._check_project_cache_status()
         else:
             self.txt_console.appendPlainText("⚠ Không phát hiện được video nào đang được chọn trong Media Pool hoặc Timeline. Vui lòng chọn thủ công.")
 
@@ -2049,43 +3232,182 @@ class ResolveFlowApp(QMainWindow):
             self.txt_console.appendPlainText("🛑 Người dùng yêu cầu hủy tiến trình. Đang tiến hành dừng an toàn...")
             self.worker.stop()
 
+    def _minimize_to_bubble(self):
+        """Thu nhỏ ứng dụng thành widget bong bóng nổi luôn trên cùng."""
+        self.hide()
+        if self.bubble.pos().x() == 0 and self.bubble.pos().y() == 0:
+            screen = QApplication.primaryScreen().geometry()
+            self.bubble.move(screen.width() - 240, 100)
+        self.bubble.show()
+        self.bubble.raise_()
+
+    def _restore_from_bubble(self):
+        """Khôi phục lại giao diện đầy đủ từ bong bóng nổi."""
+        self.bubble.hide()
+        self.show()
+        self.setWindowState(self.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)
+        self.activateWindow()
+        self.raise_()
+
+    def closeEvent(self, event):
+        if hasattr(self, "bubble") and self.bubble:
+            self.bubble.close()
+        super().closeEvent(event)
+
     def _update_run_button_state(self, running: bool):
+        if hasattr(self, "btn_scan_only"):
+            self.btn_scan_only.setEnabled(not running)
+        if hasattr(self, "btn_instant_export"):
+            self.btn_instant_export.setEnabled(not running)
         if running:
+            self.btn_run.setEnabled(True)
             self.btn_run.setText("⏹ DỪNG LẠI (STOP / CANCEL)")
             self.btn_run.setStyleSheet("""
                 QPushButton#btn_run {
-                    background-color: #C62828;
+                    background-color: #DC2626;
                     color: white;
-                    padding: 12px;
+                    padding: 10px;
                     border-radius: 6px;
                     font-weight: bold;
                 }
                 QPushButton#btn_run:hover {
-                    background-color: #D32F2F;
-                }
-                QPushButton#btn_run:pressed {
-                    background-color: #B71C1C;
+                    background-color: #B91C1C;
                 }
             """)
         else:
-            self.btn_run.setText("🚀 BẮT ĐẦU XỬ LÝ (RUN)")
+            self.btn_run.setEnabled(False)
+            self.btn_run.setText("⏹ DỪNG LẠI (STOP / CANCEL)")
             self.btn_run.setStyleSheet("""
                 QPushButton#btn_run {
-                    background-color: #2E7D32;
-                    color: white;
-                    padding: 12px;
+                    background-color: #1E293B;
+                    color: #64748B;
+                    padding: 10px;
                     border-radius: 6px;
                     font-weight: bold;
-                }
-                QPushButton#btn_run:hover {
-                    background-color: #388E3C;
-                }
-                QPushButton#btn_run:pressed {
-                    background-color: #1B5E20;
+                    border: 1px solid #334155;
                 }
             """)
 
-    def _run_pipeline(self):
+    def _set_workflow_stage(self, stage: int):
+        """Chuyển đổi trạng thái giao diện giữa Bước 1 (Quét & Cache) và Bước 2 (Dựng & Xuất)."""
+        self.workflow_stage = stage
+        if stage == 1:
+            if hasattr(self, "stage_1_container"):
+                self.stage_1_container.show()
+            if hasattr(self, "stage_2_wrapper"):
+                self.stage_2_wrapper.hide()
+            elif hasattr(self, "tab_widget"):
+                self.tab_widget.hide()
+            if hasattr(self, "btn_stage_1"):
+                self.btn_stage_1.setStyleSheet("""
+                    QPushButton {
+                        background-color: #0284C7;
+                        color: white;
+                        font-weight: bold;
+                        border: 2px solid #38BDF8;
+                        border-radius: 6px;
+                        padding: 8px 12px;
+                        font-size: 12px;
+                    }
+                """)
+            if hasattr(self, "btn_stage_2"):
+                self.btn_stage_2.setStyleSheet("""
+                    QPushButton {
+                        background-color: #1E293B;
+                        color: #94A3B8;
+                        border: 1px solid #334155;
+                        border-radius: 6px;
+                        padding: 8px 12px;
+                        font-size: 12px;
+                    }
+                    QPushButton:hover {
+                        background-color: #334155;
+                        color: #E2E8F0;
+                    }
+                """)
+        else:
+            if hasattr(self, "stage_1_container"):
+                self.stage_1_container.hide()
+            if hasattr(self, "stage_2_wrapper"):
+                self.stage_2_wrapper.show()
+            elif hasattr(self, "tab_widget"):
+                self.tab_widget.show()
+            if hasattr(self, "btn_stage_1"):
+                self.btn_stage_1.setStyleSheet("""
+                    QPushButton {
+                        background-color: #1E293B;
+                        color: #94A3B8;
+                        border: 1px solid #334155;
+                        border-radius: 6px;
+                        padding: 8px 12px;
+                        font-size: 12px;
+                    }
+                    QPushButton:hover {
+                        background-color: #334155;
+                        color: #E2E8F0;
+                    }
+                """)
+            if hasattr(self, "btn_stage_2"):
+                self.btn_stage_2.setStyleSheet("""
+                    QPushButton {
+                        background-color: #059669;
+                        color: white;
+                        font-weight: bold;
+                        border: 2px solid #34D399;
+                        border-radius: 6px;
+                        padding: 8px 12px;
+                        font-size: 12px;
+                    }
+                """)
+
+    def _start_phase_1_scan(self):
+        """Chạy riêng Phase 1: Quét nguồn, Whisper STT, Visual Activity & Nạp Cache."""
+        if self.is_processing:
+            self._stop_pipeline()
+            return
+        self.txt_console.appendPlainText("🔍 [Phase 1 Scan] Bắt đầu quét nguồn độc lập và nạp bộ nhớ đệm...")
+        self.current_phase = 1
+        self._run_pipeline(forced_phase=1)
+
+    def _start_instant_export(self):
+        """Chạy riêng Phase 2: Áp dụng kịch bản và xuất Timeline trong 0.1s từ Cache."""
+        if self.is_processing:
+            self._stop_pipeline()
+            return
+
+        raw_paths = getattr(self, "selected_files", [])
+        if not raw_paths:
+            t_path = self.lbl_file.text().strip()
+            if t_path:
+                raw_paths = [p.strip() for p in t_path.split(";") if p.strip()]
+        video_paths = [os.path.abspath(p) for p in raw_paths if os.path.exists(p)]
+        video_paths = list(dict.fromkeys(video_paths))
+        if not video_paths:
+            QMessageBox.warning(self, "Chưa chọn video", "Vui lòng chọn video nguồn hoặc thư mục dự án trước khi xuất timeline.")
+            return
+
+        cache_mgr = ScanCacheManager()
+        has_all_disk_cache = all(
+            cache_mgr.get_cached_scan(vp, self.combo_model.currentText(), self.combo_lang.currentText()) is not None
+            for vp in video_paths
+        )
+
+        if not self.clip_data_cache and not has_all_disk_cache:
+            self.txt_console.appendPlainText("ℹ Chưa phát hiện bộ nhớ cache sẵn có cho video này. Đang tự động quét nguồn (Phase 1) trước...")
+            self.current_phase = 1
+            self._run_pipeline(forced_phase=0)
+            return
+
+        self.txt_console.appendPlainText("⚡ [Instant Export - 0.1s] Nạp dữ liệu từ Scan Cache và xuất bản theo kịch bản mới...")
+        self.current_phase = 2
+        self._run_pipeline(forced_phase=2)
+
+    def _on_worker_progress(self, val: int):
+        self.progress_bar.setValue(val)
+        if hasattr(self, "bubble") and self.bubble:
+            self.bubble.update_progress(val, self.lbl_progress_status.text())
+
+    def _run_pipeline(self, forced_phase=None):
         # Ưu tiên lấy từ self.selected_files nếu hợp lệ, nếu không lấy từ text trên giao diện
         raw_paths = getattr(self, "selected_files", [])
         if not raw_paths:
@@ -2107,6 +3429,8 @@ class ResolveFlowApp(QMainWindow):
 
         self.is_processing = True
         self.progress_bar.setValue(0)
+        if hasattr(self, "bubble") and self.bubble:
+            self.bubble.update_progress(0, "Đang khởi động...")
 
         model_size = self.combo_model.currentText()
         language = self.combo_lang.currentText()
@@ -2141,16 +3465,19 @@ class ResolveFlowApp(QMainWindow):
         enable_loudnorm = self.check_loudnorm.isChecked() if hasattr(self, "check_loudnorm") else False
         loudnorm_preset = self.combo_loudnorm_preset.currentData() if hasattr(self, "combo_loudnorm_preset") else "youtube_tiktok"
 
-        is_semantic_ai = run_cut and (ai_mode != "silence_only")
-        if is_semantic_ai:
-            phase_to_run = self.current_phase
-            # Đảm bảo nếu người dùng đổi tệp video, cache Phase 1 của clip cũ sẽ bị hủy bỏ ngay
-            cached_paths = [os.path.abspath(c.get("video_path", "")) for c in (self.clip_data_cache or [])]
-            if phase_to_run == 2 and cached_paths != video_paths:
-                self._reset_workflow_phase()
-                phase_to_run = 1
+        if forced_phase is not None:
+            phase_to_run = forced_phase
         else:
-            phase_to_run = 0
+            is_semantic_ai = run_cut and (ai_mode != "silence_only")
+            if is_semantic_ai:
+                phase_to_run = self.current_phase
+                # Đảm bảo nếu người dùng đổi tệp video, cache Phase 1 của clip cũ sẽ bị hủy bỏ ngay
+                cached_paths = [os.path.abspath(c.get("video_path", "")) for c in (self.clip_data_cache or [])]
+                if phase_to_run == 2 and cached_paths != video_paths:
+                    self._reset_workflow_phase()
+                    phase_to_run = 1
+            else:
+                phase_to_run = 0
 
         if phase_to_run == 2:
             for row in range(self.table_review.rowCount()):
@@ -2201,12 +3528,15 @@ class ResolveFlowApp(QMainWindow):
             story_intent=self.combo_story_intent.currentData() or "keep",
             story_target=float(self.combo_story_target.currentData() or 60.0),
             video_type=self.combo_video_type.currentData() or "auto",
-            api_key=self.txt_api_key.text().strip() or None
+            hide_weak_subs=self.check_hide_weak_subs.isChecked(),
+            api_key=self.txt_api_key.text().strip() or None,
+            story_arrangement_override=self.story_review_state.arrangement if self.story_review_state else None,
+            project_structure=self.project_structure
         )
 
         self.worker.log_signal.connect(self._log_message)
         self.worker.step_signal.connect(self.step_progress.set_step_status)
-        self.worker.progress_signal.connect(self.progress_bar.setValue)
+        self.worker.progress_signal.connect(self._on_worker_progress)
         self.worker.finished_signal.connect(self._pipeline_finished)
 
         self.worker.start()
@@ -2275,46 +3605,59 @@ class ResolveFlowApp(QMainWindow):
     def _log_message(self, message):
         self.txt_console.appendPlainText(message)
         msg_l = message.lower()
+        status_str = None
         if "khởi động" in msg_l:
-            self.lbl_progress_status.setText("🚀 Đang khởi động hệ thống...")
+            status_str = "🚀 Đang khởi động..."
         elif "dry-run" in msg_l or "tương thích" in msg_l:
-            self.lbl_progress_status.setText("🔍 Đang kiểm tra định dạng tệp...")
+            status_str = "🔍 Kiểm tra tệp nguồn..."
         elif "tải mô hình" in msg_l:
-            self.lbl_progress_status.setText("🤖 Đang nạp mô hình Whisper AI...")
+            status_str = "🤖 Nạp Whisper AI..."
         elif "trích xuất audio" in msg_l:
-            self.lbl_progress_status.setText("🔊 Đang trích xuất âm thanh mono...")
+            status_str = "🔊 Trích xuất âm thanh..."
         elif "quét giọng nói" in msg_l or "dịch giọng nói" in msg_l:
-            self.lbl_progress_status.setText("🎙 Đang nhận diện giọng nói (Speech-to-Text)...")
+            status_str = "🎙 Nhận diện giọng nói..."
         elif "scan cache hit" in msg_l:
-            self.lbl_progress_status.setText("⚡ Nạp dữ liệu từ Scan Cache siêu tốc (0.05s)!")
+            status_str = "⚡ Nạp Cache siêu tốc (0.05s)!"
         elif "lọc khoảng lặng" in msg_l or "phân tích khoảng lặng" in msg_l or "speed-ramp" in msg_l:
-            self.lbl_progress_status.setText("✂ Đang phân tích và xử lý khoảng lặng âm thanh...")
+            status_str = "✂ Phân tích khoảng lặng..."
         elif "ai director" in msg_l:
-            self.lbl_progress_status.setText("🎬 Đạo diễn AI đang xử lý ngữ nghĩa và nhịp cắt...")
+            status_str = "🎬 Đạo diễn AI..."
         elif "vlog hook" in msg_l:
-            self.lbl_progress_status.setText("🔥 Đang trích xuất phân đoạn Teaser/Hook mở đầu...")
+            status_str = "🔥 Tạo Teaser / Hook..."
         elif "reframe" in msg_l:
-            self.lbl_progress_status.setText("👁 Đang tính toán bám mặt video dọc 9:16...")
+            status_str = "👁 Bám mặt dọc 9:16..."
         elif "b-roll" in msg_l:
-            self.lbl_progress_status.setText("🎞 Đang tạo gợi ý cảnh minh họa B-Roll...")
+            status_str = "🎞 Gợi ý B-Roll / Meme..."
         elif "sfx" in msg_l:
-            self.lbl_progress_status.setText("🔊 Đang bố trí âm thanh hiệu ứng SFX...")
+            status_str = "🔊 Chèn âm thanh SFX..."
         elif "tạo tệp timeline" in msg_l or "fcpxml" in msg_l:
-            self.lbl_progress_status.setText("📝 Đang tạo Timeline FCPXML & EDL...")
+            status_str = "📝 Tạo Timeline XML/EDL..."
         elif "import timeline" in msg_l or "gửi yêu cầu" in msg_l:
-            self.lbl_progress_status.setText("🤖 Đang kết nối và gửi sang DaVinci Resolve...")
+            status_str = "🤖 Gửi DaVinci Resolve..."
         elif "hoàn tất" in msg_l or "xong" in msg_l:
-            self.lbl_progress_status.setText("🏁 Hoàn tất thành công!")
+            status_str = "🏁 Hoàn tất thành công!"
+
+        if status_str:
+            self.lbl_progress_status.setText(status_str)
+            if hasattr(self, "bubble") and self.bubble:
+                self.bubble.update_progress(self.progress_bar.value(), status_str)
 
     @pyqtSlot(bool, str)
     def _pipeline_finished(self, success, message):
         self.is_processing = False
         self.btn_run.setEnabled(True)
         self._update_run_button_state(running=False)
+
+        if hasattr(self, "bubble") and self.bubble:
+            if success:
+                self.bubble.update_progress(100, "Hoàn tất!" if message != "phase1_done" else "Đã quét xong!")
+            else:
+                self.bubble.update_progress(0, "Đã dừng" if ("dừng" in message.lower() or "cancel" in message.lower()) else "Sự cố")
         
         if success:
             if message == "phase1_done":
-                self.lbl_progress_status.setText("✔ Đã phân tích xong kịch bản, vui lòng duyệt bảng bên trên.")
+                self._set_workflow_stage(2)
+                self.lbl_progress_status.setText("✔ Đã quét nguồn & nạp cache! Bạn có thể chọn kịch bản và bấm 'Xuất Timeline Ngay (0.1s)'.")
                 self.proposed_segments = self.worker.proposed_segments
                 self.clip_data_cache = self.worker.clip_data_out_cache
                 self.validation_warnings = self.worker.validation_warnings
@@ -2330,9 +3673,9 @@ class ResolveFlowApp(QMainWindow):
                 self._populate_review_table()
                 self._set_review_visible(True)
                 
-                self.txt_console.appendPlainText("\n✔ [AI Director] Phân tích hoàn tất! Vui lòng duyệt các phân đoạn đề xuất cắt/giữ trong bảng ở trên.")
-                self.txt_console.appendPlainText("👉 Tích chọn để GIỮ phân đoạn, Bỏ tích để CẮT phân đoạn.")
-                self.txt_console.appendPlainText("👉 Sau đó, bấm nút '🎬 XUẤT TIMELINE & DAVINCI RESOLVE' để hoàn thành.")
+                self.txt_console.appendPlainText("\n✔ [AI Director] Phân tích hoàn tất! Dữ liệu đã lưu vào Cache.")
+                self.txt_console.appendPlainText("👉 Bạn có thể đổi ý đồ kịch bản (AIDA, Shorts, Clean Talk) tùy thích.")
+                self.txt_console.appendPlainText("👉 Bấm '⚡ 2. Xuất Timeline (0.1s)' hoặc '🎬 XUẤT TIMELINE & DAVINCI RESOLVE' để xuất ngay!")
                 
                 self.current_phase = 2
                 self.btn_run.setText("🎬 XUẤT TIMELINE & DAVINCI RESOLVE")
@@ -2363,8 +3706,23 @@ class ResolveFlowApp(QMainWindow):
                 self.lbl_progress_status.setText("🏁 Khởi chạy hoàn tất. Đã xuất bản lên DaVinci Resolve!")
                 self.txt_console.appendPlainText("🏁 Khởi chạy hoàn tất. Đã xuất bản hoàn chỉnh lên DaVinci Resolve!")
                 self._set_review_visible(False)
+                
+                # Nạp Story Review Table nếu có kết quả sắp xếp kịch bản
+                story_blocks = getattr(self.worker, "story_blocks_out", [])
+                story_arr = getattr(self.worker, "story_arrangement_out", None)
+                if story_blocks and story_arr and story_arr.items:
+                    self.story_blocks = story_blocks
+                    self.story_arrangement = story_arr
+                    try:
+                        tgt = float(self.combo_story_target.currentData() or 60.0)
+                    except (ValueError, TypeError):
+                        tgt = 60.0
+                    self._populate_story_review_table(story_blocks, story_arr, target_seconds=tgt)
+
+                # Giữ ấm clip_data_cache từ worker để cho phép xuất lại tức thì với kịch bản khác
+                if getattr(self.worker, "clip_data_out_cache", None):
+                    self.clip_data_cache = self.worker.clip_data_out_cache
                 self.current_phase = 1
-                self.clip_data_cache = []
                 self.proposed_segments = []
         else:
             if "dừng" in message.lower() or "cancel" in message.lower():
@@ -2401,8 +3759,7 @@ class ResolveFlowApp(QMainWindow):
             chk_layout.setAlignment(Qt.AlignCenter)
             chk = QCheckBox()
             
-            if p.confidence < threshold:
-                p.approved = False
+            # Độ tin cậy của CHỮ không phải lý do để cắt: câu tin cậy thấp chỉ được tô vàng để xem lại
                 
             chk.setChecked(p.approved)
             chk.toggled.connect(lambda c, r=row: self._on_review_check_toggled(r, c))
@@ -2540,6 +3897,200 @@ class ResolveFlowApp(QMainWindow):
         show = set(self.review_state.needs_attention(self._review_threshold())) if only_attention else None
         for row in range(self.table_review.rowCount()):
             self.table_review.setRowHidden(row, show is not None and row not in show)
+
+    # --- STORY BLOCKS REVIEW: Duyệt và tinh chỉnh kịch bản sắp xếp ---
+    def _build_story_review_toolbar(self) -> QWidget:
+        bar = QWidget()
+        lay = QVBoxLayout(bar)
+        lay.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        self.btn_story_move_up = QPushButton("⬆ Lên")
+        self.btn_story_move_down = QPushButton("⬇ Xuống")
+        self.btn_story_enable_all = QPushButton("✔ Bật hết")
+        self.btn_story_disable_all = QPushButton("✖ Tắt hết")
+        self.btn_story_reset = QPushButton("🤖 Về đề xuất AI")
+        self.btn_story_undo = QPushButton("↶ Hoàn tác")
+        self.btn_story_redo = QPushButton("↷ Làm lại")
+
+        for b in (self.btn_story_move_up, self.btn_story_move_down, self.btn_story_enable_all,
+                  self.btn_story_disable_all, self.btn_story_reset, self.btn_story_undo, self.btn_story_redo):
+            row.addWidget(b)
+
+        self.btn_story_move_up.clicked.connect(self._on_story_move_up)
+        self.btn_story_move_down.clicked.connect(self._on_story_move_down)
+        self.btn_story_enable_all.clicked.connect(self._story_enable_all)
+        self.btn_story_disable_all.clicked.connect(self._story_disable_all)
+        self.btn_story_reset.clicked.connect(self._story_reset_ai)
+        self.btn_story_undo.clicked.connect(self._story_undo)
+        self.btn_story_redo.clicked.connect(self._story_redo)
+
+        row.addStretch(1)
+        lay.addLayout(row)
+
+        row2 = QHBoxLayout()
+        self.lbl_story_summary = QLabel("")
+        self.lbl_story_summary.setStyleSheet(f"color: {ThemeColors.TEXT_ACCENT}; font-weight: bold; font-size: 11px;")
+        row2.addWidget(self.lbl_story_summary)
+        row2.addStretch(1)
+        lay.addLayout(row2)
+
+        hint = QLabel("💡 Bấm dòng để nhảy mốc Playhead • Nút ⬆/⬇ hoặc Alt+Up/Down để đổi thứ tự khối • Space: Bật/Tắt khối")
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
+        lay.addWidget(hint)
+        return bar
+
+    def _set_story_review_visible(self, visible: bool):
+        self.table_story_review.setVisible(visible)
+        self.story_review_toolbar.setVisible(visible)
+        if visible:
+            self._refresh_story_ui()
+
+    def _populate_story_review_table(self, blocks: Sequence[Block], arrangement: Arrangement, target_seconds: float = 60.0):
+        self.story_review_state = StoryReviewState(arrangement, blocks, target_seconds=target_seconds)
+        self._render_story_review_rows()
+        self._set_story_review_visible(True)
+
+    def _render_story_review_rows(self):
+        if not self.story_review_state:
+            return
+        items = self.story_review_state.items
+        blocks_by_id = self.story_review_state.blocks_by_id
+
+        self.table_story_review.setRowCount(len(items))
+        for row, it in enumerate(items):
+            b = blocks_by_id.get(it.block_id)
+            chk_widget = QWidget()
+            chk_layout = QHBoxLayout(chk_widget)
+            chk_layout.setContentsMargins(0, 0, 0, 0)
+            chk_layout.setAlignment(Qt.AlignCenter)
+            chk = QCheckBox()
+            chk.setChecked(getattr(it, "enabled", True))
+            chk.toggled.connect(lambda c, r=row: self._on_story_review_check_toggled(r, c))
+            chk_layout.addWidget(chk)
+            self.table_story_review.setCellWidget(row, 0, chk_widget)
+
+            self.table_story_review.setItem(row, 1, QTableWidgetItem(f"#{row + 1}"))
+            
+            role_txt = ROLE_LABELS.get(it.role, it.role) + (" (mở đầu)" if it.is_copy else "")
+            role_item = QTableWidgetItem(role_txt)
+            color_name = ROLE_COLORS.get(it.role, "Blue")
+            if color_name == "Green":
+                role_item.setBackground(QColor(20, 90, 40))
+            elif color_name == "Blue":
+                role_item.setBackground(QColor(20, 60, 110))
+            elif color_name == "Yellow":
+                role_item.setBackground(QColor(110, 90, 20))
+            elif color_name == "Red":
+                role_item.setBackground(QColor(110, 30, 30))
+            elif color_name == "Purple":
+                role_item.setBackground(QColor(80, 30, 100))
+            else:
+                role_item.setBackground(QColor(30, 80, 90))
+            self.table_story_review.setItem(row, 2, role_item)
+
+            dur = it.t1 - it.t0
+            dur_item = QTableWidgetItem(f"{dur:.1f}s ({it.t0:.1f}s ➔ {it.t1:.1f}s)")
+            self.table_story_review.setItem(row, 3, dur_item)
+
+            reason_item = QTableWidgetItem(it.reason or (b.reason if b else ""))
+            self.table_story_review.setItem(row, 4, reason_item)
+
+            text_snippet = (b.text if b and b.text else "(không lời / cảnh b-roll)")
+            txt_item = QTableWidgetItem(text_snippet)
+            self.table_story_review.setItem(row, 5, txt_item)
+
+        self._refresh_story_ui()
+
+    def _on_story_review_check_toggled(self, row_idx: int, checked: bool):
+        if self.story_review_state and 0 <= row_idx < len(self.story_review_state.items):
+            self.story_review_state.set_enabled(row_idx, checked)
+            self._after_story_change()
+
+    def _selected_story_row(self) -> Optional[int]:
+        rows = self.table_story_review.selectionModel().selectedRows()
+        return rows[0].row() if rows else None
+
+    def _on_story_move_up(self):
+        row = self._selected_story_row()
+        if row is not None and self.story_review_state:
+            if self.story_review_state.move_up(row):
+                self._render_story_review_rows()
+                self.table_story_review.selectRow(max(0, row - 1))
+                self._after_story_change()
+
+    def _on_story_move_down(self):
+        row = self._selected_story_row()
+        if row is not None and self.story_review_state:
+            if self.story_review_state.move_down(row):
+                self._render_story_review_rows()
+                self.table_story_review.selectRow(min(len(self.story_review_state.items) - 1, row + 1))
+                self._after_story_change()
+
+    def _story_toggle_selected(self):
+        row = self._selected_story_row()
+        if row is not None and self.story_review_state:
+            self.story_review_state.toggle_enabled(row)
+            self._after_story_change()
+
+    def _story_enable_all(self):
+        if self.story_review_state:
+            self.story_review_state.enable_all()
+            self._after_story_change()
+
+    def _story_disable_all(self):
+        if self.story_review_state:
+            self.story_review_state.disable_all()
+            self._after_story_change()
+
+    def _story_reset_ai(self):
+        if self.story_review_state:
+            self.story_review_state.restore_ai_plan()
+            self._render_story_review_rows()
+            self._after_story_change()
+
+    def _story_undo(self):
+        if self.story_review_state and self.story_review_state.undo():
+            self._render_story_review_rows()
+            self._after_story_change()
+
+    def _story_redo(self):
+        if self.story_review_state and self.story_review_state.redo():
+            self._render_story_review_rows()
+            self._after_story_change()
+
+    def _sync_story_checks(self):
+        if not self.story_review_state:
+            return
+        for row in range(self.table_story_review.rowCount()):
+            widget = self.table_story_review.cellWidget(row, 0)
+            cb = widget.findChild(QCheckBox) if widget else None
+            if cb is not None and row < len(self.story_review_state.items):
+                cb.blockSignals(True)
+                cb.setChecked(getattr(self.story_review_state.items[row], "enabled", True))
+                cb.blockSignals(False)
+
+    def _refresh_story_ui(self):
+        if not self.story_review_state:
+            return
+        st = self.story_review_state.summary()
+        diff_str = f" ({st['difference_to_target']:+.1f}s)" if st['target_seconds'] > 0 else ""
+        self.lbl_story_summary.setText(
+            f"🧭 Đang bật {st['enabled_count']}/{st['total_count']} khối • Tổng: {st['total_seconds']:.1f}s / {st['target_seconds']:.0f}s Target{diff_str}"
+        )
+        self.btn_story_undo.setEnabled(self.story_review_state.can_undo)
+        self.btn_story_redo.setEnabled(self.story_review_state.can_redo)
+
+    def _after_story_change(self):
+        self._sync_story_checks()
+        self._refresh_story_ui()
+
+    def _on_story_review_selection_changed(self):
+        row = self._selected_story_row()
+        if row is not None and self.story_review_state and row < len(self.story_review_state.items):
+            it = self.story_review_state.items[row]
+            self.mini_timeline.set_playhead_seconds(it.t0)
+
 
 
 def start_gui():
