@@ -1,24 +1,20 @@
 import os
-from typing import Optional, Callable
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QMenu,
-    QGraphicsDropShadowEffect, QApplication, QScrollArea, QGridLayout, QLineEdit, QPushButton, QStackedWidget
+    QGraphicsDropShadowEffect, QApplication, QPushButton
 )
-from PySide6.QtCore import Qt, QPoint, Signal as pyqtSignal, QPropertyAnimation, QEasingCurve, QSize
-from PySide6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QCursor, QAction, QIcon
-from src.ui.theme import ThemeColors, ThemeFonts
-
-from src.core.text_preset import BUILTIN_PRESETS, TextStylePreset
-from src.core.transition_preset import BUILTIN_TRANSITIONS, TransitionStylePreset
-from src.ui.tabs.tab_assets import AssetCard
+from PySide6.QtCore import Qt, QPoint, Signal as pyqtSignal, QSize
+from PySide6.QtGui import QColor, QPainter, QBrush, QPen
+from src.ui.theme import ThemeColors
 
 class FloatingBubbleWidget(QWidget):
     """
-    Tách biệt 2 Luồng:
-    1. AI Director (Mở Giao diện đầy đủ)
-    2. Kho Tài Nguyên / CapCut Mode (Mở Mini Browser)
+    TRUNG TÂM ĐIỀU HƯỚNG CỦA ỨNG DỤNG.
+    Chỉ hiển thị 2 nút mở 2 cửa sổ độc lập. Không chứa UI con.
     """
-    restore_requested = pyqtSignal()
+    open_auto_requested = pyqtSignal()
+    open_studio_requested = pyqtSignal()
+    
     stop_requested = pyqtSignal()
     pause_requested = pyqtSignal()
 
@@ -32,11 +28,7 @@ class FloatingBubbleWidget(QWidget):
         self.status_text = "Sẵn sàng"
         self.is_processing = False
         
-        self.is_expanded = False
-        self.collapsed_size = QSize(320, 64)
-        self.expanded_size = QSize(340, 480)
-
-        self.setFixedSize(self.collapsed_size)
+        self.setFixedSize(QSize(320, 64))
         self._init_ui()
 
     def _init_ui(self):
@@ -44,7 +36,6 @@ class FloatingBubbleWidget(QWidget):
         self.main_layout.setContentsMargins(10, 8, 12, 10)
         self.main_layout.setSpacing(10)
 
-        # 1. Header (Pill)
         header_widget = QWidget()
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(0, 0, 0, 0)
@@ -62,7 +53,7 @@ class FloatingBubbleWidget(QWidget):
         """)
         header_layout.addWidget(self.lbl_icon)
 
-        # Trạng thái tiến trình (Chỉ hiện khi đang xử lý AI)
+        # Trạng thái tiến trình (Chỉ hiện khi luồng AUTO đang xử lý AI)
         self.info_layout = QWidget()
         i_layout = QVBoxLayout(self.info_layout)
         i_layout.setSpacing(2)
@@ -82,7 +73,7 @@ class FloatingBubbleWidget(QWidget):
         self.info_layout.setVisible(False)
         header_layout.addWidget(self.info_layout, stretch=1)
 
-        # Cụm 2 Nút (Launcher Mode - Hiển thị khi đang rảnh)
+        # Cụm 2 Nút (Launcher Mode)
         self.launcher_layout = QWidget()
         l_layout = QHBoxLayout(self.launcher_layout)
         l_layout.setContentsMargins(0,0,0,0)
@@ -94,7 +85,7 @@ class FloatingBubbleWidget(QWidget):
             QPushButton {{ background-color: {ThemeColors.BG_INPUT}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 6px; color: {ThemeColors.TEXT_PRIMARY}; padding: 8px; font-weight: bold; font-size: 11px; }}
             QPushButton:hover {{ background-color: {ThemeColors.BORDER_DEFAULT}; border: 1px solid {ThemeColors.PRIMARY}; }}
         """)
-        self.btn_ai_mode.clicked.connect(self.restore_requested.emit)
+        self.btn_ai_mode.clicked.connect(self.open_auto_requested.emit)
         
         self.btn_capcut_mode = QPushButton("🎨 Kho Hiệu ứng")
         self.btn_capcut_mode.setCursor(Qt.PointingHandCursor)
@@ -102,7 +93,7 @@ class FloatingBubbleWidget(QWidget):
             QPushButton {{ background-color: {ThemeColors.BG_INPUT}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 6px; color: {ThemeColors.TEXT_PRIMARY}; padding: 8px; font-weight: bold; font-size: 11px; }}
             QPushButton:hover {{ background-color: {ThemeColors.BORDER_DEFAULT}; border: 1px solid {ThemeColors.PRIMARY}; }}
         """)
-        self.btn_capcut_mode.clicked.connect(self.toggle_expand)
+        self.btn_capcut_mode.clicked.connect(self.open_studio_requested.emit)
         
         l_layout.addWidget(self.btn_ai_mode, stretch=1)
         l_layout.addWidget(self.btn_capcut_mode, stretch=1)
@@ -110,95 +101,11 @@ class FloatingBubbleWidget(QWidget):
 
         self.main_layout.addWidget(header_widget)
 
-        # 2. Mini Asset Browser
-        self.browser_container = QWidget()
-        self.browser_container.setVisible(False)
-        b_layout = QVBoxLayout(self.browser_container)
-        b_layout.setContentsMargins(0, 5, 0, 0)
-        
-        self.txt_search = QLineEdit()
-        self.txt_search.setPlaceholderText("🔍 Tìm hiệu ứng...")
-        self.txt_search.setStyleSheet(f"""
-            background-color: {ThemeColors.BG_INPUT};
-            border: 1px solid {ThemeColors.BORDER_DEFAULT};
-            border-radius: 6px; padding: 6px; color: {ThemeColors.TEXT_PRIMARY};
-        """)
-        self.txt_search.textChanged.connect(self._filter_assets)
-        b_layout.addWidget(self.txt_search)
-        
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("background: transparent; border: none;")
-        self.grid_container = QWidget()
-        self.grid = QGridLayout(self.grid_container)
-        self.grid.setContentsMargins(0,0,0,0)
-        self.grid.setSpacing(8)
-        scroll.setWidget(self.grid_container)
-        b_layout.addWidget(scroll)
-        
-        self.main_layout.addWidget(self.browser_container, stretch=1)
-
         shadow = QGraphicsDropShadowEffect(self)
         shadow.setBlurRadius(20)
         shadow.setColor(QColor(0, 0, 0, 200))
         shadow.setOffset(0, 4)
         self.setGraphicsEffect(shadow)
-
-        self._populate_mini_browser()
-
-    def _populate_mini_browser(self):
-        self.all_assets = BUILTIN_PRESETS + BUILTIN_TRANSITIONS
-        self.card_widgets = []
-        for p in self.all_assets:
-            card = AssetCard(preset=p, sample_text_func=lambda: "ChunDVC Title")
-            card.setFixedHeight(90)
-            self.card_widgets.append(card)
-        self._filter_assets()
-
-    def _filter_assets(self):
-        while self.grid.count():
-            item = self.grid.takeAt(0)
-            
-        query = self.txt_search.text().lower()
-        cols = 2
-        visible = []
-        
-        for c in self.card_widgets:
-            p = c.preset
-            cat = p.category.lower() if hasattr(p, 'category') else ""
-            if query and query not in p.name.lower() and query not in cat:
-                continue
-            visible.append(c)
-            
-        for i, c in enumerate(visible):
-            c.setVisible(True)
-            self.grid.addWidget(c, i // cols, i % cols)
-
-    def toggle_expand(self):
-        self.is_expanded = not self.is_expanded
-        
-        self.anim = QPropertyAnimation(self, b"size")
-        self.anim.setDuration(250)
-        self.anim.setEasingCurve(QEasingCurve.OutCubic)
-        self.anim.setStartValue(self.size())
-        
-        if self.is_expanded:
-            self.anim.setEndValue(self.expanded_size)
-            self.browser_container.setVisible(True)
-            self.btn_capcut_mode.setText("➖ Đóng")
-            self.btn_capcut_mode.setStyleSheet(f"""
-                QPushButton {{ background-color: {ThemeColors.BORDER_ACTIVE}; border: 1px solid {ThemeColors.PRIMARY}; border-radius: 6px; color: {ThemeColors.BG_MAIN}; padding: 8px; font-weight: bold; font-size: 11px; }}
-            """)
-        else:
-            self.anim.setEndValue(self.collapsed_size)
-            self.browser_container.setVisible(False)
-            self.btn_capcut_mode.setText("🎨 Kho Hiệu ứng")
-            self.btn_capcut_mode.setStyleSheet(f"""
-                QPushButton {{ background-color: {ThemeColors.BG_INPUT}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 6px; color: {ThemeColors.TEXT_PRIMARY}; padding: 8px; font-weight: bold; font-size: 11px; }}
-                QPushButton:hover {{ background-color: {ThemeColors.BORDER_DEFAULT}; border: 1px solid {ThemeColors.PRIMARY}; }}
-            """)
-            
-        self.anim.start()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -211,10 +118,10 @@ class FloatingBubbleWidget(QWidget):
         painter.setBrush(brush)
         painter.setPen(pen)
         
-        radius = 16 if self.is_expanded else 32
+        radius = 32
         painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), radius, radius)
 
-        if self.is_processing and self.progress_pct > 0 and not self.is_expanded:
+        if self.is_processing and self.progress_pct > 0:
             prog_pen = QPen(QColor(ThemeColors.PRIMARY), 3)
             painter.setPen(prog_pen)
             w = self.width() - 40
@@ -222,7 +129,7 @@ class FloatingBubbleWidget(QWidget):
             prog_w = int((w * self.progress_pct) / 100)
             painter.drawLine(20, y, 20 + prog_w, y)
 
-    def update_progress(self, pct: int, status_text: Optional[str] = None):
+    def update_progress(self, pct: int, status_text: str = None):
         self.progress_pct = max(0, min(100, pct))
         self.lbl_progress.setText(f"{self.progress_pct}%")
         if status_text:
@@ -233,7 +140,6 @@ class FloatingBubbleWidget(QWidget):
         
         self.is_processing = (self.progress_pct > 0 and self.progress_pct < 100)
         
-        # Toggle UI Based on State
         if self.is_processing:
             self.launcher_layout.setVisible(False)
             self.info_layout.setVisible(True)
@@ -260,12 +166,6 @@ class FloatingBubbleWidget(QWidget):
             QMenu::item {{ padding: 6px 20px; border-radius: 4px; }}
             QMenu::item:selected {{ background-color: {ThemeColors.BG_INPUT}; color: {ThemeColors.TEXT_ACCENT}; }}
         """)
-        action_restore = menu.addAction("🖥️ Mở Giao Diện Đầy Đủ")
-        action_restore.triggered.connect(self.restore_requested.emit)
-        menu.addSeparator()
-        if self.is_processing:
-            action_stop = menu.addAction("🛑 Dừng Tiến Trình")
-            action_stop.triggered.connect(self.stop_requested.emit)
-        action_quit = menu.addAction("❌ Thoát Ứng Dụng")
+        action_quit = menu.addAction("❌ Thoát ChunDVC")
         action_quit.triggered.connect(QApplication.instance().quit)
         menu.exec(event.globalPos())
