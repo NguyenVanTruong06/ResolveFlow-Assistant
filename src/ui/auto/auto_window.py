@@ -2280,6 +2280,7 @@ class AutoWindow(QMainWindow):
         self.btn_back_to_stage1 = QPushButton()
         self.btn_instant_export = QPushButton()
         self.check_cache = QCheckBox()
+        self.lbl_file = QLabel()
 
         self._bind_tab_delegates()
 
@@ -3057,11 +3058,6 @@ class AutoWindow(QMainWindow):
             status_msg = f"🎉 ĐÃ CÓ SẴN CACHE (100% - {total}/{total} clips)! Dữ liệu đã sẵn sàng. Bạn có thể sang Bước 2 hoặc nạp JSON để xuất timeline ngay trong 0.1s!"
             status_style = "background-color: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid #10B981; border-radius: 6px; padding: 8px; font-weight: bold; font-size: 12px;"
             badge_txt = f"⚡ Cache: 100% ({total}/{total})"
-        if hasattr(self, "lbl_cache_badge"):
-            self.lbl_cache_badge.setText(f"{cached_count} / {total} clip")
-        if hasattr(self, "cache_progress_bar"):
-            p = int(cached_count / total * 100) if total else 0
-            self.cache_progress_bar.setValue(p)
             badge_style = "background-color: #065F46; color: #34D399; border: 1px solid #10B981; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;"
             if hasattr(self, "btn_s1_skip_stage2"):
                 self.btn_s1_skip_stage2.setStyleSheet("background-color: #059669; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
@@ -3075,6 +3071,12 @@ class AutoWindow(QMainWindow):
             status_style = "background-color: rgba(56, 189, 248, 0.1); color: #3dcee1; border: 1px solid #2c9dac; border-radius: 6px; padding: 8px; font-size: 12px;"
             badge_txt = f"🔍 Chưa có Cache ({total} clips)"
             badge_style = "background-color: #031e22; color: #3dcee1; border: 1px solid #0c3d44; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;"
+
+        if hasattr(self, "lbl_cache_badge"):
+            self.lbl_cache_badge.setText(f"{cached_count} / {total} clip")
+        if hasattr(self, "cache_progress_bar"):
+            p = int(cached_count / total * 100) if total else 0
+            self.cache_progress_bar.setValue(p)
 
         if hasattr(self, "lbl_s1_cache_status"):
             self.lbl_s1_cache_status.setText(status_msg)
