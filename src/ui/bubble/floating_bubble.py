@@ -84,7 +84,7 @@ class BubbleTrayPopup(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.bubble = bubble
 
-        self.setFixedWidth(244)
+        self.setFixedWidth(276)
         self._init_ui()
 
     def _init_ui(self):
@@ -103,15 +103,15 @@ class BubbleTrayPopup(QWidget):
         """)
 
         c_layout = QVBoxLayout(self.container)
-        c_layout.setContentsMargins(10, 10, 10, 10)
-        c_layout.setSpacing(7)
+        c_layout.setContentsMargins(8, 8, 8, 8)
+        c_layout.setSpacing(4)
 
         # =========================================================================
         # 1. Khối trạng thái (Status Header: .t-status)
         # =========================================================================
         self.status_box = QWidget()
         s_box_layout = QVBoxLayout(self.status_box)
-        s_box_layout.setContentsMargins(0, 0, 0, 4)
+        s_box_layout.setContentsMargins(2, 2, 2, 4)
         s_box_layout.setSpacing(6)
 
         # Hàng trạng thái chính (.r)
@@ -192,34 +192,42 @@ class BubbleTrayPopup(QWidget):
         # Nút 1: AI Director
         self.btn_ai = QPushButton()
         self.btn_ai.setCursor(Qt.PointingHandCursor)
+        self.btn_ai.setFixedHeight(54)
         self.btn_ai.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
                 border: 1px solid transparent;
                 border-radius: 10px;
-                padding: 6px;
+                padding: 0px;
                 text-align: left;
             }}
             QPushButton:hover {{
-                background-color: {ThemeColors.BG_INPUT};
+                background-color: rgba(39, 39, 42, 0.75);
                 border-color: {ThemeColors.BORDER_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: rgba(39, 39, 42, 0.95);
             }}
         """)
         ai_layout = QHBoxLayout(self.btn_ai)
-        ai_layout.setContentsMargins(4, 4, 4, 4)
+        ai_layout.setContentsMargins(8, 6, 8, 6)
         ai_layout.setSpacing(10)
 
         lbl_ai_icon = QLabel()
         lbl_ai_icon.setFixedSize(34, 34)
         lbl_ai_icon.setAlignment(Qt.AlignCenter)
+        lbl_ai_icon.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         lbl_ai_icon.setStyleSheet(f"background: {ThemeColors.VIOLET_LO}; border-radius: 9px;")
         lbl_ai_icon.setPixmap(create_vector_icon("ai", "#c4b5fd", 20))
 
         ai_text_box = QVBoxLayout()
+        ai_text_box.setContentsMargins(0, 0, 0, 0)
         ai_text_box.setSpacing(1)
         lbl_ai_t = QLabel("<b>AI Director</b>")
-        lbl_ai_t.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 13px;")
+        lbl_ai_t.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        lbl_ai_t.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 13px; line-height: 1.2;")
         lbl_ai_sub = QLabel("Dựng tự động 1-click")
+        lbl_ai_sub.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         lbl_ai_sub.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
         ai_text_box.addWidget(lbl_ai_t)
         ai_text_box.addWidget(lbl_ai_sub)
@@ -232,34 +240,42 @@ class BubbleTrayPopup(QWidget):
         # Nút 2: Kho Đạo Cụ
         self.btn_studio = QPushButton()
         self.btn_studio.setCursor(Qt.PointingHandCursor)
+        self.btn_studio.setFixedHeight(54)
         self.btn_studio.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
                 border: 1px solid transparent;
                 border-radius: 10px;
-                padding: 6px;
+                padding: 0px;
                 text-align: left;
             }}
             QPushButton:hover {{
-                background-color: {ThemeColors.BG_INPUT};
+                background-color: rgba(39, 39, 42, 0.75);
                 border-color: {ThemeColors.BORDER_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: rgba(39, 39, 42, 0.95);
             }}
         """)
         st_layout = QHBoxLayout(self.btn_studio)
-        st_layout.setContentsMargins(4, 4, 4, 4)
+        st_layout.setContentsMargins(8, 6, 8, 6)
         st_layout.setSpacing(10)
 
         lbl_st_icon = QLabel()
         lbl_st_icon.setFixedSize(34, 34)
         lbl_st_icon.setAlignment(Qt.AlignCenter)
+        lbl_st_icon.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         lbl_st_icon.setStyleSheet(f"background: {ThemeColors.CYAN_LO}; border-radius: 9px;")
         lbl_st_icon.setPixmap(create_vector_icon("grid", "#67e8f9", 20))
 
         st_text_box = QVBoxLayout()
+        st_text_box.setContentsMargins(0, 0, 0, 0)
         st_text_box.setSpacing(1)
         lbl_st_t = QLabel("<b>Kho Đạo Cụ</b>")
-        lbl_st_t.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 13px;")
+        lbl_st_t.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        lbl_st_t.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 13px; line-height: 1.2;")
         lbl_st_sub = QLabel("Chữ, màu, hiệu ứng, sticker, âm thanh")
+        lbl_st_sub.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         lbl_st_sub.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
         st_text_box.addWidget(lbl_st_t)
         st_text_box.addWidget(lbl_st_sub)

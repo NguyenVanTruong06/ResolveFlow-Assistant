@@ -68,3 +68,24 @@ def test_create_vector_icons():
     resolve_pix = create_vector_icon("resolve", "#ffffff", 20)
     assert not resolve_pix.isNull()
     assert resolve_pix.width() == 20
+
+
+def test_floating_bubble_tray_dimensions_and_buttons(qapp):
+    bubble = FloatingBubbleWidget()
+    tray = bubble.tray
+    # Tra soát bề rộng khay đủ để chứa trọn vẹn subtitle không bị cắt
+    assert tray.width() >= 270
+    assert tray.btn_ai.height() >= 50
+    assert tray.btn_studio.height() >= 50
+
+    # Kiểm tra tín hiệu từ 2 nút AI Director và Kho Đạo Cụ
+    ai_clicked = []
+    studio_clicked = []
+    bubble.open_auto_requested.connect(lambda: ai_clicked.append(True))
+    bubble.open_studio_requested.connect(lambda: studio_clicked.append(True))
+
+    tray.btn_ai.click()
+    tray.btn_studio.click()
+
+    assert len(ai_clicked) == 1
+    assert len(studio_clicked) == 1
