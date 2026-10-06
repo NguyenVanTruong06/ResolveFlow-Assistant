@@ -1280,4 +1280,161 @@ def test_auto_window_story_review_state_and_pipeline_launch(qapp, monkeypatch):
     window.deleteLater()
 
 
+def test_tab_assets_integrated_in_auto_window(qapp, monkeypatch):
+    """Kiểm thử tích hợp toàn diện Kho Đạo Cụ (TabAssets) trong AutoWindow."""
+    import re
+    from src.ui.auto.auto_window import AutoWindow
+    from src.ui.tabs.tab_assets import TabAssets, StudioAsset
+    from src.core.text_preset import TextStylePreset
+    from src.core.transition_preset import TransitionStylePreset
+
+    # 1. Khởi tạo AutoWindow và kiểm tra cấu trúc phân cấp & delegates
+    window = AutoWindow()
+    assert hasattr(window, "tab_titles")
+    assert isinstance(window.tab_titles, TabAssets)
+    assert window.tab_widget.indexOf(window.tab_titles) >= 0
+
+    # Delegates được gán chính xác
+    assert window.combo_text_preset is window.tab_titles.combo_text_preset
+    assert window.txt_font is window.tab_titles.txt_font
+    assert window.txt_size is window.tab_titles.txt_size
+    assert window.txt_color is window.tab_titles.txt_color
+    assert window.btn_copy_fusion is window.tab_titles.btn_copy_fusion
+    assert window.btn_install_presets is window.tab_titles.btn_install_presets
+    assert window.btn_insert_title_playhead is window.tab_titles.btn_insert_title_playhead
+
+    # Preset synchronization
+    assert len(window.tab_titles.all_presets) > 0
+    assert window.combo_text_preset.count() == len(window.tab_titles.all_presets)
+
+    # 2. Kiểm tra chuyển tab Rail qua tất cả 5 danh mục chính
+    core_tabs = ["text", "lut", "trans", "icon", "sfx"]
+    for tab_id in core_tabs:
+        assert tab_id in window.tab_titles.rail_btns
+        btn = window.tab_titles.rail_btns[tab_id]
+        btn.click()
+        assert window.tab_titles.current_rail_tab == tab_id
+        assert btn.isChecked() is True
+        assert "mẫu" in window.tab_titles.lbl_count_badge.text()
+
+    # 3. Kiểm tra chọn card và hiển thị renderers trực quan
+    # 3.1 Text Card Selection
+    window.tab_titles._filter_by_rail("text")
+    window.tab_titles._on_card_selected("kinetic_hormozi")
+    assert window.tab_titles.selected_asset.id == "kinetic_hormozi"
+    assert window.combo_text_preset.currentData() == "kinetic_hormozi"
+    assert not window.tab_titles.inspector_text_preview.isHidden()
+    assert window.tab_titles.inspector_lut_viewport.isHidden()
+    assert window.tab_titles.inspector_sfx_viewport.isHidden()
+    preview_html = window.tab_titles.lbl_insp_preview.text().lower()
+    assert any(c in preview_html for c in ["#facc15", "#ffe600", "#ffd700", "yellow"])
+
+    # 3.2 SFX Card Selection & Waveform
+    window.tab_titles._filter_by_rail("sfx")
+    window.tab_titles._on_card_selected("sfx_whoosh")
+    assert window.tab_titles.selected_asset.id == "sfx_whoosh"
+    assert not window.tab_titles.inspector_sfx_viewport.isHidden()
+    assert window.tab_titles.inspector_text_preview.isHidden()
+    assert hasattr(window.tab_titles, "sfx_waveform_canvas")
+    assert len(window.tab_titles.sfx_waveform_canvas.bars) >= 16
+    assert "s" in window.tab_titles.sfx_time_lbl.text()
+
+    # 3.3 LUT Card Selection & Split Widget
+    window.tab_titles._filter_by_rail("lut")
+    window.tab_titles._on_card_selected("cinematic_teal_orange")
+    assert window.tab_titles.selected_asset.id == "cinematic_teal_orange"
+    assert not window.tab_titles.inspector_lut_viewport.isHidden()
+    assert window.tab_titles.inspector_text_preview.isHidden()
+    assert hasattr(window.tab_titles, "lut_split_widget")
+
+    # 3.4 Transition Card Selection
+    window.tab_titles._filter_by_rail("trans")
+    trans_id = window.tab_titles.all_transitions[0].id
+    window.tab_titles._on_card_selected(trans_id)
+    assert window.tab_titles.selected_asset.id == trans_id
+    assert not window.tab_titles.inspector_trans_viewport.isHidden()
+    assert window.tab_titles.inspector_text_preview.isHidden()
+
+    # 3.5 Icon / Sticker Card Selection
+    window.tab_titles._filter_by_rail("icon")
+    icon_id = window.tab_titles.all_icons[0].id
+    window.tab_titles._on_card_selected(icon_id)
+    assert window.tab_titles.selected_asset.id == icon_id
+    assert not window.tab_titles.inspector_icon_viewport.isHidden()
+    assert window.tab_titles.inspector_text_preview.isHidden()
+
+    # 4. Kiểm tra cập nhật trực tiếp trên Live Preview Inspector
+    window.tab_titles._filter_by_rail("text")
+    window.tab_titles._on_card_selected("karaoke_pop")
+
+    # Đổi tỉ lệ 16:9 <-> 9:16
+    initial_aspect = window.tab_titles.current_aspect_ratio
+    window.tab_titles._toggle_inspector_aspect_ratio()
+    assert window.tab_titles.current_aspect_ratio != initial_aspect
+    window.tab_titles._toggle_inspector_aspect_ratio()
+    assert window.tab_titles.current_aspect_ratio == initial_aspect
+
+    # Cập nhật sample text
+    window.tab_titles.txt_single_title.setText("ResolveFlow Test Subtitle")
+    preview_txt = window.tab_titles.lbl_insp_preview.text()
+    assert "ResolveFlow" in preview_txt
+    assert "Subtitle" in preview_txt
+
+    # Cập nhật cỡ chữ
+    window.tab_titles.slide_font_size.setValue(60)
+    assert "60 px" in window.tab_titles.lbl_font_size_val.text()
+    assert window.txt_size.text() == "60"
+
+    # 5. Kiểm tra các hành động DaVinci Resolve & Free Version Drag & Drop
+    calls = []
+    class DummyResolve:
+        def insert_title_at_playhead(self, **kwargs):
+            calls.append(("title", kwargs))
+            return True
+        def insert_sfx_to_track(self, **kwargs):
+            calls.append(("sfx", kwargs))
+            return True
+        def apply_look_lut(self, **kwargs):
+            calls.append(("lut", kwargs))
+            return True
+
+    monkeypatch.setattr("src.ui.auto.auto_window.ResolveAutomation", lambda: DummyResolve())
+    monkeypatch.setattr("src.ui.tabs.tab_assets.ResolveAutomation", lambda: DummyResolve())
+
+    # Drag & Drop cho bản Free (tạo file .setting / .wav / .cube tạm)
+    mime_text = window.tab_titles._create_drag_mime_data()
+    assert mime_text.hasUrls()
+    assert mime_text.urls()[0].toLocalFile().endswith(".setting")
+
+    sfx_asset = [s for s in window.tab_titles.all_sfx if s.id == "sfx_whoosh"][0]
+    mime_sfx = window.tab_titles._create_drag_mime_data(sfx_asset)
+    assert mime_sfx.hasUrls()
+    assert mime_sfx.urls()[0].toLocalFile().endswith(".wav")
+
+    lut_asset = window.tab_titles.all_luts[0]
+    mime_lut = window.tab_titles._create_drag_mime_data(lut_asset)
+    assert mime_lut.hasUrls()
+    assert mime_lut.urls()[0].toLocalFile().endswith(".cube")
+
+    # Copy Fusion Macro
+    window.tab_titles.btn_copy_fusion.click()
+    clipboard_code = QApplication.clipboard().text()
+    assert len(clipboard_code) > 0
+    assert not window.tab_titles.lbl_toast.isHidden()
+
+    # Chèn tại Playhead
+    window.tab_titles._insert_at_playhead()
+    assert len(calls) >= 1
+    assert calls[0][0] == "title"
+
+    # 6. Kiểm tra ràng buộc phong cách (integer px only, không có fractional px)
+    fractional_px = re.findall(r'\b\d+\.\d+px\b', window.tab_titles.inspector.styleSheet())
+    assert len(fractional_px) == 0, f"Found fractional px in stylesheet: {fractional_px}"
+
+    # Dọn dẹp an toàn
+    window.close()
+    window.deleteLater()
+    qapp.processEvents()
+
+
 

@@ -2861,6 +2861,18 @@ class AutoWindow(QMainWindow):
         self.btn_install_presets = self.tab_titles.btn_install_presets
         self.btn_copy_fusion = self.tab_titles.btn_copy_fusion
 
+        # Studio Asset Signals & Provider Wiring
+        self.tab_titles.set_preset_provider(self._get_current_active_preset)
+        self.tab_titles.insert_title_requested.connect(self._on_insert_title_at_playhead)
+        self.tab_titles.install_presets_requested.connect(
+            lambda: self.txt_console.appendPlainText("🚀 [Effects Library] Đã cài đặt 7 Presets Fusion Text+ vào DaVinci Resolve!") if hasattr(self, "txt_console") else None
+        )
+        self.tab_titles.copy_fusion_node_requested.connect(
+            lambda pid: self.txt_console.appendPlainText(f"📋 [Clipboard] Đã copy Fusion Node của preset '{pid}'. Hãy chuyển sang DaVinci Resolve và ấn Ctrl+V để chèn!") if hasattr(self, "txt_console") else None
+        )
+        self.tab_titles.apply_lut_requested.connect(self._on_apply_lut_to_timeline)
+        self.tab_titles.insert_sfx_requested.connect(self._on_insert_sfx_at_playhead)
+
         # Tab 3: SFX & Audio Enhancer Delegates
         self.combo_sfx_track = self.tab_sfx.combo_target_track
         self.slide_volume_offset = self.tab_sfx.slide_volume_offset
