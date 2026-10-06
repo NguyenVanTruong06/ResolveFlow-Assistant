@@ -1646,24 +1646,14 @@ class AutoWindow(QMainWindow):
         """)
         proj_layout.addWidget(self.cache_progress_bar)
 
-        self.btn_scan_only = QPushButton("🔄 Quét Cache (Tiền xử lý)")
-        self.btn_scan_only.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(6,182,212,0.15);
-                color: #22d3ee;
-                border: 1px solid rgba(6,182,212,0.3);
-                border-radius: 6px;
-                padding: 6px;
-                font-weight: bold;
-                font-size: 11.5px;
-                margin-top: 4px;
-            }
-            QPushButton:hover {
-                background-color: rgba(6,182,212,0.25);
-            }
-        """)
-        self.btn_scan_only.clicked.connect(self._start_phase_1_scan)
-        proj_layout.addWidget(self.btn_scan_only)
+        self.lbl_cache_hint = QLabel("⚡ Tự động quét & nạp cache khi bấm [Bắt đầu dựng]")
+        self.lbl_cache_hint.setStyleSheet("color: #71717a; font-size: 10.5px; margin-top: 3px; line-height: 1.3;")
+        self.lbl_cache_hint.setWordWrap(True)
+        proj_layout.addWidget(self.lbl_cache_hint)
+
+        # Giữ biến btn_scan_only ẩn để tương thích ngược với các slot cũ
+        self.btn_scan_only = QPushButton()
+        self.btn_scan_only.setVisible(False)
 
         l_vbox.addWidget(proj_box)
 
@@ -3213,6 +3203,8 @@ class AutoWindow(QMainWindow):
             status_style = "background-color: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid #10B981; border-radius: 6px; padding: 8px; font-weight: bold; font-size: 12px;"
             badge_txt = f"⚡ 100% Sẵn sàng ({total}/{total})"
             badge_style = "background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #10b981; padding: 2px 8px; border-radius: 999px; font-weight: bold; font-size: 11px;"
+            if hasattr(self, "lbl_cache_hint"):
+                self.lbl_cache_hint.setText("✓ 100% Sẵn sàng · Bấm [Bắt đầu dựng] để xuất tức thì!")
             if hasattr(self, "cache_progress_bar"):
                 self.cache_progress_bar.setStyleSheet("""
                     QProgressBar { background-color: #27272a; border-radius: 3px; }
@@ -3225,6 +3217,8 @@ class AutoWindow(QMainWindow):
             status_style = "background-color: rgba(245, 158, 11, 0.15); color: #FBBF24; border: 1px solid #F59E0B; border-radius: 6px; padding: 8px; font-size: 12px;"
             badge_txt = f"⚡ Cache: {cached_count}/{total} ({int(cached_count/total*100)}%)"
             badge_style = "background-color: rgba(6, 182, 212, 0.15); color: #22d3ee; border: 1px solid #06b6d4; padding: 2px 8px; border-radius: 999px; font-weight: bold; font-size: 11px;"
+            if hasattr(self, "lbl_cache_hint"):
+                self.lbl_cache_hint.setText(f"⚡ Đã nạp {cached_count}/{total} clip · Sẽ tự quét {total - cached_count} clip khi bấm dựng")
             if hasattr(self, "cache_progress_bar"):
                 self.cache_progress_bar.setStyleSheet("""
                     QProgressBar { background-color: #27272a; border-radius: 3px; }
@@ -3235,6 +3229,8 @@ class AutoWindow(QMainWindow):
             status_style = "background-color: rgba(56, 189, 248, 0.1); color: #3dcee1; border: 1px solid #2c9dac; border-radius: 6px; padding: 8px; font-size: 12px;"
             badge_txt = f"⚠️ Chưa có ({0}/{total})"
             badge_style = "background-color: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid #f59e0b; padding: 2px 8px; border-radius: 999px; font-weight: bold; font-size: 11px;"
+            if hasattr(self, "lbl_cache_hint"):
+                self.lbl_cache_hint.setText("⚡ Tự động quét & nạp cache khi bấm [Bắt đầu dựng]")
             if hasattr(self, "cache_progress_bar"):
                 self.cache_progress_bar.setStyleSheet("""
                     QProgressBar { background-color: #27272a; border-radius: 3px; }
@@ -4063,6 +4059,14 @@ class AutoWindow(QMainWindow):
                     lbl.setText(f"○ {self.step_names[i]}")
                     lbl.setStyleSheet("color: #71717a; font-size: 11.5px;")
 
+        # Cập nhật thanh tiến độ cache bên cột trái nếu đang quét/nạp
+        if hasattr(self, "cache_progress_bar") and getattr(self, "is_processing", False):
+            if getattr(self, "current_phase", 1) == 1 and val > self.cache_progress_bar.value():
+                self.cache_progress_bar.setValue(val)
+                if hasattr(self, "lbl_cache_badge"):
+                    self.lbl_cache_badge.setText(f"⏳ Đang nạp ({val}%)")
+                    self.lbl_cache_badge.setStyleSheet("background-color: rgba(139, 92, 246, 0.2); color: #c4b5fd; border: 1px solid #8b5cf6; padding: 2px 8px; border-radius: 999px; font-weight: bold; font-size: 11px;")
+
         status_txt = self.lbl_eta.text() if hasattr(self, "lbl_eta") else ""
         if hasattr(self, "lbl_progress_status"):
             status_txt = self.lbl_progress_status.text()
@@ -4320,6 +4324,7 @@ class AutoWindow(QMainWindow):
                 if self.bubble: self.bubble.update_progress(0, "Đã dừng" if ("dừng" in message.lower() or "cancel" in message.lower()) else "Sự cố")
         
         if success:
+            self._check_project_cache_status()
             if message == "phase1_done":
                 self._set_workflow_stage(2)
                 self.lbl_progress_status.setText("✔ Đã quét nguồn & nạp cache! Bạn có thể chọn kịch bản và bấm 'Xuất Timeline Ngay (0.1s)'.")

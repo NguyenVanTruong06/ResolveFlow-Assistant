@@ -757,7 +757,6 @@ button.chip.on{background:var(--violet-lo);color:#ddd6fe;border-color:var(--viol
           <button class="btn ghost"><svg class="ico"><use href="#i-download"/></svg>Lưu recipe</button>
           <span class="sp"></span>
           <button class="select fmt"><span>Xuất: FCPXML 1.9</span><svg class="ico"><use href="#i-chev"/></svg></button>
-          <button class="btn">Chỉ quét nguồn</button>
           <button class="btn primary lg" id="runBtn"><svg class="ico"><use href="#i-play"/></svg>Bắt đầu dựng</button>
         </div>
       </section>
@@ -886,6 +885,36 @@ function updateAll(){
   $('#etaTxt').textContent=P.state==='done'?'Xong sau 3 phút 56 giây':P.state==='idle'?'Chưa chạy':`còn khoảng ${Math.max(1,Math.round((100-p)/18))} phút`;
   $('#autoPill').innerHTML=P.state==='run'?`<span class="dot run"></span><span>${name} ${p}%</span>`:P.state==='done'?`<span class="dot ok"></span><span>Đã xuất timeline</span>`:`<span class="dot"></span><span>Sẵn sàng</span>`;
   renderPipe();
+
+  // Đồng bộ thời gian thực sang thẻ Bộ nhớ đệm và danh sách chương bên cột trái
+  const cBar=$('#cacheBar');
+  const cPill=$('#cachePill');
+  const cDesc=$('#cacheDesc');
+  const cBox=$('#cacheBox');
+  if(P.state==='run'){
+    const pCache=Math.min(100,Math.round(P.p/64*100));
+    const cachedClips=Math.min(67,Math.round(67*pCache/100));
+    if(cBar) cBar.style.setProperty('--p',pCache+'%');
+    if(pCache>=100){
+      if(cBox) cBox.className='cache is-full';
+      if(cPill){ cPill.className='cache-pill ok'; cPill.innerHTML='67 / 67 clip · 100% ⚡'; }
+      if(cDesc) cDesc.innerHTML='<span style="color:#86efac">✓ Đã nạp cache 100%</span> · Tự động hoàn tất, đang chuyển sang đạo diễn AI';
+    } else {
+      if(cBox) cBox.className='cache';
+      if(cPill){ cPill.className='cache-pill'; cPill.innerHTML=`${cachedClips} / 67 clip · ${pCache}%`; }
+      if(cDesc) cDesc.innerHTML=`🔄 Đang tự động quét & nạp cache... (${cachedClips}/67)`;
+    }
+  } else if(P.state==='done'){
+    if(cBox) cBox.className='cache is-full';
+    if(cPill){ cPill.className='cache-pill ok'; cPill.innerHTML='67 / 67 clip · 100% ⚡'; }
+    if(cBar) cBar.style.setProperty('--p','100%');
+    if(cDesc) cDesc.innerHTML='<span style="color:#86efac">✓ Đã nạp cache 100%</span> · Dữ liệu đã sẵn sàng!';
+  } else {
+    if(cBox) cBox.className='cache';
+    if(cPill){ cPill.className='cache-pill'; cPill.innerHTML='Chờ dựng · 0 / 67'; }
+    if(cBar) cBar.style.setProperty('--p','0%');
+    if(cDesc) cDesc.innerHTML='⚡ Tự động quét & nạp cache khi bấm [Bắt đầu dựng]';
+  }
 }
 const now=()=>new Date().toTimeString().slice(0,8);
 function log(h,t=now()){const c=$('#console');c.insertAdjacentHTML('beforeend',`<div><span class="t">${t}</span> ${h}</div>`);c.scrollTop=c.scrollHeight}
