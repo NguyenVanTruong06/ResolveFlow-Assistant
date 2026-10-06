@@ -1457,25 +1457,28 @@ class AutoWindow(QMainWindow):
         # -------------------------------------------------------------------------
         # CỘT TRÁI (300px): Nguồn footage, Dự án, Cache, Danh sách chương
         # -------------------------------------------------------------------------
+        # -------------------------------------------------------------------------
+        # CỘT TRÁI (300px): Nguồn footage, Dự án, Cache, Danh sách chương
+        # -------------------------------------------------------------------------
         a_left = QFrame()
-        a_left.setFixedWidth(300)
-        a_left.setStyleSheet("background-color: #111113; border-right: 1px solid #27272a;")
+        a_left.setFixedWidth(292)
+        a_left.setStyleSheet("background-color: #111113; border: none;")
         l_vbox = QVBoxLayout(a_left)
-        l_vbox.setContentsMargins(16, 16, 16, 16)
-        l_vbox.setSpacing(14)
+        l_vbox.setContentsMargins(14, 14, 14, 14)
+        l_vbox.setSpacing(12)
 
-        # Dropzone (Thuần túy là vùng nhận diện kéo thả)
+        # Dropzone (Vùng nhận diện kéo thả viền tím cách điệu)
         self.drop_frame = QFrame()
         self.drop_frame.setStyleSheet("""
             QFrame {
-                border: 1.5px dashed #3f3f46;
-                border-radius: 10px;
+                border: 1.5px dashed rgba(167, 139, 250, 0.45);
+                border-radius: 12px;
                 background-color: #18181b;
                 padding: 16px 10px;
             }
             QFrame:hover {
                 border-color: #a78bfa;
-                background-color: rgba(139,92,246,0.08);
+                background-color: rgba(139, 92, 246, 0.12);
             }
         """)
         drop_layout = QVBoxLayout(self.drop_frame)
@@ -1483,32 +1486,96 @@ class AutoWindow(QMainWindow):
         drop_layout.setAlignment(Qt.AlignCenter)
         lbl_drop_icon = QLabel("📥")
         lbl_drop_icon.setAlignment(Qt.AlignCenter)
-        lbl_drop_icon.setStyleSheet("font-size: 24px; color: #a1a1aa;")
+        lbl_drop_icon.setStyleSheet("font-size: 24px; color: #c4b5fd;")
         drop_layout.addWidget(lbl_drop_icon)
-        lbl_drop_txt = QLabel("Kéo & thả footage vào đây")
+        lbl_drop_txt = QLabel("Thả thư mục footage vào đây")
         lbl_drop_txt.setAlignment(Qt.AlignCenter)
-        lbl_drop_txt.setStyleSheet("font-size: 12px; font-weight: 600; color: #d4d4d8;")
+        lbl_drop_txt.setStyleSheet("font-size: 12px; font-weight: 600; color: #f4f4f5;")
         drop_layout.addWidget(lbl_drop_txt)
+        lbl_drop_sub = QLabel("hoặc chọn nguồn bên dưới")
+        lbl_drop_sub.setAlignment(Qt.AlignCenter)
+        lbl_drop_sub.setStyleSheet("font-size: 11px; color: #71717a;")
+        drop_layout.addWidget(lbl_drop_sub)
         l_vbox.addWidget(self.drop_frame)
 
-        # 4 Nút Nguồn 2x2
+        # 4 Nút Nguồn 2x2 với viền và icon màu sắc chuyên nghiệp
         src_grid = QGridLayout()
-        src_grid.setSpacing(8)
+        src_grid.setSpacing(6)
 
         self.btn_browse_folder = QPushButton("📁 Thư mục")
-        self.btn_browse_folder.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 7px; border-radius: 6px; font-size: 11.5px; text-align: left;")
+        self.btn_browse_folder.setStyleSheet("""
+            QPushButton {
+                background-color: #18181b;
+                border: 1px solid #27272a;
+                padding: 7px 9px;
+                border-radius: 7px;
+                font-size: 11.5px;
+                text-align: left;
+                color: #e4e4e7;
+            }
+            QPushButton:hover {
+                border-color: rgba(245, 158, 11, 0.5);
+                background-color: rgba(245, 158, 11, 0.1);
+                color: #ffffff;
+            }
+        """)
         self.btn_browse_folder.clicked.connect(self._browse_folder)
 
         self.btn_browse_files = QPushButton("🎬 Tệp video")
-        self.btn_browse_files.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 7px; border-radius: 6px; font-size: 11.5px; text-align: left;")
+        self.btn_browse_files.setStyleSheet("""
+            QPushButton {
+                background-color: #18181b;
+                border: 1px solid #27272a;
+                padding: 7px 9px;
+                border-radius: 7px;
+                font-size: 11.5px;
+                text-align: left;
+                color: #e4e4e7;
+            }
+            QPushButton:hover {
+                border-color: rgba(167, 139, 250, 0.5);
+                background-color: rgba(167, 139, 250, 0.1);
+                color: #ffffff;
+            }
+        """)
         self.btn_browse_files.clicked.connect(self._browse_file)
 
         self.btn_from_davinci = QPushButton("🎞️ Từ DaVinci")
-        self.btn_from_davinci.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 7px; border-radius: 6px; font-size: 11.5px; text-align: left;")
+        self.btn_from_davinci.setStyleSheet("""
+            QPushButton {
+                background-color: #18181b;
+                border: 1px solid #27272a;
+                padding: 7px 9px;
+                border-radius: 7px;
+                font-size: 11.5px;
+                text-align: left;
+                color: #e4e4e7;
+            }
+            QPushButton:hover {
+                border-color: rgba(56, 189, 248, 0.5);
+                background-color: rgba(56, 189, 248, 0.1);
+                color: #ffffff;
+            }
+        """)
         self.btn_from_davinci.clicked.connect(self._auto_detect_video)
 
         self.btn_google_drive = QPushButton("☁️ Google Drive")
-        self.btn_google_drive.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 7px; border-radius: 6px; font-size: 11.5px; text-align: left;")
+        self.btn_google_drive.setStyleSheet("""
+            QPushButton {
+                background-color: #18181b;
+                border: 1px solid #27272a;
+                padding: 7px 9px;
+                border-radius: 7px;
+                font-size: 11.5px;
+                text-align: left;
+                color: #e4e4e7;
+            }
+            QPushButton:hover {
+                border-color: rgba(52, 211, 153, 0.5);
+                background-color: rgba(52, 211, 153, 0.1);
+                color: #ffffff;
+            }
+        """)
         self.btn_google_drive.clicked.connect(self._open_google_drive_dialog)
 
         src_grid.addWidget(self.btn_browse_folder, 0, 0)
@@ -1519,7 +1586,7 @@ class AutoWindow(QMainWindow):
 
         # Dự án & Bộ nhớ đệm (Cache)
         proj_box = QFrame()
-        proj_box.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 10px;")
+        proj_box.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 10px; padding: 10px;")
         proj_layout = QVBoxLayout(proj_box)
         proj_layout.setSpacing(6)
 
@@ -1539,24 +1606,24 @@ class AutoWindow(QMainWindow):
         lbl_c_title = QLabel("Bộ nhớ đệm")
         lbl_c_title.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
         self.lbl_cache_badge = QLabel("0 / 0 clip")
-        self.lbl_cache_badge.setStyleSheet("color: #22d3ee; font-size: 11.5px; font-weight: bold;")
+        self.lbl_cache_badge.setStyleSheet("color: #22d3ee; font-size: 11px; font-weight: bold; background-color: rgba(6,182,212,0.15); padding: 2px 7px; border-radius: 6px;")
         cache_row.addWidget(lbl_c_title)
         cache_row.addStretch()
         cache_row.addWidget(self.lbl_cache_badge)
         proj_layout.addLayout(cache_row)
 
         self.cache_progress_bar = QProgressBar()
-        self.cache_progress_bar.setFixedHeight(5)
+        self.cache_progress_bar.setFixedHeight(6)
         self.cache_progress_bar.setTextVisible(False)
         self.cache_progress_bar.setValue(0)
         self.cache_progress_bar.setStyleSheet("""
             QProgressBar {
                 background-color: #27272a;
-                border-radius: 2.5px;
+                border-radius: 3px;
             }
             QProgressBar::chunk {
                 background-color: #06b6d4;
-                border-radius: 2.5px;
+                border-radius: 3px;
             }
         """)
         proj_layout.addWidget(self.cache_progress_bar)
@@ -1588,22 +1655,26 @@ class AutoWindow(QMainWindow):
         lbl_chaps.setStyleSheet("font-weight: bold; color: #a1a1aa; font-size: 12px;")
         chap_head.addWidget(lbl_chaps)
         chap_head.addStretch()
-        btn_sort_chap = QPushButton("Sắp xếp")
+        btn_sort_chap = QPushButton("Sắp xếp theo giờ quay")
         btn_sort_chap.setStyleSheet("background: transparent; color: #71717a; border: none; font-size: 11px;")
         chap_head.addWidget(btn_sort_chap)
         l_vbox.addLayout(chap_head)
 
         self.list_chapters = QListWidget()
+        self.list_chapters.setMinimumHeight(160)
+        self.list_chapters.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.list_chapters.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_chapters.setStyleSheet("""
             QListWidget {
                 background-color: transparent;
                 border: none;
-                color: #a1a1aa;
+                color: #d4d4d8;
                 font-size: 11.5px;
             }
             QListWidget::item {
-                padding: 5px 8px;
-                border-radius: 5px;
+                padding: 6px 8px;
+                border-radius: 6px;
+                margin-bottom: 2px;
             }
             QListWidget::item:hover {
                 background-color: #18181b;
@@ -1612,11 +1683,57 @@ class AutoWindow(QMainWindow):
                 background-color: #27272a;
                 color: #fff;
             }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 5px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #3f3f46;
+                border-radius: 2px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #71717a;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
         """)
-        self.list_chapters.addItem("(Chưa có danh sách chương)")
+        self.list_chapters.addItem("⚪ (Chưa có danh sách chương)")
         l_vbox.addWidget(self.list_chapters, stretch=1)
 
-        workspace_layout.addWidget(a_left)
+        # Đặt a_left vào QScrollArea để hỗ trợ cuộn mượt mà trên mọi độ phân giải màn hình
+        a_left_scroll = QScrollArea()
+        a_left_scroll.setFixedWidth(300)
+        a_left_scroll.setWidgetResizable(True)
+        a_left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        a_left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        a_left_scroll.setFrameShape(QFrame.NoFrame)
+        a_left_scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: #111113;
+                border-right: 1px solid #27272a;
+            }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 6px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #3f3f46;
+                border-radius: 3px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #71717a;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+        a_left_scroll.setWidget(a_left)
+        workspace_layout.addWidget(a_left_scroll)
 
         # -------------------------------------------------------------------------
         # CỘT GIỮA (Expanding): Stepper, Presets, Thiết lập nhanh, Toggles, Động cơ AI
@@ -2962,8 +3079,27 @@ class AutoWindow(QMainWindow):
             self.lbl_proj_meta.setText(f"{len(proj.groups)} nhóm · {proj.total_files} video")
         if hasattr(self, "list_chapters"):
             self.list_chapters.clear()
+            cache_mgr = ScanCacheManager()
+            model = self.combo_model.currentText()
+            lang = self.combo_lang.currentText()
             for grp in proj.groups:
-                self.list_chapters.addItem(f"● {grp.name}  ({len(grp.video_paths)} clips)")
+                all_cached = True
+                has_any = False
+                for vp in grp.video_paths:
+                    if cache_mgr.get_cached_scan(vp, model, lang) is not None:
+                        has_any = True
+                    else:
+                        all_cached = False
+                if all_cached and grp.video_paths:
+                    dot_symbol = "🟢"
+                    tag = "Cache"
+                elif has_any:
+                    dot_symbol = "🔵"
+                    tag = "Quét"
+                else:
+                    dot_symbol = "⚪"
+                    tag = "Chờ"
+                self.list_chapters.addItem(f"{dot_symbol} {grp.name}  ({len(grp.video_paths)} clips)  [{tag}]")
         self.txt_console.appendPlainText("\n" + "="*60)
         self.txt_console.appendPlainText("🚀 [CẤU TRÚC THƯ MỤC DỰ ÁN PHÂN TẦNG ĐÃ NẠP]")
         self.txt_console.appendPlainText(proj.summary_tree())
@@ -3057,23 +3193,36 @@ class AutoWindow(QMainWindow):
         if total > 0 and cached_count == total:
             status_msg = f"🎉 ĐÃ CÓ SẴN CACHE (100% - {total}/{total} clips)! Dữ liệu đã sẵn sàng. Bạn có thể sang Bước 2 hoặc nạp JSON để xuất timeline ngay trong 0.1s!"
             status_style = "background-color: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid #10B981; border-radius: 6px; padding: 8px; font-weight: bold; font-size: 12px;"
-            badge_txt = f"⚡ Cache: 100% ({total}/{total})"
-            badge_style = "background-color: #065F46; color: #34D399; border: 1px solid #10B981; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;"
+            badge_txt = f"⚡ 100% Sẵn sàng ({total}/{total})"
+            badge_style = "background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #10b981; padding: 2px 8px; border-radius: 999px; font-weight: bold; font-size: 11px;"
+            if hasattr(self, "cache_progress_bar"):
+                self.cache_progress_bar.setStyleSheet("""
+                    QProgressBar { background-color: #27272a; border-radius: 3px; }
+                    QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981, stop:1 #06b6d4); border-radius: 3px; }
+                """)
             if hasattr(self, "btn_s1_skip_stage2"):
                 self.btn_s1_skip_stage2.setStyleSheet("background-color: #059669; color: white; font-weight: bold; padding: 11px; border-radius: 6px; font-size: 12px;")
         elif cached_count > 0:
             status_msg = f"⚡ Đã có cache một phần ({cached_count}/{total} clips). Bấm Quét để hoàn tất {total - cached_count} clips còn lại."
             status_style = "background-color: rgba(245, 158, 11, 0.15); color: #FBBF24; border: 1px solid #F59E0B; border-radius: 6px; padding: 8px; font-size: 12px;"
-            badge_txt = f"⚡ Cache: {cached_count}/{total}"
-            badge_style = "background-color: #78350F; color: #FBBF24; border: 1px solid #F59E0B; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;"
+            badge_txt = f"⚡ Cache: {cached_count}/{total} ({int(cached_count/total*100)}%)"
+            badge_style = "background-color: rgba(6, 182, 212, 0.15); color: #22d3ee; border: 1px solid #06b6d4; padding: 2px 8px; border-radius: 999px; font-weight: bold; font-size: 11px;"
+            if hasattr(self, "cache_progress_bar"):
+                self.cache_progress_bar.setStyleSheet("""
+                    QProgressBar { background-color: #27272a; border-radius: 3px; }
+                    QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8b5cf6, stop:1 #06b6d4); border-radius: 3px; }
+                """)
         else:
             status_msg = f"🔍 Chưa có Cache ({total} clips). Hãy bấm nút 'Bắt đầu quét' bên dưới để nhận diện lời thoại 1 lần duy nhất."
             status_style = "background-color: rgba(56, 189, 248, 0.1); color: #3dcee1; border: 1px solid #2c9dac; border-radius: 6px; padding: 8px; font-size: 12px;"
-            badge_txt = f"🔍 Chưa có Cache ({total} clips)"
-            badge_style = "background-color: #031e22; color: #3dcee1; border: 1px solid #0c3d44; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;"
+            badge_txt = f"⚠️ Chưa có ({0}/{total})"
+            badge_style = "background-color: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid #f59e0b; padding: 2px 8px; border-radius: 999px; font-weight: bold; font-size: 11px;"
+            if hasattr(self, "cache_progress_bar"):
+                self.cache_progress_bar.setStyleSheet("""
+                    QProgressBar { background-color: #27272a; border-radius: 3px; }
+                    QProgressBar::chunk { background-color: #3f3f46; border-radius: 3px; }
+                """)
 
-        if hasattr(self, "lbl_cache_badge"):
-            self.lbl_cache_badge.setText(f"{cached_count} / {total} clip")
         if hasattr(self, "cache_progress_bar"):
             p = int(cached_count / total * 100) if total else 0
             self.cache_progress_bar.setValue(p)
