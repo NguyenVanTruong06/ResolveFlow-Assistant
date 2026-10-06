@@ -64,6 +64,12 @@ def create_vector_icon(icon_type: str, color_hex: str, size: int = 20) -> QPixma
         painter.drawLine(QPointF(12, 3), QPointF(12, 8.8))
         painter.drawLine(QPointF(19.8, 16.5), QPointF(14.8, 13.6))
         painter.drawLine(QPointF(4.2, 16.5), QPointF(9.2, 13.6))
+    elif icon_type == "download":
+        # Biểu tượng mũi tên tải về / nạp dữ liệu (#i-download trong thiết kế UI)
+        painter.drawLine(QPointF(12, 5), QPointF(12, 14.5))
+        painter.drawLine(QPointF(7.5, 10.5), QPointF(12, 14.5))
+        painter.drawLine(QPointF(16.5, 10.5), QPointF(12, 14.5))
+        painter.drawLine(QPointF(5, 18.5), QPointF(19, 18.5))
 
     painter.end()
     return pix

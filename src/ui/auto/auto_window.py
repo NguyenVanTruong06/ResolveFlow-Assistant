@@ -55,6 +55,7 @@ from PySide6.QtGui import QFont, QColor, QPixmap, QIcon, QShortcut, QKeySequence
 
 from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS, MODULE_DESCRIPTIONS, get_application_stylesheet
 from src.ui.tabs import TabCopilot, TabAutoCut, TabAssets, TabSFX, TabExport
+from src.ui.bubble.floating_bubble import create_vector_icon
 
 class PreviewDialog(QDialog):
     """Hộp thoại hiển thị xem trước nhanh (Quick Preview) kiểu chữ phụ đề Text+."""
@@ -1467,35 +1468,52 @@ class AutoWindow(QMainWindow):
         l_vbox.setContentsMargins(14, 14, 14, 14)
         l_vbox.setSpacing(12)
 
-        # Dropzone (Vùng nhận diện kéo thả viền tím cách điệu)
+        # Dropzone (Vùng nhận diện kéo thả viền tím cách điệu - Nhỏ gọn, 1 ô duy nhất)
         self.drop_frame = QFrame()
+        self.drop_frame.setObjectName("drop_frame")
+        self.drop_frame.setFixedHeight(102)
         self.drop_frame.setStyleSheet("""
-            QFrame {
+            QFrame#drop_frame {
                 border: 1.5px dashed rgba(167, 139, 250, 0.45);
                 border-radius: 12px;
                 background-color: #18181b;
-                padding: 16px 10px;
             }
-            QFrame:hover {
+            QFrame#drop_frame:hover {
                 border-color: #a78bfa;
                 background-color: rgba(139, 92, 246, 0.12);
             }
+            QFrame#drop_frame QLabel {
+                border: none;
+                background-color: transparent;
+            }
         """)
         drop_layout = QVBoxLayout(self.drop_frame)
-        drop_layout.setSpacing(6)
+        drop_layout.setContentsMargins(10, 8, 10, 8)
+        drop_layout.setSpacing(3)
         drop_layout.setAlignment(Qt.AlignCenter)
-        lbl_drop_icon = QLabel("📥")
+
+        # Icon tải xuống nhỏ gọn, bo góc viền tím
+        lbl_drop_icon = QLabel()
+        lbl_drop_icon.setFixedSize(32, 32)
         lbl_drop_icon.setAlignment(Qt.AlignCenter)
-        lbl_drop_icon.setStyleSheet("font-size: 24px; color: #c4b5fd;")
-        drop_layout.addWidget(lbl_drop_icon)
+        lbl_drop_icon.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(139, 92, 246, 0.25), stop:1 rgba(6, 182, 212, 0.18));
+            border: 1px solid rgba(167, 139, 250, 0.35);
+            border-radius: 8px;
+        """)
+        lbl_drop_icon.setPixmap(create_vector_icon("download", "#c4b5fd", 18))
+
         lbl_drop_txt = QLabel("Thả thư mục footage vào đây")
         lbl_drop_txt.setAlignment(Qt.AlignCenter)
         lbl_drop_txt.setStyleSheet("font-size: 12px; font-weight: 600; color: #f4f4f5;")
-        drop_layout.addWidget(lbl_drop_txt)
+
         lbl_drop_sub = QLabel("hoặc chọn nguồn bên dưới")
         lbl_drop_sub.setAlignment(Qt.AlignCenter)
-        lbl_drop_sub.setStyleSheet("font-size: 11px; color: #71717a;")
-        drop_layout.addWidget(lbl_drop_sub)
+        lbl_drop_sub.setStyleSheet("font-size: 10.5px; color: #71717a;")
+
+        drop_layout.addWidget(lbl_drop_icon, 0, Qt.AlignCenter)
+        drop_layout.addWidget(lbl_drop_txt, 0, Qt.AlignCenter)
+        drop_layout.addWidget(lbl_drop_sub, 0, Qt.AlignCenter)
         l_vbox.addWidget(self.drop_frame)
 
         # 4 Nút Nguồn 2x2 với viền và icon màu sắc chuyên nghiệp
