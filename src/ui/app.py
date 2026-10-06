@@ -474,12 +474,27 @@ class PipelineWorker(QThread):
                         
                         if needs_transcription:
                             self.log_signal.emit("   🎙 Dịch giọng nói (Speech-to-Text Whisper)...")
-                            lang_code = None if self.language == "Auto" else ("vi" if self.language == "Tiếng Việt" else "en")
+                            lang_code = None if self.language in ["Auto", "auto"] else ("vi" if self.language in ["vi", "Tiếng Việt"] else ("en" if self.language in ["en", "English"] else self.language))
                             
+                            last_log_pct = -1
+                            last_log_time = 0.0
+
                             def on_progress(ratio, text_snippet):
+                                nonlocal last_log_pct, last_log_time
                                 pct = int(ratio * 100)
-                                if pct % 20 == 0:
-                                    self.log_signal.emit(f"      ⏳ Quét giọng nói: {pct}% -> \"{text_snippet[:35]}...\"")
+                                now_t = time.time()
+                                snippet_clean = (text_snippet or "").strip()
+                                
+                                # Cập nhật tiến độ tổng mượt mà trong giai đoạn STT (15% -> 65%)
+                                clip_chunk = 50.0 / max(1, total_clips)
+                                current_overall = int(15 + (idx * clip_chunk) + (ratio * clip_chunk))
+                                self.progress_signal.emit(min(65, current_overall))
+
+                                # Gửi thông báo câu thoại đang nghe theo thời gian thực (ít nhất 0.7s/lần hoặc tăng 5%)
+                                if snippet_clean and (pct >= last_log_pct + 5 or (now_t - last_log_time) >= 0.7):
+                                    last_log_pct = pct
+                                    last_log_time = now_t
+                                    self.log_signal.emit(f"      🎙️ Đang nghe: \"{snippet_clean[:50]}\" ({pct}%)")
 
                             raw_subtitles = transcriber.transcribe(
                                 temp_wav, 

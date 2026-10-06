@@ -4794,8 +4794,12 @@ class AutoWindow(QMainWindow):
             status_str = "🤖 Nạp Whisper AI..."
         elif "trích xuất audio" in msg_l:
             status_str = "🔊 Trích xuất âm thanh..."
-        elif "quét giọng nói" in msg_l or "dịch giọng nói" in msg_l:
-            status_str = "🎙 Nhận diện giọng nói..."
+        elif "quét giọng nói" in msg_l or "dịch giọng nói" in msg_l or "đang nghe" in msg_l:
+            if "đang nghe:" in msg_l:
+                clean_txt = message.strip()
+                status_str = clean_txt if clean_txt.startswith("🎙") else f"🎙️ {clean_txt}"
+            else:
+                status_str = "🎙 Nhận diện giọng nói..."
         elif "scan cache hit" in msg_l:
             status_str = "⚡ Nạp Cache siêu tốc (0.05s)!"
         elif "lọc khoảng lặng" in msg_l or "phân tích khoảng lặng" in msg_l or "speed-ramp" in msg_l:

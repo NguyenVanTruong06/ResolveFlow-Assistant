@@ -973,11 +973,21 @@ function sim(){
   clearInterval(P.timer);
   if(P.state!=='run')P.p=0;
   P.state='run';setSeg('#stateSeg','run');
-  let last=curStep();log(`<span class="ai">▸</span> Bắt đầu dựng: Vlog có Hook`);
   P.timer=setInterval(()=>{
     P.p=Math.min(100,P.p+.7);
     const c=curStep();
     if(c!==last){log(`<span class="ok">✓</span> ${STEPS[last].n} xong`);log(`<span class="ai">▸</span> ${STEPS[c].n}: ${STEPS[c].d}`);last=c}
+    if(c===2 && Math.floor(P.p) % 10 === 0 && Math.floor(P.p) !== window._lastLogP){
+      window._lastLogP = Math.floor(P.p);
+      const sampleTexts = [
+        "Xin chào các bạn đã quay trở lại kênh...",
+        "Hôm nay chúng ta cùng khám phá cung đường này nhé...",
+        "Thời tiết ở đây thực sự rất là đẹp luôn...",
+        "Đoạn này mình sẽ quay thêm một góc B-Roll nữa..."
+      ];
+      const sample = sampleTexts[Math.floor(P.p / 10) % sampleTexts.length];
+      log(`<span style="color:#22d3ee">🎙️ Đang nghe:</span> "${sample}" (${Math.floor(P.p)}%)`);
+    }
     if(P.p>=100){clearInterval(P.timer);P.state='done';setSeg('#stateSeg','done');
       log(`<span class="ok">✓ Đã xuất ResolveFlow_H264_vlog.fcpxml (21:01)</span>`);toast('Dựng xong, timeline sẵn sàng để nạp vào DaVinci')}
     updateAll()},120);
