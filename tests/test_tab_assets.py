@@ -1,6 +1,6 @@
 import re
 import pytest
-from PySide6.QtWidgets import QLabel, QPushButton, QFrame, QSlider
+from PySide6.QtWidgets import QLabel, QPushButton, QFrame, QSlider, QApplication
 from PySide6.QtCore import Qt
 
 from src.ui.tabs.tab_assets import (
@@ -250,4 +250,162 @@ def test_inspector_live_previews(qapp):
     fractional_px_pattern = re.compile(r'\b\d+\.\d+px\b')
     insp_sheet = tab.inspector.styleSheet()
     assert len(fractional_px_pattern.findall(insp_sheet)) == 0, "No fractional px in inspector stylesheet"
+
+
+def test_asset_actions_and_drag_drop(qapp, monkeypatch):
+    """
+    Kiểm tra toàn diện bộ điều khiển tham số (Typography, Swatches, Motion & Curves, Destination Track)
+    và 4 hành động DaVinci Resolve (_insert_at_playhead, _create_drag_mime_data / btn_drag_davinci,
+    _get_current_fusion_macro_code / btn_copy_fusion, _install_to_fusion).
+    """
+    import os
+    tab = TabAssets()
+    tab.show()
+
+    # -------------------------------------------------------------
+    # 1. Inspector Parameter Tuning Controls:
+    # -------------------------------------------------------------
+    # A. Typography controls
+    assert hasattr(tab, "combo_font"), "TabAssets must have combo_font dropdown"
+    fonts = [tab.combo_font.itemText(i) for i in range(tab.combo_font.count())]
+    for required_font in ["Montserrat", "Arial Black", "Bangers", "Be Vietnam Pro"]:
+        assert any(required_font.lower() in f.lower() for f in fonts), f"Font {required_font} must be in combo_font"
+
+    assert hasattr(tab, "slide_font_size"), "TabAssets must have slide_font_size slider"
+    assert tab.slide_font_size.minimum() == 24
+    assert tab.slide_font_size.maximum() == 140
+
+    assert hasattr(tab, "weight_buttons"), "TabAssets must have weight_buttons segment"
+    weight_texts = [b.text() for b in tab.weight_buttons.values()]
+    for req_w in ["Thường", "Đậm", "Rất đậm"]:
+        assert any(req_w in t for t in weight_texts), f"Weight segment must have {req_w}"
+
+    assert hasattr(tab, "slide_stroke_width"), "TabAssets must have slide_stroke_width slider"
+
+    # B. Color Swatches (Text, Highlight, Stroke, Box/Glow)
+    assert hasattr(tab, "btn_color_text"), "Must have btn_color_text"
+    assert hasattr(tab, "btn_color_highlight"), "Must have btn_color_highlight"
+    assert hasattr(tab, "btn_color_stroke"), "Must have btn_color_stroke"
+    assert hasattr(tab, "btn_color_box_glow"), "Must have btn_color_box_glow"
+
+    # Thử đổi màu swatch
+    tab._set_swatch_color("text", "#FF5500")
+    assert tab.swatch_colors["text"] == "#FF5500"
+
+    # C. Motion & Curves (Animation chips & Timing curves)
+    assert hasattr(tab, "anim_chips"), "Must have anim_chips dictionary"
+    for req_anim in ["pop", "bounce", "typewriter", "slide", "box_highlight", "glow", "static"]:
+        assert req_anim in tab.anim_chips, f"Animation chip {req_anim} must exist"
+
+    assert hasattr(tab, "curve_chips"), "Must have curve_chips dictionary"
+    for req_curve in ["spring", "ease", "linear"]:
+        assert req_curve in tab.curve_chips, f"Timing curve chip {req_curve} must exist"
+
+    # D. Destination Track & Hints
+    assert hasattr(tab, "combo_target_track"), "Must have combo_target_track"
+    assert hasattr(tab, "lbl_track_hint"), "Must have lbl_track_hint for hints"
+
+    # Khi chọn Visual Asset (Text) -> Track V2/V3
+    text_preset = BUILTIN_PRESETS[0]
+    tab._on_card_selected(text_preset.id)
+    track_items_text = [tab.combo_target_track.itemText(i) for i in range(tab.combo_target_track.count())]
+    assert any("V2" in t for t in track_items_text)
+
+    # Khi chọn SFX -> Chuyển track Audio Track 2 và có gợi ý -12dB compensation hint
+    sfx_asset = MOCKUP_SFX[0]
+    tab._on_card_selected(sfx_asset.id)
+    track_items_sfx = [tab.combo_target_track.itemText(i) for i in range(tab.combo_target_track.count())]
+    assert any("A2" in t or "Audio" in t for t in track_items_sfx)
+    assert "-12" in tab.lbl_track_hint.text()
+
+    # E. Dọn dẹp timer khi chuyển qua lại SFX (_stop_inspector_sfx_play)
+    tab._start_inspector_sfx_play()
+    assert tab.sfx_waveform_canvas.is_playing is True
+    assert tab.sfx_playback_timer.isActive() is True
+    # Chọn lại text preset -> Phải dừng timer SFX
+    tab._on_card_selected(text_preset.id)
+    assert tab.sfx_waveform_canvas.is_playing is False
+    assert tab.sfx_playback_timer.isActive() is False
+
+    # -------------------------------------------------------------
+    # 2. 4 Action Integrations:
+    # -------------------------------------------------------------
+    # Action 1: _insert_at_playhead() & btn_insert_title_playhead
+    assert hasattr(tab, "_insert_at_playhead"), "TabAssets must have _insert_at_playhead"
+    calls = []
+    class DummyResolve:
+        def insert_title_at_playhead(self, **kwargs):
+            calls.append(("title", kwargs))
+            return True
+        def insert_sfx_to_track(self, **kwargs):
+            calls.append(("sfx", kwargs))
+            return True
+        def apply_look_lut(self, **kwargs):
+            calls.append(("lut", kwargs))
+            return True
+
+    monkeypatch.setattr("src.ui.tabs.tab_assets.ResolveAutomation", lambda: DummyResolve())
+    tab.selected_asset = text_preset
+    tab._insert_at_playhead()
+    assert len(calls) == 1 and calls[0][0] == "title"
+
+    tab.selected_asset = sfx_asset
+    tab._insert_at_playhead()
+    assert len(calls) == 2 and calls[1][0] == "sfx"
+
+    # Action 2: _create_drag_mime_data() & btn_drag_davinci
+    assert hasattr(tab, "btn_drag_davinci"), "TabAssets must have btn_drag_davinci button"
+    assert hasattr(tab, "_create_drag_mime_data"), "TabAssets must have _create_drag_mime_data method"
+
+    # Text -> .setting file
+    mime_text = tab._create_drag_mime_data(text_preset)
+    assert mime_text.hasUrls()
+    path_text = mime_text.urls()[0].toLocalFile()
+    assert path_text.endswith(".setting") and os.path.exists(path_text)
+
+    # Transition -> .setting file
+    trans_asset = BUILTIN_TRANSITIONS[0]
+    mime_trans = tab._create_drag_mime_data(trans_asset)
+    assert mime_trans.hasUrls()
+    path_trans = mime_trans.urls()[0].toLocalFile()
+    assert path_trans.endswith(".setting") and os.path.exists(path_trans)
+
+    # SFX -> .wav file
+    mime_sfx = tab._create_drag_mime_data(sfx_asset)
+    assert mime_sfx.hasUrls()
+    path_sfx = mime_sfx.urls()[0].toLocalFile()
+    assert path_sfx.endswith(".wav")
+
+    # LUT -> .cube file
+    lut_asset = MOCKUP_LUTS[0]
+    mime_lut = tab._create_drag_mime_data(lut_asset)
+    assert mime_lut.hasUrls()
+    path_lut = mime_lut.urls()[0].toLocalFile()
+    assert path_lut.endswith(".cube")
+
+    # Action 3: _get_current_fusion_macro_code() & btn_copy_fusion
+    assert hasattr(tab, "_get_current_fusion_macro_code"), "TabAssets must have _get_current_fusion_macro_code"
+    assert hasattr(tab, "btn_copy_fusion"), "TabAssets must have btn_copy_fusion"
+    tab.selected_asset = text_preset
+    macro_code = tab._get_current_fusion_macro_code()
+    assert ("TextPlus" in macro_code or "MacroOperator" in macro_code or "Tools" in macro_code)
+
+    tab.btn_copy_fusion.click()
+    clipboard_text = QApplication.clipboard().text()
+    assert clipboard_text == macro_code
+    assert hasattr(tab, "lbl_toast"), "TabAssets must have notification toast label lbl_toast"
+    assert tab.lbl_toast.isVisible()
+
+    # Action 4: _install_to_fusion() & btn_install_presets
+    assert hasattr(tab, "_install_to_fusion"), "TabAssets must have _install_to_fusion"
+    assert hasattr(tab, "btn_install_presets"), "TabAssets must have btn_install_presets"
+    installed_count, _ = tab._install_to_fusion()
+    assert isinstance(installed_count, int)
+    assert installed_count >= 0
+
+    # Global constraints check on newly created inspector controls
+    fractional_px_pattern = re.compile(r'\b\d+\.\d+px\b')
+    insp_sheet = tab.inspector.styleSheet()
+    assert len(fractional_px_pattern.findall(insp_sheet)) == 0, "No fractional px in inspector stylesheet"
+
 

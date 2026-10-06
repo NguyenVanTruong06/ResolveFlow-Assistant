@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QLineEdit, QPushButton, QCheckBox, QGroupBox, QFormLayout,
     QSlider, QFrame, QScrollArea, QGridLayout, QApplication, QMessageBox,
-    QSizePolicy, QFileDialog
+    QSizePolicy, QFileDialog, QColorDialog
 )
 from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF
 from PySide6.QtGui import (
@@ -30,6 +30,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS
 from src.core.text_preset import TextStylePreset, BUILTIN_PRESETS, FusionSettingGenerator
 from src.core.transition_preset import TransitionStylePreset, BUILTIN_TRANSITIONS, TransitionMacroGenerator
+from src.core.resolve_api import ResolveAutomation
 
 
 # =========================================================================
@@ -208,6 +209,7 @@ class DraggableAssetLabel(QLabel):
         super().__init__(parent)
         self.preset_getter: Optional[Callable[[], Any]] = None
         self.sample_text_getter: Optional[Callable[[], str]] = None
+        self.mime_data_generator: Optional[Callable[[Any], QMimeData]] = None
         self.drag_start_pos = None
         self.setCursor(Qt.OpenHandCursor)
         self.setToolTip("🖱️ Kéo thả trực tiếp vào Timeline DaVinci Resolve!")
@@ -234,29 +236,59 @@ class DraggableAssetLabel(QLabel):
             return
 
         drag = QDrag(self)
-        mime_data = QMimeData()
-
-        if isinstance(preset, LocalAsset):
-            mime_data.setUrls([QUrl.fromLocalFile(preset.file_path)])
-        elif isinstance(preset, TextStylePreset):
-            temp_setting = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{preset.id}_{uuid.uuid4().hex[:6]}.setting")
-            sample_txt = self.sample_text_getter() if callable(self.sample_text_getter) else preset.name
-            FusionSettingGenerator.export_setting_file(preset, temp_setting, sample_text=sample_txt)
-            mime_data.setUrls([QUrl.fromLocalFile(temp_setting)])
-        elif isinstance(preset, TransitionStylePreset):
-            temp_setting = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{preset.id}_{uuid.uuid4().hex[:6]}.setting")
-            TransitionMacroGenerator.export_setting_file(preset, temp_setting)
-            mime_data.setUrls([QUrl.fromLocalFile(temp_setting)])
+        if callable(self.mime_data_generator):
+            mime_data = self.mime_data_generator(preset)
         else:
-            # StudioAsset ảo
-            temp_path = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{getattr(preset, 'id', 'item')}.txt")
-            with open(temp_path, "w", encoding="utf-8") as f:
-                f.write(getattr(preset, "name", "ResolveFlow Asset"))
-            mime_data.setUrls([QUrl.fromLocalFile(temp_path)])
+            mime_data = QMimeData()
+            if isinstance(preset, LocalAsset):
+                mime_data.setUrls([QUrl.fromLocalFile(preset.file_path)])
+            elif isinstance(preset, TextStylePreset):
+                temp_setting = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{preset.id}_{uuid.uuid4().hex[:6]}.setting")
+                sample_txt = self.sample_text_getter() if callable(self.sample_text_getter) else preset.name
+                FusionSettingGenerator.export_setting_file(preset, temp_setting, sample_text=sample_txt)
+                mime_data.setUrls([QUrl.fromLocalFile(temp_setting)])
+            elif isinstance(preset, TransitionStylePreset):
+                temp_setting = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{preset.id}_{uuid.uuid4().hex[:6]}.setting")
+                TransitionMacroGenerator.export_setting_file(preset, temp_setting)
+                mime_data.setUrls([QUrl.fromLocalFile(temp_setting)])
+            else:
+                # StudioAsset ảo
+                temp_path = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{getattr(preset, 'id', 'item')}.txt")
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    f.write(getattr(preset, "name", "ResolveFlow Asset"))
+                mime_data.setUrls([QUrl.fromLocalFile(temp_path)])
 
-        drag.setMimeData(mime_data)
-        self.setCursor(Qt.OpenHandCursor)
-        drag.exec_(Qt.CopyAction)
+        if mime_data:
+            drag.setMimeData(mime_data)
+            self.setCursor(Qt.OpenHandCursor)
+            drag.exec_(Qt.CopyAction)
+
+
+class DraggableActionButton(QPushButton):
+    """Nút bấm hỗ trợ kéo thả (Drag & Drop) file .setting / .wav / .cube / .mp4 vào DaVinci Resolve."""
+    def __init__(self, text: str, mime_data_getter: Optional[Callable[[], QMimeData]] = None, parent=None):
+        super().__init__(text, parent)
+        self.mime_data_getter = mime_data_getter
+        self._drag_start_pos = None
+        self.setCursor(Qt.PointingHandCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start_pos = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.LeftButton) or not self._drag_start_pos:
+            return
+        if (event.pos() - self._drag_start_pos).manhattanLength() < 8:
+            return
+        if callable(self.mime_data_getter):
+            mime_data = self.mime_data_getter()
+            if mime_data and mime_data.hasUrls():
+                drag = QDrag(self)
+                drag.setMimeData(mime_data)
+                drag.exec_(Qt.CopyAction)
+
 
 
 # =========================================================================
@@ -1292,6 +1324,9 @@ class TabAssets(QWidget):
         self._init_ui()
         self.sfx_playback_timer = QTimer(self)
         self.sfx_playback_timer.timeout.connect(self._on_inspector_sfx_playback_finished)
+        self.toast_timer = QTimer(self)
+        self.toast_timer.setSingleShot(True)
+        self.toast_timer.timeout.connect(lambda: self.lbl_toast.hide() if hasattr(self, "lbl_toast") else None)
         self._populate_cards()
         self._filter_by_rail("text")
 
@@ -1299,6 +1334,8 @@ class TabAssets(QWidget):
         self._current_preset_callback = provider_func
         self.preview_lbl.preset_getter = provider_func
         self.preview_lbl.sample_text_getter = lambda: self.txt_single_title.text().strip() or "ResolveFlow Title"
+        self.preview_lbl.mime_data_generator = lambda p=None: self._create_drag_mime_data(p or self.selected_asset)
+
 
     def _init_ui(self):
         main_layout = QHBoxLayout(self)
@@ -1738,9 +1775,14 @@ class TabAssets(QWidget):
         self.grp_params = QWidget()
         p_layout = QVBoxLayout(self.grp_params)
         p_layout.setContentsMargins(0, 0, 0, 0)
-        p_layout.setSpacing(8)
+        p_layout.setSpacing(12)
 
-        p_layout.addWidget(QLabel("Chữ mẫu hiển thị:"))
+        # Chữ mẫu hiển thị & Thời lượng
+        self.grp_sample_text = QWidget()
+        sample_vbox = QVBoxLayout(self.grp_sample_text)
+        sample_vbox.setContentsMargins(0, 0, 0, 0)
+        sample_vbox.setSpacing(4)
+        sample_vbox.addWidget(QLabel("Chữ mẫu hiển thị:"))
         self.txt_single_title = QLineEdit("ResolveFlow Studio")
         self.txt_single_title.textChanged.connect(self._on_sample_text_changed)
         self.txt_single_title.setStyleSheet(f"""
@@ -1749,33 +1791,311 @@ class TabAssets(QWidget):
             border-radius: 6px;
             padding: 6px;
             color: {ThemeColors.TEXT_PRIMARY};
+            font-size: 12px;
         """)
-        p_layout.addWidget(self.txt_single_title)
+        sample_vbox.addWidget(self.txt_single_title)
+        p_layout.addWidget(self.grp_sample_text)
 
+        self.grp_duration = QWidget()
+        dur_vbox = QVBoxLayout(self.grp_duration)
+        dur_vbox.setContentsMargins(0, 0, 0, 0)
+        dur_vbox.setSpacing(4)
         h_dur = QHBoxLayout()
         h_dur.addWidget(QLabel("Thời lượng:"))
         self.lbl_dur_val = QLabel("4.0s")
-        self.lbl_dur_val.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-weight: bold;")
+        self.lbl_dur_val.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-weight: bold; font-size: 11px;")
+        h_dur.addStretch()
         h_dur.addWidget(self.lbl_dur_val)
-        p_layout.addLayout(h_dur)
+        dur_vbox.addLayout(h_dur)
 
         self.slide_title_dur = QSlider(Qt.Horizontal)
         self.slide_title_dur.setRange(10, 100)
         self.slide_title_dur.setValue(40)
-        self.slide_title_dur.valueChanged.connect(lambda v: self.lbl_dur_val.setText(f"{v/10.0:.1f}s"))
-        p_layout.addWidget(self.slide_title_dur)
-
-        p_layout.addWidget(QLabel("Track đích:"))
-        self.combo_target_track = QComboBox()
-        self.combo_target_track.addItems(["Video Track 2 (V2)", "Video Track 1 (V1)", "Audio Track 2 (A2)", "Audio Track 1 (A1)"])
-        self.combo_target_track.setStyleSheet(f"""
-            background: {ThemeColors.BG_CARD};
-            border: 1px solid {ThemeColors.BORDER_DEFAULT};
-            border-radius: 6px;
-            padding: 4px;
-            color: {ThemeColors.TEXT_PRIMARY};
+        self.slide_title_dur.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                height: 4px;
+                background: {ThemeColors.BG_CARD};
+                border-radius: 2px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {ThemeColors.PRIMARY};
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {ThemeColors.CYAN_HI};
+                width: 12px;
+                margin-top: -4px;
+                margin-bottom: -4px;
+                border-radius: 6px;
+            }}
         """)
-        p_layout.addWidget(self.combo_target_track)
+        self.slide_title_dur.valueChanged.connect(lambda v: self.lbl_dur_val.setText(f"{v/10.0:.1f}s"))
+        dur_vbox.addWidget(self.slide_title_dur)
+        p_layout.addWidget(self.grp_duration)
+
+        # A. Typography controls
+        self.grp_typography = QWidget()
+        t_vbox = QVBoxLayout(self.grp_typography)
+        t_vbox.setContentsMargins(0, 0, 0, 0)
+        t_vbox.setSpacing(6)
+
+        lbl_typo_title = QLabel("KIỂU CHỮ")
+        lbl_typo_title.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {ThemeColors.TEXT_MUTED};")
+        t_vbox.addWidget(lbl_typo_title)
+
+        t_vbox.addWidget(QLabel("Phông chữ:"))
+        self.combo_font = QComboBox()
+        self.combo_font.addItems([
+            "Montserrat", "Arial Black", "Bangers", "Be Vietnam Pro",
+            "Arial", "Segoe UI", "Georgia", "Consolas", "Impact"
+        ])
+        self.combo_font.setStyleSheet(f"""
+            QComboBox {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 5px 8px;
+                color: {ThemeColors.TEXT_PRIMARY};
+                font-size: 11px;
+            }}
+            QComboBox:hover {{
+                border-color: {ThemeColors.PRIMARY};
+            }}
+        """)
+        self.combo_font.currentTextChanged.connect(self._on_font_changed)
+        t_vbox.addWidget(self.combo_font)
+
+        h_sz = QHBoxLayout()
+        h_sz.addWidget(QLabel("Cỡ chữ:"))
+        self.lbl_font_size_val = QLabel("72 px")
+        self.lbl_font_size_val.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 11px; font-weight: bold;")
+        h_sz.addStretch()
+        h_sz.addWidget(self.lbl_font_size_val)
+        t_vbox.addLayout(h_sz)
+
+        self.slide_font_size = QSlider(Qt.Horizontal)
+        self.slide_font_size.setRange(24, 140)
+        self.slide_font_size.setValue(72)
+        self.slide_font_size.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                height: 4px;
+                background: {ThemeColors.BG_CARD};
+                border-radius: 2px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {ThemeColors.PRIMARY};
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {ThemeColors.CYAN_HI};
+                width: 12px;
+                margin-top: -4px;
+                margin-bottom: -4px;
+                border-radius: 6px;
+            }}
+        """)
+        self.slide_font_size.valueChanged.connect(self._on_font_size_changed)
+        t_vbox.addWidget(self.slide_font_size)
+
+        t_vbox.addWidget(QLabel("Độ đậm:"))
+        seg_w_box = QWidget()
+        seg_w_layout = QHBoxLayout(seg_w_box)
+        seg_w_layout.setContentsMargins(0, 0, 0, 0)
+        seg_w_layout.setSpacing(4)
+
+        self.weight_buttons = {
+            "regular": QPushButton("Thường"),
+            "bold": QPushButton("Đậm"),
+            "extrabold": QPushButton("Rất đậm")
+        }
+        for w_k, w_b in self.weight_buttons.items():
+            w_b.setCheckable(True)
+            w_b.setCursor(Qt.PointingHandCursor)
+            w_b.setFixedHeight(26)
+            w_b.clicked.connect(lambda _, k=w_k: self._on_weight_button_clicked(k))
+            seg_w_layout.addWidget(w_b)
+        self.weight_buttons["bold"].setChecked(True)
+        self._update_weight_button_styles()
+        t_vbox.addWidget(seg_w_box)
+
+        h_sw = QHBoxLayout()
+        h_sw.addWidget(QLabel("Độ dày viền:"))
+        self.lbl_stroke_width_val = QLabel("0.15")
+        self.lbl_stroke_width_val.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 11px; font-weight: bold;")
+        h_sw.addStretch()
+        h_sw.addWidget(self.lbl_stroke_width_val)
+        t_vbox.addLayout(h_sw)
+
+        self.slide_stroke_width = QSlider(Qt.Horizontal)
+        self.slide_stroke_width.setRange(0, 50)
+        self.slide_stroke_width.setValue(15)
+        self.slide_stroke_width.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                height: 4px;
+                background: {ThemeColors.BG_CARD};
+                border-radius: 2px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {ThemeColors.PRIMARY};
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {ThemeColors.CYAN_HI};
+                width: 12px;
+                margin-top: -4px;
+                margin-bottom: -4px;
+                border-radius: 6px;
+            }}
+        """)
+        self.slide_stroke_width.valueChanged.connect(self._on_stroke_width_changed)
+        t_vbox.addWidget(self.slide_stroke_width)
+
+        p_layout.addWidget(self.grp_typography)
+
+        # B. Color Swatches
+        self.grp_swatches = QWidget()
+        sw_vbox = QVBoxLayout(self.grp_swatches)
+        sw_vbox.setContentsMargins(0, 0, 0, 0)
+        sw_vbox.setSpacing(6)
+        lbl_swatches_title = QLabel("MÀU SẮC")
+        lbl_swatches_title.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {ThemeColors.TEXT_MUTED};")
+        sw_vbox.addWidget(lbl_swatches_title)
+
+        self.swatch_colors = {
+            "text": "#FFFFFF",
+            "highlight": "#FACC15",
+            "stroke": "#000000",
+            "box_glow": "#EF4444"
+        }
+
+        sw_grid = QGridLayout()
+        sw_grid.setContentsMargins(0, 0, 0, 0)
+        sw_grid.setSpacing(6)
+
+        self.btn_color_text = QPushButton("Chữ")
+        self.btn_color_text.setCursor(Qt.PointingHandCursor)
+        self.btn_color_text.setToolTip("Chọn màu chữ chính")
+        self.btn_color_text.clicked.connect(lambda: self._pick_color("text"))
+
+        self.btn_color_highlight = QPushButton("Highlight")
+        self.btn_color_highlight.setCursor(Qt.PointingHandCursor)
+        self.btn_color_highlight.setToolTip("Chọn màu highlight điểm nhấn")
+        self.btn_color_highlight.clicked.connect(lambda: self._pick_color("highlight"))
+
+        self.btn_color_stroke = QPushButton("Viền")
+        self.btn_color_stroke.setCursor(Qt.PointingHandCursor)
+        self.btn_color_stroke.setToolTip("Chọn màu viền chữ")
+        self.btn_color_stroke.clicked.connect(lambda: self._pick_color("stroke"))
+
+        self.btn_color_box_glow = QPushButton("Hộp/Glow")
+        self.btn_color_box_glow.setCursor(Qt.PointingHandCursor)
+        self.btn_color_box_glow.setToolTip("Chọn màu hộp nền hoặc viền phát sáng")
+        self.btn_color_box_glow.clicked.connect(lambda: self._pick_color("box_glow"))
+
+        sw_grid.addWidget(self.btn_color_text, 0, 0)
+        sw_grid.addWidget(self.btn_color_highlight, 0, 1)
+        sw_grid.addWidget(self.btn_color_stroke, 1, 0)
+        sw_grid.addWidget(self.btn_color_box_glow, 1, 1)
+        sw_vbox.addLayout(sw_grid)
+
+        for k, c in self.swatch_colors.items():
+            self._set_swatch_color(k, c)
+
+        p_layout.addWidget(self.grp_swatches)
+
+        # C. Motion & Curves
+        self.grp_motion = QWidget()
+        m_vbox = QVBoxLayout(self.grp_motion)
+        m_vbox.setContentsMargins(0, 0, 0, 0)
+        m_vbox.setSpacing(6)
+
+        lbl_motion_title = QLabel("CHUYỂN ĐỘNG & ĐƯỜNG CONG")
+        lbl_motion_title.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {ThemeColors.TEXT_MUTED};")
+        m_vbox.addWidget(lbl_motion_title)
+
+        m_vbox.addWidget(QLabel("Hiệu ứng nhảy chữ:"))
+        anim_container = QWidget()
+        anim_layout = QGridLayout(anim_container)
+        anim_layout.setContentsMargins(0, 0, 0, 0)
+        anim_layout.setSpacing(4)
+
+        self.anim_chips = {
+            "pop": QPushButton("Pop"),
+            "bounce": QPushButton("Bounce"),
+            "typewriter": QPushButton("Gõ chữ"),
+            "slide": QPushButton("Trượt"),
+            "box_highlight": QPushButton("Hộp nền"),
+            "glow": QPushButton("Phát sáng"),
+            "static": QPushButton("Đứng yên")
+        }
+        r_i, c_i = 0, 0
+        for ak, abtn in self.anim_chips.items():
+            abtn.setCheckable(True)
+            abtn.setCursor(Qt.PointingHandCursor)
+            abtn.setFixedHeight(24)
+            abtn.clicked.connect(lambda _, k=ak: self._on_anim_chip_clicked(k))
+            anim_layout.addWidget(abtn, r_i, c_i)
+            c_i += 1
+            if c_i > 2:
+                c_i = 0
+                r_i += 1
+        self.anim_chips["pop"].setChecked(True)
+        self._update_anim_chip_styles()
+        m_vbox.addWidget(anim_container)
+
+        m_vbox.addWidget(QLabel("Đường cong thời gian:"))
+        curve_container = QWidget()
+        curve_layout = QHBoxLayout(curve_container)
+        curve_layout.setContentsMargins(0, 0, 0, 0)
+        curve_layout.setSpacing(4)
+
+        self.curve_chips = {
+            "spring": QPushButton("Spring"),
+            "ease": QPushButton("Ease in-out"),
+            "linear": QPushButton("Tuyến tính")
+        }
+        for ck, cbtn in self.curve_chips.items():
+            cbtn.setCheckable(True)
+            cbtn.setCursor(Qt.PointingHandCursor)
+            cbtn.setFixedHeight(24)
+            cbtn.clicked.connect(lambda _, k=ck: self._on_curve_chip_clicked(k))
+            curve_layout.addWidget(cbtn)
+        self.curve_chips["spring"].setChecked(True)
+        self._update_curve_chip_styles()
+        m_vbox.addWidget(curve_container)
+
+        p_layout.addWidget(self.grp_motion)
+
+        # D. Destination Track
+        self.grp_track = QWidget()
+        tr_vbox = QVBoxLayout(self.grp_track)
+        tr_vbox.setContentsMargins(0, 0, 0, 0)
+        tr_vbox.setSpacing(4)
+
+        tr_vbox.addWidget(QLabel("Track đích:"))
+        self.combo_target_track = QComboBox()
+        self.combo_target_track.addItems(["Video Track 2 (V2)", "Video Track 3 (V3)", "Video Track 1 (V1)"])
+        self.combo_target_track.setStyleSheet(f"""
+            QComboBox {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 5px 8px;
+                color: {ThemeColors.TEXT_PRIMARY};
+                font-size: 11px;
+            }}
+            QComboBox:hover {{
+                border-color: {ThemeColors.PRIMARY};
+            }}
+        """)
+        tr_vbox.addWidget(self.combo_target_track)
+
+        self.lbl_track_hint = QLabel("Đề xuất: Chèn lên V2/V3 để tránh đè video chính V1.")
+        self.lbl_track_hint.setWordWrap(True)
+        self.lbl_track_hint.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 10px;")
+        tr_vbox.addWidget(self.lbl_track_hint)
+
+        p_layout.addWidget(self.grp_track)
 
         self.insp_vbox.addWidget(self.grp_params)
         self.insp_vbox.addStretch()
@@ -1788,7 +2108,26 @@ class TabAssets(QWidget):
         acts_vbox.setContentsMargins(16, 12, 16, 14)
         acts_vbox.setSpacing(8)
 
+        # Thông báo Toast
+        self.lbl_toast = QLabel("")
+        self.lbl_toast.setAlignment(Qt.AlignCenter)
+        self.lbl_toast.setWordWrap(True)
+        self.lbl_toast.setStyleSheet(f"""
+            QLabel {{
+                background-color: {ThemeColors.BG_CARD_ACTIVE};
+                color: {ThemeColors.CYAN_HI};
+                border: 1px solid {ThemeColors.CYAN};
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+        """)
+        self.lbl_toast.hide()
+        acts_vbox.addWidget(self.lbl_toast)
+
         self.btn_insert_title_playhead = QPushButton("🚀 Chèn tại Playhead (V2)")
+        self.btn_insert_playhead = self.btn_insert_title_playhead
         self.btn_insert_title_playhead.setCursor(Qt.PointingHandCursor)
         self.btn_insert_title_playhead.setStyleSheet(f"""
             QPushButton {{
@@ -1804,40 +2143,81 @@ class TabAssets(QWidget):
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #a78bfa, stop:1 #8b5cf6);
             }}
         """)
-        self.btn_insert_title_playhead.clicked.connect(self._on_insert_single_title_clicked)
+        self.btn_insert_title_playhead.clicked.connect(self._insert_at_playhead)
         acts_vbox.addWidget(self.btn_insert_title_playhead)
 
         h_acts_sub = QHBoxLayout()
-        h_acts_sub.setSpacing(8)
+        h_acts_sub.setSpacing(6)
 
-        self.btn_install_presets = QPushButton("📥 Cài Đặt")
-        self.btn_install_presets.setCursor(Qt.PointingHandCursor)
-        self.btn_install_presets.clicked.connect(self._on_install_presets_clicked)
-        self.btn_install_presets.setStyleSheet(f"""
-            background: {ThemeColors.BG_CARD};
-            border: 1px solid {ThemeColors.BORDER_DEFAULT};
-            color: {ThemeColors.TEXT_PRIMARY};
-            padding: 6px;
-            border-radius: 6px;
+        self.btn_drag_davinci = DraggableActionButton("🖐️ Kéo DaVinci", lambda: self._create_drag_mime_data())
+        self.btn_drag_davinci.setCursor(Qt.OpenHandCursor)
+        self.btn_drag_davinci.setToolTip("Giữ chuột và kéo sang Timeline DaVinci Resolve!")
+        self.btn_drag_davinci.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                color: {ThemeColors.TEXT_PRIMARY};
+                padding: 6px 8px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: {ThemeColors.BG_CARD_ACTIVE};
+                border-color: {ThemeColors.PRIMARY};
+                color: #ffffff;
+            }}
         """)
+        self.btn_drag_davinci.clicked.connect(lambda: self._show_toast("Giữ chuột và kéo sang Timeline DaVinci Resolve!"))
 
         self.btn_copy_fusion = QPushButton("📋 Copy Fusion")
         self.btn_copy_fusion.setCursor(Qt.PointingHandCursor)
         self.btn_copy_fusion.clicked.connect(self._on_copy_fusion_clicked)
         self.btn_copy_fusion.setStyleSheet(f"""
-            background: {ThemeColors.BG_CARD};
-            border: 1px solid {ThemeColors.BORDER_DEFAULT};
-            color: {ThemeColors.TEXT_PRIMARY};
-            padding: 6px;
-            border-radius: 6px;
+            QPushButton {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                color: {ThemeColors.TEXT_PRIMARY};
+                padding: 6px 8px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: {ThemeColors.BG_CARD_ACTIVE};
+                border-color: {ThemeColors.PRIMARY};
+                color: #ffffff;
+            }}
         """)
 
-        h_acts_sub.addWidget(self.btn_install_presets)
+        self.btn_install_presets = QPushButton("📥 Cài Đặt")
+        self.btn_install_presets.setCursor(Qt.PointingHandCursor)
+        self.btn_install_presets.clicked.connect(self._install_to_fusion)
+        self.btn_install_presets.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                color: {ThemeColors.TEXT_PRIMARY};
+                padding: 6px 8px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: {ThemeColors.BG_CARD_ACTIVE};
+                border-color: {ThemeColors.PRIMARY};
+                color: #ffffff;
+            }}
+        """)
+
+        h_acts_sub.addWidget(self.btn_drag_davinci)
         h_acts_sub.addWidget(self.btn_copy_fusion)
+        h_acts_sub.addWidget(self.btn_install_presets)
         acts_vbox.addLayout(h_acts_sub)
 
         insp_layout.addWidget(scroll_insp, stretch=1)
         insp_layout.addWidget(insp_acts)
+
 
         # Ghép 4 cột vào layout chính
         main_layout.addWidget(self.rail)
@@ -1849,6 +2229,7 @@ class TabAssets(QWidget):
     # 7. LOGIC ĐIỀU HƯỚNG VÀ LỌC DANH MỤC
     # =========================================================================
     def _filter_by_rail(self, tab_id: str):
+        self._stop_inspector_sfx_play()
         self.current_rail_tab = tab_id
         for tid, btn in self.rail_btns.items():
             btn.setChecked(tid == tab_id)
@@ -1856,6 +2237,7 @@ class TabAssets(QWidget):
         # Cập nhật danh mục con ở Cột 2
         self._rebuild_categories_column()
         self._refresh_grid()
+
 
     def _rebuild_categories_column(self):
         # Dọn sạch các nút cũ
@@ -2045,6 +2427,7 @@ class TabAssets(QWidget):
             self.grid.addWidget(card, idx // cols, idx % cols)
 
     def _on_card_selected(self, preset_id: str):
+        self._stop_inspector_sfx_play()
         # Cập nhật combo_text_preset cho unit tests
         idx = self.combo_text_preset.findData(preset_id)
         if idx >= 0:
@@ -2059,6 +2442,7 @@ class TabAssets(QWidget):
 
         # Cập nhật Inspector
         self._update_inspector_details()
+
 
     def _toggle_inspector_aspect_ratio(self):
         if self.current_aspect_ratio == "16:9":
@@ -2149,13 +2533,46 @@ class TabAssets(QWidget):
             self.inspector_trans_viewport.hide()
             self.inspector_icon_viewport.hide()
 
+            self.grp_params.show()
+            if hasattr(self, "grp_sample_text"):
+                self.grp_sample_text.show()
+            if hasattr(self, "grp_duration"):
+                self.grp_duration.show()
+            if hasattr(self, "grp_typography"):
+                self.grp_typography.show()
+            if hasattr(self, "grp_swatches"):
+                self.grp_swatches.show()
+            if hasattr(self, "grp_motion"):
+                self.grp_motion.show()
+            if hasattr(self, "grp_track"):
+                self.grp_track.show()
+
+            self.combo_target_track.clear()
+            self.combo_target_track.addItems(["Video Track 2 (V2)", "Video Track 3 (V3)", "Video Track 1 (V1)"])
+            self.lbl_track_hint.setText("Đề xuất: Chèn lên V2/V3 để tránh đè video chính V1.")
+
+            font_val = getattr(self.selected_asset, "font", "Montserrat")
+            f_idx = self.combo_font.findText(font_val)
+            if f_idx >= 0:
+                self.combo_font.setCurrentIndex(f_idx)
+            sz_val = getattr(self.selected_asset, "size", 72)
+            self.slide_font_size.setValue(int(sz_val))
+
+            std_col = getattr(self.selected_asset, "standard_color", None) or "#FFFFFF"
+            hl_col = getattr(self.selected_asset, "highlight_color", None) or "#FACC15"
+            out_col = getattr(self.selected_asset, "outline_color", None) or "#000000"
+            box_col = getattr(self.selected_asset, "box_color", None) or getattr(self.selected_asset, "glow_color", None) or "#EF4444"
+            self._set_swatch_color("text", std_col)
+            self._set_swatch_color("highlight", hl_col)
+            self._set_swatch_color("stroke", out_col)
+            self._set_swatch_color("box_glow", box_col)
+
             sample = self.txt_single_title.text().strip() or "ResolveFlow Studio"
             pid = getattr(self.selected_asset, "id", "")
-            std_col = getattr(self.selected_asset, "standard_color", "#FFFFFF")
             html = format_text_preset_html(pid, name, sample, std_col, is_large=True)
             self.lbl_insp_preview.setText(html)
             self.btn_insert_title_playhead.setText("🚀 Chèn tại Playhead (V2)")
-            self.grp_params.show()
+
         elif is_lut:
             self.inspector_aspect_btn.hide()
             self.inspector_text_preview.hide()
@@ -2164,10 +2581,28 @@ class TabAssets(QWidget):
             self.inspector_trans_viewport.hide()
             self.inspector_icon_viewport.hide()
 
+            self.grp_params.show()
+            if hasattr(self, "grp_sample_text"):
+                self.grp_sample_text.hide()
+            if hasattr(self, "grp_duration"):
+                self.grp_duration.hide()
+            if hasattr(self, "grp_typography"):
+                self.grp_typography.hide()
+            if hasattr(self, "grp_swatches"):
+                self.grp_swatches.hide()
+            if hasattr(self, "grp_motion"):
+                self.grp_motion.hide()
+            if hasattr(self, "grp_track"):
+                self.grp_track.show()
+
+            self.combo_target_track.clear()
+            self.combo_target_track.addItems(["Timeline (Màu toàn bộ)", "Clip đang chọn"])
+            self.lbl_track_hint.setText("Áp màu LUT điện ảnh lên Node cấp Timeline hoặc Clip.")
+
             pal = getattr(self.selected_asset, "pal", [])
             self.lut_split_widget.set_lut(name, pal)
             self.btn_insert_title_playhead.setText("🎨 Áp LUT lên Timeline")
-            self.grp_params.hide()
+
         elif is_sfx:
             self.inspector_aspect_btn.hide()
             self.inspector_text_preview.hide()
@@ -2175,6 +2610,24 @@ class TabAssets(QWidget):
             self.inspector_sfx_viewport.show()
             self.inspector_trans_viewport.hide()
             self.inspector_icon_viewport.hide()
+
+            self.grp_params.show()
+            if hasattr(self, "grp_sample_text"):
+                self.grp_sample_text.hide()
+            if hasattr(self, "grp_duration"):
+                self.grp_duration.hide()
+            if hasattr(self, "grp_typography"):
+                self.grp_typography.hide()
+            if hasattr(self, "grp_swatches"):
+                self.grp_swatches.hide()
+            if hasattr(self, "grp_motion"):
+                self.grp_motion.hide()
+            if hasattr(self, "grp_track"):
+                self.grp_track.show()
+
+            self.combo_target_track.clear()
+            self.combo_target_track.addItems(["Audio Track 2 (A2 - SFX)", "Audio Track 1 (A1)"])
+            self.lbl_track_hint.setText("Gợi ý: Audio Track 2 với bù âm -12dB phù hợp mạng xã hội, không đè giọng nói.")
 
             pid = getattr(self.selected_asset, "id", "sfx")
             clean_id = pid.replace("sfx_", "")
@@ -2184,7 +2637,7 @@ class TabAssets(QWidget):
             self.sfx_hint_lbl.setText(f"assets/sfx/{clean_id}.wav")
             self.sfx_play_btn.setText("▶ Nghe thử")
             self.btn_insert_title_playhead.setText("🔊 Chèn âm thanh tại Playhead (A2)")
-            self.grp_params.hide()
+
         elif is_trans:
             self.inspector_aspect_btn.hide()
             self.inspector_text_preview.hide()
@@ -2193,11 +2646,29 @@ class TabAssets(QWidget):
             self.inspector_trans_viewport.show()
             self.inspector_icon_viewport.hide()
 
+            self.grp_params.show()
+            if hasattr(self, "grp_sample_text"):
+                self.grp_sample_text.hide()
+            if hasattr(self, "grp_duration"):
+                self.grp_duration.hide()
+            if hasattr(self, "grp_typography"):
+                self.grp_typography.hide()
+            if hasattr(self, "grp_swatches"):
+                self.grp_swatches.hide()
+            if hasattr(self, "grp_motion"):
+                self.grp_motion.hide()
+            if hasattr(self, "grp_track"):
+                self.grp_track.show()
+
+            self.combo_target_track.clear()
+            self.combo_target_track.addItems(["Video Track 1 (V1 - Cắt cảnh)", "Video Track 2 (V2)"])
+            self.lbl_track_hint.setText("Kéo hoặc chèn vào điểm giao nhau giữa 2 clip.")
+
             kind = getattr(self.selected_asset, "category", "transform")
             frames = getattr(self.selected_asset, "frames", 20)
             self.trans_loop_widget.set_transition(name, kind, frames)
             self.btn_insert_title_playhead.setText("🔄 Chèn chuyển cảnh vào Timeline")
-            self.grp_params.hide()
+
         else:
             self.inspector_aspect_btn.hide()
             self.inspector_text_preview.hide()
@@ -2206,20 +2677,454 @@ class TabAssets(QWidget):
             self.inspector_trans_viewport.hide()
             self.inspector_icon_viewport.show()
 
+            self.grp_params.show()
+            if hasattr(self, "grp_sample_text"):
+                self.grp_sample_text.hide()
+            if hasattr(self, "grp_duration"):
+                self.grp_duration.show()
+            if hasattr(self, "grp_typography"):
+                self.grp_typography.hide()
+            if hasattr(self, "grp_swatches"):
+                self.grp_swatches.hide()
+            if hasattr(self, "grp_motion"):
+                self.grp_motion.hide()
+            if hasattr(self, "grp_track"):
+                self.grp_track.show()
+
+            self.combo_target_track.clear()
+            self.combo_target_track.addItems(["Video Track 2 (V2)", "Video Track 3 (V3)", "Video Track 1 (V1)"])
+            self.lbl_track_hint.setText("Đề xuất: Chèn lên V2/V3 để tránh đè video chính V1.")
+
             tab_type = getattr(self.selected_asset, "tab", "icon")
             badge = getattr(self.selected_asset, "badge_icon", "✨")
             color_hex = getattr(self.selected_asset, "color_hex", "#facc15")
             self.icon_meme_widget.set_item(name, tab_type, badge, color_hex, sub)
             self.btn_insert_title_playhead.setText("➕ Chèn vào Timeline")
-            self.grp_params.hide()
 
     def _on_sample_text_changed(self, text: str):
-        if isinstance(self.selected_asset, TextStylePreset) or getattr(self.selected_asset, "tab", "") == "text":
-            name = getattr(self.selected_asset, "name", "")
+        self._update_text_preview_from_params()
+
+    def _on_font_changed(self, font_name: str):
+        self.txt_font.setText(font_name)
+        self._update_text_preview_from_params()
+
+    def _on_font_size_changed(self, value: int):
+        self.lbl_font_size_val.setText(f"{value} px")
+        self.txt_size.setText(str(value))
+        self._update_text_preview_from_params()
+
+    def _on_stroke_width_changed(self, value: int):
+        self.lbl_stroke_width_val.setText(f"{value/100.0:.2f}")
+        self._update_text_preview_from_params()
+
+    def _on_weight_button_clicked(self, key: str):
+        for k, b in self.weight_buttons.items():
+            b.setChecked(k == key)
+        self._update_weight_button_styles()
+        self._update_text_preview_from_params()
+
+    def _update_weight_button_styles(self):
+        for k, btn in self.weight_buttons.items():
+            is_on = btn.isChecked()
+            bg = ThemeColors.BG_CARD_ACTIVE if is_on else ThemeColors.BG_CARD
+            border = ThemeColors.PRIMARY if is_on else ThemeColors.BORDER_DEFAULT
+            col = "#FFFFFF" if is_on else ThemeColors.TEXT_MUTED
+            weight = "bold" if is_on else "normal"
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {bg};
+                    border: 1px solid {border};
+                    border-radius: 4px;
+                    color: {col};
+                    font-size: 11px;
+                    font-weight: {weight};
+                    padding: 2px 6px;
+                }}
+                QPushButton:hover {{
+                    border-color: {ThemeColors.PRIMARY};
+                }}
+            """)
+
+    def _on_anim_chip_clicked(self, key: str):
+        for k, b in self.anim_chips.items():
+            b.setChecked(k == key)
+        self._update_anim_chip_styles()
+        self._update_text_preview_from_params()
+
+    def _update_anim_chip_styles(self):
+        for k, btn in self.anim_chips.items():
+            is_on = btn.isChecked()
+            bg = ThemeColors.PRIMARY if is_on else ThemeColors.BG_CARD
+            border = ThemeColors.CYAN_HI if is_on else ThemeColors.BORDER_DEFAULT
+            col = "#FFFFFF" if is_on else ThemeColors.TEXT_MUTED
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {bg};
+                    border: 1px solid {border};
+                    border-radius: 12px;
+                    color: {col};
+                    font-size: 11px;
+                    font-weight: {"bold" if is_on else "normal"};
+                    padding: 2px 8px;
+                }}
+                QPushButton:hover {{
+                    border-color: {ThemeColors.CYAN};
+                    color: #FFFFFF;
+                }}
+            """)
+
+    def _on_curve_chip_clicked(self, key: str):
+        for k, b in self.curve_chips.items():
+            b.setChecked(k == key)
+        self._update_curve_chip_styles()
+
+    def _update_curve_chip_styles(self):
+        for k, btn in self.curve_chips.items():
+            is_on = btn.isChecked()
+            bg = ThemeColors.BG_CARD_ACTIVE if is_on else ThemeColors.BG_CARD
+            border = ThemeColors.CYAN_HI if is_on else ThemeColors.BORDER_DEFAULT
+            col = ThemeColors.CYAN_HI if is_on else ThemeColors.TEXT_MUTED
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {bg};
+                    border: 1px solid {border};
+                    border-radius: 12px;
+                    color: {col};
+                    font-size: 11px;
+                    font-weight: {"bold" if is_on else "normal"};
+                    padding: 2px 8px;
+                }}
+                QPushButton:hover {{
+                    border-color: {ThemeColors.CYAN_HI};
+                }}
+            """)
+
+    def _pick_color(self, key: str):
+        curr = self.swatch_colors.get(key, "#FFFFFF")
+        col = QColorDialog.getColor(QColor(curr), self, f"Chọn màu cho {key.capitalize()}")
+        if col.isValid():
+            self._set_swatch_color(key, col.name().upper())
+
+    def _set_swatch_color(self, key: str, hex_color: str):
+        if not hex_color:
+            defaults = {"text": "#FFFFFF", "highlight": "#FACC15", "stroke": "#000000", "box_glow": "#EF4444"}
+            hex_color = defaults.get(key, "#FFFFFF")
+        hex_color = str(hex_color)
+        if not hasattr(self, "swatch_colors"):
+            self.swatch_colors = {}
+        self.swatch_colors[key] = hex_color
+        btn = getattr(self, f"btn_color_{key}", None)
+        if btn:
+            is_light = hex_color.upper() in ("#FFFFFF", "#FFF", "#FACC15", "#A3E635", "#FEF3C7")
+            text_col = "#18181b" if is_light else "#FFFFFF"
+            labels = {"text": "Chữ", "highlight": "Highlight", "stroke": "Viền", "box_glow": "Hộp/Glow"}
+            name_lbl = labels.get(key, key.capitalize())
+            btn.setText(f"■ {name_lbl}\n{hex_color}")
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {hex_color};
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 6px;
+                    color: {text_col};
+                    font-size: 10px;
+                    font-weight: bold;
+                    padding: 4px;
+                    text-align: center;
+                }}
+                QPushButton:hover {{
+                    border-color: {ThemeColors.CYAN_HI};
+                }}
+            """)
+        self._update_text_preview_from_params()
+
+    def _update_text_preview_from_params(self):
+        if not self.selected_asset:
+            return
+        is_text = isinstance(self.selected_asset, TextStylePreset) or getattr(self.selected_asset, "tab", "") == "text"
+        if not is_text:
+            return
+
+        name = getattr(self.selected_asset, "name", "")
+        pid = getattr(self.selected_asset, "id", "")
+        sample = self.txt_single_title.text().strip() or "ResolveFlow Studio"
+        std_col = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else "#FFFFFF"
+        html = format_text_preset_html(pid, name, sample, std_col, is_large=True)
+        self.lbl_insp_preview.setText(html)
+
+    def _show_toast(self, message: str):
+        if hasattr(self, "lbl_toast"):
+            self.lbl_toast.setText(message)
+            self.lbl_toast.show()
+            self.toast_timer.stop()
+            self.toast_timer.start(2500)
+
+    def _insert_at_playhead(self):
+        if not self.selected_asset:
+            return
+
+        is_text = isinstance(self.selected_asset, TextStylePreset) or getattr(self.selected_asset, "tab", "") == "text"
+        is_sfx = getattr(self.selected_asset, "tab", "") == "sfx"
+        is_lut = getattr(self.selected_asset, "tab", "") == "lut"
+
+        try:
+            resolve_auto = ResolveAutomation()
+        except Exception:
+            resolve_auto = None
+
+        if is_text:
+            text = self.txt_single_title.text().strip() or "ResolveFlow Title"
+            preset_id = getattr(self.selected_asset, "id", "karaoke_pop")
+            dur = float(self.slide_title_dur.value()) / 10.0 if hasattr(self, 'slide_title_dur') and self.slide_title_dur.value() > 0 else 4.0
+            font_name = self.combo_font.currentText() if hasattr(self, 'combo_font') else "Arial"
+            font_size = self.slide_font_size.value() if hasattr(self, 'slide_font_size') else 48
+            color_hex = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, 'swatch_colors') else "#FFFFFF"
+
+            if resolve_auto and hasattr(resolve_auto, "insert_title_at_playhead"):
+                try:
+                    resolve_auto.insert_title_at_playhead(
+                        text=text,
+                        preset_id=preset_id,
+                        duration_sec=dur,
+                        font_name=font_name,
+                        font_size=font_size,
+                        color_hex=color_hex
+                    )
+                except Exception:
+                    pass
+            self.insert_title_requested.emit(text, preset_id, dur)
+            self._show_toast(f"Đã chèn “{getattr(self.selected_asset, 'name', text)}” tại Playhead (V2)")
+        elif is_sfx:
+            pid = getattr(self.selected_asset, "id", "whoosh")
+            clean_id = pid.replace("sfx_", "")
+            sfx_file = os.path.join("assets", "sfx", f"{clean_id}.wav")
+            if not os.path.exists(sfx_file):
+                sfx_file = os.path.join("assets", "sfx", f"{pid}.wav")
+            dur = getattr(self.selected_asset, "duration", 1.5)
+            if resolve_auto and hasattr(resolve_auto, "insert_sfx_to_track"):
+                try:
+                    resolve_auto.insert_sfx_to_track(
+                        sfx_path=os.path.abspath(sfx_file) if os.path.exists(sfx_file) else sfx_file,
+                        target_track=2,
+                        volume_offset_db=-12.0
+                    )
+                except Exception:
+                    pass
+            self.insert_sfx_requested.emit(sfx_file, 2, -12.0)
+            self._show_toast(f"Đã chèn âm thanh “{getattr(self.selected_asset, 'name', pid)}” tại Playhead (A2)")
+        elif is_lut:
+            lut_name = getattr(self.selected_asset, "name", "")
             pid = getattr(self.selected_asset, "id", "")
-            std_col = getattr(self.selected_asset, "standard_color", "#FFFFFF")
-            html = format_text_preset_html(pid, name, text.strip() or "ResolveFlow Studio", std_col, is_large=True)
-            self.lbl_insp_preview.setText(html)
+            lut_file = os.path.join("assets", "luts", f"ResolveFlow_{pid}.cube")
+            if resolve_auto and hasattr(resolve_auto, "apply_look_lut"):
+                try:
+                    resolve_auto.apply_look_lut(lut_path=lut_file, scope="timeline")
+                except Exception:
+                    pass
+            self.apply_lut_requested.emit(pid)
+            self._show_toast(f"Đã áp LUT “{lut_name}” lên Timeline")
+        else:
+            self._show_toast(f"Đã chèn “{getattr(self.selected_asset, 'name', 'Asset')}” vào Timeline")
+
+    def _create_drag_mime_data(self, asset: Optional[Any] = None) -> QMimeData:
+        target = asset if asset is not None else self.selected_asset
+        mime_data = QMimeData()
+        if not target:
+            return mime_data
+
+        temp_dir = tempfile.gettempdir()
+        sample_txt = self.txt_single_title.text().strip() or "ResolveFlow Title"
+        asset_id = getattr(target, "id", "asset")
+        tab_type = getattr(target, "tab", "")
+
+        if isinstance(target, TextStylePreset) or tab_type == "text":
+            temp_setting = os.path.join(temp_dir, f"ResolveFlow_{asset_id}_{uuid.uuid4().hex[:6]}.setting")
+            if isinstance(target, TextStylePreset):
+                FusionSettingGenerator.export_setting_file(target, temp_setting, sample_text=sample_txt)
+            else:
+                preset_obj = next((p for p in self.all_presets if getattr(p, "id", "") == asset_id), None)
+                if isinstance(preset_obj, TextStylePreset):
+                    FusionSettingGenerator.export_setting_file(preset_obj, temp_setting, sample_text=sample_txt)
+                else:
+                    tmp_p = TextStylePreset(
+                        id=asset_id,
+                        name=getattr(target, "name", "Text Title"),
+                        font=self.combo_font.currentText() if hasattr(self, "combo_font") else "Arial",
+                        size=self.slide_font_size.value() if hasattr(self, "slide_font_size") else 48,
+                        weight="bold",
+                        standard_color=self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else "#FFFFFF"
+                    )
+                    FusionSettingGenerator.export_setting_file(tmp_p, temp_setting, sample_text=sample_txt)
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(temp_setting))])
+
+        elif isinstance(target, TransitionStylePreset) or tab_type == "trans":
+            temp_setting = os.path.join(temp_dir, f"ResolveFlow_{asset_id}_{uuid.uuid4().hex[:6]}.setting")
+            if isinstance(target, TransitionStylePreset):
+                TransitionMacroGenerator.export_setting_file(target, temp_setting)
+            else:
+                trans_obj = next((t for t in self.all_transitions if getattr(t, "id", "") == asset_id), None)
+                if isinstance(trans_obj, TransitionStylePreset):
+                    TransitionMacroGenerator.export_setting_file(trans_obj, temp_setting)
+                else:
+                    tmp_t = TransitionStylePreset(
+                        id=asset_id,
+                        name=getattr(target, "name", "Transition"),
+                        category="transform",
+                        duration_frames=getattr(target, "frames", 20)
+                    )
+                    TransitionMacroGenerator.export_setting_file(tmp_t, temp_setting)
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(temp_setting))])
+
+        elif tab_type == "sfx" or "sfx" in asset_id:
+            clean_id = asset_id.replace("sfx_", "")
+            candidate_paths = [
+                os.path.join("assets", "sfx", f"{clean_id}.wav"),
+                os.path.join("assets", "sfx", f"{asset_id}.wav"),
+                getattr(target, "file_path", "")
+            ]
+            sfx_file = None
+            for p in candidate_paths:
+                if p and os.path.exists(p):
+                    sfx_file = os.path.abspath(p)
+                    break
+            if not sfx_file:
+                import wave
+                sfx_file = os.path.join(temp_dir, f"ResolveFlow_{clean_id}.wav")
+                if not os.path.exists(sfx_file):
+                    try:
+                        with wave.open(sfx_file, "wb") as wf:
+                            wf.setnchannels(1)
+                            wf.setsampwidth(2)
+                            wf.setframerate(44100)
+                            wf.writeframes(b"\x00\x00" * 4410)
+                    except Exception:
+                        with open(sfx_file, "wb") as f:
+                            f.write(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00D\xac\x00\x00\x88X\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(sfx_file))])
+
+        elif tab_type == "lut":
+            candidate_paths = [
+                os.path.join("assets", "luts", f"ResolveFlow_{asset_id}.cube"),
+                os.path.join("assets", "luts", f"{asset_id}.cube"),
+                getattr(target, "file_path", "")
+            ]
+            lut_file = None
+            for p in candidate_paths:
+                if p and os.path.exists(p):
+                    lut_file = os.path.abspath(p)
+                    break
+            if not lut_file:
+                lut_file = os.path.join(temp_dir, f"ResolveFlow_{asset_id}.cube")
+                if not os.path.exists(lut_file):
+                    with open(lut_file, "w", encoding="utf-8") as f:
+                        f.write(f'TITLE "ResolveFlow_{asset_id}"\nLUT_3D_SIZE 2\n0.0 0.0 0.0\n1.0 0.0 0.0\n0.0 1.0 0.0\n1.0 1.0 0.0\n0.0 0.0 1.0\n1.0 0.0 1.0\n0.0 1.0 1.0\n1.0 1.0 1.0\n')
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(lut_file))])
+
+        elif tab_type in ("meme", "overlay"):
+            dir_name = "memes" if tab_type == "meme" else getattr(target, "category", "cinematic")
+            candidate_paths = [
+                os.path.join("assets", "broll_memes", dir_name, f"{asset_id}.mp4"),
+                os.path.join("assets", "broll_memes", f"{asset_id}.mp4"),
+                getattr(target, "file_path", "")
+            ]
+            vid_file = None
+            for p in candidate_paths:
+                if p and os.path.exists(p):
+                    vid_file = os.path.abspath(p)
+                    break
+            if not vid_file:
+                vid_file = os.path.join(temp_dir, f"ResolveFlow_{asset_id}.mp4")
+                if not os.path.exists(vid_file):
+                    with open(vid_file, "wb") as f:
+                        f.write(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00isommp42")
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(vid_file))])
+
+        elif isinstance(target, LocalAsset):
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(target.file_path))])
+
+        else:
+            temp_path = os.path.join(temp_dir, f"ResolveFlow_{asset_id}.txt")
+            with open(temp_path, "w", encoding="utf-8") as f:
+                f.write(getattr(target, "name", "ResolveFlow Asset"))
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(temp_path))])
+
+        return mime_data
+
+    def _get_current_fusion_macro_code(self) -> str:
+        target = self.selected_asset
+        if not target:
+            return ""
+
+        sample_txt = self.txt_single_title.text().strip() or "ResolveFlow Title"
+        asset_id = getattr(target, "id", "asset")
+        tab_type = getattr(target, "tab", "")
+
+        if isinstance(target, TextStylePreset):
+            return FusionSettingGenerator.generate_setting_content(target, sample_text=sample_txt)
+        elif tab_type == "text":
+            preset_obj = next((p for p in self.all_presets if getattr(p, "id", "") == asset_id), None)
+            if isinstance(preset_obj, TextStylePreset):
+                return FusionSettingGenerator.generate_setting_content(preset_obj, sample_text=sample_txt)
+            tmp_p = TextStylePreset(
+                id=asset_id,
+                name=getattr(target, "name", "Title"),
+                font=self.combo_font.currentText() if hasattr(self, "combo_font") else "Arial",
+                size=self.slide_font_size.value() if hasattr(self, "slide_font_size") else 48,
+                weight="bold",
+                standard_color=self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else "#FFFFFF"
+            )
+            return FusionSettingGenerator.generate_setting_content(tmp_p, sample_text=sample_txt)
+        elif isinstance(target, TransitionStylePreset):
+            return TransitionMacroGenerator.generate_setting_content(target)
+        elif tab_type == "trans":
+            trans_obj = next((t for t in self.all_transitions if getattr(t, "id", "") == asset_id), None)
+            if isinstance(trans_obj, TransitionStylePreset):
+                return TransitionMacroGenerator.generate_setting_content(trans_obj)
+            tmp_t = TransitionStylePreset(
+                id=asset_id,
+                name=getattr(target, "name", "Transition"),
+                category="transform",
+                duration_frames=getattr(target, "frames", 20)
+            )
+            return TransitionMacroGenerator.generate_setting_content(tmp_t)
+        else:
+            name = getattr(target, "name", "Asset")
+            return f"""{{
+    Tools = ordered() {{
+        RF_{asset_id} = TextPlus {{
+            Inputs = {{
+                StyledText = Input {{ Value = "{name}", }},
+                Font = Input {{ Value = "Arial", }},
+                Size = Input {{ Value = 0.08, }},
+            }},
+            ViewInfo = OperatorInfo {{ Pos = {{ 220, 36.3 }} }},
+        }}
+    }}
+}}"""
+
+    def _install_to_fusion(self) -> Tuple[int, str]:
+        is_trans = isinstance(self.selected_asset, TransitionStylePreset) or getattr(self.selected_asset, "tab", "") == "trans"
+        if is_trans:
+            count, target_dir = TransitionMacroGenerator.install_transitions_to_davinci_resolve()
+            msg = f"Đã cài đặt {count} chuyển cảnh vào DaVinci Resolve ({target_dir})"
+        else:
+            count, target_dir = FusionSettingGenerator.install_presets_to_davinci_resolve()
+            msg = f"Đã cài đặt {count} mẫu chữ vào DaVinci Resolve ({target_dir})"
+        self.install_presets_requested.emit()
+        self._show_toast(msg)
+        return count, target_dir
+
+    def _on_insert_single_title_clicked(self):
+        self._insert_at_playhead()
+
+    def _on_install_presets_clicked(self):
+        self._install_to_fusion()
+
+    def _on_copy_fusion_clicked(self):
+        macro_code = self._get_current_fusion_macro_code()
+        QApplication.clipboard().setText(macro_code)
+        preset_id = self.combo_text_preset.currentData() or getattr(self.selected_asset, "id", "karaoke_pop")
+        self.copy_fusion_node_requested.emit(preset_id)
+        self._show_toast("Đã copy Fusion node! Dán vào trang Fusion bằng Ctrl+V")
 
     def _on_favorite_toggled(self, preset_id: str, is_fav: bool):
         if is_fav:
@@ -2250,20 +3155,3 @@ class TabAssets(QWidget):
         self._refresh_grid()
         QMessageBox.information(self, "Quét hoàn tất", f"Đã nạp thành công {found} tài nguyên cá nhân vào Kho Đạo Cụ!")
 
-    # =========================================================================
-    # 9. HÀNH ĐỘNG INSERT / COPY / INSTALL
-    # =========================================================================
-    def _on_insert_single_title_clicked(self):
-        text = self.txt_single_title.text().strip() or "ResolveFlow Title"
-        preset_id = self.combo_text_preset.currentData() or "karaoke_pop"
-        dur = float(self.slide_title_dur.value()) / 10.0 if hasattr(self, 'slide_title_dur') and self.slide_title_dur.value() > 0 else 4.0
-        self.insert_title_requested.emit(text, preset_id, dur)
-
-    def _on_install_presets_clicked(self):
-        from src.core.text_preset import FusionSettingGenerator
-        FusionSettingGenerator.install_presets_to_davinci_resolve()
-        self.install_presets_requested.emit()
-
-    def _on_copy_fusion_clicked(self):
-        preset_id = self.combo_text_preset.currentData() or "karaoke_pop"
-        self.copy_fusion_node_requested.emit(preset_id)

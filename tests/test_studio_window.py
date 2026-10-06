@@ -50,7 +50,8 @@ def test_studio_window_card_selection_and_inspector(qapp):
 
     # Nhập text mới và kiểm tra preview cập nhật
     tab_assets.txt_single_title.setText("ResolveFlow Test")
-    assert tab_assets.lbl_insp_preview.text() == "ResolveFlow Test"
+    preview_html = tab_assets.lbl_insp_preview.text()
+    assert "ResolveFlow" in preview_html and "Test" in preview_html
 
 
 def test_studio_window_insert_signal(qapp):
