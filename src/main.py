@@ -30,6 +30,14 @@ def start_app():
     bubble.stop_requested.connect(auto_win._stop_pipeline)
     if hasattr(auto_win, '_pause_pipeline'):
         bubble.pause_requested.connect(auto_win._pause_pipeline)
+
+    def _on_insert_timeline_clicked():
+        auto_win.show()
+        auto_win.raise_()
+        auto_win.activateWindow()
+        auto_win._log_message("🎞️ [Bong bóng] Đang nạp timeline vào DaVinci Resolve...")
+
+    bubble.insert_timeline_requested.connect(_on_insert_timeline_clicked)
     
     # Hiển thị Bubble ngay khi khởi động
     bubble.show()

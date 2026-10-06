@@ -2,28 +2,77 @@
 Bong bóng nổi Desktop (Floating Desktop Bubble) cho ResolveFlow Assistant.
 Thiết kế theo chuẩn hiện đại từ src/ui/resolveflow_ui.html:
 - Quả cầu tròn 56px với gradient Tím - Cyan điện ảnh và bóng đổ mượt mà.
-- Vòng tròn tiến độ Conic Gradient (QConicalGradient) và huy hiệu % phát sáng.
+- Biểu tượng logo ResolveFlow vector sắc nét (Khung màn hình bo góc + Tam giác Play) thay cho emoji thô.
+- Vòng tròn tiến độ Conic Gradient (QConicalGradient) và huy hiệu % phát sáng bên dưới.
 - Khay điều hướng (Tray Popup) mở rộng thông minh với độ trễ 120ms mở / 400ms đóng chống giật.
+- 3 trạng thái Status Header:
+  + Chờ (Idle): ● Sẵn sàng | DaVinci đang mở / DaVinci chưa mở
+  + Đang chạy (Run): ● Tên bước đang chạy | % tiến độ | Thanh mini progress bar cyan
+  + Hoàn tất (Done): ● Đã xuất timeline | Nút chính nổi bật '🎞️ Nạp vào DaVinci'
 - Tự động nhận diện mép màn hình (Ghim trái / Ghim phải) và tự dính mép (Edge Snapping).
-- 2 Nút hành động lớn: 🤖 AI Director (1-Click) và 🎨 Kho Đạo Cụ (Studio).
+- 2 Nút hành động lớn với biểu tượng vector sắc nét:
+  + 🤖 AI Director (Dựng tự động 1-click)
+  + 🎨 Kho Đạo Cụ (Chữ, màu, hiệu ứng, sticker, âm thanh)
 """
 
 import os
+import time
+import subprocess
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QMenu,
     QGraphicsDropShadowEffect, QApplication, QPushButton, QProgressBar, QFrame
 )
-from PySide6.QtCore import Qt, QPoint, Signal as pyqtSignal, QSize, QTimer, QRectF
+from PySide6.QtCore import Qt, QPoint, Signal as pyqtSignal, QSize, QTimer, QRectF, QPointF
 from PySide6.QtGui import (
     QColor, QPainter, QBrush, QPen, QLinearGradient, QConicalGradient,
-    QFont, QCursor, QPainterPath
+    QFont, QCursor, QPainterPath, QPixmap
 )
 from src.ui.theme import ThemeColors, ThemeFonts
+
+
+def create_vector_icon(icon_type: str, color_hex: str, size: int = 20) -> QPixmap:
+    """Tạo biểu tượng vector sắc nét không phụ thuộc vào font emoji của hệ điều hành."""
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.Antialiasing)
+
+    scale = size / 24.0
+    painter.scale(scale, scale)
+
+    pen = QPen(QColor(color_hex), 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.NoBrush)
+
+    if icon_type == "ai":
+        # Biểu tượng AI Director (#i-ai trong thiết kế UI)
+        painter.drawRoundedRect(QRectF(4, 7, 16, 12), 3, 3)
+        painter.drawLine(QPointF(12, 7), QPointF(12, 4))
+        painter.drawLine(QPointF(9, 12), QPointF(9, 13))
+        painter.drawLine(QPointF(15, 12), QPointF(15, 13))
+        painter.drawLine(QPointF(9.5, 16), QPointF(14.5, 16))
+    elif icon_type == "grid":
+        # Biểu tượng Kho Đạo Cụ 2x2 grid (#i-grid trong thiết kế UI)
+        painter.drawRoundedRect(QRectF(4, 4, 7, 7), 1.5, 1.5)
+        painter.drawRoundedRect(QRectF(13, 4, 7, 7), 1.5, 1.5)
+        painter.drawRoundedRect(QRectF(4, 13, 7, 7), 1.5, 1.5)
+        painter.drawRoundedRect(QRectF(13, 13, 7, 7), 1.5, 1.5)
+    elif icon_type == "resolve":
+        # Biểu tượng DaVinci Resolve pinwheel (#i-resolve trong thiết kế UI)
+        painter.drawEllipse(QRectF(3, 3, 18, 18))
+        painter.drawEllipse(QRectF(8.8, 8.8, 6.4, 6.4))
+        painter.drawLine(QPointF(12, 3), QPointF(12, 8.8))
+        painter.drawLine(QPointF(19.8, 16.5), QPointF(14.8, 13.6))
+        painter.drawLine(QPointF(4.2, 16.5), QPointF(9.2, 13.6))
+
+    painter.end()
+    return pix
 
 
 class BubbleTrayPopup(QWidget):
     """
     Khay điều hướng nổi (Tray Popup) xuất hiện mượt mà khi rê chuột vào Bong bóng.
+    Tương ứng với .b-tray trong resolveflow_ui.html.
     """
     open_auto_requested = pyqtSignal()
     open_studio_requested = pyqtSignal()
@@ -35,7 +84,7 @@ class BubbleTrayPopup(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.bubble = bubble
 
-        self.setFixedWidth(240)
+        self.setFixedWidth(244)
         self._init_ui()
 
     def _init_ui(self):
@@ -55,32 +104,39 @@ class BubbleTrayPopup(QWidget):
 
         c_layout = QVBoxLayout(self.container)
         c_layout.setContentsMargins(10, 10, 10, 10)
-        c_layout.setSpacing(8)
+        c_layout.setSpacing(7)
 
-        # 1. Khối trạng thái (Status Header)
+        # =========================================================================
+        # 1. Khối trạng thái (Status Header: .t-status)
+        # =========================================================================
         self.status_box = QWidget()
         s_box_layout = QVBoxLayout(self.status_box)
         s_box_layout.setContentsMargins(0, 0, 0, 4)
-        s_box_layout.setSpacing(4)
+        s_box_layout.setSpacing(6)
 
+        # Hàng trạng thái chính (.r)
         h_stat = QHBoxLayout()
         h_stat.setContentsMargins(0, 0, 0, 0)
         h_stat.setSpacing(6)
 
         self.lbl_dot = QLabel("●")
-        self.lbl_dot.setStyleSheet(f"color: {ThemeColors.GREEN}; font-size: 10px;")
+        self.lbl_dot.setStyleSheet(f"color: {ThemeColors.GREEN}; font-size: 11px;")
 
         self.lbl_tray_status = QLabel("<b>Sẵn sàng</b>")
         self.lbl_tray_status.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 12px;")
 
-        self.lbl_tray_pct = QLabel("")
-        self.lbl_tray_pct.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-family: {ThemeFonts.FAMILY_MONO}; font-weight: bold; font-size: 11px;")
+        self.lbl_tray_right = QLabel("DaVinci đang mở")
+        self.lbl_tray_right.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
+
+        # Tương thích ngược với mã kiểm thử
+        self.lbl_tray_pct = self.lbl_tray_right
 
         h_stat.addWidget(self.lbl_dot)
         h_stat.addWidget(self.lbl_tray_status, stretch=1)
-        h_stat.addWidget(self.lbl_tray_pct)
+        h_stat.addWidget(self.lbl_tray_right)
         s_box_layout.addLayout(h_stat)
 
+        # Thanh tiến độ mini (.bar) khi đang chạy
         self.mini_bar = QProgressBar()
         self.mini_bar.setFixedHeight(4)
         self.mini_bar.setTextVisible(False)
@@ -98,15 +154,42 @@ class BubbleTrayPopup(QWidget):
         self.mini_bar.setVisible(False)
         s_box_layout.addWidget(self.mini_bar)
 
+        # Nút hành động nổi bật khi hoàn tất: "🎞️ Nạp vào DaVinci"
+        self.btn_insert_timeline = QPushButton("🎞️ Nạp vào DaVinci")
+        self.btn_insert_timeline.setCursor(Qt.PointingHandCursor)
+        self.btn_insert_timeline.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8b5cf6, stop:1 #7c3aed);
+                color: #ffffff;
+                font-size: 12px;
+                font-weight: 600;
+                border-radius: 8px;
+                padding: 6px 12px;
+                border: none;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #a78bfa, stop:1 #8b5cf6);
+            }}
+            QPushButton:pressed {{
+                background-color: #6d28d9;
+            }}
+        """)
+        self.btn_insert_timeline.clicked.connect(self.insert_timeline_requested.emit)
+        self.btn_insert_timeline.setVisible(False)
+        s_box_layout.addWidget(self.btn_insert_timeline)
+
         c_layout.addWidget(self.status_box)
 
-        # Đường ngăn cách mỏng
+        # Đường ngăn cách mỏng (.line)
         sep = QFrame()
         sep.setFixedHeight(1)
         sep.setStyleSheet(f"background-color: {ThemeColors.BORDER_DEFAULT};")
         c_layout.addWidget(sep)
 
-        # 2. Cụm 2 nút hành động lớn
+        # =========================================================================
+        # 2. Cụm 2 nút hành động lớn (.t-btn ai & .t-btn kit)
+        # =========================================================================
+        # Nút 1: AI Director
         self.btn_ai = QPushButton()
         self.btn_ai.setCursor(Qt.PointingHandCursor)
         self.btn_ai.setStyleSheet(f"""
@@ -125,26 +208,28 @@ class BubbleTrayPopup(QWidget):
         ai_layout = QHBoxLayout(self.btn_ai)
         ai_layout.setContentsMargins(4, 4, 4, 4)
         ai_layout.setSpacing(10)
-        
-        lbl_ai_icon = QLabel("🤖")
-        lbl_ai_icon.setFixedSize(32, 32)
+
+        lbl_ai_icon = QLabel()
+        lbl_ai_icon.setFixedSize(34, 34)
         lbl_ai_icon.setAlignment(Qt.AlignCenter)
-        lbl_ai_icon.setStyleSheet(f"background: {ThemeColors.VIOLET_LO}; color: #c4b5fd; font-size: 16px; border-radius: 8px;")
-        
+        lbl_ai_icon.setStyleSheet(f"background: {ThemeColors.VIOLET_LO}; border-radius: 9px;")
+        lbl_ai_icon.setPixmap(create_vector_icon("ai", "#c4b5fd", 20))
+
         ai_text_box = QVBoxLayout()
         ai_text_box.setSpacing(1)
         lbl_ai_t = QLabel("<b>AI Director</b>")
-        lbl_ai_t.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 12.5px;")
+        lbl_ai_t.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 13px;")
         lbl_ai_sub = QLabel("Dựng tự động 1-click")
         lbl_ai_sub.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
         ai_text_box.addWidget(lbl_ai_t)
         ai_text_box.addWidget(lbl_ai_sub)
-        
+
         ai_layout.addWidget(lbl_ai_icon)
         ai_layout.addLayout(ai_text_box, stretch=1)
         self.btn_ai.clicked.connect(self.open_auto_requested.emit)
         c_layout.addWidget(self.btn_ai)
 
+        # Nút 2: Kho Đạo Cụ
         self.btn_studio = QPushButton()
         self.btn_studio.setCursor(Qt.PointingHandCursor)
         self.btn_studio.setStyleSheet(f"""
@@ -164,16 +249,17 @@ class BubbleTrayPopup(QWidget):
         st_layout.setContentsMargins(4, 4, 4, 4)
         st_layout.setSpacing(10)
 
-        lbl_st_icon = QLabel("🎨")
-        lbl_st_icon.setFixedSize(32, 32)
+        lbl_st_icon = QLabel()
+        lbl_st_icon.setFixedSize(34, 34)
         lbl_st_icon.setAlignment(Qt.AlignCenter)
-        lbl_st_icon.setStyleSheet(f"background: {ThemeColors.CYAN_LO}; color: #67e8f9; font-size: 16px; border-radius: 8px;")
+        lbl_st_icon.setStyleSheet(f"background: {ThemeColors.CYAN_LO}; border-radius: 9px;")
+        lbl_st_icon.setPixmap(create_vector_icon("grid", "#67e8f9", 20))
 
         st_text_box = QVBoxLayout()
         st_text_box.setSpacing(1)
         lbl_st_t = QLabel("<b>Kho Đạo Cụ</b>")
-        lbl_st_t.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 12.5px;")
-        lbl_st_sub = QLabel("Chữ, màu, hiệu ứng, âm thanh")
+        lbl_st_t.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 13px;")
+        lbl_st_sub = QLabel("Chữ, màu, hiệu ứng, sticker, âm thanh")
         lbl_st_sub.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
         st_text_box.addWidget(lbl_st_t)
         st_text_box.addWidget(lbl_st_sub)
@@ -183,9 +269,11 @@ class BubbleTrayPopup(QWidget):
         self.btn_studio.clicked.connect(self.open_studio_requested.emit)
         c_layout.addWidget(self.btn_studio)
 
-        # Footer Hint
+        # =========================================================================
+        # 3. Chân khay hướng dẫn (.t-foot)
+        # =========================================================================
         lbl_hint = QLabel("Kéo để di chuyển · Chuột phải để thoát")
-        lbl_hint.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 10px; padding-top: 2px;")
+        lbl_hint.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 10.5px; padding-top: 2px;")
         lbl_hint.setAlignment(Qt.AlignCenter)
         c_layout.addWidget(lbl_hint)
 
@@ -209,9 +297,15 @@ class BubbleTrayPopup(QWidget):
 class FloatingBubbleWidget(QWidget):
     """
     TRUNG TÂM ĐIỀU HƯỚNG NỔI TRÊN DESKTOP (ResolveFlow Bubble).
+    Khắc phục hoàn toàn các nhược điểm cũ:
+    - Biểu tượng logo thương hiệu ResolveFlow vector chuẩn mực.
+    - Vòng tròn Conic Ring mượt mà khi đang xử lý.
+    - Huy hiệu Done Badge xanh lá và % pill thông minh.
+    - Khay mở rộng linh hoạt theo vị trí mép màn hình.
     """
     open_auto_requested = pyqtSignal()
     open_studio_requested = pyqtSignal()
+    insert_timeline_requested = pyqtSignal()
     stop_requested = pyqtSignal()
     pause_requested = pyqtSignal()
     restore_requested = pyqtSignal()
@@ -227,16 +321,19 @@ class FloatingBubbleWidget(QWidget):
         self.status_text = "Sẵn sàng"
         self.is_processing = False
         self.is_done = False
+        self.last_duration = ""
+        self.is_davinci_connected = True
 
-        # Khởi tạo kích thước vùng vẽ bong bóng: 68x92 px (đủ cho 56px orb + 20px % badge)
-        self.setFixedSize(QSize(68, 92))
+        # Khởi tạo kích thước vùng vẽ bong bóng: 68x96 px (56px orb + conic ring + 20px % pill)
+        self.setFixedSize(QSize(68, 96))
 
         # Khởi tạo khay Popup mở rộng (Tray)
         self.tray = BubbleTrayPopup(self)
         self.tray.open_auto_requested.connect(self._on_open_auto)
         self.tray.open_studio_requested.connect(self._on_open_studio)
+        self.tray.insert_timeline_requested.connect(self._on_insert_timeline)
 
-        # Timers hover mở (120ms) và đóng (400ms)
+        # Timers hover mở (120ms) và đóng (400ms) chống giật theo đặc tả thiết kế
         self.show_timer = QTimer(self)
         self.show_timer.setSingleShot(True)
         self.show_timer.timeout.connect(self._show_tray)
@@ -245,7 +342,7 @@ class FloatingBubbleWidget(QWidget):
         self.hide_timer.setSingleShot(True)
         self.hide_timer.timeout.connect(self._hide_tray)
 
-        # Các thuộc tính tương thích ngược với unit tests & legacy controllers
+        # Các thuộc tính tương thích ngược với unit tests & controllers cũ
         self.lbl_title = QLabel("AI Director", self)
         self.lbl_title.setVisible(False)
         self.lbl_status = QLabel("Sẵn sàng", self)
@@ -267,11 +364,29 @@ class FloatingBubbleWidget(QWidget):
         self._hide_tray_immediate()
         self.open_studio_requested.emit()
 
-    def update_progress(self, pct: int, status_text: str = None):
-        """Cập nhật tiến trình % và trạng thái."""
+    def _on_insert_timeline(self):
+        self._hide_tray_immediate()
+        self.insert_timeline_requested.emit()
+
+    def set_davinci_connected(self, connected: bool):
+        """Cập nhật trạng thái kết nối tới DaVinci Resolve."""
+        self.is_davinci_connected = connected
+        if not self.is_processing and not self.is_done:
+            dv_text = "DaVinci đang mở" if self.is_davinci_connected else "DaVinci chưa mở"
+            self.tray.lbl_tray_right.setText(dv_text)
+
+    def update_progress(self, pct: int, status_text: str = None, duration: str = None):
+        """
+        Cập nhật tiến trình % và trạng thái theo đặc tả UI mockup:
+        - pct == 0: Chờ (Idle)
+        - 0 < pct < 100: Đang chạy (Run)
+        - pct >= 100: Hoàn tất (Done)
+        """
         self.progress_pct = max(0, min(100, pct))
         if status_text:
             self.status_text = status_text.strip().replace("\n", " ")
+        if duration:
+            self.last_duration = duration
 
         self.is_processing = (0 < self.progress_pct < 100)
         self.is_done = (self.progress_pct >= 100)
@@ -285,24 +400,32 @@ class FloatingBubbleWidget(QWidget):
 
         # Cập nhật nội dung trong khay Tray Popup
         if self.is_done:
-            self.tray.lbl_dot.setStyleSheet(f"color: {ThemeColors.GREEN};")
-            self.tray.lbl_tray_status.setText("<b>Đã hoàn tất!</b>")
-            self.tray.lbl_tray_pct.setText("Xong")
-            self.tray.lbl_tray_pct.setStyleSheet(f"color: {ThemeColors.TEXT_SUCCESS};")
+            self.tray.lbl_dot.setStyleSheet(f"color: {ThemeColors.GREEN}; font-size: 11px;")
+            self.tray.lbl_tray_status.setText("<b>Đã xuất timeline</b>")
+            time_display = self.last_duration if self.last_duration else "Xong"
+            self.tray.lbl_tray_right.setText(time_display)
+            self.tray.lbl_tray_right.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
             self.tray.mini_bar.setVisible(False)
+            self.tray.btn_insert_timeline.setVisible(True)
         elif self.is_processing:
-            self.tray.lbl_dot.setStyleSheet(f"color: {ThemeColors.CYAN_HI};")
-            short_txt = self.status_text if len(self.status_text) <= 20 else self.status_text[:18] + ".."
+            self.tray.lbl_dot.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 11px;")
+            short_txt = self.status_text if len(self.status_text) <= 36 else self.status_text[:34] + ".."
             self.tray.lbl_tray_status.setText(f"<b>{short_txt}</b>")
-            self.tray.lbl_tray_pct.setText(pct_str)
-            self.tray.lbl_tray_pct.setStyleSheet(f"color: {ThemeColors.CYAN_HI};")
+            self.tray.lbl_tray_right.setText(pct_str)
+            self.tray.lbl_tray_right.setStyleSheet(
+                f"color: {ThemeColors.CYAN_HI}; font-family: {ThemeFonts.FAMILY_MONO}; font-weight: bold; font-size: 11px;"
+            )
             self.tray.mini_bar.setVisible(True)
             self.tray.mini_bar.setValue(self.progress_pct)
+            self.tray.btn_insert_timeline.setVisible(False)
         else:
-            self.tray.lbl_dot.setStyleSheet(f"color: {ThemeColors.GREEN};")
+            self.tray.lbl_dot.setStyleSheet(f"color: {ThemeColors.GREEN}; font-size: 11px;")
             self.tray.lbl_tray_status.setText("<b>Sẵn sàng</b>")
-            self.tray.lbl_tray_pct.setText("")
+            dv_text = "DaVinci đang mở" if self.is_davinci_connected else "DaVinci chưa mở"
+            self.tray.lbl_tray_right.setText(dv_text)
+            self.tray.lbl_tray_right.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
             self.tray.mini_bar.setVisible(False)
+            self.tray.btn_insert_timeline.setVisible(False)
 
         self.update()
 
@@ -310,14 +433,17 @@ class FloatingBubbleWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        # Tâm của quả cầu 56px (đặt ở x=34, y=34)
+        # Tâm của quả cầu 56px (tâm tại x=34, y=34)
         cx, cy = 34, 34
-        radius = 28 # Bán kính 28px (đường kính 56px)
+        radius = 28  # Bán kính 28px (đường kính 56px)
 
-        # 1. Vẽ vòng tiến độ ngoài (Conic Progress Ring) khi đang chạy
+        # =========================================================================
+        # 1. Vẽ vòng tiến độ ngoài (Conic Progress Ring: .b-ring) khi đang xử lý
+        # =========================================================================
         if self.is_processing and self.progress_pct > 0:
-            ring_rect = QRectF(cx - radius - 4, cy - radius - 4, (radius + 4) * 2, (radius + 4) * 2)
-            conic = QConicalGradient(cx, cy, -90) # Bắt đầu từ 12 giờ
+            ring_radius = radius + 4
+            ring_rect = QRectF(cx - ring_radius, cy - ring_radius, ring_radius * 2, ring_radius * 2)
+            conic = QConicalGradient(cx, cy, -90)  # Bắt đầu từ 12 giờ
             conic.setColorAt(0.0, QColor(ThemeColors.CYAN_HI))
             pct_norm = max(0.01, min(1.0, self.progress_pct / 100.0))
             conic.setColorAt(pct_norm, QColor(ThemeColors.CYAN_HI))
@@ -330,12 +456,16 @@ class FloatingBubbleWidget(QWidget):
             painter.setBrush(Qt.NoBrush)
             painter.drawEllipse(ring_rect)
 
+        # =========================================================================
         # 2. Vẽ bóng đổ của quả cầu (Orb Drop Shadow)
+        # =========================================================================
         shadow_path = QPainterPath()
         shadow_path.addEllipse(cx - radius, cy - radius + 2, radius * 2, radius * 2)
         painter.fillPath(shadow_path, QColor(0, 0, 0, 140))
 
-        # 3. Vẽ quả cầu chính (Orb with Linear Gradient Tím -> Cyan)
+        # =========================================================================
+        # 3. Vẽ quả cầu chính (Orb: .b-orb) với Gradient Tím -> Cyan điện ảnh
+        # =========================================================================
         orb_path = QPainterPath()
         orb_path.addEllipse(cx - radius, cy - radius, radius * 2, radius * 2)
 
@@ -349,38 +479,62 @@ class FloatingBubbleWidget(QWidget):
         painter.setPen(QPen(pen_border, 1.2))
         painter.drawPath(orb_path)
 
-        # 4. Vẽ Icon trung tâm (🎬 Cinema clapper / Play icon)
-        painter.setPen(QColor("#FFFFFF"))
-        painter.setFont(QFont("Segoe UI Emoji", 18))
-        painter.drawText(QRectF(cx - radius, cy - radius, radius * 2, radius * 2), Qt.AlignCenter, "🎬")
+        # =========================================================================
+        # 4. Vẽ Logo trung tâm ResolveFlow vector (#logo: Khung màn hình bo góc + Tam giác Play)
+        # =========================================================================
+        painter.save()
+        painter.translate(cx, cy)
+        scale_logo = 1.05
+        painter.scale(scale_logo, scale_logo)
 
-        # 5. Vẽ dấu tick xanh hoàn tất (Done Badge)
+        # Khung viền bo góc màn hình (viewBox 24x24: M4 7.5A3.5 3.5...)
+        frame_rect = QRectF(-8.0, -8.0, 16.0, 16.0)
+        frame_pen = QPen(QColor("#FFFFFF"), 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        painter.setPen(frame_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(frame_rect, 3.2, 3.2)
+
+        # Tam giác Play ở giữa khung (d="M10 8.9v6.2l5.2-3.1z")
+        play_path = QPainterPath()
+        play_path.moveTo(-2.2, -4.5)
+        play_path.lineTo(-2.2, 4.5)
+        play_path.lineTo(4.4, 0.0)
+        play_path.closeSubpath()
+        painter.fillPath(play_path, QColor("#FFFFFF"))
+        painter.restore()
+
+        # =========================================================================
+        # 5. Vẽ dấu tick xanh hoàn tất (.b-done)
+        # =========================================================================
         if self.is_done:
             done_cx, done_cy = cx + 18, cy + 18
-            done_r = 9
+            done_r = 9.5
             painter.setBrush(QColor(ThemeColors.GREEN))
-            painter.setPen(QPen(QColor(ThemeColors.BG_CANVAS), 2))
-            painter.drawEllipse(done_cx - done_r, done_cy - done_r, done_r * 2, done_r * 2)
+            painter.setPen(QPen(QColor("#0d0d11"), 2))
+            painter.drawEllipse(QRectF(done_cx - done_r, done_cy - done_r, done_r * 2, done_r * 2))
 
-            painter.setPen(QPen(QColor("#052e16"), 2))
-            painter.drawLine(done_cx - 4, done_cy, done_cx - 1, done_cy + 3)
-            painter.drawLine(done_cx - 1, done_cy + 3, done_cx + 4, done_cy - 3)
+            pen_check = QPen(QColor("#052e16"), 2.2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            painter.setPen(pen_check)
+            painter.drawLine(QPointF(done_cx - 4.2, done_cy), QPointF(done_cx - 1.0, done_cy + 3.2))
+            painter.drawLine(QPointF(done_cx - 1.0, done_cy + 3.2), QPointF(done_cx + 4.5, done_cy - 3.2))
 
-        # 6. Vẽ Pill hiển thị % tiến độ ở dưới đáy
+        # =========================================================================
+        # 6. Vẽ Pill hiển thị % tiến độ ở dưới đáy (.b-pct)
+        # =========================================================================
         if self.is_processing or self.is_done:
             pill_w = 48
-            pill_h = 18
+            pill_h = 20
             pill_x = cx - pill_w / 2
-            pill_y = cy + radius + 4
+            pill_y = cy + radius + 5
             pill_rect = QRectF(pill_x, pill_y, pill_w, pill_h)
 
             painter.setBrush(QColor(24, 24, 27, 240))
-            pill_border = ThemeColors.BORDER_FOCUS if self.is_processing else ThemeColors.GREEN
+            pill_border = ThemeColors.BORDER_HOVER if self.is_processing else QColor("#166534")
             painter.setPen(QPen(QColor(pill_border), 1))
-            painter.drawRoundedRect(pill_rect, 9, 9)
+            painter.drawRoundedRect(pill_rect, 10, 10)
 
             pct_txt = "Xong" if self.is_done else f"{self.progress_pct}%"
-            txt_color = ThemeColors.TEXT_SUCCESS if self.is_done else ThemeColors.CYAN_HI
+            txt_color = "#86efac" if self.is_done else ThemeColors.CYAN_HI
             painter.setPen(QColor(txt_color))
             f_mono = QFont("Cascadia Mono", 9)
             f_mono.setBold(True)
@@ -398,13 +552,13 @@ class FloatingBubbleWidget(QWidget):
 
         b_pos = self.mapToGlobal(QPoint(0, 0))
 
-        # Nếu bong bóng nằm ở nửa phải màn hình -> bung sang TRÁI
+        # Nếu bong bóng nằm ở nửa phải màn hình -> bung sang TRÁI (right: calc(100% + 12px))
         if b_pos.x() > screen.width() / 2:
-            tx = b_pos.x() - tray_w - 6
-        else: # Bung sang PHẢI
-            tx = b_pos.x() + self.width() + 6
+            tx = b_pos.x() - tray_w - 10
+        else:  # Bung sang PHẢI (left: calc(100% + 12px))
+            tx = b_pos.x() + self.width() + 10
 
-        ty = max(10, min(screen.height() - tray_h - 20, b_pos.y() - 10))
+        ty = max(10, min(screen.height() - tray_h - 20, b_pos.y() - 8))
 
         self.tray.move(tx, ty)
         self.tray.show()
