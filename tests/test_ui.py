@@ -1241,4 +1241,43 @@ def test_cache_status_and_whisper_model_selection(qapp, tmp_path):
     window.deleteLater()
 
 
+def test_auto_window_story_review_state_and_pipeline_launch(qapp, monkeypatch):
+    """Kiểm tra thuộc tính story_review_state và bảo đảm _run_pipeline không bị lỗi AttributeError."""
+    from src.ui.auto.auto_window import AutoWindow
+    window = AutoWindow()
+
+    # 1. Kiểm tra thuộc tính tồn tại
+    assert hasattr(window, "story_review_state")
+    assert window.story_review_state is None
+
+    # 2. Mock PipelineWorker để kiểm tra không bị crash AttributeError khi khởi chạy
+    started = []
+    class DummyWorker:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            class DummySignal:
+                def connect(self, fn): pass
+            self.log_signal = DummySignal()
+            self.step_signal = DummySignal()
+            self.progress_signal = DummySignal()
+            self.finished_signal = DummySignal()
+        def start(self):
+            started.append(True)
+
+    monkeypatch.setattr("src.ui.auto.auto_window.PipelineWorker", DummyWorker)
+    
+    # Giả lập có video hợp lệ
+    window.selected_files = ["D:/fake/path/video.mp4"]
+    monkeypatch.setattr("os.path.exists", lambda p: True)
+
+    # Kích hoạt qua nút bấm / _toggle_pipeline_execution
+    window._toggle_pipeline_execution()
+    assert len(started) == 1
+    assert window.worker is not None
+    assert window.worker.kwargs.get("story_arrangement_override") is None
+
+    window.close()
+    window.deleteLater()
+
+
 

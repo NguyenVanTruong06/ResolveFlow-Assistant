@@ -1468,7 +1468,7 @@ class PipelineStepTrackerWidget(QFrame):
             lbl_name.setStyleSheet("color: #71717a; font-size: 12px; font-weight: 600;")
 
             lbl_desc = QLabel(cfg["desc"])
-            lbl_desc.setStyleSheet("color: #52525b; font-size: 10.5px;")
+            lbl_desc.setStyleSheet("color: #52525b; font-size: 10px;")
 
             vbox_text.addWidget(lbl_name)
             vbox_text.addWidget(lbl_desc)
@@ -1525,7 +1525,7 @@ class PipelineStepTrackerWidget(QFrame):
                 font-size: 12px;
             """)
             row["name"].setStyleSheet("color: #f4f4f5; font-size: 12px; font-weight: bold;")
-            row["desc"].setStyleSheet("color: #a1a1aa; font-size: 10.5px;")
+            row["desc"].setStyleSheet("color: #a1a1aa; font-size: 10px;")
             if not row["time"].text():
                 row["time"].setText("...")
             row["time"].setStyleSheet("color: #22d3ee; font-size: 11px; font-family: monospace; font-weight: bold;")
@@ -1558,7 +1558,7 @@ class PipelineStepTrackerWidget(QFrame):
             """)
             row["name"].setStyleSheet("color: #fca5a5; font-size: 12px;")
             row["time"].setText("Đã dừng")
-            row["time"].setStyleSheet("color: #ef4444; font-size: 10.5px;")
+            row["time"].setStyleSheet("color: #ef4444; font-size: 10px;")
 
     def _set_row_done(self, step_key: str):
         import time
@@ -1574,7 +1574,7 @@ class PipelineStepTrackerWidget(QFrame):
             font-size: 11px;
         """)
         row["name"].setStyleSheet("color: #f4f4f5; font-size: 12px; font-weight: 500;")
-        row["desc"].setStyleSheet("color: #71717a; font-size: 10.5px;")
+        row["desc"].setStyleSheet("color: #71717a; font-size: 10px;")
 
         start_t = self.start_times.get(step_key)
         if start_t:
@@ -1610,7 +1610,7 @@ class PipelineStepTrackerWidget(QFrame):
                 font-size: 11px;
             """)
             row["name"].setStyleSheet("color: #71717a; font-size: 12px; font-weight: 600;")
-            row["desc"].setStyleSheet("color: #52525b; font-size: 10.5px;")
+            row["desc"].setStyleSheet("color: #52525b; font-size: 10px;")
             row["desc"].setText(self.step_configs[key]["desc"])
             row["time"].setText("")
 
@@ -1636,6 +1636,7 @@ class AutoWindow(QMainWindow):
         self.proposed_segments = []
         self.validation_warnings = []
         self.project_structure: Optional[ProjectFolderStructure] = None
+        self.story_review_state: Optional[StoryReviewState] = None
 
         self.preset_mgr = PresetManager()
         self.recipe_mgr = RecipeManager()
@@ -1682,11 +1683,11 @@ class AutoWindow(QMainWindow):
         h_layout.addStretch()
 
         pill_status = QLabel("● Đang nhận diện lời thoại")
-        pill_status.setStyleSheet("background-color: rgba(139,92,246,0.15); color: #c4b5fd; padding: 4px 10px; border-radius: 12px; font-size: 11.5px;")
+        pill_status.setStyleSheet("background-color: rgba(139,92,246,0.15); color: #c4b5fd; padding: 4px 10px; border-radius: 12px; font-size: 12px;")
         h_layout.addWidget(pill_status)
 
         pill_resolve = QLabel("● DaVinci Resolve đã kết nối")
-        pill_resolve.setStyleSheet("background-color: rgba(34,197,94,0.15); color: #86efac; padding: 4px 10px; border-radius: 12px; font-size: 11.5px;")
+        pill_resolve.setStyleSheet("background-color: rgba(34,197,94,0.15); color: #86efac; padding: 4px 10px; border-radius: 12px; font-size: 12px;")
         h_layout.addWidget(pill_resolve)
 
         window_layout.addWidget(header)
@@ -1753,7 +1754,7 @@ class AutoWindow(QMainWindow):
 
         lbl_drop_sub = QLabel("hoặc chọn nguồn bên dưới")
         lbl_drop_sub.setAlignment(Qt.AlignCenter)
-        lbl_drop_sub.setStyleSheet("font-size: 10.5px; color: #71717a;")
+        lbl_drop_sub.setStyleSheet("font-size: 10px; color: #71717a;")
 
         drop_layout.addWidget(lbl_drop_icon, 0, Qt.AlignCenter)
         drop_layout.addWidget(lbl_drop_txt, 0, Qt.AlignCenter)
@@ -1771,7 +1772,7 @@ class AutoWindow(QMainWindow):
                 border: 1px solid #27272a;
                 padding: 7px 9px;
                 border-radius: 7px;
-                font-size: 11.5px;
+                font-size: 12px;
                 text-align: left;
                 color: #e4e4e7;
             }
@@ -1790,7 +1791,7 @@ class AutoWindow(QMainWindow):
                 border: 1px solid #27272a;
                 padding: 7px 9px;
                 border-radius: 7px;
-                font-size: 11.5px;
+                font-size: 12px;
                 text-align: left;
                 color: #e4e4e7;
             }
@@ -1809,7 +1810,7 @@ class AutoWindow(QMainWindow):
                 border: 1px solid #27272a;
                 padding: 7px 9px;
                 border-radius: 7px;
-                font-size: 11.5px;
+                font-size: 12px;
                 text-align: left;
                 color: #e4e4e7;
             }
@@ -1828,7 +1829,7 @@ class AutoWindow(QMainWindow):
                 border: 1px solid #27272a;
                 padding: 7px 9px;
                 border-radius: 7px;
-                font-size: 11.5px;
+                font-size: 12px;
                 text-align: left;
                 color: #e4e4e7;
             }
@@ -1855,7 +1856,7 @@ class AutoWindow(QMainWindow):
         proj_top = QHBoxLayout()
         lbl_p_icon = QLabel("📁")
         self.lbl_proj_name = QLabel("Chưa chọn dự án")
-        self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #a1a1aa; font-size: 12.5px;")
+        self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #a1a1aa; font-size: 12px;")
         proj_top.addWidget(lbl_p_icon)
         proj_top.addWidget(self.lbl_proj_name, stretch=1)
         proj_layout.addLayout(proj_top)
@@ -1866,7 +1867,7 @@ class AutoWindow(QMainWindow):
 
         cache_row = QHBoxLayout()
         lbl_c_title = QLabel("Bộ nhớ đệm")
-        lbl_c_title.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
+        lbl_c_title.setStyleSheet("color: #a1a1aa; font-size: 12px;")
         self.lbl_cache_badge = QLabel("0 / 0 clip")
         self.lbl_cache_badge.setStyleSheet("color: #22d3ee; font-size: 11px; font-weight: bold; background-color: rgba(6,182,212,0.15); padding: 2px 7px; border-radius: 6px;")
         cache_row.addWidget(lbl_c_title)
@@ -1891,7 +1892,7 @@ class AutoWindow(QMainWindow):
         proj_layout.addWidget(self.cache_progress_bar)
 
         self.lbl_cache_hint = QLabel("⚡ Tự động quét & nạp cache khi bấm [Bắt đầu dựng]")
-        self.lbl_cache_hint.setStyleSheet("color: #71717a; font-size: 10.5px; margin-top: 3px; line-height: 1.3;")
+        self.lbl_cache_hint.setStyleSheet("color: #71717a; font-size: 10px; margin-top: 3px; line-height: 1.3;")
         self.lbl_cache_hint.setWordWrap(True)
         proj_layout.addWidget(self.lbl_cache_hint)
 
@@ -1966,7 +1967,7 @@ class AutoWindow(QMainWindow):
                 background-color: transparent;
                 border: none;
                 color: #d4d4d8;
-                font-size: 11.5px;
+                font-size: 12px;
             }
             QListWidget::item {
                 padding: 6px 8px;
@@ -2083,7 +2084,7 @@ class AutoWindow(QMainWindow):
         lbl_h2.setStyleSheet("font-size: 19px; font-weight: bold; color: #f4f4f5;")
         c_vbox.addWidget(lbl_h2)
         lbl_sub = QLabel("Chọn một kiểu, app tự bật bộ tính năng phù hợp. Muốn chỉnh từng thông số thì mở phần nâng cao bên dưới.")
-        lbl_sub.setStyleSheet("font-size: 12.5px; color: #71717a;")
+        lbl_sub.setStyleSheet("font-size: 12px; color: #71717a;")
         c_vbox.addWidget(lbl_sub)
 
         # Hidden Combo để tương thích backend
@@ -2145,12 +2146,12 @@ class AutoWindow(QMainWindow):
             b_lay.addLayout(top_row)
 
             lbl_t = QLabel(title)
-            lbl_t.setStyleSheet("font-weight: bold; font-size: 12.5px; color: #f4f4f5;")
+            lbl_t.setStyleSheet("font-weight: bold; font-size: 12px; color: #f4f4f5;")
             b_lay.addWidget(lbl_t)
 
             lbl_d = QLabel(desc)
             lbl_d.setWordWrap(True)
-            lbl_d.setStyleSheet("font-size: 10.5px; color: #71717a;")
+            lbl_d.setStyleSheet("font-size: 10px; color: #71717a;")
             b_lay.addWidget(lbl_d)
 
             def on_click():
@@ -2216,7 +2217,7 @@ class AutoWindow(QMainWindow):
 
         # Mức độ cắt vấp (Slider)
         self.lbl_master_intensity = QLabel("Mức độ cắt vấp & im lặng: VỪA (Cân bằng)")
-        self.lbl_master_intensity.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
+        self.lbl_master_intensity.setStyleSheet("color: #a1a1aa; font-size: 12px;")
         quick_grid.addWidget(self.lbl_master_intensity, 2, 0)
         self.slide_master_intensity = QSlider(Qt.Horizontal)
         self.slide_master_intensity.setRange(1, 3)
@@ -2255,7 +2256,7 @@ class AutoWindow(QMainWindow):
                     border: 1px solid #27272a;
                     border-radius: 8px;
                     padding: 8px;
-                    font-size: 11.5px;
+                    font-size: 12px;
                     color: #f4f4f5;
                 }
                 QCheckBox:hover { border-color: #3f3f46; }
@@ -2335,9 +2336,9 @@ class AutoWindow(QMainWindow):
             lbl_i = QLabel(icon)
             lbl_i.setStyleSheet("font-size: 14px;")
             lbl_t = QLabel(title)
-            lbl_t.setStyleSheet("font-weight: 500; font-size: 12.5px; color: #f4f4f5;")
+            lbl_t.setStyleSheet("font-weight: 500; font-size: 12px; color: #f4f4f5;")
             lbl_d = QLabel(desc)
-            lbl_d.setStyleSheet("color: #71717a; font-size: 11.5px;")
+            lbl_d.setStyleSheet("color: #71717a; font-size: 12px;")
             r_lay.addWidget(lbl_i)
             r_lay.addWidget(lbl_t)
             r_lay.addStretch()
@@ -2372,7 +2373,7 @@ class AutoWindow(QMainWindow):
                 border-top: 1px solid #27272a;
                 color: #c4b5fd;
                 font-weight: bold;
-                font-size: 12.5px;
+                font-size: 12px;
                 padding: 10px 14px;
                 text-align: left;
             }
@@ -2405,7 +2406,7 @@ class AutoWindow(QMainWindow):
                 border: 1px solid #27272a;
                 border-radius: 6px;
                 padding: 8px;
-                font-size: 11.5px;
+                font-size: 12px;
                 color: #a1a1aa;
             }
             QPushButton:checked {
@@ -2434,7 +2435,7 @@ class AutoWindow(QMainWindow):
         pw_lay.setSpacing(8)
 
         lbl_step1 = QLabel("1. Nhấn nút dưới đây để copy toàn bộ Transcript & Prompt gửi cho ChatGPT / Claude:")
-        lbl_step1.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
+        lbl_step1.setStyleSheet("color: #a1a1aa; font-size: 12px;")
         pw_lay.addWidget(lbl_step1)
 
         self.btn_quick_copy = QPushButton("📋 1. Copy Prompt Đạo Diễn (Kèm Dữ Liệu Video)")
@@ -2442,7 +2443,7 @@ class AutoWindow(QMainWindow):
         pw_lay.addWidget(self.btn_quick_copy)
 
         lbl_step2 = QLabel("2. Dán mã JSON kịch bản mà AI trả về vào đây:")
-        lbl_step2.setStyleSheet("color: #a1a1aa; font-size: 11.5px; margin-top: 6px;")
+        lbl_step2.setStyleSheet("color: #a1a1aa; font-size: 12px; margin-top: 6px;")
         pw_lay.addWidget(lbl_step2)
 
         self.txt_json_input = QPlainTextEdit()
@@ -2641,7 +2642,7 @@ class AutoWindow(QMainWindow):
                 border-radius: 6px;
                 padding: 7px 12px;
                 font-weight: 500;
-                font-size: 11.5px;
+                font-size: 12px;
             }
             QPushButton:hover {
                 background-color: rgba(239, 68, 68, 0.15);
@@ -3464,7 +3465,7 @@ class AutoWindow(QMainWindow):
         if hasattr(self, "step_labels") and hasattr(self, "step_names"):
             for i, lbl in enumerate(self.step_labels):
                 lbl.setText(f"○ {self.step_names[i]}")
-                lbl.setStyleSheet("color: #71717a; font-size: 11.5px;")
+                lbl.setStyleSheet("color: #71717a; font-size: 12px;")
         """Đặt lại trạng thái kịch bản và xóa sạch cache phân đoạn cũ khi chọn video mới."""
         self.current_phase = 1
         self.clip_data_cache = []
@@ -3491,7 +3492,7 @@ class AutoWindow(QMainWindow):
                 self.txt_console.appendPlainText(f"📁 Đã chọn hàng loạt {len(file_paths)} tệp video.")
             if hasattr(self, "lbl_proj_name"):
                 self.lbl_proj_name.setText(os.path.basename(os.path.dirname(file_paths[0])) or "Dự án lẻ")
-                self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #f4f4f5; font-size: 12.5px;")
+                self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #f4f4f5; font-size: 12px;")
             if hasattr(self, "lbl_proj_meta"):
                 self.lbl_proj_meta.setText(f"{len(file_paths)} tệp video")
             if hasattr(self, "list_chapters"):
@@ -3519,7 +3520,7 @@ class AutoWindow(QMainWindow):
         self.lbl_file.setText(f"📂 [{proj.root_name}] {len(proj.groups)} nhóm • {proj.total_files} video ({proj.root_path})")
         if hasattr(self, "lbl_proj_name"):
             self.lbl_proj_name.setText(proj.root_name)
-            self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #f4f4f5; font-size: 12.5px;")
+            self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #f4f4f5; font-size: 12px;")
         if hasattr(self, "lbl_proj_meta"):
             self.lbl_proj_meta.setText(f"{len(proj.groups)} nhóm · {proj.total_files} video")
         if hasattr(self, "list_chapters"):
@@ -3850,16 +3851,16 @@ class AutoWindow(QMainWindow):
             for i, lbl in enumerate(self.step_labels):
                 if pct >= 100:
                     lbl.setText(f"✓ {self.step_names[i]}")
-                    lbl.setStyleSheet("color: #86efac; font-size: 11.5px; font-weight: 500;")
+                    lbl.setStyleSheet("color: #86efac; font-size: 12px; font-weight: 500;")
                 elif i < step_idx:
                     lbl.setText(f"✓ {self.step_names[i]}")
-                    lbl.setStyleSheet("color: #86efac; font-size: 11.5px;")
+                    lbl.setStyleSheet("color: #86efac; font-size: 12px;")
                 elif i == step_idx:
                     lbl.setText(f"● {self.step_names[i]}")
-                    lbl.setStyleSheet("color: #c4b5fd; font-size: 11.5px; font-weight: bold;")
+                    lbl.setStyleSheet("color: #c4b5fd; font-size: 12px; font-weight: bold;")
                 else:
                     lbl.setText(f"○ {self.step_names[i]}")
-                    lbl.setStyleSheet("color: #71717a; font-size: 11.5px;")
+                    lbl.setStyleSheet("color: #71717a; font-size: 12px;")
         if hasattr(self, "bubble") and self.bubble:
             self.bubble.update_progress(pct, status)
         QApplication.processEvents()
@@ -4710,7 +4711,7 @@ class AutoWindow(QMainWindow):
             video_type=self.combo_video_type.currentData() or "auto",
             hide_weak_subs=self.check_hide_weak_subs.isChecked(),
             api_key=self.txt_api_key.text().strip() or None,
-            story_arrangement_override=self.story_review_state.arrangement if self.story_review_state else None,
+            story_arrangement_override=self.story_review_state.arrangement if getattr(self, "story_review_state", None) else None,
             project_structure=self.project_structure
         )
 
