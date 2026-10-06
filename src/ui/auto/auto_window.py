@@ -2109,12 +2109,15 @@ class AutoWindow(QMainWindow):
             b_lay.addWidget(lbl_d)
 
             def on_click():
-                for other_btn, other_idx in self.preset_cards:
-                    other_btn.setChecked(other_btn == btn)
+                for other_btn, other_idx, other_ck, other_t in self.preset_cards:
+                    is_this = (other_btn == btn)
+                    other_btn.setChecked(is_this)
+                    other_ck.setText("✓" if is_this else "○")
                 self.combo_workflow.setCurrentIndex(idx)
+                self._apply_preset_features(idx, title)
 
             btn.clicked.connect(on_click)
-            self.preset_cards.append((btn, idx))
+            self.preset_cards.append((btn, idx, lbl_ck, title))
             return btn
 
         for i, (ic, t, d, idx) in enumerate(card_data):
@@ -2131,18 +2134,38 @@ class AutoWindow(QMainWindow):
         # Footage Type
         quick_grid.addWidget(QLabel("Loại footage:"), 0, 0)
         seg_footage = QHBoxLayout()
+        self.footage_buttons = {}
         for ft_name in ["Tự nhận diện", "Nói liên tục", "Hỗn hợp", "Du lịch"]:
             btn_ft = QPushButton(ft_name)
-            btn_ft.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 4px 8px; font-size: 11px;")
+            btn_ft.setCheckable(True)
+            btn_ft.setChecked(ft_name == "Du lịch")
+            btn_ft.setCursor(Qt.PointingHandCursor)
+            btn_ft.setStyleSheet("""
+                QPushButton { background-color: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 4px 8px; font-size: 11px; color: #a1a1aa; }
+                QPushButton:hover { border-color: #3f3f46; color: #fff; }
+                QPushButton:checked { background-color: #8b5cf6; border-color: #a78bfa; color: #fff; font-weight: bold; }
+            """)
+            btn_ft.clicked.connect(lambda checked=False, name=ft_name: self._set_quick_footage(name))
+            self.footage_buttons[ft_name] = btn_ft
             seg_footage.addWidget(btn_ft)
         quick_grid.addLayout(seg_footage, 0, 1)
 
         # Nhịp dựng
         quick_grid.addWidget(QLabel("Nhịp dựng:"), 1, 0)
         seg_pacing = QHBoxLayout()
+        self.pacing_buttons = {}
         for pc_name in ["Thong thả", "Cân bằng", "Nhanh"]:
             btn_pc = QPushButton(pc_name)
-            btn_pc.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 4px 8px; font-size: 11px;")
+            btn_pc.setCheckable(True)
+            btn_pc.setChecked(pc_name == "Cân bằng")
+            btn_pc.setCursor(Qt.PointingHandCursor)
+            btn_pc.setStyleSheet("""
+                QPushButton { background-color: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 4px 8px; font-size: 11px; color: #a1a1aa; }
+                QPushButton:hover { border-color: #3f3f46; color: #fff; }
+                QPushButton:checked { background-color: #8b5cf6; border-color: #a78bfa; color: #fff; font-weight: bold; }
+            """)
+            btn_pc.clicked.connect(lambda checked=False, name=pc_name: self._set_quick_pacing(name))
+            self.pacing_buttons[pc_name] = btn_pc
             seg_pacing.addWidget(btn_pc)
         quick_grid.addLayout(seg_pacing, 1, 1)
 
@@ -2197,6 +2220,47 @@ class AutoWindow(QMainWindow):
 
         c_vbox.addLayout(tog_grid)
 
+        # Banner chuyển bước mượt mà sang giai đoạn AI
+        self.step_transition_box = QFrame()
+        self.step_transition_box.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(139,92,246,0.18), stop:1 rgba(6,182,212,0.18));
+                border: 1px solid rgba(139,92,246,0.35);
+                border-radius: 10px;
+                padding: 10px;
+            }
+        """)
+        trans_lay = QHBoxLayout(self.step_transition_box)
+        trans_lay.setContentsMargins(12, 8, 12, 8)
+
+        info_vbox = QVBoxLayout()
+        info_vbox.setSpacing(2)
+        self.lbl_active_preset_name = QLabel("👉 Đã chọn phong cách: <b style='color:#c4b5fd;'>Vlog có Hook</b>")
+        self.lbl_active_preset_name.setStyleSheet("font-size: 13px; color: #f4f4f5;")
+        lbl_trans_sub = QLabel("Chuyển sang cấu hình Động cơ AI (Web Prompt / Cloud AI / Local) hoặc dán JSON kịch bản.")
+        lbl_trans_sub.setStyleSheet("font-size: 11px; color: #a1a1aa;")
+        info_vbox.addWidget(self.lbl_active_preset_name)
+        info_vbox.addWidget(lbl_trans_sub)
+        trans_lay.addLayout(info_vbox, stretch=1)
+
+        self.btn_goto_ai = QPushButton("⚡ Chọn Động cơ AI ➔")
+        self.btn_goto_ai.setCursor(Qt.PointingHandCursor)
+        self.btn_goto_ai.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8b5cf6, stop:1 #06b6d4);
+                color: #ffffff;
+                font-weight: bold;
+                padding: 9px 16px;
+                border-radius: 6px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #a78bfa, stop:1 #22d3ee);
+            }
+        """)
+        trans_lay.addWidget(self.btn_goto_ai)
+        c_vbox.addWidget(self.step_transition_box)
+
         # =========================================================================
         # TÙY CHỈNH NÂNG CAO (ACCORDION & ĐỘNG CƠ AI ĐẦY ĐỦ)
         # =========================================================================
@@ -2206,11 +2270,23 @@ class AutoWindow(QMainWindow):
         acc_layout.setContentsMargins(0, 0, 0, 0)
         acc_layout.setSpacing(0)
 
-        def make_acc_row(icon, title, desc):
-            row = QFrame()
-            row.setStyleSheet("border-bottom: 1px solid #27272a; padding: 6px 12px;")
-            r_lay = QHBoxLayout(row)
-            r_lay.setContentsMargins(10, 6, 10, 6)
+        def make_acc_row(icon, title, desc, on_click_fn=None):
+            btn = QPushButton()
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #18181b;
+                    border: none;
+                    border-bottom: 1px solid #27272a;
+                    padding: 8px 14px;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    background-color: #27272a;
+                }
+            """)
+            r_lay = QHBoxLayout(btn)
+            r_lay.setContentsMargins(0, 0, 0, 0)
             lbl_i = QLabel(icon)
             lbl_i.setStyleSheet("font-size: 14px;")
             lbl_t = QLabel(title)
@@ -2221,12 +2297,26 @@ class AutoWindow(QMainWindow):
             r_lay.addWidget(lbl_t)
             r_lay.addStretch()
             r_lay.addWidget(lbl_d)
-            return row
+            if on_click_fn:
+                btn.clicked.connect(on_click_fn)
+            return btn
 
-        acc_layout.addWidget(make_acc_row("✂️", "Cắt khoảng lặng", "-30 dB · tối thiểu 0.6s · tua 8x"))
-        acc_layout.addWidget(make_acc_row("🤖", "Đạo diễn AI", "Clean talk · lọc vấp · lọc lặp"))
-        acc_layout.addWidget(make_acc_row("📑", "Mạch kịch bản", "Giữ thứ tự thời gian"))
-        acc_layout.addWidget(make_acc_row("📝", "Phụ đề", "Theo từ · tối đa 6 từ/dòng"))
+        def on_click_silence():
+            self.txt_console.appendPlainText("✂️ [Cắt khoảng lặng]: Đã chọn mức độ dB và tua nhanh. Có thể điều chỉnh thanh trượt ở trên.")
+
+        def on_click_director():
+            self.txt_console.appendPlainText("🤖 [Đạo diễn AI]: Làm sạch thoại, lọc câu lặp và sắp xếp phân cảnh theo ý đồ.")
+
+        def on_click_intent():
+            self.txt_console.appendPlainText("📑 [Mạch kịch bản]: Giữ trọn mạch thời gian hoặc dồn câu đắt giá lên đầu.")
+
+        def on_click_subtitles():
+            self.txt_console.appendPlainText("📝 [Phụ đề]: Sẵn sàng sinh phụ đề động bám âm từng từ.")
+
+        acc_layout.addWidget(make_acc_row("✂️", "Cắt khoảng lặng", "-30 dB · tối thiểu 0.6s · tua 8x", on_click_silence))
+        acc_layout.addWidget(make_acc_row("🤖", "Đạo diễn AI", "Clean talk · lọc vấp · lọc lặp", on_click_director))
+        acc_layout.addWidget(make_acc_row("📑", "Mạch kịch bản", "Giữ thứ tự thời gian", on_click_intent))
+        acc_layout.addWidget(make_acc_row("📝", "Phụ đề", "Theo từ · tối đa 6 từ/dòng", on_click_subtitles))
 
         # Hàng Động cơ AI (Có thể bấm để bung ra)
         btn_acc_engine = QPushButton("⚡  Động cơ AI (Chọn Web / Cloud / Local)  ▾")
@@ -3213,6 +3303,66 @@ class AutoWindow(QMainWindow):
         elif mode == "advanced":
             self.txt_console.appendPlainText("🎯 Chế độ [Advanced]: Đã mở toàn bộ 6 nhóm chức năng chi tiết.")
         self._update_card_active_states()
+
+    def _apply_preset_features(self, idx: int, title: str = ""):
+        """Tự động đồng bộ các công tắc tính năng và thiết lập nhanh khi đổi Preset Card."""
+        if hasattr(self, "lbl_active_preset_name") and title:
+            self.lbl_active_preset_name.setText(f"👉 Đã chọn phong cách: <b style='color:#c4b5fd;'>{title}</b>")
+        if idx == 0:  # Vlog có Hook
+            self.check_hook.setChecked(True)
+            self.check_punch_in.setChecked(True)
+            self.check_broll.setChecked(True)
+            self.check_sfx.setChecked(True)
+            self.check_reframe.setChecked(False)
+            self.check_subtitle.setChecked(True)
+            self._set_quick_footage("Du lịch")
+            self._set_quick_pacing("Cân bằng")
+        elif idx == 1:  # Podcast, phỏng vấn
+            self.check_hook.setChecked(False)
+            self.check_punch_in.setChecked(False)
+            self.check_broll.setChecked(False)
+            self.check_sfx.setChecked(False)
+            self.check_reframe.setChecked(False)
+            self.check_subtitle.setChecked(True)
+            self._set_quick_footage("Nói liên tục")
+            self._set_quick_pacing("Cân bằng")
+        elif idx == 2:  # Shorts, TikTok 9:16
+            self.check_hook.setChecked(True)
+            self.check_punch_in.setChecked(True)
+            self.check_broll.setChecked(True)
+            self.check_sfx.setChecked(True)
+            self.check_reframe.setChecked(True)
+            self.check_subtitle.setChecked(True)
+            self._set_quick_footage("Tự nhận diện")
+            self._set_quick_pacing("Nhanh")
+        elif idx == 3:  # Tự chỉnh
+            self.txt_console.appendPlainText("🛠 Chế độ [Tự chỉnh]: Mở toàn bộ quyền tinh chỉnh tính năng.")
+
+    def _set_quick_footage(self, name: str):
+        """Cập nhật giao diện và backend cho Loại Footage."""
+        if hasattr(self, "footage_buttons"):
+            for ft_name, btn in self.footage_buttons.items():
+                btn.setChecked(ft_name == name)
+        mapping = {"Tự nhận diện": "auto", "Nói liên tục": "talking_head", "Hỗn hợp": "mixed", "Du lịch": "travel_vlog"}
+        if hasattr(self, "combo_video_type"):
+            val = mapping.get(name, "auto")
+            c_idx = self.combo_video_type.findData(val)
+            if c_idx >= 0:
+                self.combo_video_type.setCurrentIndex(c_idx)
+        self.txt_console.appendPlainText(f"📹 [Loại Footage]: Đã chọn '{name}'")
+
+    def _set_quick_pacing(self, name: str):
+        """Cập nhật giao diện và backend cho Nhịp Dựng."""
+        if hasattr(self, "pacing_buttons"):
+            for pc_name, btn in self.pacing_buttons.items():
+                btn.setChecked(pc_name == name)
+        mapping = {"Thong thả": "relaxed", "Cân bằng": "balanced", "Nhanh": "fast"}
+        if hasattr(self, "combo_pacing"):
+            val = mapping.get(name, "balanced")
+            c_idx = self.combo_pacing.findData(val)
+            if c_idx >= 0:
+                self.combo_pacing.setCurrentIndex(c_idx)
+        self.txt_console.appendPlainText(f"⚡ [Nhịp Dựng]: Đã chọn '{name}'")
 
     # --- 2 LỚP UX: MASTER INTENSITY & TOGGLE ADVANCED ---
     def _on_master_intensity_changed(self, val):

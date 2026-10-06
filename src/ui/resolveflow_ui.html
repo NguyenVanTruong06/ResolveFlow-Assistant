@@ -742,6 +742,15 @@ button.chip.on{background:var(--violet-lo);color:#ddd6fe;border-color:var(--viol
             </div>
           </div>
 
+          <!-- Banner chuyển bước sang Động cơ AI -->
+          <div class="next-step-box" style="margin-bottom:14px;padding:12px 14px;background:linear-gradient(135deg,rgba(139,92,246,0.15),rgba(6,182,212,0.15));border:1px solid rgba(139,92,246,0.3);border-radius:10px;display:flex;align-items:center;gap:12px">
+            <div style="flex:1">
+              <div style="font-weight:600;font-size:13px;color:#f4f4f5">👉 Đã chọn phong cách: <b id="activePresetTitle" style="color:#c4b5fd">Vlog có Hook</b></div>
+              <div style="font-size:11px;color:#a1a1aa">Chuyển sang cấu hình Động cơ AI (Web Prompt / Cloud AI / Local) hoặc dán JSON kịch bản</div>
+            </div>
+            <button class="btn primary sm" id="btnGoToAI" style="white-space:nowrap;padding:8px 14px;font-weight:bold"><svg class="ico"><use href="#i-bolt"/></svg>Chọn Động cơ AI ➔</button>
+          </div>
+
           <div class="blk">
             <div class="sec-h"><span class="h">Tùy chỉnh nâng cao</span><span class="hint">Recipe: Vlog Hook &amp; Speed-Ramp</span></div>
             <div class="acc">
@@ -1046,8 +1055,117 @@ if(sortBtn){
 }
 
 const totalFootage=CHAPS.reduce((a,c)=>a+c[2],0);
-$('#projMeta').textContent=`67 clip, ${fmtT(totalFootage)} footage`;
-$$('#presets .preset').forEach(p=>p.addEventListener('click',()=>$$('#presets .preset').forEach(x=>x.classList.toggle('on',x===p))));
+// Đồng bộ cấu hình các Preset
+const PRESET_CONFIGS = {
+  podcast: {
+    title: 'Podcast, phỏng vấn',
+    footage: 'Nói liên tục',
+    pacing: 'Cân bằng',
+    hint: 'Recipe: Podcast Pro Clean',
+    toggles: [false, false, false, false, false, true]
+  },
+  shorts: {
+    title: 'Shorts, TikTok 9:16',
+    footage: 'Tự nhận diện',
+    pacing: 'Nhanh',
+    hint: 'Recipe: TikTok Viral 60s',
+    toggles: [true, true, true, true, true, true]
+  },
+  vlog: {
+    title: 'Vlog có Hook',
+    footage: 'Du lịch',
+    pacing: 'Cân bằng',
+    hint: 'Recipe: Vlog Hook & Speed-Ramp',
+    toggles: [true, true, true, true, false, true]
+  },
+  adv: {
+    title: 'Tự chỉnh',
+    footage: 'Tự nhận diện',
+    pacing: 'Cân bằng',
+    hint: 'Recipe: Tùy chỉnh cá nhân',
+    toggles: [true, true, true, true, true, true]
+  }
+};
+
+$$('#presets .preset').forEach(p => {
+  p.addEventListener('click', () => {
+    $$('#presets .preset').forEach(x => x.classList.toggle('on', x === p));
+    const k = p.dataset.p;
+    const cfg = PRESET_CONFIGS[k];
+    if(cfg){
+      const t = $('#activePresetTitle');
+      if(t) t.textContent = cfg.title;
+      const hint = $('.blk .sec-h .hint');
+      if(hint) hint.textContent = cfg.hint;
+      const chks = $$('.toggles input[type=checkbox]');
+      cfg.toggles.forEach((val, idx) => {
+        if(chks[idx]) chks[idx].checked = val;
+      });
+      $$('.field').forEach(f => {
+        const lbl = f.querySelector('.lbl');
+        if(!lbl) return;
+        if(lbl.textContent.includes('Loại footage')){
+          f.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.textContent === cfg.footage));
+        } else if(lbl.textContent.includes('Nhịp dựng')){
+          f.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.textContent === cfg.pacing));
+        }
+      });
+      toast(`Đã chọn: ${cfg.title}`);
+    }
+  });
+});
+
+// Cho phép bấm các nút segmented thiết lập nhanh
+$$('.seg').forEach(seg => {
+  seg.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      seg.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      toast(`Đã thiết lập: ${btn.textContent}`);
+    });
+  });
+});
+
+// Nút chuyển tiếp sang bước Động cơ AI
+const btnGoToAI = $('#btnGoToAI');
+if(btnGoToAI){
+  btnGoToAI.addEventListener('click', () => {
+    const steps = $$('.stepper .step');
+    if(steps.length >= 3){
+      steps[1].className = 'step done';
+      steps[1].querySelector('.n').innerHTML = '<svg class="ico"><use href="#i-check"/></svg>';
+      steps[2].className = 'step on';
+    }
+    log('<span class="ai">▸</span> <b>[Chuyển bước]</b> Đã hoàn tất chọn kiểu dựng. Chuyển sang giai đoạn Động cơ AI & Kịch bản.');
+    toast('Đã chuyển sang giai đoạn Động cơ AI');
+    const acc = $('.acc');
+    if(acc){
+      acc.scrollIntoView({behavior:'smooth', block:'center'});
+      acc.style.outline = '2px solid #8b5cf6';
+      setTimeout(() => { acc.style.outline = 'none'; }, 1500);
+    }
+  });
+}
+
+// Cho phép bấm các hàng accordion
+$$('.acc-row').forEach(row => {
+  row.addEventListener('click', () => {
+    const txt = row.textContent;
+    if(txt.includes('Động cơ AI')){
+      toast('Động cơ AI: Prompt Web (ChatGPT/Claude), Cloud API hoặc Local Ollama');
+      log('<span class="ai">⚡</span> Động cơ AI: Sẵn sàng copy Prompt hoặc dán mã JSON kịch bản.');
+    } else if(txt.includes('Cắt khoảng lặng')){
+      toast('Cắt khoảng lặng: -30 dB, tối thiểu 0.6s, tua 8x');
+    } else if(txt.includes('Đạo diễn AI')){
+      toast('Đạo diễn AI: Clean talk, lọc vấp, lọc câu lặp');
+    } else if(txt.includes('Mạch kịch bản')){
+      toast('Mạch kịch bản: Giữ thứ tự thời gian');
+    } else if(txt.includes('Phụ đề')){
+      toast('Phụ đề: Karaoke Pop nhảy chữ từng từ');
+    }
+  });
+});
+
 const cr=$('#cutRange');cr.dataset.labels='Nhẹ|Vừa|Mạnh';paintRange(cr);
 
 const TOTAL=1261.1,pc=s=>s/TOTAL*100;
