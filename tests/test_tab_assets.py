@@ -1,0 +1,168 @@
+import re
+import pytest
+from PySide6.QtWidgets import QLabel, QPushButton, QFrame
+from PySide6.QtCore import Qt
+
+from src.ui.tabs.tab_assets import (
+    AssetCard, StudioAsset, MOCKUP_LUTS, MOCKUP_SFX, MOCKUP_ICONS, TabAssets
+)
+from src.core.text_preset import BUILTIN_PRESETS, TextStylePreset
+from src.core.transition_preset import BUILTIN_TRANSITIONS, TransitionStylePreset
+from src.ui.theme import ThemeColors
+
+
+def test_visual_card_renderers_text_rich_html(qapp):
+    """Kiểm tra bộ render rich HTML cho thumbnail Text."""
+    presets_by_id = {p.id: p for p in BUILTIN_PRESETS}
+
+    # 1. Alex Hormozi (yellow highlight text)
+    hormozi = presets_by_id.get("kinetic_hormozi")
+    card_hormozi = AssetCard(hormozi)
+    assert hasattr(card_hormozi, "_render_text_thumbnail"), "AssetCard must have _render_text_thumbnail"
+    assert card_hormozi.lbl_text_preview is not None
+    html_hormozi = card_hormozi.lbl_text_preview.text().lower()
+    assert ("#facc15" in html_hormozi or "#ffe600" in html_hormozi or "#ffd700" in html_hormozi), (
+        "Alex Hormozi preview must contain yellow highlight text"
+    )
+
+    # 2. Karaoke Pop (active green word)
+    karaoke = presets_by_id.get("karaoke_pop")
+    card_karaoke = AssetCard(karaoke)
+    html_karaoke = card_karaoke.lbl_text_preview.text().lower()
+    assert ("#a3e635" in html_karaoke or "#22c55e" in html_karaoke), (
+        "Karaoke Pop preview must contain active green word highlight"
+    )
+
+    # 3. Box Highlight (red rounded box)
+    box = presets_by_id.get("box_highlight")
+    card_box = AssetCard(box)
+    html_box = card_box.lbl_text_preview.text().lower()
+    assert ("#ef4444" in html_box or "#e60000" in html_box), (
+        "Box Highlight preview must contain red box styling"
+    )
+
+    # 4. Glow Neon Cyan (drop shadow glow / cyan neon)
+    glow = presets_by_id.get("glow_neon")
+    card_glow = AssetCard(glow)
+    html_glow = card_glow.lbl_text_preview.text().lower()
+    assert ("#06b6d4" in html_glow or "#00ffff" in html_glow or "#67e8f9" in html_glow or "#22d3ee" in html_glow), (
+        "Glow Neon preview must contain cyan glow styling"
+    )
+
+    # 5. 90s VHS Camcorder (tape Consolas)
+    vhs = presets_by_id.get("vhs_retro")
+    card_vhs = AssetCard(vhs)
+    html_vhs = card_vhs.lbl_text_preview.text().lower()
+    assert ("consolas" in html_vhs or "vhs" in html_vhs or "play" in html_vhs), (
+        "90s VHS preview must use tape Consolas or VHS playback elements"
+    )
+
+    # 6. Paper Cutout (paper/kraft styling)
+    paper = presets_by_id.get("paper_cutout")
+    card_paper = AssetCard(paper)
+    html_paper = card_paper.lbl_text_preview.text().lower()
+    thumb_style_paper = card_paper.thumb.styleSheet().lower()
+    assert ("kraft" in html_paper or "cbb48a" in html_paper or "fef3c7" in html_paper
+            or "cbb48a" in thumb_style_paper or "fbf9f1" in html_paper or "span" in html_paper), (
+        "Paper Cutout must render vintage paper cutout elements"
+    )
+
+    # 7. Gradient Sunset
+    gradient = presets_by_id.get("gradient_fill")
+    card_gradient = AssetCard(gradient)
+    html_gradient = card_gradient.lbl_text_preview.text().lower()
+    thumb_gradient = card_gradient.thumb.styleSheet().lower()
+    assert ("linear-gradient" in thumb_gradient or "gradient" in html_gradient or "linear-gradient" in html_gradient or "#fb923c" in html_gradient or "#f43f5e" in html_gradient or "#a855f7" in html_gradient), (
+        "Gradient Sunset must render sunset gradient colors"
+    )
+
+
+def test_visual_card_renderers_sfx_waveform(qapp):
+    """Kiểm tra bộ render Waveform 16-20 bars + nút quick play cho SFX."""
+    sfx_items = [s for s in MOCKUP_SFX if s.id in ["sfx_whoosh", "sfx_pop", "sfx_ding", "sfx_riser", "sfx_glitch"]]
+    assert len(sfx_items) >= 4
+
+    for item in sfx_items:
+        card = AssetCard(item)
+        assert hasattr(card, "_render_sfx_thumbnail"), "AssetCard must have _render_sfx_thumbnail"
+        # Nút nghe nhanh btn_quick_play
+        assert hasattr(card, "btn_quick_play"), "SFX card must have btn_quick_play"
+        assert isinstance(card.btn_quick_play, QPushButton)
+        assert card.btn_quick_play.text() in ["▶", "⏸", "🔊"]
+
+        # Waveform canvas có 16 đến 20 envelope bars
+        assert hasattr(card, "waveform_canvas"), "SFX card must have waveform_canvas"
+        assert hasattr(card.waveform_canvas, "bars"), "Waveform canvas must expose bars"
+        bars = card.waveform_canvas.bars
+        assert 16 <= len(bars) <= 20, f"Waveform must have 16-20 bars, got {len(bars)} for {item.id}"
+        assert all(0.0 <= b <= 1.0 for b in bars), "All envelope bars must be normalized between 0.0 and 1.0"
+
+        # Click quick play không được văng lỗi
+        card.btn_quick_play.click()
+
+
+def test_visual_card_renderers_lut_stripes(qapp):
+    """Kiểm tra bảng màu 4 sọc đối lập + badge phân loại cho LUT."""
+    lut = MOCKUP_LUTS[0]
+    card = AssetCard(lut)
+    assert hasattr(card, "_render_lut_thumbnail"), "AssetCard must have _render_lut_thumbnail"
+    assert hasattr(card, "lut_stripes"), "LUT card must have lut_stripes"
+    assert len(card.lut_stripes) == 4, f"LUT preview must have 4 stripes, got {len(card.lut_stripes)}"
+
+    # Badge phân loại category badge
+    assert hasattr(card, "badge_category"), "LUT card must have badge_category"
+    assert isinstance(card.badge_category, QLabel)
+    assert card.badge_category.text() != ""
+
+
+def test_visual_card_renderers_transition(qapp):
+    """Kiểm tra hiệu ứng chuyển cảnh: motion icon, scanline accent, badge frame count."""
+    for trans in BUILTIN_TRANSITIONS:
+        card = AssetCard(trans)
+        assert hasattr(card, "_render_transition_thumbnail"), "AssetCard must have _render_transition_thumbnail"
+
+        # Badge số frame (ví dụ: '16f', '20f', '24f', '30f')
+        assert hasattr(card, "badge_frames"), "Transition card must have badge_frames"
+        assert isinstance(card.badge_frames, QLabel)
+        frame_text = card.badge_frames.text()
+        assert frame_text.endswith("f") or "frame" in frame_text
+
+        # Motion icon và scanline accent
+        assert hasattr(card, "lbl_motion_icon"), "Transition card must have lbl_motion_icon"
+        assert card.lbl_motion_icon.text() != ""
+        assert hasattr(card, "scanline_accent"), "Transition card must have scanline_accent"
+
+
+def test_visual_card_renderers_icon(qapp):
+    """Kiểm tra icon vector / reaction emoji badge."""
+    icon_item = MOCKUP_ICONS[0]
+    card = AssetCard(icon_item)
+    assert hasattr(card, "_render_icon_thumbnail"), "AssetCard must have _render_icon_thumbnail"
+    assert hasattr(card, "lbl_icon_preview"), "Icon card must have lbl_icon_preview"
+    assert isinstance(card.lbl_icon_preview, QLabel)
+    assert card.lbl_icon_preview.text() != ""
+
+
+def test_visual_card_renderers_global_constraints(qapp):
+    """Kiểm tra ràng buộc kỹ thuật toàn cục: cấm cỡ chữ số thập phân (ví dụ 10.5px)."""
+    fractional_px_pattern = re.compile(r'\b\d+\.\d+px\b')
+
+    cards = [
+        AssetCard(BUILTIN_PRESETS[0]),
+        AssetCard(MOCKUP_SFX[0]),
+        AssetCard(MOCKUP_LUTS[0]),
+        AssetCard(BUILTIN_TRANSITIONS[0]),
+        AssetCard(MOCKUP_ICONS[0]),
+    ]
+
+    for card in cards:
+        # Kiểm tra stylesheet của card
+        sheet = card.styleSheet()
+        matches = fractional_px_pattern.findall(sheet)
+        assert len(matches) == 0, f"Found fractional font/size px in card stylesheet: {matches}"
+
+        # Kiểm tra thumbnail stylesheet
+        if hasattr(card, "thumb") and card.thumb:
+            t_sheet = card.thumb.styleSheet()
+            t_matches = fractional_px_pattern.findall(t_sheet)
+            assert len(t_matches) == 0, f"Found fractional px in thumb stylesheet: {t_matches}"

@@ -11,6 +11,7 @@ import os
 import json
 import uuid
 import tempfile
+import math
 from typing import Optional, Callable, List, Dict, Any, Tuple
 
 from PySide6.QtWidgets import (
@@ -259,12 +260,90 @@ class DraggableAssetLabel(QLabel):
 
 
 # =========================================================================
-# 5. ASSET CARD (Thẻ đạo cụ hiển thị trên lưới)
+# 5. WAVEFORM CANVAS & ASSET CARD (Bộ hiển thị đạo cụ trực quan)
 # =========================================================================
+class WaveformCanvas(QWidget):
+    """Canvas vẽ dạng sóng (waveform) 16-20 cột phong bì âm thanh (envelope bars)."""
+    def __init__(self, preset_id: str = "sfx", bars: Optional[List[float]] = None, parent=None):
+        super().__init__(parent)
+        self.preset_id = preset_id
+        self.bars = bars if bars is not None else self._generate_envelope_bars(preset_id)
+        self.is_playing = False
+        self.setFixedHeight(30)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    @staticmethod
+    def _generate_envelope_bars(preset_id: str, num_bars: int = 18) -> List[float]:
+        # Hash identifier for consistent determinism
+        pid = str(preset_id).lower()
+        h = sum(ord(c) * (31 ** i) for i, c in enumerate(pid)) & 0x7FFFFFFF
+
+        # Envelope classification
+        if "whoosh" in pid or "swoosh" in pid:
+            env_type = "hump"
+        elif "riser" in pid or "drum_roll" in pid:
+            env_type = "rise"
+        elif any(k in pid for k in ["pop", "ding", "click", "punch", "hit", "shutter"]):
+            env_type = "hit"
+        elif "glitch" in pid:
+            env_type = "glitch"
+        elif "beep" in pid:
+            env_type = "beep"
+        else:
+            env_type = "flat"
+
+        bars = []
+        for i in range(num_bars):
+            h = (h * 1103515245 + 12345) & 0x7FFFFFFF
+            noise = 0.6 + 0.4 * ((h % 1000) / 1000.0)
+            x = i / max(1, num_bars - 1)
+
+            if env_type == "rise":
+                e = 0.12 + 0.88 * x
+            elif env_type == "hump":
+                e = math.sin(math.pi * x)
+            elif env_type == "hit":
+                e = math.exp(-4.5 * x)
+            elif env_type == "beep":
+                e = 0.85 if (0.12 < x < 0.88) else 0.12
+            elif env_type == "glitch":
+                e = 0.35 + 0.65 * abs(math.sin(x * 12.0))
+            else:
+                e = 0.55 + 0.25 * math.sin(x * 8.0)
+
+            val = max(0.08, min(1.0, e * noise))
+            bars.append(round(val, 3))
+        return bars
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+        n = len(self.bars)
+        if n == 0:
+            return
+
+        gap = 2.0
+        bar_w = max(2.0, (w - (n - 1) * gap) / n)
+
+        color = QColor(ThemeColors.CYAN_HI if self.is_playing else ThemeColors.CYAN)
+        painter.setBrush(QBrush(color))
+        painter.setPen(Qt.NoPen)
+
+        for i, val in enumerate(self.bars):
+            bar_h = max(3.0, val * (h - 4))
+            x = i * (bar_w + gap)
+            y = (h - bar_h) / 2.0
+            painter.drawRoundedRect(QRectF(x, y, bar_w, bar_h), 1.0, 1.0)
+
+
 class AssetCard(QFrame):
     selected_signal = pyqtSignal(str)
     favorite_toggled = pyqtSignal(str, bool)
     add_requested = pyqtSignal(object)
+    quick_play_requested = pyqtSignal(str)
 
     def __init__(self, preset: Any, is_fav: bool = False, sample_text_func=None, parent=None):
         super().__init__(parent)
@@ -272,6 +351,10 @@ class AssetCard(QFrame):
         self.is_fav = is_fav
         self.sample_text_func = sample_text_func
         self.is_selected = False
+        self._drag_start_pos = None
+        self._is_playing_audio = False
+        self._player = None
+        self._audio_output = None
 
         self.setFixedHeight(148)
         self.setMinimumWidth(160)
@@ -310,41 +393,20 @@ class AssetCard(QFrame):
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
             }}
         """)
-        th_layout = QVBoxLayout(self.thumb)
-        th_layout.setContentsMargins(6, 4, 6, 4)
-        th_layout.setAlignment(Qt.AlignCenter)
 
-        # Vẽ preview theo kiểu
-        if isinstance(self.preset, TextStylePreset):
-            lbl_p = QLabel(self.preset.name.split("(")[0].strip())
-            f = QFont("Arial", 11)
-            f.setBold(True)
-            lbl_p.setFont(f)
-            lbl_p.setStyleSheet(f"color: {self.preset.standard_color}; text-shadow: 0 1px 2px #000;")
-            lbl_p.setAlignment(Qt.AlignCenter)
-            th_layout.addWidget(lbl_p)
-        elif getattr(self.preset, "tab", "") == "lut":
-            # Dải màu LUT
-            pal = getattr(self.preset, "pal", ["#1f2937", "#64748b", "#cbd5e1", "#f8fafc"])
-            h_pal = QHBoxLayout()
-            h_pal.setSpacing(2)
-            for c in pal:
-                stripe = QFrame()
-                stripe.setFixedHeight(36)
-                stripe.setStyleSheet(f"background-color: {c}; border-radius: 3px;")
-                h_pal.addWidget(stripe)
-            th_layout.addLayout(h_pal)
+        # Điều phối tới bộ render chuyên biệt theo từng loại đạo cụ
+        if isinstance(self.preset, TextStylePreset) or getattr(self.preset, "tab", "") == "text":
+            self._render_text_thumbnail()
         elif getattr(self.preset, "tab", "") == "sfx":
-            lbl_wave = QLabel(" ▂▃▅▆▇▆▅▃▂ ")
-            lbl_wave.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 16px;")
-            lbl_wave.setAlignment(Qt.AlignCenter)
-            th_layout.addWidget(lbl_wave)
+            self._render_sfx_thumbnail()
+        elif getattr(self.preset, "tab", "") == "lut":
+            self._render_lut_thumbnail()
+        elif isinstance(self.preset, TransitionStylePreset) or getattr(self.preset, "tab", "") == "trans":
+            self._render_transition_thumbnail()
+        elif getattr(self.preset, "tab", "") in ("icon", "meme", "overlay") or hasattr(self.preset, "badge_icon"):
+            self._render_icon_thumbnail()
         else:
-            badge = getattr(self.preset, "badge_icon", "✨")
-            lbl_icon = QLabel(badge)
-            lbl_icon.setStyleSheet("font-size: 26px;")
-            lbl_icon.setAlignment(Qt.AlignCenter)
-            th_layout.addWidget(lbl_icon)
+            self._render_icon_thumbnail()
 
         layout.addWidget(self.thumb)
 
@@ -380,6 +442,385 @@ class AssetCard(QFrame):
 
         layout.addLayout(h_info)
 
+    def _render_text_thumbnail(self):
+        """Render xem trước phong cách chữ nghệ thuật (Alex Hormozi, Karaoke, Box, Neon, VHS, Paper, Gradient)."""
+        pid = getattr(self.preset, "id", "")
+        th_layout = QVBoxLayout(self.thumb)
+        th_layout.setContentsMargins(6, 4, 6, 4)
+        th_layout.setAlignment(Qt.AlignCenter)
+
+        self.lbl_text_preview = QLabel(self.thumb)
+        self.lbl_text_preview.setTextFormat(Qt.RichText)
+        self.lbl_text_preview.setAlignment(Qt.AlignCenter)
+        self.lbl_text_preview.setWordWrap(True)
+
+        if pid == "kinetic_hormozi":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {ThemeColors.BG_MAIN};
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: 'Arial Black', Impact, sans-serif; font-weight: 900; font-size: 13px; text-transform: uppercase; color: #ffffff; text-align: center;\">"
+                "TIỀN ĐẾN<br>TỪ <span style=\"color: #facc15; font-size: 15px;\">ĐÂU?</span>"
+                "</div>"
+            )
+        elif pid == "karaoke_pop":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {ThemeColors.BG_MAIN};
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: Arial, sans-serif; font-weight: 800; font-size: 13px; color: #ffffff; text-align: center;\">"
+                "dính <span style=\"color: #a3e635; font-size: 15px; font-weight: 900;\">mưa</span> rồi"
+                "</div>"
+            )
+        elif pid == "box_highlight":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {ThemeColors.BG_MAIN};
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: Arial, sans-serif; font-weight: 800; font-size: 13px; color: #ffffff; text-align: center;\">"
+                "100% <span style=\"background-color: #ef4444; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: 900;\">sức khỏe</span>"
+                "</div>"
+            )
+        elif pid == "glow_neon":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #0b2236;
+                    border: 1px solid {ThemeColors.CYAN};
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: Arial, sans-serif; font-weight: 800; font-size: 15px; text-align: center;\">"
+                "<span style=\"color: #ecfeff; border: 1px solid #06b6d4; background-color: rgba(6, 182, 212, 0.2); padding: 3px 10px; border-radius: 6px;\">NEON</span>"
+                "</div>"
+            )
+        elif pid == "vhs_retro":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #1b1714;
+                    border: 1px solid #3a302a;
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: Consolas, monospace; font-size: 10px; color: #f5f5f4; text-align: center;\">"
+                "<div style=\"color: #22c55e; font-size: 9px; margin-bottom: 2px;\">▶ PLAY SP 0:12</div>"
+                "<div style=\"font-size: 14px; font-weight: bold; letter-spacing: 2px; color: #fff59d;\">HÈ 1999</div>"
+                "</div>"
+            )
+        elif pid == "paper_cutout":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #cbb48a;
+                    border: 1px solid #a98d5f;
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: Georgia, serif; font-weight: bold; font-size: 13px; color: #111111; text-align: center;\">"
+                "<span style=\"background-color: #ffffff; color: #111111; padding: 2px 4px; margin: 1px; border-radius: 2px;\">V</span>"
+                "<span style=\"background-color: #fef3c7; color: #111111; padding: 2px 4px; margin: 1px; border-radius: 2px;\">L</span>"
+                "<span style=\"background-color: #111111; color: #ffffff; padding: 2px 4px; margin: 1px; border-radius: 2px;\">O</span>"
+                "<span style=\"background-color: #fecaca; color: #111111; padding: 2px 4px; margin: 1px; border-radius: 2px;\">G</span>"
+                "</div>"
+            )
+        elif pid == "gradient_fill":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(251,146,60,0.15), stop:0.5 rgba(244,63,94,0.15), stop:1 rgba(168,85,247,0.15));
+                    border: 1px solid rgba(244,63,94,0.3);
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: 'Arial Black', sans-serif; font-weight: 900; font-size: 14px; text-align: center;\">"
+                "<span style=\"color: #fb923c;\">HOÀNG </span><span style=\"color: #f43f5e;\">HÔN </span><span style=\"color: #a855f7;\">SUNSET</span>"
+                "</div>"
+            )
+        else:
+            std_col = getattr(self.preset, "standard_color", "#FFFFFF")
+            name_clean = getattr(self.preset, "name", "Text").split("(")[0].strip()
+            self.lbl_text_preview.setText(
+                f"<div style=\"font-family: Arial, sans-serif; font-weight: bold; font-size: 13px; color: {std_col}; text-align: center;\">"
+                f"{name_clean}"
+                "</div>"
+            )
+
+        th_layout.addWidget(self.lbl_text_preview)
+
+    def _render_sfx_thumbnail(self):
+        """Render dạng sóng âm thanh 16-20 envelope bars + nút nghe nhanh btn_quick_play."""
+        self.thumb.setStyleSheet(f"""
+            QFrame {{
+                background-color: {ThemeColors.BG_MAIN};
+                border-radius: 8px;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+            }}
+        """)
+        th_layout = QVBoxLayout(self.thumb)
+        th_layout.setContentsMargins(6, 6, 6, 6)
+        th_layout.setSpacing(4)
+
+        # Hàng trên: nút nghe thử nhanh btn_quick_play và thẻ tag
+        h_top = QHBoxLayout()
+        h_top.setContentsMargins(0, 0, 0, 0)
+        h_top.setSpacing(6)
+
+        self.btn_quick_play = QPushButton("▶", self.thumb)
+        self.btn_quick_play.setFixedSize(24, 24)
+        self.btn_quick_play.setCursor(Qt.PointingHandCursor)
+        self.btn_quick_play.setToolTip("Nghe thử âm thanh nhanh")
+        self.btn_quick_play.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 12px;
+                color: {ThemeColors.CYAN_HI};
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.CYAN};
+                color: #05252c;
+                border-color: {ThemeColors.CYAN_HI};
+            }}
+        """)
+        self.btn_quick_play.clicked.connect(self._toggle_quick_play)
+        h_top.addWidget(self.btn_quick_play)
+
+        sub_txt = getattr(self.preset, "sub", "") or "SFX"
+        lbl_sfx_badge = QLabel(f"🔊 {sub_txt}")
+        lbl_sfx_badge.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 10px;")
+        h_top.addWidget(lbl_sfx_badge)
+        h_top.addStretch()
+
+        th_layout.addLayout(h_top)
+
+        # Waveform canvas 16-20 bars
+        pid = getattr(self.preset, "id", "sfx")
+        self.waveform_canvas = WaveformCanvas(preset_id=pid, parent=self.thumb)
+        th_layout.addWidget(self.waveform_canvas)
+
+    def _render_lut_thumbnail(self):
+        """Render dải màu 4 sọc tương phản cao + huy hiệu danh mục cho LUT."""
+        self.thumb.setStyleSheet(f"""
+            QFrame {{
+                background-color: {ThemeColors.BG_MAIN};
+                border-radius: 8px;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+            }}
+        """)
+        th_layout = QVBoxLayout(self.thumb)
+        th_layout.setContentsMargins(6, 6, 6, 6)
+        th_layout.setSpacing(4)
+
+        # Category badge
+        h_top = QHBoxLayout()
+        h_top.setContentsMargins(0, 0, 0, 0)
+
+        cat_name = getattr(self.preset, "category", "") or "cinema"
+        cat_labels = {
+            "natural": "Đời thường",
+            "cinema": "Điện ảnh",
+            "style": "Phong cách"
+        }
+        cat_display = cat_labels.get(cat_name.lower(), cat_name.capitalize())
+        badge_icon = getattr(self.preset, "badge_icon", "🎨")
+        self.badge_category = QLabel(f"{badge_icon} {cat_display}", self.thumb)
+        self.badge_category.setStyleSheet(f"""
+            QLabel {{
+                background-color: rgba(24, 24, 27, 0.85);
+                color: #e4e4e7;
+                font-size: 10px;
+                font-weight: bold;
+                padding: 2px 6px;
+                border-radius: 4px;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+            }}
+        """)
+        h_top.addWidget(self.badge_category)
+        h_top.addStretch()
+        th_layout.addLayout(h_top)
+
+        # 4-stripe palette
+        pal = getattr(self.preset, "pal", None)
+        if not pal or len(pal) < 4:
+            pal = ["#1f2937", "#64748b", "#cbd5e1", "#f8fafc"]
+        pal = pal[:4]
+
+        stripe_container = QWidget(self.thumb)
+        stripe_layout = QHBoxLayout(stripe_container)
+        stripe_layout.setContentsMargins(0, 0, 0, 0)
+        stripe_layout.setSpacing(2)
+
+        self.lut_stripes = []
+        for c in pal:
+            stripe = QFrame(stripe_container)
+            stripe.setFixedHeight(34)
+            stripe.setStyleSheet(f"background-color: {c}; border-radius: 3px; border: none;")
+            self.lut_stripes.append(stripe)
+            stripe_layout.addWidget(stripe)
+
+        th_layout.addWidget(stripe_container)
+
+    def _render_transition_thumbnail(self):
+        """Render chuyển cảnh: motion icon, scanline accent, frame count badge (16f, 24f, 30f)."""
+        self.thumb.setStyleSheet(f"""
+            QFrame {{
+                background-color: #121216;
+                border-radius: 8px;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+            }}
+        """)
+        th_layout = QVBoxLayout(self.thumb)
+        th_layout.setContentsMargins(6, 6, 6, 6)
+        th_layout.setSpacing(4)
+
+        # Frame count badge
+        h_top = QHBoxLayout()
+        h_top.setContentsMargins(0, 0, 0, 0)
+
+        frames = getattr(self.preset, "duration_frames", None) or getattr(self.preset, "frames", 24)
+        self.badge_frames = QLabel(f"{frames}f", self.thumb)
+        self.badge_frames.setStyleSheet(f"""
+            QLabel {{
+                background-color: rgba(24, 24, 27, 0.85);
+                color: #c4b5fd;
+                font-size: 10px;
+                font-weight: bold;
+                padding: 2px 6px;
+                border-radius: 4px;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+            }}
+        """)
+        h_top.addWidget(self.badge_frames)
+        h_top.addStretch()
+        th_layout.addLayout(h_top)
+
+        # Visual motion icon
+        badge_icon = getattr(self.preset, "badge_icon", "🎬")
+        self.lbl_motion_icon = QLabel(f"{badge_icon}  A ➔ B", self.thumb)
+        self.lbl_motion_icon.setAlignment(Qt.AlignCenter)
+        self.lbl_motion_icon.setStyleSheet("""
+            QLabel {{
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+        """)
+        th_layout.addWidget(self.lbl_motion_icon)
+
+        # Scanline accent
+        self.scanline_accent = QFrame(self.thumb)
+        self.scanline_accent.setFixedHeight(2)
+        self.scanline_accent.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 transparent, stop:0.5 {ThemeColors.CYAN}, stop:1 transparent);
+                border: none;
+            }}
+        """)
+        th_layout.addWidget(self.scanline_accent)
+
+    def _render_icon_thumbnail(self):
+        """Render icon SVG hoặc reaction emoji badge cỡ lớn."""
+        self.thumb.setStyleSheet(f"""
+            QFrame {{
+                background-color: {ThemeColors.BG_MAIN};
+                border-radius: 8px;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+            }}
+        """)
+        th_layout = QVBoxLayout(self.thumb)
+        th_layout.setContentsMargins(6, 6, 6, 6)
+        th_layout.setAlignment(Qt.AlignCenter)
+
+        badge = getattr(self.preset, "badge_icon", "") or getattr(self.preset, "emo", "✨")
+        color = getattr(self.preset, "color_hex", "#facc15")
+        self.lbl_icon_preview = QLabel(badge, self.thumb)
+        self.lbl_icon_preview.setAlignment(Qt.AlignCenter)
+        self.lbl_icon_preview.setStyleSheet(f"""
+            QLabel {{
+                font-size: 32px;
+                color: {color};
+                background: transparent;
+                border: none;
+            }}
+        """)
+        th_layout.addWidget(self.lbl_icon_preview)
+
+    def _toggle_quick_play(self):
+        if self._is_playing_audio:
+            self._stop_quick_play()
+        else:
+            self._start_quick_play()
+
+    def _start_quick_play(self):
+        self._is_playing_audio = True
+        if hasattr(self, "btn_quick_play"):
+            self.btn_quick_play.setText("⏸")
+        if hasattr(self, "waveform_canvas"):
+            self.waveform_canvas.is_playing = True
+            self.waveform_canvas.update()
+
+        pid = getattr(self.preset, "id", "")
+        clean_id = pid.replace("sfx_", "")
+        candidate_paths = [
+            os.path.join("assets", "sfx", f"{clean_id}.wav"),
+            os.path.join("assets", "sfx", f"{pid}.wav"),
+            getattr(self.preset, "file_path", "")
+        ]
+        sound_path = None
+        for p in candidate_paths:
+            if p and os.path.exists(p):
+                sound_path = p
+                break
+
+        if sound_path:
+            try:
+                if self._player is None:
+                    self._player = QMediaPlayer(self)
+                    self._audio_output = QAudioOutput(self)
+                    self._player.setAudioOutput(self._audio_output)
+                    self._player.playbackStateChanged.connect(self._on_player_state_changed)
+                self._player.setSource(QUrl.fromLocalFile(os.path.abspath(sound_path)))
+                self._audio_output.setVolume(0.8)
+                self._player.play()
+            except Exception:
+                QTimer.singleShot(1500, self._stop_quick_play)
+        else:
+            QTimer.singleShot(1500, self._stop_quick_play)
+
+        self.quick_play_requested.emit(pid)
+
+    def _stop_quick_play(self):
+        self._is_playing_audio = False
+        if hasattr(self, "btn_quick_play"):
+            self.btn_quick_play.setText("▶")
+        if hasattr(self, "waveform_canvas"):
+            self.waveform_canvas.is_playing = False
+            self.waveform_canvas.update()
+        if self._player is not None:
+            try:
+                self._player.stop()
+            except Exception:
+                pass
+
+    def _on_player_state_changed(self, state):
+        if state == QMediaPlayer.StoppedState:
+            self._stop_quick_play()
+
     def _toggle_fav(self):
         self.is_fav = not self.is_fav
         self.btn_fav.setText("❤️" if self.is_fav else "🤍")
@@ -392,9 +833,47 @@ class AssetCard(QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            self._drag_start_pos = event.pos()
             pid = getattr(self.preset, "id", "")
             self.selected_signal.emit(pid)
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.LeftButton) or not self._drag_start_pos:
+            return
+        if (event.pos() - self._drag_start_pos).manhattanLength() < 8:
+            return
+        self._start_drag()
+
+    def _start_drag(self):
+        drag = QDrag(self)
+        mime_data = QMimeData()
+
+        if isinstance(self.preset, LocalAsset):
+            mime_data.setUrls([QUrl.fromLocalFile(self.preset.file_path)])
+        elif isinstance(self.preset, TextStylePreset):
+            temp_setting = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{self.preset.id}_{uuid.uuid4().hex[:6]}.setting")
+            sample_txt = self.sample_text_func() if callable(self.sample_text_func) else self.preset.name
+            FusionSettingGenerator.export_setting_file(self.preset, temp_setting, sample_text=sample_txt)
+            mime_data.setUrls([QUrl.fromLocalFile(temp_setting)])
+        elif isinstance(self.preset, TransitionStylePreset):
+            temp_setting = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{self.preset.id}_{uuid.uuid4().hex[:6]}.setting")
+            TransitionMacroGenerator.export_setting_file(self.preset, temp_setting)
+            mime_data.setUrls([QUrl.fromLocalFile(temp_setting)])
+        else:
+            pid = getattr(self.preset, "id", "item")
+            clean_id = pid.replace("sfx_", "")
+            sfx_file = os.path.join("assets", "sfx", f"{clean_id}.wav")
+            if os.path.exists(sfx_file):
+                mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(sfx_file))])
+            else:
+                temp_path = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{pid}.txt")
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    f.write(getattr(self.preset, "name", "ResolveFlow Asset"))
+                mime_data.setUrls([QUrl.fromLocalFile(temp_path)])
+
+        drag.setMimeData(mime_data)
+        drag.exec_(Qt.CopyAction)
 
 
 # =========================================================================
@@ -562,7 +1041,7 @@ class TabAssets(QWidget):
         self.lbl_cats_head.setStyleSheet(f"""
             padding: 16px 14px 10px;
             font-weight: bold;
-            font-size: 13.5px;
+            font-size: 14px;
             color: {ThemeColors.TEXT_PRIMARY};
         """)
         cats_layout.addWidget(self.lbl_cats_head)
@@ -618,7 +1097,7 @@ class TabAssets(QWidget):
         mh_layout.setSpacing(10)
 
         self.lbl_main_cat = QLabel("Chữ chuyển động")
-        self.lbl_main_cat.setStyleSheet(f"font-weight: bold; font-size: 13.5px; color: {ThemeColors.TEXT_PRIMARY};")
+        self.lbl_main_cat.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {ThemeColors.TEXT_PRIMARY};")
         mh_layout.addWidget(self.lbl_main_cat)
 
         self.lbl_count_badge = QLabel("14 mẫu")
@@ -701,7 +1180,7 @@ class TabAssets(QWidget):
         self.lbl_insp_title = QLabel("<b>Alex Hormozi Pop</b>")
         self.lbl_insp_title.setStyleSheet(f"font-size: 15px; color: {ThemeColors.TEXT_PRIMARY};")
         self.lbl_insp_sub = QLabel("Kinetic bounce · Font: Arial Black")
-        self.lbl_insp_sub.setStyleSheet(f"font-size: 11.5px; color: {ThemeColors.TEXT_MUTED};")
+        self.lbl_insp_sub.setStyleSheet(f"font-size: 12px; color: {ThemeColors.TEXT_MUTED};")
         self.insp_vbox.addWidget(self.lbl_insp_title)
         self.insp_vbox.addWidget(self.lbl_insp_sub)
 
@@ -711,7 +1190,7 @@ class TabAssets(QWidget):
         self.preview_lbl.setText("🖱️ Giữ chuột và kéo vào Timeline")
         self.preview_lbl.setStyleSheet(f"""
             background-color: {ThemeColors.BG_CARD};
-            border: 1.5px dashed {ThemeColors.PRIMARY};
+            border: 2px dashed {ThemeColors.PRIMARY};
             border-radius: 6px;
             color: #c4b5fd;
             font-size: 11px;
@@ -781,7 +1260,7 @@ class TabAssets(QWidget):
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8b5cf6, stop:1 #7c3aed);
                 color: #ffffff;
                 font-weight: bold;
-                font-size: 12.5px;
+                font-size: 13px;
                 padding: 10px;
                 border-radius: 8px;
                 border: none;
@@ -922,7 +1401,7 @@ class TabAssets(QWidget):
                     border: none;
                     border-radius: 6px;
                     color: {ThemeColors.TEXT_MUTED};
-                    font-size: 11.5px;
+                    font-size: 12px;
                     text-align: left;
                     padding-left: 6px;
                 }}
