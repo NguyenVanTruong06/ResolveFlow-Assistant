@@ -1371,6 +1371,250 @@ class PipelineWorker(QThread):
         self.finished_signal.emit(False, "Tiến trình đã dừng bởi người dùng (Cancelled).")
 
 
+class PipelineStepTrackerWidget(QFrame):
+    """
+    Hiển thị 6 bước tiến trình chi tiết chuẩn theo bản thiết kế:
+    1. Kiểm tra (Validation & source clips)
+    2. Tải AI (Faster-Whisper model loading)
+    3. Nhận diện (Speech-to-text / Silence / Cache)
+    4. Đạo diễn AI (Script & Semantic Director)
+    5. Biên tập (Auto-cut / Punch-in / B-roll / SFX / Subtitles)
+    6. Xuất bản (Generate FCPXML / Export DaVinci)
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("""
+            QFrame#step_tracker_frame {
+                background-color: #18181b;
+                border: 1px solid #27272a;
+                border-radius: 8px;
+                padding: 4px;
+            }
+        """)
+        self.setObjectName("step_tracker_frame")
+
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(8, 8, 8, 8)
+        self.layout.setSpacing(6)
+
+        self.step_keys = [
+            "validate",
+            "load_model",
+            "speech_to_text",
+            "ai_director",
+            "apply_cut",
+            "export"
+        ]
+
+        self.step_configs = {
+            "validate": {
+                "name": "Kiểm tra",
+                "desc": "Kiểm tra tệp video & định dạng nguồn",
+                "default_time": "0:04"
+            },
+            "load_model": {
+                "name": "Tải AI",
+                "desc": "Faster-Whisper AI model",
+                "default_time": "0:09"
+            },
+            "speech_to_text": {
+                "name": "Nhận diện",
+                "desc": "Lời thoại, khoảng lặng, chuyển động",
+                "default_time": "2:41"
+            },
+            "ai_director": {
+                "name": "Đạo diễn AI",
+                "desc": "Lọc vấp, dựng mạch, tìm Hook",
+                "default_time": "0:38"
+            },
+            "apply_cut": {
+                "name": "Biên tập",
+                "desc": "Punch-in, B-roll, SFX, phụ đề",
+                "default_time": "0:21"
+            },
+            "export": {
+                "name": "Xuất bản",
+                "desc": "FCPXML 1.9 cho DaVinci Resolve",
+                "default_time": "0:03"
+            }
+        }
+
+        self.rows = {}
+        self.start_times = {}
+
+        for key in self.step_keys:
+            cfg = self.step_configs[key]
+            row_widget = QWidget()
+            row_lay = QHBoxLayout(row_widget)
+            row_lay.setContentsMargins(0, 2, 0, 2)
+            row_lay.setSpacing(8)
+
+            lbl_icon = QLabel("○")
+            lbl_icon.setFixedSize(22, 22)
+            lbl_icon.setAlignment(Qt.AlignCenter)
+            lbl_icon.setStyleSheet("""
+                background-color: transparent;
+                color: #52525b;
+                border: 1.5px solid #3f3f46;
+                border-radius: 11px;
+                font-size: 11px;
+            """)
+
+            vbox_text = QVBoxLayout()
+            vbox_text.setContentsMargins(0, 0, 0, 0)
+            vbox_text.setSpacing(1)
+
+            lbl_name = QLabel(cfg["name"])
+            lbl_name.setStyleSheet("color: #71717a; font-size: 12px; font-weight: 600;")
+
+            lbl_desc = QLabel(cfg["desc"])
+            lbl_desc.setStyleSheet("color: #52525b; font-size: 10.5px;")
+
+            vbox_text.addWidget(lbl_name)
+            vbox_text.addWidget(lbl_desc)
+
+            lbl_time = QLabel("")
+            lbl_time.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            lbl_time.setStyleSheet("color: #71717a; font-size: 11px; font-family: monospace;")
+
+            row_lay.addWidget(lbl_icon)
+            row_lay.addLayout(vbox_text, stretch=1)
+            row_lay.addWidget(lbl_time)
+
+            self.layout.addWidget(row_widget)
+            self.rows[key] = {
+                "widget": row_widget,
+                "icon": lbl_icon,
+                "name": lbl_name,
+                "desc": lbl_desc,
+                "time": lbl_time,
+                "status": "idle"
+            }
+
+    def set_step_detail(self, step_key: str, desc: str):
+        if step_key in self.rows:
+            self.rows[step_key]["desc"].setText(desc)
+
+    def set_step_status(self, step_key: str, status: str, detail: str = ""):
+        import time
+        if step_key not in self.rows:
+            return
+
+        now = time.time()
+        row = self.rows[step_key]
+        row["status"] = status
+
+        if detail:
+            row["desc"].setText(detail)
+
+        if status == "running":
+            step_idx = self.step_keys.index(step_key)
+            for i in range(step_idx):
+                prior_key = self.step_keys[i]
+                if self.rows[prior_key]["status"] in ["idle", "running"]:
+                    self._set_row_done(prior_key)
+
+            self.start_times[step_key] = now
+            row["icon"].setText("●")
+            row["icon"].setStyleSheet("""
+                background-color: rgba(6, 182, 212, 0.2);
+                color: #22d3ee;
+                border: 1.5px solid #06b6d4;
+                border-radius: 11px;
+                font-weight: bold;
+                font-size: 12px;
+            """)
+            row["name"].setStyleSheet("color: #f4f4f5; font-size: 12px; font-weight: bold;")
+            row["desc"].setStyleSheet("color: #a1a1aa; font-size: 10.5px;")
+            if not row["time"].text():
+                row["time"].setText("...")
+            row["time"].setStyleSheet("color: #22d3ee; font-size: 11px; font-family: monospace; font-weight: bold;")
+
+        elif status == "done":
+            self._set_row_done(step_key)
+
+        elif status == "error":
+            row["icon"].setText("✕")
+            row["icon"].setStyleSheet("""
+                background-color: rgba(239, 68, 68, 0.2);
+                color: #f87171;
+                border: 1.5px solid #ef4444;
+                border-radius: 11px;
+                font-weight: bold;
+                font-size: 11px;
+            """)
+            row["name"].setStyleSheet("color: #f87171; font-size: 12px; font-weight: bold;")
+            row["time"].setText("Lỗi")
+            row["time"].setStyleSheet("color: #ef4444; font-size: 11px;")
+
+        elif status == "stopped":
+            row["icon"].setText("⏹")
+            row["icon"].setStyleSheet("""
+                background-color: rgba(239, 68, 68, 0.15);
+                color: #f87171;
+                border: 1.5px solid rgba(239, 68, 68, 0.5);
+                border-radius: 11px;
+                font-size: 10px;
+            """)
+            row["name"].setStyleSheet("color: #fca5a5; font-size: 12px;")
+            row["time"].setText("Đã dừng")
+            row["time"].setStyleSheet("color: #ef4444; font-size: 10.5px;")
+
+    def _set_row_done(self, step_key: str):
+        import time
+        row = self.rows[step_key]
+        row["status"] = "done"
+        row["icon"].setText("✓")
+        row["icon"].setStyleSheet("""
+            background-color: #15803d;
+            color: #ffffff;
+            border: 1.5px solid #22c55e;
+            border-radius: 11px;
+            font-weight: bold;
+            font-size: 11px;
+        """)
+        row["name"].setStyleSheet("color: #f4f4f5; font-size: 12px; font-weight: 500;")
+        row["desc"].setStyleSheet("color: #71717a; font-size: 10.5px;")
+
+        start_t = self.start_times.get(step_key)
+        if start_t:
+            elapsed = max(1, int(time.time() - start_t))
+            m = elapsed // 60
+            s = elapsed % 60
+            row["time"].setText(f"{m}:{s:02d}")
+        elif not row["time"].text() or row["time"].text() in ["...", "0%"]:
+            row["time"].setText(self.step_configs[step_key]["default_time"])
+        row["time"].setStyleSheet("color: #71717a; font-size: 11px; font-family: monospace;")
+
+    def update_step_progress(self, step_key: str, pct: int):
+        if step_key in self.rows and self.rows[step_key]["status"] == "running":
+            self.rows[step_key]["time"].setText(f"{pct}%")
+            self.rows[step_key]["time"].setStyleSheet("color: #22d3ee; font-size: 11px; font-family: monospace; font-weight: bold;")
+
+    def mark_stopped(self):
+        for key in self.step_keys:
+            if self.rows[key]["status"] == "running":
+                self.set_step_status(key, "stopped")
+
+    def reset(self):
+        self.start_times.clear()
+        for key in self.step_keys:
+            row = self.rows[key]
+            row["status"] = "idle"
+            row["icon"].setText("○")
+            row["icon"].setStyleSheet("""
+                background-color: transparent;
+                color: #52525b;
+                border: 1.5px solid #3f3f46;
+                border-radius: 11px;
+                font-size: 11px;
+            """)
+            row["name"].setStyleSheet("color: #71717a; font-size: 12px; font-weight: 600;")
+            row["desc"].setStyleSheet("color: #52525b; font-size: 10.5px;")
+            row["desc"].setText(self.step_configs[key]["desc"])
+            row["time"].setText("")
+
+
 class AutoWindow(QMainWindow):
     """
     Lớp giao diện người dùng chính (Main Dashboard) của ChunDVC v1.0.
@@ -2072,8 +2316,12 @@ class AutoWindow(QMainWindow):
         self.txt_json_input.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 6px; color: #22d3ee; font-family: monospace; font-size: 11px;")
         pw_lay.addWidget(self.txt_json_input)
 
-        self.btn_apply_json = QPushButton("✅ 2. Áp dụng Kịch bản JSON")
+        self.lbl_json_hint = QLabel("💡 Dán JSON kịch bản vào ô trên · Nút [Bắt đầu dựng] bên dưới sẽ tự động kích hoạt")
+        self.lbl_json_hint.setStyleSheet("color: #71717a; font-size: 11px; margin-top: 2px;")
+        self.lbl_json_hint.setWordWrap(True)
+        pw_lay.addWidget(self.lbl_json_hint)
 
+        self.btn_apply_json = QPushButton("🎬 Dựng Theo Kịch Bản Này [Bắt đầu dựng]")
         self.btn_apply_json.setStyleSheet("background-color: #06b6d4; color: #000; font-weight: bold; padding: 7px; border-radius: 6px;")
         pw_lay.addWidget(self.btn_apply_json)
         self.ai_stack.addWidget(p_web)
@@ -2136,7 +2384,8 @@ class AutoWindow(QMainWindow):
         self.btn_mode_ollama.clicked.connect(lambda: switch_mode(2))
 
         self.btn_quick_copy.clicked.connect(self._quick_copy_copilot_prompt)
-        self.btn_apply_json.clicked.connect(lambda: self._apply_json_text_plan(self.txt_json_input.toPlainText()))
+        self.btn_apply_json.clicked.connect(self._toggle_pipeline_execution)
+        self.txt_json_input.textChanged.connect(self._on_json_text_changed)
         self.btn_run_ollama.clicked.connect(lambda: self._run_local_ollama_pipeline("travel_vlog", self.combo_ollama_model.currentText(), "http://localhost:11434"))
         self.btn_run_api.clicked.connect(lambda: self._run_cloud_api_pipeline("travel_vlog", self.combo_cloud_provider.currentText(), self.txt_api_key.text()))
 
@@ -2240,43 +2489,32 @@ class AutoWindow(QMainWindow):
         """)
         r_vbox.addWidget(self.progress_bar)
 
-        # Pipeline Steps
-        pipe_box = QFrame()
-        pipe_box.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 10px;")
-        pipe_lay = QVBoxLayout(pipe_box)
-        pipe_lay.setSpacing(6)
-
-        self.step_names = [
-            "Nạp Whisper & Phân tích âm thanh",
-            "Cắt khoảng lặng & Lọc vấp",
-            "Đạo diễn AI & Dựng mạch kịch bản",
-            "Chèn B-roll, SFX & Xuất Timeline"
-        ]
-        self.step_labels = []
-        for name in self.step_names:
-            lbl_st = QLabel(f"○ {name}")
-            lbl_st.setStyleSheet("color: #71717a; font-size: 11.5px;")
-            pipe_lay.addWidget(lbl_st)
-            self.step_labels.append(lbl_st)
-        r_vbox.addWidget(pipe_box)
+        # Pipeline Steps (6 bước chuẩn theo bản thiết kế)
+        self.step_tracker = PipelineStepTrackerWidget()
+        self.step_progress = self.step_tracker
+        self.step_names = [cfg["name"] for cfg in self.step_tracker.step_configs.values()]
+        self.step_labels = [row["name"] for row in self.step_tracker.rows.values()]
+        r_vbox.addWidget(self.step_tracker)
 
         # Nút Dừng
         self.btn_stop = QPushButton("⏹ Dừng tiến trình")
         self.btn_stop.setStyleSheet("""
             QPushButton {
                 background-color: #18181b;
-                border: 1px solid rgba(239,68,68,0.4);
+                border: 1px solid rgba(239, 68, 68, 0.4);
                 color: #f87171;
                 border-radius: 6px;
-                padding: 6px;
+                padding: 7px 12px;
                 font-weight: 500;
                 font-size: 11.5px;
             }
             QPushButton:hover {
-                background-color: rgba(239,68,68,0.15);
+                background-color: rgba(239, 68, 68, 0.15);
+                border-color: #ef4444;
             }
         """)
         self.btn_stop.clicked.connect(self._stop_pipeline)
+        self.btn_stop.setVisible(False)
         r_vbox.addWidget(self.btn_stop)
 
         # Nhật ký Console
@@ -3024,6 +3262,8 @@ class AutoWindow(QMainWindow):
             self.lbl_eta.setText("Sẵn sàng")
         if hasattr(self, "progress_bar"):
             self.progress_bar.setValue(0)
+        if hasattr(self, "step_tracker"):
+            self.step_tracker.reset()
         if hasattr(self, "step_labels") and hasattr(self, "step_names"):
             for i, lbl in enumerate(self.step_labels):
                 lbl.setText(f"○ {self.step_names[i]}")
@@ -3855,8 +4095,28 @@ class AutoWindow(QMainWindow):
         if self.worker and self.worker.isRunning():
             self.btn_run.setEnabled(False)
             self.btn_run.setText("⏳ ĐANG DỪNG LẠI...")
+            if hasattr(self, "btn_stop"):
+                self.btn_stop.setEnabled(False)
+                self.btn_stop.setText("⏳ Đang dừng...")
             self.txt_console.appendPlainText("🛑 Người dùng yêu cầu hủy tiến trình. Đang tiến hành dừng an toàn...")
+            if hasattr(self, "step_tracker"):
+                self.step_tracker.mark_stopped()
             self.worker.stop()
+
+    def _on_json_text_changed(self):
+        """Tự động kiểm tra và đồng bộ trạng thái khi người dùng dán hoặc sửa kịch bản JSON."""
+        txt = self.txt_json_input.toPlainText().strip()
+        is_json = txt.startswith("{") and ("timeline" in txt or "timeline_segments" in txt or "clips" in txt)
+        if is_json:
+            if hasattr(self, "lbl_json_hint"):
+                self.lbl_json_hint.setText("✓ Đã nhận diện Kịch bản JSON · Sẵn sàng thi công!")
+                self.lbl_json_hint.setStyleSheet("color: #22d3ee; font-weight: bold; font-size: 11px;")
+        else:
+            if hasattr(self, "lbl_json_hint"):
+                self.lbl_json_hint.setText("💡 Dán JSON kịch bản vào ô trên · Nút [Bắt đầu dựng] bên dưới sẽ tự động kích hoạt")
+                self.lbl_json_hint.setStyleSheet("color: #71717a; font-size: 11px;")
+        if not getattr(self, "is_processing", False):
+            self._update_run_button_state(running=False)
 
     def _minimize_to_bubble(self):
         """Thu nhỏ ứng dụng thành widget bong bóng nổi luôn trên cùng."""
@@ -3885,6 +4145,11 @@ class AutoWindow(QMainWindow):
             self.btn_scan_only.setEnabled(not running)
         if hasattr(self, "btn_instant_export"):
             self.btn_instant_export.setEnabled(not running)
+        if hasattr(self, "btn_stop"):
+            self.btn_stop.setVisible(running)
+            self.btn_stop.setEnabled(running)
+            self.btn_stop.setText("⏹ Dừng tiến trình")
+
         if running:
             self.btn_run.setEnabled(True)
             self.btn_run.setText("⏹ DỪNG LẠI (STOP / CANCEL)")
@@ -3901,18 +4166,57 @@ class AutoWindow(QMainWindow):
                 }
             """)
         else:
-            self.btn_run.setEnabled(False)
-            self.btn_run.setText("⏹ DỪNG LẠI (STOP / CANCEL)")
-            self.btn_run.setStyleSheet("""
-                QPushButton#btn_run {
-                    background-color: #031e22;
-                    color: #1e737e;
-                    padding: 10px;
-                    border-radius: 6px;
-                    font-weight: bold;
-                    border: 1px solid #0c3d44;
-                }
-            """)
+            self.btn_run.setEnabled(True)
+            has_json = False
+            if hasattr(self, "txt_json_input"):
+                txt = self.txt_json_input.toPlainText().strip()
+                if txt.startswith("{") and ("timeline" in txt or "timeline_segments" in txt or "clips" in txt):
+                    has_json = True
+
+            if has_json:
+                self.btn_run.setText("🎬 DỰNG THEO KỊCH BẢN JSON (0.1s)")
+                self.btn_run.setStyleSheet("""
+                    QPushButton#btn_run {
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0891b2, stop:1 #06b6d4);
+                        color: #042f2e;
+                        padding: 10px;
+                        border-radius: 6px;
+                        font-weight: bold;
+                        font-size: 13px;
+                    }
+                    QPushButton#btn_run:hover {
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #06b6d4, stop:1 #22d3ee);
+                    }
+                """)
+            elif getattr(self, "current_phase", 1) == 2:
+                self.btn_run.setText("🎬 XUẤT TIMELINE & DAVINCI RESOLVE")
+                self.btn_run.setStyleSheet("""
+                    QPushButton#btn_run {
+                        background-color: #0288D1;
+                        color: white;
+                        padding: 12px;
+                        border-radius: 6px;
+                        font-weight: bold;
+                    }
+                    QPushButton#btn_run:hover {
+                        background-color: #03A9F4;
+                    }
+                """)
+            else:
+                self.btn_run.setText("🎬 Bắt đầu dựng")
+                self.btn_run.setStyleSheet("""
+                    QPushButton#btn_run {
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8b5cf6, stop:1 #06b6d4);
+                        color: white;
+                        padding: 10px;
+                        border-radius: 6px;
+                        font-weight: bold;
+                        font-size: 13px;
+                    }
+                    QPushButton#btn_run:hover {
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #a78bfa, stop:1 #22d3ee);
+                    }
+                """)
 
     def _set_workflow_stage(self, stage: int):
         """Chuyển đổi trạng thái giao diện giữa Bước 1 (Quét & Cache) và Bước 2 (Dựng & Xuất)."""
@@ -4035,29 +4339,24 @@ class AutoWindow(QMainWindow):
             self.lbl_pct_big.setStyleSheet("font-size: 32px; font-weight: bold; color: #f4f4f5;")
         
         # Cập nhật trạng thái từng bước trên danh sách bước bên phải
-        if hasattr(self, "step_labels") and len(self.step_labels) == 4:
-            if val < 25:
-                active_idx = 0
-            elif val < 50:
-                active_idx = 1
-            elif val < 80:
-                active_idx = 2
+        if hasattr(self, "step_tracker"):
+            if val < 6:
+                self.step_tracker.set_step_status("validate", "running")
+            elif val < 12:
+                self.step_tracker.set_step_status("load_model", "running")
+            elif val < 65:
+                self.step_tracker.set_step_status("speech_to_text", "running")
+                self.step_tracker.update_step_progress("speech_to_text", val)
+            elif val < 82:
+                self.step_tracker.set_step_status("ai_director", "running")
+            elif val < 94:
+                self.step_tracker.set_step_status("apply_cut", "running")
             else:
-                active_idx = 3
+                self.step_tracker.set_step_status("export", "running")
 
-            for i, lbl in enumerate(self.step_labels):
-                if val >= 100:
-                    lbl.setText(f"✓ {self.step_names[i]}")
-                    lbl.setStyleSheet("color: #86efac; font-size: 11.5px; font-weight: 500;")
-                elif i < active_idx:
-                    lbl.setText(f"✓ {self.step_names[i]}")
-                    lbl.setStyleSheet("color: #86efac; font-size: 11.5px;")
-                elif i == active_idx:
-                    lbl.setText(f"● {self.step_names[i]}")
-                    lbl.setStyleSheet("color: #c4b5fd; font-size: 11.5px; font-weight: bold;")
-                else:
-                    lbl.setText(f"○ {self.step_names[i]}")
-                    lbl.setStyleSheet("color: #71717a; font-size: 11.5px;")
+            if val >= 100:
+                for k in self.step_tracker.step_keys:
+                    self.step_tracker._set_row_done(k)
 
         # Cập nhật thanh tiến độ cache bên cột trái nếu đang quét/nạp
         if hasattr(self, "cache_progress_bar") and getattr(self, "is_processing", False):

@@ -767,7 +767,7 @@ button.chip.on{background:var(--violet-lo);color:#ddd6fe;border-color:var(--viol
           <div class="overall"><b id="pctBig">46%</b><span id="etaTxt">còn khoảng 3 phút</span></div>
           <div class="bar" id="mainBar" style="--p:46%"><i></i></div>
           <div class="pipe" id="pipe"></div>
-          <button class="btn stop sm" style="align-self:flex-start"><svg class="ico"><use href="#i-stop"/></svg>Dừng</button>
+          <button class="btn stop sm" id="stopBtn" style="align-self:flex-start;display:none"><svg class="ico"><use href="#i-stop"/></svg>Dừng</button>
         </div>
         <div class="sec" style="border-bottom:0;padding-bottom:10px"><div class="sec-h"><span class="h">Nhật ký</span><button class="btn ghost sm">Sao chép</button></div></div>
         <div class="console" id="console"></div>
@@ -914,11 +914,37 @@ function updateAll(){
     if(cPill){ cPill.className='cache-pill'; cPill.innerHTML='Chờ dựng · 0 / 67'; }
     if(cBar) cBar.style.setProperty('--p','0%');
     if(cDesc) cDesc.innerHTML='⚡ Tự động quét & nạp cache khi bấm [Bắt đầu dựng]';
+  // Đồng bộ trạng thái nút Dừng và nút Bắt đầu dựng
+  const stopBtn=$('#stopBtn');
+  const runBtn=$('#runBtn');
+  if(stopBtn && runBtn){
+    if(P.state==='run'){
+      stopBtn.style.display='inline-flex';
+      stopBtn.disabled=false;
+      runBtn.innerHTML=`<svg class="ico"><use href="#i-stop"/></svg>Đang dựng (Bấm để dừng)`;
+      runBtn.classList.add('stop');
+      runBtn.classList.remove('primary');
+    } else {
+      stopBtn.style.display='none';
+      stopBtn.disabled=true;
+      runBtn.innerHTML=`<svg class="ico"><use href="#i-play"/></svg>Bắt đầu dựng`;
+      runBtn.classList.remove('stop');
+      runBtn.classList.add('primary');
+    }
   }
 }
 const now=()=>new Date().toTimeString().slice(0,8);
 function log(h,t=now()){const c=$('#console');c.insertAdjacentHTML('beforeend',`<div><span class="t">${t}</span> ${h}</div>`);c.scrollTop=c.scrollHeight}
 function setSeg(sel,val){$$(sel+' button').forEach(b=>b.classList.toggle('on',(b.dataset.s||b.dataset.side)===val))}
+function stopSim(){
+  clearInterval(P.timer);
+  P.state='idle';
+  P.p=0;
+  setSeg('#stateSeg','idle');
+  log(`<span style="color:#ef4444">🛑 Người dùng bấm Dừng. Đã thu hồi tài nguyên và dừng tiến trình an toàn!</span>`);
+  toast('🛑 Đã dừng tiến trình an toàn');
+  updateAll();
+}
 function sim(){
   clearInterval(P.timer);
   if(P.state!=='run')P.p=0;
@@ -938,7 +964,8 @@ $$('#sideSeg button').forEach(b=>b.addEventListener('click',()=>{
   const bb=$('#bubble'),s=b.dataset.side;bb.dataset.side=s;
   bb.style.right=s==='right'?'30px':'auto';bb.style.left=s==='left'?'30px':'auto'}));
 $('#simBtn').onclick=sim;
-$('#runBtn').onclick=sim;
+$('#stopBtn').onclick=stopSim;
+$('#runBtn').onclick=()=>{if(P.state==='run')stopSim();else sim()};
 
 /* ======================= AI DIRECTOR ======================= */
 const CHAPS=[

@@ -1158,4 +1158,55 @@ def test_google_drive_dialog_and_import(app_window, tmp_path):
     assert str(mock_file) in app_window.lbl_file.text()
 
 
+def test_pipeline_step_tracker_and_unified_run_flow(qapp):
+    """Kiểm tra widget 6 bước tiến trình, nút Dừng và luồng thống nhất kịch bản JSON."""
+    from src.ui.auto.auto_window import AutoWindow
+    window = AutoWindow()
+    tracker = window.step_tracker
+    assert tracker is not None
+    assert len(tracker.step_keys) == 6
+    assert "speech_to_text" in tracker.rows
+
+    # 1. Kiểm tra chuyển trạng thái bước
+    tracker.set_step_status("speech_to_text", "running")
+    assert tracker.rows["speech_to_text"]["status"] == "running"
+    assert tracker.rows["speech_to_text"]["icon"].text() == "●"
+
+    # Kiểm tra cập nhật % trực tiếp
+    tracker.update_step_progress("speech_to_text", 96)
+    assert tracker.rows["speech_to_text"]["time"].text() == "96%"
+
+    # Kiểm tra nút Dừng
+    tracker.mark_stopped()
+    assert tracker.rows["speech_to_text"]["status"] == "stopped"
+    assert tracker.rows["speech_to_text"]["icon"].text() == "⏹"
+
+    # Reset
+    tracker.reset()
+    assert tracker.rows["speech_to_text"]["status"] == "idle"
+    assert tracker.rows["speech_to_text"]["icon"].text() == "○"
+
+    # 2. Kiểm tra hiển thị nút Dừng theo trạng thái
+    window._update_run_button_state(running=False)
+    assert window.btn_stop.isHidden() is True
+
+    window._update_run_button_state(running=True)
+    assert window.btn_stop.isHidden() is False
+    assert window.btn_stop.isEnabled() is True
+
+    window._update_run_button_state(running=False)
+    assert window.btn_stop.isHidden() is True
+
+    # 3. Kiểm tra tự động nhận diện JSON kịch bản và tích hợp vào nút Bắt đầu dựng
+    valid_json = '{"timeline": [{"start": 0.0, "end": 5.0, "text": "Xin chào"}]}'
+    window.txt_json_input.setPlainText(valid_json)
+    assert "DỰNG THEO KỊCH BẢN JSON" in window.btn_run.text()
+
+    # Khi xóa JSON, nút quay về mặc định
+    window.txt_json_input.setPlainText("")
+    assert "Bắt đầu dựng" in window.btn_run.text()
+    window.close()
+    window.deleteLater()
+
+
 
