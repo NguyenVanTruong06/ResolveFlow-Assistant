@@ -263,14 +263,19 @@ class DraggableAssetLabel(QLabel):
 # 5. WAVEFORM CANVAS & ASSET CARD (Bộ hiển thị đạo cụ trực quan)
 # =========================================================================
 class WaveformCanvas(QWidget):
-    """Canvas vẽ dạng sóng (waveform) 16-20 cột phong bì âm thanh (envelope bars)."""
-    def __init__(self, preset_id: str = "sfx", bars: Optional[List[float]] = None, parent=None):
+    """Canvas vẽ dạng sóng (waveform) phong bì âm thanh (envelope bars)."""
+    def __init__(self, preset_id: str = "sfx", bars: Optional[List[float]] = None, parent=None, num_bars: int = 18, height: int = 30):
         super().__init__(parent)
         self.preset_id = preset_id
-        self.bars = bars if bars is not None else self._generate_envelope_bars(preset_id)
+        self.bars = bars if bars is not None else self._generate_envelope_bars(preset_id, num_bars=num_bars)
         self.is_playing = False
-        self.setFixedHeight(30)
+        self.setFixedHeight(height)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def set_preset_id(self, preset_id: str, num_bars: int = 18):
+        self.preset_id = preset_id
+        self.bars = self._generate_envelope_bars(preset_id, num_bars=num_bars)
+        self.update()
 
     @staticmethod
     def _generate_envelope_bars(preset_id: str, num_bars: int = 18) -> List[float]:
@@ -337,6 +342,369 @@ class WaveformCanvas(QWidget):
             x = i * (bar_w + gap)
             y = (h - bar_h) / 2.0
             painter.drawRoundedRect(QRectF(x, y, bar_w, bar_h), 1.0, 1.0)
+
+
+class LutSplitWidget(QWidget):
+    """Widget so sánh Before / After chia đôi màn hình với thanh trượt split."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.split_pct = 50
+        self.lut_colors = ["#1f2937", "#64748b", "#cbd5e1", "#f8fafc"]
+        self.lut_name = "Clean Rec.709"
+        self.setFixedHeight(130)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def set_split(self, pct: int):
+        self.split_pct = max(0, min(100, pct))
+        self.update()
+
+    def set_lut(self, name: str, colors: Optional[List[str]] = None):
+        self.lut_name = name
+        self.lut_colors = colors or ["#1f2937", "#64748b", "#cbd5e1", "#f8fafc"]
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+        split_x = int(w * (self.split_pct / 100.0))
+
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(0, 0, w, h, 8, 8)
+        painter.setClipPath(clip_path)
+
+        # 1. Cảnh Gốc (Original neutral scenery)
+        grad_orig = QLinearGradient(0, 0, 0, h)
+        grad_orig.setColorAt(0.0, QColor("#334155"))
+        grad_orig.setColorAt(0.5, QColor("#1e293b"))
+        grad_orig.setColorAt(1.0, QColor("#0f172a"))
+        painter.fillRect(0, 0, w, h, grad_orig)
+
+        # Mặt trời cảnh gốc
+        painter.setBrush(QBrush(QColor(245, 158, 11, 140)))
+        painter.setPen(Qt.NoPen)
+        painter.drawEllipse(QPointF(w * 0.25, h * 0.35), 22, 22)
+
+        # Núi đồi cảnh gốc
+        orig_hill = QPainterPath()
+        orig_hill.moveTo(0, h)
+        orig_hill.lineTo(0, h * 0.6)
+        orig_hill.quadTo(w * 0.25, h * 0.45, w * 0.55, h * 0.68)
+        orig_hill.lineTo(w, h * 0.68)
+        orig_hill.lineTo(w, h)
+        painter.setBrush(QBrush(QColor("#1e293b")))
+        painter.drawPath(orig_hill)
+
+        # 2. Cảnh Sau (Graded scene with LUT palette)
+        painter.save()
+        painter.setClipRect(split_x, 0, w - split_x, h)
+        grad_lut = QLinearGradient(0, 0, 0, h)
+        c0 = QColor(self.lut_colors[0] if len(self.lut_colors) > 0 else "#09090b")
+        c1 = QColor(self.lut_colors[1] if len(self.lut_colors) > 1 else "#7c3aed")
+        c2 = QColor(self.lut_colors[2] if len(self.lut_colors) > 2 else "#ec4899")
+        grad_lut.setColorAt(0.0, c0)
+        grad_lut.setColorAt(0.5, c1)
+        grad_lut.setColorAt(1.0, c2)
+        painter.fillRect(split_x, 0, w - split_x, h, grad_lut)
+
+        # Mặt trời graded
+        sun_color = QColor(self.lut_colors[-1] if self.lut_colors else "#fde047")
+        painter.setBrush(QBrush(sun_color))
+        painter.drawEllipse(QPointF(w * 0.25, h * 0.35), 22, 22)
+
+        # Đồi graded
+        lut_hill = QPainterPath()
+        lut_hill.moveTo(0, h)
+        lut_hill.lineTo(0, h * 0.6)
+        lut_hill.quadTo(w * 0.25, h * 0.45, w * 0.55, h * 0.68)
+        lut_hill.lineTo(w, h * 0.68)
+        lut_hill.lineTo(w, h)
+        painter.setBrush(QBrush(c0.darker(140)))
+        painter.drawPath(lut_hill)
+        painter.restore()
+
+        # 3. Vạch chia tách (Divider & handle)
+        painter.setClipping(False)
+        painter.setPen(QPen(QColor("#FFFFFF"), 2))
+        painter.drawLine(split_x, 0, split_x, h)
+
+        handle_y = h / 2.0
+        painter.setBrush(QBrush(QColor("#FFFFFF")))
+        painter.setPen(QPen(QColor(ThemeColors.BG_CARD), 2))
+        painter.drawEllipse(QPointF(split_x, handle_y), 7, 7)
+
+        # 4. Badges GỐC & SAU
+        painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        # Gốc badge
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 160)))
+        painter.drawRoundedRect(QRectF(8, 8, 42, 18), 4, 4)
+        painter.setPen(QPen(QColor("#e4e4e7")))
+        painter.drawText(QRectF(8, 8, 42, 18), Qt.AlignCenter, "GỐC")
+
+        # Sau badge
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(139, 92, 246, 200)))
+        painter.drawRoundedRect(QRectF(w - 50, 8, 42, 18), 4, 4)
+        painter.setPen(QPen(QColor("#ffffff")))
+        painter.drawText(QRectF(w - 50, 8, 42, 18), Qt.AlignCenter, "SAU")
+
+
+class TransitionLoopWidget(QWidget):
+    """Widget xem trước chuyển cảnh dạng lặp (Transition Visual Loop Preview)."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.trans_name = "Whip Pan Left"
+        self.trans_kind = "transform"
+        self.frames = 20
+        self.progress = 0.0
+        self.setFixedHeight(130)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        self.anim_timer = QTimer(self)
+        self.anim_timer.setInterval(40)
+        self.anim_timer.timeout.connect(self._on_tick)
+        self.anim_timer.start()
+
+    def set_transition(self, name: str, kind: str, frames: int):
+        self.trans_name = name
+        self.trans_kind = kind
+        self.frames = frames
+        self.update()
+
+    def _on_tick(self):
+        self.progress += 0.03
+        if self.progress > 1.3:
+            self.progress = 0.0
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(0, 0, w, h, 8, 8)
+        painter.setClipPath(clip_path)
+
+        # Clip A (Violet)
+        painter.fillRect(0, 0, w, h, QColor("#1e1b4b"))
+
+        p = min(1.0, max(0.0, self.progress))
+        if "whip" in self.trans_kind or "slide" in self.trans_kind:
+            bx = int(w * (1.0 - p))
+            painter.fillRect(bx, 0, w, h, QColor("#083344"))
+            if 0.05 < p < 0.95:
+                painter.setPen(QPen(QColor("#06b6d4"), 3))
+                painter.drawLine(bx, 0, bx, h)
+        elif "zoom" in self.trans_kind:
+            scale = 0.2 + 0.8 * p
+            bw = int(w * scale)
+            bh = int(h * scale)
+            bx = int((w - bw) / 2)
+            by = int((h - bh) / 2)
+            painter.fillRect(bx, by, bw, bh, QColor("#083344"))
+        elif "glitch" in self.trans_kind:
+            if int(p * 10) % 2 == 0:
+                painter.fillRect(0, 0, w, h, QColor("#083344"))
+                gy = int(h * ((p * 3) % 1.0))
+                painter.fillRect(0, gy, w, 14, QColor("#ef4444"))
+            else:
+                painter.fillRect(0, 0, w, h, QColor("#1e1b4b"))
+        else:
+            alpha = int(p * 255)
+            painter.fillRect(0, 0, w, h, QColor(8, 51, 68, alpha))
+            if "leak" in self.trans_kind or "glow" in self.trans_kind:
+                painter.setBrush(QBrush(QColor(253, 224, 71, int((1.0 - abs(p - 0.5) * 2) * 160))))
+                painter.setPen(Qt.NoPen)
+                painter.drawEllipse(QPointF(w * p, h * 0.5), 50, 50)
+
+        # Labels Clip A & B
+        painter.setFont(QFont("Arial Black", 14))
+        painter.setPen(QColor(255, 255, 255, 120))
+        painter.drawText(QRectF(16, 0, 50, h), Qt.AlignVCenter, "A")
+        painter.drawText(QRectF(w - 66, 0, 50, h), Qt.AlignVCenter | Qt.AlignRight, "B")
+
+        # Frame badge
+        painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 160)))
+        painter.drawRoundedRect(QRectF(w - 74, 8, 66, 18), 4, 4)
+        painter.setPen(QPen(QColor(ThemeColors.CYAN_HI)))
+        painter.drawText(QRectF(w - 74, 8, 66, 18), Qt.AlignCenter, f"{self.frames} frame")
+
+        # Transition name badge
+        painter.drawRoundedRect(QRectF(8, h - 26, w - 16, 20), 4, 4)
+        painter.setPen(QPen(QColor("#ffffff")))
+        painter.drawText(QRectF(14, h - 26, w - 28, 20), Qt.AlignVCenter | Qt.AlignLeft, f"🔁 {self.trans_name}")
+
+
+class IconMemePreviewWidget(QWidget):
+    """Widget xem trước Icon vector hoặc Meme video reaction cỡ lớn."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.item_name = ""
+        self.item_type = "icon"
+        self.badge_icon = "✨"
+        self.color_hex = "#facc15"
+        self.sub_text = ""
+        self.setFixedHeight(130)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def set_item(self, name: str, item_type: str, badge: str, color_hex: str, sub: str):
+        self.item_name = name
+        self.item_type = item_type
+        self.badge_icon = badge or "✨"
+        self.color_hex = color_hex or "#facc15"
+        self.sub_text = sub
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(0, 0, w, h, 8, 8)
+        painter.setClipPath(clip_path)
+
+        if self.item_type == "icon":
+            painter.fillRect(0, 0, w, h, QColor("#18181b"))
+            sq = 12
+            painter.setBrush(QBrush(QColor("#27272a")))
+            painter.setPen(Qt.NoPen)
+            for x in range(0, w, sq):
+                for y in range(0, h, sq):
+                    if (x // sq + y // sq) % 2 == 0:
+                        painter.drawRect(x, y, sq, sq)
+
+            painter.setFont(QFont("Segoe UI Emoji", 36))
+            painter.setPen(QColor(self.color_hex))
+            painter.drawText(QRectF(0, 6, w, h - 30), Qt.AlignCenter, self.badge_icon)
+
+            painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
+            painter.drawRoundedRect(QRectF(8, 8, 48, 18), 4, 4)
+            painter.setPen(QPen(QColor(self.color_hex)))
+            painter.drawText(QRectF(8, 8, 48, 18), Qt.AlignCenter, "VECTOR")
+        else:
+            grad = QLinearGradient(0, 0, w, h)
+            grad.setColorAt(0.0, QColor("#1e1b4b"))
+            grad.setColorAt(1.0, QColor("#09090b"))
+            painter.fillRect(0, 0, w, h, grad)
+
+            painter.setFont(QFont("Segoe UI Emoji", 34))
+            painter.setPen(QColor("#ffffff"))
+            painter.drawText(QRectF(0, 6, w, h - 34), Qt.AlignCenter, self.badge_icon)
+
+            painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(6, 182, 212, 180)))
+            painter.drawRoundedRect(QRectF(w - 56, 8, 48, 18), 4, 4)
+            painter.setPen(QPen(QColor("#ffffff")))
+            painter.drawText(QRectF(w - 56, 8, 48, 18), Qt.AlignCenter, "▶ MP4")
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 170)))
+        painter.drawRoundedRect(QRectF(8, h - 26, w - 16, 20), 4, 4)
+        painter.setPen(QPen(QColor("#ffffff")))
+        painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        painter.drawText(QRectF(14, h - 26, w - 28, 20), Qt.AlignVCenter | Qt.AlignLeft, self.item_name)
+
+
+def format_text_preset_html(preset_id: str, preset_name: str = "Title", sample_text: str = "", standard_color: str = "#FFFFFF", is_large: bool = False) -> str:
+    """Format rich HTML cho mẫu chữ trong card và inspector."""
+    pid = (preset_id or "").lower()
+    text = sample_text.strip() if sample_text.strip() else ""
+
+    font_base = "18px" if is_large else "13px"
+    font_hl = "22px" if is_large else "15px"
+
+    if pid == "kinetic_hormozi":
+        display = text if text else "TIỀN ĐẾN<br>TỪ <span style=\"color: #facc15;\">ĐÂU?</span>"
+        if text and "<span" not in text:
+            words = text.split()
+            if len(words) > 1:
+                display = " ".join(words[:-1]) + f" <span style=\"color: #facc15; font-size: {font_hl};\">{words[-1]}</span>"
+            else:
+                display = f"<span style=\"color: #facc15;\">{text}</span>"
+        return (
+            f"<div style=\"font-family: 'Arial Black', Impact, sans-serif; font-weight: 900; font-size: {font_base}; text-transform: uppercase; color: #ffffff; text-align: center;\">"
+            f"{display}"
+            "</div>"
+        )
+    elif pid == "karaoke_pop":
+        display = text if text else "dính <span style=\"color: #a3e635;\">mưa</span> rồi"
+        if text and "<span" not in text:
+            words = text.split()
+            if len(words) > 1:
+                mid = len(words) // 2
+                display = " ".join(words[:mid]) + f" <span style=\"color: #a3e635; font-size: {font_hl}; font-weight: 900;\">{words[mid]}</span> " + " ".join(words[mid+1:])
+            else:
+                display = f"<span style=\"color: #a3e635;\">{text}</span>"
+        return (
+            f"<div style=\"font-family: Arial, sans-serif; font-weight: 800; font-size: {font_base}; color: #ffffff; text-align: center;\">"
+            f"{display}"
+            "</div>"
+        )
+    elif pid == "box_highlight":
+        display = text if text else "100% <span style=\"background-color: #ef4444; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: 900;\">sức khỏe</span>"
+        if text and "<span" not in text:
+            words = text.split()
+            if len(words) > 1:
+                display = " ".join(words[:-1]) + f" <span style=\"background-color: #ef4444; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: 900;\">{words[-1]}</span>"
+            else:
+                display = f"<span style=\"background-color: #ef4444; color: #ffffff; padding: 2px 6px; border-radius: 4px;\">{text}</span>"
+        return (
+            f"<div style=\"font-family: Arial, sans-serif; font-weight: 800; font-size: {font_base}; color: #ffffff; text-align: center;\">"
+            f"{display}"
+            "</div>"
+        )
+    elif pid == "glow_neon":
+        display = text if text else "NEON"
+        return (
+            f"<div style=\"font-family: Arial, sans-serif; font-weight: 800; font-size: {font_base}; text-align: center;\">"
+            f"<span style=\"color: #ecfeff; border: 1px solid #06b6d4; background-color: rgba(6, 182, 212, 0.2); padding: 4px 12px; border-radius: 6px;\">{display}</span>"
+            "</div>"
+        )
+    elif pid == "vhs_retro":
+        display = text if text else "HÈ 1999"
+        sub_play = "▶ PLAY SP 0:12"
+        return (
+            f"<div style=\"font-family: Consolas, monospace; font-size: 11px; color: #f5f5f4; text-align: center;\">"
+            f"<div style=\"color: #22c55e; font-size: 10px; margin-bottom: 3px;\">{sub_play}</div>"
+            f"<div style=\"font-size: {font_base}; font-weight: bold; letter-spacing: 2px; color: #fff59d;\">{display}</div>"
+            "</div>"
+        )
+    elif pid == "paper_cutout":
+        display = text if text else "VLOG"
+        spans = "".join(f"<span style=\"background-color: #ffffff; color: #111111; padding: 2px 5px; margin: 1px; border-radius: 2px;\">{c}</span>" for c in display[:8])
+        return (
+            f"<div style=\"font-family: Georgia, serif; font-weight: bold; font-size: {font_base}; color: #111111; text-align: center;\">"
+            f"{spans}"
+            "</div>"
+        )
+    elif pid == "gradient_fill":
+        display = text if text else "HOÀNG HÔN SUNSET"
+        return (
+            f"<div style=\"font-family: 'Arial Black', sans-serif; font-weight: 900; font-size: {font_base}; text-align: center;\">"
+            f"<span style=\"color: #fb923c;\">{display}</span>"
+            "</div>"
+        )
+    else:
+        display = text if text else preset_name.split("(")[0].strip()
+        return (
+            f"<div style=\"font-family: Arial, sans-serif; font-weight: bold; font-size: {font_base}; color: {standard_color}; text-align: center;\">"
+            f"{display}"
+            "</div>"
+        )
 
 
 class AssetCard(QFrame):
@@ -917,10 +1285,13 @@ class TabAssets(QWidget):
 
         self.current_rail_tab = "text"
         self.current_sub_cat = "all"
+        self.current_aspect_ratio = "16:9"
         self.card_widgets: List[AssetCard] = []
         self.selected_asset = self.all_presets[0] if self.all_presets else None
 
         self._init_ui()
+        self.sfx_playback_timer = QTimer(self)
+        self.sfx_playback_timer.timeout.connect(self._on_inspector_sfx_playback_finished)
         self._populate_cards()
         self._filter_by_rail("text")
 
@@ -1160,21 +1531,185 @@ class TabAssets(QWidget):
         self.insp_vbox.setContentsMargins(16, 16, 16, 16)
         self.insp_vbox.setSpacing(14)
 
-        # 1. Khung Preview lớn
-        self.lbl_insp_preview = QLabel("PREVIEW")
-        self.lbl_insp_preview.setFixedHeight(120)
-        self.lbl_insp_preview.setAlignment(Qt.AlignCenter)
-        self.lbl_insp_preview.setStyleSheet(f"""
-            QLabel {{
+        # 1. Cụm Live Preview Header & Toggle Aspect Ratio (16:9 / 9:16)
+        h_insp_header = QHBoxLayout()
+        h_insp_header.setContentsMargins(0, 0, 0, 0)
+        h_insp_header.setSpacing(8)
+
+        lbl_live_title = QLabel("LIVE PREVIEW")
+        lbl_live_title.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {ThemeColors.TEXT_MUTED};")
+        h_insp_header.addWidget(lbl_live_title)
+        h_insp_header.addStretch()
+
+        self.inspector_aspect_btn = QPushButton("📐 16:9")
+        self.inspector_aspect_btn.setCursor(Qt.PointingHandCursor)
+        self.inspector_aspect_btn.setToolTip("Chuyển tỉ lệ khung hình: 16:9 (Ngang) ↔ 9:16 (Dọc TikTok/Shorts)")
+        self.inspector_aspect_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                color: {ThemeColors.CYAN_HI};
+                font-size: 11px;
+                font-weight: bold;
+                padding: 3px 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.BG_CARD_ACTIVE};
+                border-color: {ThemeColors.CYAN_HI};
+            }}
+        """)
+        self.inspector_aspect_btn.clicked.connect(self._toggle_inspector_aspect_ratio)
+        h_insp_header.addWidget(self.inspector_aspect_btn)
+        self.insp_vbox.addLayout(h_insp_header)
+
+        # 2. Viewport 1: Text Live Preview
+        self.inspector_text_preview = QFrame()
+        self.inspector_text_preview.setFixedHeight(130)
+        self.inspector_text_preview.setStyleSheet(f"""
+            QFrame {{
                 background-color: {ThemeColors.BG_CARD};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-radius: 10px;
-                font-size: 18px;
-                font-weight: bold;
-                color: #FFFFFF;
             }}
         """)
-        self.insp_vbox.addWidget(self.lbl_insp_preview)
+        t_prev_layout = QVBoxLayout(self.inspector_text_preview)
+        t_prev_layout.setContentsMargins(8, 8, 8, 8)
+        t_prev_layout.setAlignment(Qt.AlignCenter)
+
+        self.lbl_insp_preview = QLabel("PREVIEW", self.inspector_text_preview)
+        self.lbl_insp_preview.setTextFormat(Qt.RichText)
+        self.lbl_insp_preview.setAlignment(Qt.AlignCenter)
+        self.lbl_insp_preview.setWordWrap(True)
+        self.lbl_insp_preview.setStyleSheet("background: transparent; border: none; font-size: 16px; color: #FFFFFF;")
+        t_prev_layout.addWidget(self.lbl_insp_preview)
+        self.insp_vbox.addWidget(self.inspector_text_preview)
+
+        # 3. Viewport 2: LUT Split Comparison (Before / After Split Slider 0% - 100%)
+        self.inspector_lut_viewport = QWidget()
+        lut_v_layout = QVBoxLayout(self.inspector_lut_viewport)
+        lut_v_layout.setContentsMargins(0, 0, 0, 0)
+        lut_v_layout.setSpacing(6)
+
+        self.lut_split_widget = LutSplitWidget(self.inspector_lut_viewport)
+        lut_v_layout.addWidget(self.lut_split_widget)
+
+        h_slider_row = QHBoxLayout()
+        h_slider_row.setContentsMargins(2, 0, 2, 0)
+        h_slider_row.setSpacing(8)
+
+        lbl_split_title = QLabel("So sánh Before / After:")
+        lbl_split_title.setStyleSheet(f"font-size: 11px; color: {ThemeColors.TEXT_MUTED};")
+        self.lbl_split_pct = QLabel("50%")
+        self.lbl_split_pct.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {ThemeColors.CYAN_HI};")
+
+        h_slider_row.addWidget(lbl_split_title)
+        h_slider_row.addStretch()
+        h_slider_row.addWidget(self.lbl_split_pct)
+        lut_v_layout.addLayout(h_slider_row)
+
+        self.lut_split_slider = QSlider(Qt.Horizontal, self.inspector_lut_viewport)
+        self.lut_split_slider.setRange(0, 100)
+        self.lut_split_slider.setValue(50)
+        self.lut_split_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                height: 6px;
+                background: {ThemeColors.BG_CARD};
+                border-radius: 3px;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {ThemeColors.PRIMARY};
+                border-radius: 3px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {ThemeColors.CYAN_HI};
+                width: 14px;
+                margin-top: -4px;
+                margin-bottom: -4px;
+                border-radius: 7px;
+            }}
+        """)
+        self.lut_split_slider.valueChanged.connect(self._on_lut_split_slider_changed)
+        lut_v_layout.addWidget(self.lut_split_slider)
+        self.insp_vbox.addWidget(self.inspector_lut_viewport)
+
+        # 4. Viewport 3: SFX Waveform Visualizer & Playback Controller
+        self.inspector_sfx_viewport = QWidget()
+        sfx_v_layout = QVBoxLayout(self.inspector_sfx_viewport)
+        sfx_v_layout.setContentsMargins(0, 0, 0, 0)
+        sfx_v_layout.setSpacing(6)
+
+        h_ctrl = QHBoxLayout()
+        h_ctrl.setContentsMargins(0, 0, 0, 0)
+        h_ctrl.setSpacing(8)
+
+        self.sfx_play_btn = QPushButton("▶ Nghe thử", self.inspector_sfx_viewport)
+        self.sfx_play_btn.setCursor(Qt.PointingHandCursor)
+        self.sfx_play_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.CYAN};
+                border-radius: 6px;
+                color: {ThemeColors.CYAN_HI};
+                font-size: 11px;
+                font-weight: bold;
+                padding: 4px 10px;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.CYAN};
+                color: #05252c;
+            }}
+        """)
+        self.sfx_play_btn.clicked.connect(self._toggle_inspector_sfx_play)
+        h_ctrl.addWidget(self.sfx_play_btn)
+
+        self.sfx_time_lbl = QLabel("0:02", self.inspector_sfx_viewport)
+        self.sfx_time_lbl.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {ThemeColors.TEXT_PRIMARY};")
+        h_ctrl.addWidget(self.sfx_time_lbl)
+
+        h_ctrl.addStretch()
+
+        self.sfx_hint_lbl = QLabel("assets/sfx/whoosh.wav", self.inspector_sfx_viewport)
+        self.sfx_hint_lbl.setStyleSheet(f"font-size: 11px; color: {ThemeColors.TEXT_MUTED};")
+        h_ctrl.addWidget(self.sfx_hint_lbl)
+        sfx_v_layout.addLayout(h_ctrl)
+
+        self.sfx_waveform_canvas = WaveformCanvas(preset_id="sfx", num_bars=32, height=56, parent=self.inspector_sfx_viewport)
+        self.sfx_waveform_canvas.setStyleSheet(f"""
+            background-color: {ThemeColors.BG_CARD};
+            border: 1px solid {ThemeColors.BORDER_DEFAULT};
+            border-radius: 8px;
+            padding: 4px;
+        """)
+        sfx_v_layout.addWidget(self.sfx_waveform_canvas)
+        self.insp_vbox.addWidget(self.inspector_sfx_viewport)
+
+        # 5. Viewport 4: Transition Visual Loop Preview
+        self.inspector_trans_viewport = QWidget()
+        trans_v_layout = QVBoxLayout(self.inspector_trans_viewport)
+        trans_v_layout.setContentsMargins(0, 0, 0, 0)
+        trans_v_layout.setSpacing(6)
+
+        self.trans_loop_widget = TransitionLoopWidget(self.inspector_trans_viewport)
+        trans_v_layout.addWidget(self.trans_loop_widget)
+        self.insp_vbox.addWidget(self.inspector_trans_viewport)
+
+        # 6. Viewport 5: Icon/Meme Vector & Video Preview
+        self.inspector_icon_viewport = QWidget()
+        icon_v_layout = QVBoxLayout(self.inspector_icon_viewport)
+        icon_v_layout.setContentsMargins(0, 0, 0, 0)
+        icon_v_layout.setSpacing(6)
+
+        self.icon_meme_widget = IconMemePreviewWidget(self.inspector_icon_viewport)
+        icon_v_layout.addWidget(self.icon_meme_widget)
+        self.insp_vbox.addWidget(self.inspector_icon_viewport)
+
+        # Mặc định ẩn các viewport không phải Text
+        self.inspector_lut_viewport.hide()
+        self.inspector_sfx_viewport.hide()
+        self.inspector_trans_viewport.hide()
+        self.inspector_icon_viewport.hide()
 
         # 2. Thông tin chi tiết
         self.lbl_insp_title = QLabel("<b>Alex Hormozi Pop</b>")
@@ -1525,6 +2060,73 @@ class TabAssets(QWidget):
         # Cập nhật Inspector
         self._update_inspector_details()
 
+    def _toggle_inspector_aspect_ratio(self):
+        if self.current_aspect_ratio == "16:9":
+            self.current_aspect_ratio = "9:16"
+        else:
+            self.current_aspect_ratio = "16:9"
+        self.inspector_aspect_btn.setText(f"📐 {self.current_aspect_ratio}")
+        self._update_text_preview_aspect()
+
+    def _update_text_preview_aspect(self):
+        if not hasattr(self, "inspector_text_preview"):
+            return
+        if self.current_aspect_ratio == "9:16":
+            self.inspector_text_preview.setFixedHeight(180)
+            self.inspector_text_preview.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #09090b;
+                    border: 2px solid {ThemeColors.PRIMARY};
+                    border-radius: 12px;
+                    margin: 0px 36px;
+                }}
+            """)
+        else:
+            self.inspector_text_preview.setFixedHeight(130)
+            self.inspector_text_preview.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {ThemeColors.BG_CARD};
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 10px;
+                    margin: 0px;
+                }}
+            """)
+
+    def _on_lut_split_slider_changed(self, value: int):
+        if hasattr(self, "lut_split_widget"):
+            self.lut_split_widget.set_split(value)
+        if hasattr(self, "lbl_split_pct"):
+            self.lbl_split_pct.setText(f"{value}%")
+
+    def _toggle_inspector_sfx_play(self):
+        if hasattr(self, "sfx_waveform_canvas") and self.sfx_waveform_canvas.is_playing:
+            self._stop_inspector_sfx_play()
+        else:
+            self._start_inspector_sfx_play()
+
+    def _start_inspector_sfx_play(self):
+        if hasattr(self, "sfx_waveform_canvas"):
+            self.sfx_waveform_canvas.is_playing = True
+            self.sfx_waveform_canvas.update()
+        if hasattr(self, "sfx_play_btn"):
+            self.sfx_play_btn.setText("⏸ Dừng")
+        dur = getattr(self.selected_asset, "duration", 1.5)
+        if hasattr(self, "sfx_playback_timer"):
+            self.sfx_playback_timer.stop()
+            self.sfx_playback_timer.start(int(dur * 1000) if dur > 0 else 1500)
+
+    def _stop_inspector_sfx_play(self):
+        if hasattr(self, "sfx_waveform_canvas"):
+            self.sfx_waveform_canvas.is_playing = False
+            self.sfx_waveform_canvas.update()
+        if hasattr(self, "sfx_play_btn"):
+            self.sfx_play_btn.setText("▶ Nghe thử")
+        if hasattr(self, "sfx_playback_timer"):
+            self.sfx_playback_timer.stop()
+
+    def _on_inspector_sfx_playback_finished(self):
+        self._stop_inspector_sfx_play()
+
     def _update_inspector_details(self):
         if not self.selected_asset:
             return
@@ -1534,54 +2136,90 @@ class TabAssets(QWidget):
         sub = getattr(self.selected_asset, "sub", "") or getattr(self.selected_asset, "description", "")
         self.lbl_insp_sub.setText(sub)
 
-        # Cập nhật text preview
-        if isinstance(self.selected_asset, TextStylePreset):
-            sample = self.txt_single_title.text().strip() or "ResolveFlow"
-            self.lbl_insp_preview.setText(sample)
-            self.lbl_insp_preview.setStyleSheet(f"""
-                background-color: {ThemeColors.BG_CARD};
-                border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 10px;
-                font-size: 20px;
-                font-weight: bold;
-                color: {self.selected_asset.standard_color};
-            """)
+        is_text = isinstance(self.selected_asset, TextStylePreset) or getattr(self.selected_asset, "tab", "") == "text"
+        is_lut = getattr(self.selected_asset, "tab", "") == "lut"
+        is_sfx = getattr(self.selected_asset, "tab", "") == "sfx"
+        is_trans = isinstance(self.selected_asset, TransitionStylePreset) or getattr(self.selected_asset, "tab", "") == "trans"
+
+        if is_text:
+            self.inspector_aspect_btn.show()
+            self.inspector_text_preview.show()
+            self.inspector_lut_viewport.hide()
+            self.inspector_sfx_viewport.hide()
+            self.inspector_trans_viewport.hide()
+            self.inspector_icon_viewport.hide()
+
+            sample = self.txt_single_title.text().strip() or "ResolveFlow Studio"
+            pid = getattr(self.selected_asset, "id", "")
+            std_col = getattr(self.selected_asset, "standard_color", "#FFFFFF")
+            html = format_text_preset_html(pid, name, sample, std_col, is_large=True)
+            self.lbl_insp_preview.setText(html)
             self.btn_insert_title_playhead.setText("🚀 Chèn tại Playhead (V2)")
-        elif getattr(self.selected_asset, "tab", "") == "lut":
-            self.lbl_insp_preview.setText("🎨 LUT PREVIEW")
-            self.lbl_insp_preview.setStyleSheet(f"""
-                background-color: {ThemeColors.BG_CARD};
-                border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 10px;
-                color: #22d3ee;
-                font-weight: bold;
-            """)
+            self.grp_params.show()
+        elif is_lut:
+            self.inspector_aspect_btn.hide()
+            self.inspector_text_preview.hide()
+            self.inspector_lut_viewport.show()
+            self.inspector_sfx_viewport.hide()
+            self.inspector_trans_viewport.hide()
+            self.inspector_icon_viewport.hide()
+
+            pal = getattr(self.selected_asset, "pal", [])
+            self.lut_split_widget.set_lut(name, pal)
             self.btn_insert_title_playhead.setText("🎨 Áp LUT lên Timeline")
-        elif getattr(self.selected_asset, "tab", "") == "sfx":
-            self.lbl_insp_preview.setText("🔊 SOUNDBOARD SFX")
-            self.lbl_insp_preview.setStyleSheet(f"""
-                background-color: {ThemeColors.BG_CARD};
-                border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 10px;
-                color: #34d399;
-                font-weight: bold;
-            """)
+            self.grp_params.hide()
+        elif is_sfx:
+            self.inspector_aspect_btn.hide()
+            self.inspector_text_preview.hide()
+            self.inspector_lut_viewport.hide()
+            self.inspector_sfx_viewport.show()
+            self.inspector_trans_viewport.hide()
+            self.inspector_icon_viewport.hide()
+
+            pid = getattr(self.selected_asset, "id", "sfx")
+            clean_id = pid.replace("sfx_", "")
+            dur = getattr(self.selected_asset, "duration", 2.0)
+            self.sfx_waveform_canvas.set_preset_id(pid, num_bars=32)
+            self.sfx_time_lbl.setText(f"{dur:.1f}s")
+            self.sfx_hint_lbl.setText(f"assets/sfx/{clean_id}.wav")
+            self.sfx_play_btn.setText("▶ Nghe thử")
             self.btn_insert_title_playhead.setText("🔊 Chèn âm thanh tại Playhead (A2)")
+            self.grp_params.hide()
+        elif is_trans:
+            self.inspector_aspect_btn.hide()
+            self.inspector_text_preview.hide()
+            self.inspector_lut_viewport.hide()
+            self.inspector_sfx_viewport.hide()
+            self.inspector_trans_viewport.show()
+            self.inspector_icon_viewport.hide()
+
+            kind = getattr(self.selected_asset, "category", "transform")
+            frames = getattr(self.selected_asset, "frames", 20)
+            self.trans_loop_widget.set_transition(name, kind, frames)
+            self.btn_insert_title_playhead.setText("🔄 Chèn chuyển cảnh vào Timeline")
+            self.grp_params.hide()
         else:
+            self.inspector_aspect_btn.hide()
+            self.inspector_text_preview.hide()
+            self.inspector_lut_viewport.hide()
+            self.inspector_sfx_viewport.hide()
+            self.inspector_trans_viewport.hide()
+            self.inspector_icon_viewport.show()
+
+            tab_type = getattr(self.selected_asset, "tab", "icon")
             badge = getattr(self.selected_asset, "badge_icon", "✨")
-            self.lbl_insp_preview.setText(f"{badge}\n{name}")
-            self.lbl_insp_preview.setStyleSheet(f"""
-                background-color: {ThemeColors.BG_CARD};
-                border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 10px;
-                color: #FFFFFF;
-                font-weight: bold;
-            """)
+            color_hex = getattr(self.selected_asset, "color_hex", "#facc15")
+            self.icon_meme_widget.set_item(name, tab_type, badge, color_hex, sub)
             self.btn_insert_title_playhead.setText("➕ Chèn vào Timeline")
+            self.grp_params.hide()
 
     def _on_sample_text_changed(self, text: str):
-        if isinstance(self.selected_asset, TextStylePreset):
-            self.lbl_insp_preview.setText(text.strip() or "ResolveFlow")
+        if isinstance(self.selected_asset, TextStylePreset) or getattr(self.selected_asset, "tab", "") == "text":
+            name = getattr(self.selected_asset, "name", "")
+            pid = getattr(self.selected_asset, "id", "")
+            std_col = getattr(self.selected_asset, "standard_color", "#FFFFFF")
+            html = format_text_preset_html(pid, name, text.strip() or "ResolveFlow Studio", std_col, is_large=True)
+            self.lbl_insp_preview.setText(html)
 
     def _on_favorite_toggled(self, preset_id: str, is_fav: bool):
         if is_fav:

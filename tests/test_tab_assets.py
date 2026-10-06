@@ -1,10 +1,10 @@
 import re
 import pytest
-from PySide6.QtWidgets import QLabel, QPushButton, QFrame
+from PySide6.QtWidgets import QLabel, QPushButton, QFrame, QSlider
 from PySide6.QtCore import Qt
 
 from src.ui.tabs.tab_assets import (
-    AssetCard, StudioAsset, MOCKUP_LUTS, MOCKUP_SFX, MOCKUP_ICONS, TabAssets
+    AssetCard, StudioAsset, MOCKUP_LUTS, MOCKUP_SFX, MOCKUP_ICONS, MOCKUP_MEMES, TabAssets
 )
 from src.core.text_preset import BUILTIN_PRESETS, TextStylePreset
 from src.core.transition_preset import BUILTIN_TRANSITIONS, TransitionStylePreset
@@ -166,3 +166,88 @@ def test_visual_card_renderers_global_constraints(qapp):
             t_sheet = card.thumb.styleSheet()
             t_matches = fractional_px_pattern.findall(t_sheet)
             assert len(t_matches) == 0, f"Found fractional px in thumb stylesheet: {t_matches}"
+
+
+def test_inspector_live_previews(qapp):
+    """Kiểm tra khu vực Inspector Live Preview viewports và nút chuyển tỉ lệ khung hình."""
+    tab = TabAssets()
+    tab.show()
+
+    # 1. Aspect ratio switcher và Text Live Preview
+    assert hasattr(tab, "inspector_aspect_btn"), "TabAssets must have inspector_aspect_btn"
+    assert hasattr(tab, "current_aspect_ratio"), "TabAssets must store current_aspect_ratio"
+    assert tab.current_aspect_ratio in ["16:9", "9:16"]
+    assert isinstance(tab.inspector_aspect_btn, QPushButton)
+
+    # Khởi tạo mặc định là 16:9, bấm nút chuyển sang 9:16 rồi quay lại 16:9
+    initial_ratio = tab.current_aspect_ratio
+    tab.inspector_aspect_btn.click()
+    assert tab.current_aspect_ratio != initial_ratio
+    assert tab.current_aspect_ratio in ["16:9", "9:16"]
+    assert any(ratio in tab.inspector_aspect_btn.text() for ratio in ["16:9", "9:16"])
+
+    # Text preset mặc định đang được chọn
+    text_preset = BUILTIN_PRESETS[0]
+    tab._on_card_selected(text_preset.id)
+    assert tab.selected_asset.id == text_preset.id
+    assert tab.inspector_aspect_btn.isVisible()
+    # Kiểm tra viewport text preview
+    assert hasattr(tab, "inspector_text_preview"), "TabAssets must have inspector_text_preview"
+    assert tab.inspector_text_preview.isVisible()
+
+    # 2. LUT Split Before/After Viewport
+    assert hasattr(tab, "lut_split_slider"), "TabAssets must have lut_split_slider"
+    assert isinstance(tab.lut_split_slider, QSlider)
+    assert tab.lut_split_slider.minimum() == 0
+    assert tab.lut_split_slider.maximum() == 100
+    assert hasattr(tab, "inspector_lut_viewport"), "TabAssets must have inspector_lut_viewport"
+
+    # Chọn một LUT
+    lut_asset = MOCKUP_LUTS[0]
+    tab._on_card_selected(lut_asset.id)
+    assert tab.selected_asset.id == lut_asset.id
+    assert tab.inspector_lut_viewport.isVisible()
+    assert not tab.inspector_aspect_btn.isVisible()
+    # Split slider thay đổi giá trị
+    tab.lut_split_slider.setValue(75)
+    assert tab.lut_split_slider.value() == 75
+
+    # 3. SFX Waveform Visualizer & Playback Controller
+    assert hasattr(tab, "sfx_waveform_canvas"), "TabAssets must have sfx_waveform_canvas"
+    assert hasattr(tab, "inspector_sfx_viewport"), "TabAssets must have inspector_sfx_viewport"
+    assert hasattr(tab, "sfx_play_btn"), "TabAssets must have sfx_play_btn playback controller"
+    assert hasattr(tab, "sfx_time_lbl"), "TabAssets must have sfx_time_lbl time indicator"
+
+    sfx_asset = MOCKUP_SFX[0]
+    tab._on_card_selected(sfx_asset.id)
+    assert tab.selected_asset.id == sfx_asset.id
+    assert tab.inspector_sfx_viewport.isVisible()
+    assert tab.sfx_waveform_canvas.isVisible()
+    assert tab.sfx_play_btn.isVisible()
+    assert tab.sfx_time_lbl.isVisible()
+    tab.sfx_play_btn.click()
+
+    # 4. Transition Visual Loop Preview
+    assert hasattr(tab, "inspector_trans_viewport"), "TabAssets must have inspector_trans_viewport"
+    trans_asset = BUILTIN_TRANSITIONS[0]
+    tab._on_card_selected(trans_asset.id)
+    assert tab.selected_asset.id == trans_asset.id
+    assert tab.inspector_trans_viewport.isVisible()
+
+    # 5. Icon/Meme Vector / Emoji / Thumbnail Preview
+    assert hasattr(tab, "inspector_icon_viewport"), "TabAssets must have inspector_icon_viewport"
+    icon_asset = MOCKUP_ICONS[0]
+    tab._on_card_selected(icon_asset.id)
+    assert tab.selected_asset.id == icon_asset.id
+    assert tab.inspector_icon_viewport.isVisible()
+
+    meme_asset = MOCKUP_MEMES[0]
+    tab._on_card_selected(meme_asset.id)
+    assert tab.selected_asset.id == meme_asset.id
+    assert tab.inspector_icon_viewport.isVisible() or hasattr(tab, "inspector_meme_viewport")
+
+    # 6. Global constraints: font sizes in stylesheets must use integer px (NO fractional px)
+    fractional_px_pattern = re.compile(r'\b\d+\.\d+px\b')
+    insp_sheet = tab.inspector.styleSheet()
+    assert len(fractional_px_pattern.findall(insp_sheet)) == 0, "No fractional px in inspector stylesheet"
+
