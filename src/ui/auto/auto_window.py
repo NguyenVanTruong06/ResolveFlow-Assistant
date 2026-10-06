@@ -1895,6 +1895,51 @@ class AutoWindow(QMainWindow):
         self.lbl_cache_hint.setWordWrap(True)
         proj_layout.addWidget(self.lbl_cache_hint)
 
+        # Cấu hình Mô hình Whisper AI Local & Ngôn ngữ
+        model_row = QHBoxLayout()
+        model_row.setSpacing(6)
+        lbl_model_tag = QLabel("Mô hình AI:")
+        lbl_model_tag.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        model_row.addWidget(lbl_model_tag)
+
+        self.combo_model = QComboBox()
+        self.combo_model.addItems(["small", "base", "tiny", "medium", "large-v3"])
+        self.combo_model.setCurrentText("small")
+        self.combo_model.setStyleSheet("""
+            QComboBox {
+                background-color: #27272a;
+                color: #f4f4f5;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 11px;
+            }
+            QComboBox::drop-down { border: none; }
+        """)
+        self.combo_model.setToolTip("Mô hình Faster-Whisper Local (small: Khuyên dùng cho Tiếng Việt)")
+        model_row.addWidget(self.combo_model, stretch=1)
+
+        self.combo_lang = QComboBox()
+        self.combo_lang.addItems(["vi", "en", "auto"])
+        self.combo_lang.setCurrentText("vi")
+        self.combo_lang.setStyleSheet("""
+            QComboBox {
+                background-color: #27272a;
+                color: #f4f4f5;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 11px;
+            }
+            QComboBox::drop-down { border: none; }
+        """)
+        self.combo_lang.setToolTip("Ngôn ngữ nhận diện (vi: Tiếng Việt, en: English, auto: Tự động)")
+        model_row.addWidget(self.combo_lang)
+        proj_layout.addLayout(model_row)
+
+        self.combo_model.currentIndexChanged.connect(self._check_project_cache_status)
+        self.combo_lang.currentIndexChanged.connect(self._check_project_cache_status)
+
         # Giữ biến btn_scan_only ẩn để tương thích ngược với các slot cũ
         self.btn_scan_only = QPushButton()
         self.btn_scan_only.setVisible(False)
@@ -2716,10 +2761,12 @@ class AutoWindow(QMainWindow):
         self.combo_ai_engine = QComboBox()
         self.combo_ai_engine.addItems(["Prompt Web (Miễn phí)", "Cloud API (OpenAI/Gemini)", "Local (Ollama)"])
 
-        self.combo_model = QComboBox()
-        self.combo_model.addItem('large-v3')
-        self.combo_lang = QComboBox()
-        self.combo_lang.addItem('vi')
+        if not hasattr(self, "combo_model"):
+            self.combo_model = QComboBox()
+            self.combo_model.addItems(["small", "base", "tiny", "medium", "large-v3"])
+        if not hasattr(self, "combo_lang"):
+            self.combo_lang = QComboBox()
+            self.combo_lang.addItems(["vi", "en", "auto"])
         self.combo_llm_provider = QComboBox()
         self.btn_auto_resolve = QPushButton()
         self.btn_story_save = QPushButton()
@@ -3615,12 +3662,12 @@ class AutoWindow(QMainWindow):
                     QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8b5cf6, stop:1 #06b6d4); border-radius: 3px; }
                 """)
         else:
-            status_msg = f"🔍 Chưa có Cache ({total} clips). Hãy bấm nút 'Bắt đầu quét' bên dưới để nhận diện lời thoại 1 lần duy nhất."
+            status_msg = f"🔍 Chưa có Cache ({total} clips). Sẽ tự động quét & nạp cache khi bấm [Bắt đầu dựng]."
             status_style = "background-color: rgba(56, 189, 248, 0.1); color: #3dcee1; border: 1px solid #2c9dac; border-radius: 6px; padding: 8px; font-size: 12px;"
             badge_txt = f"⚠️ Chưa có ({0}/{total})"
             badge_style = "background-color: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid #f59e0b; padding: 2px 8px; border-radius: 999px; font-weight: bold; font-size: 11px;"
             if hasattr(self, "lbl_cache_hint"):
-                self.lbl_cache_hint.setText("⚡ Tự động quét & nạp cache khi bấm [Bắt đầu dựng]")
+                self.lbl_cache_hint.setText(f"Chưa có cache (0/{total} clip) · Sẽ tự quét & nạp cache khi bấm [Bắt đầu dựng]")
             if hasattr(self, "cache_progress_bar"):
                 self.cache_progress_bar.setStyleSheet("""
                     QProgressBar { background-color: #27272a; border-radius: 3px; }
@@ -3640,6 +3687,9 @@ class AutoWindow(QMainWindow):
         if hasattr(self, "lbl_s1_media_info"):
             proj_title = self.project_structure.root_name if self.project_structure else (os.path.basename(raw_paths[0]) if total == 1 else f"{total} videos")
             self.lbl_s1_media_info.setText(f"📁 <b>Dự án:</b> {proj_title} | <b>Tổng cộng:</b> {total} video tệp")
+
+        if hasattr(self, "btn_run") and not getattr(self, "is_processing", False):
+            self._update_run_button_state(False)
 
     def _build_copilot_clips_data(self) -> Tuple[str, List[Dict[str, Any]]]:
         """Tổng hợp danh sách clip và transcript từ cache để phục vụ các động cơ AI."""
@@ -4353,7 +4403,22 @@ class AutoWindow(QMainWindow):
                     }
                 """)
             else:
-                self.btn_run.setText("🎬 Bắt đầu dựng")
+                raw_paths = getattr(self, "selected_files", [])
+                cache_mgr = ScanCacheManager()
+                model = self.combo_model.currentText() if hasattr(self, "combo_model") else "small"
+                lang = self.combo_lang.currentText() if hasattr(self, "combo_lang") else "vi"
+                total = len(raw_paths)
+                cached_count = sum(1 for vp in raw_paths if cache_mgr.get_cached_scan(vp, model, lang) is not None) if total > 0 else 0
+
+                if total > 0 and cached_count == 0:
+                    self.btn_run.setText("🚀 QUÉT NGUỒN & BẮT ĐẦU DỰNG")
+                elif total > 0 and cached_count < total:
+                    self.btn_run.setText(f"⚡ QUÉT TIẾP & BẮT ĐẦU DỰNG ({cached_count}/{total})")
+                elif total > 0 and cached_count == total:
+                    self.btn_run.setText("🎬 Bắt đầu dựng (Dùng Cache 0.1s)")
+                else:
+                    self.btn_run.setText("🎬 Bắt đầu dựng")
+
                 self.btn_run.setStyleSheet("""
                     QPushButton#btn_run {
                         background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8b5cf6, stop:1 #06b6d4);

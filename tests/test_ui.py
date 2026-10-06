@@ -1209,4 +1209,36 @@ def test_pipeline_step_tracker_and_unified_run_flow(qapp):
     window.deleteLater()
 
 
+def test_cache_status_and_whisper_model_selection(qapp, tmp_path):
+    """Kiểm tra hiển thị trạng thái cache 0%, tự đổi text nút sang Quét nguồn & Bắt đầu dựng và chọn model Faster-Whisper."""
+    from src.ui.auto.auto_window import AutoWindow
+    window = AutoWindow()
+
+    # 1. Kiểm tra dropdown model & lang
+    assert hasattr(window, "combo_model")
+    assert hasattr(window, "combo_lang")
+    model_items = [window.combo_model.itemText(i) for i in range(window.combo_model.count())]
+    assert "small" in model_items
+    assert "large-v3" in model_items
+
+    # 2. Tạo file video giả chưa có cache
+    fake_video = str(tmp_path / "uncached_test_video.mp4")
+    with open(fake_video, "w") as f:
+        f.write("dummy video data")
+
+    window.selected_files = [fake_video]
+    window._check_project_cache_status()
+
+    # Kiểm tra badge và hint khi cache 0%
+    assert "Chưa có" in window.lbl_cache_badge.text()
+    assert "0/1" in window.lbl_cache_hint.text()
+    assert window.cache_progress_bar.value() == 0
+
+    # Nút chính tự đổi nhãn khi chưa có cache
+    assert "QUÉT NGUỒN & BẮT ĐẦU DỰNG" in window.btn_run.text()
+
+    window.close()
+    window.deleteLater()
+
+
 

@@ -679,10 +679,25 @@ button.chip.on{background:var(--violet-lo);color:#ddd6fe;border-color:var(--viol
               <div class="bar" id="cacheBar" style="--p:79%"><i></i></div>
             </div>
             <div class="cache-desc" id="cacheDesc">⚡ 53 clip đã nạp cache · 14 clip chờ quét</div>
+            <div class="cache-model-row" style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:6px;padding-top:6px;border-top:1px dashed rgba(255,255,255,.08);font-size:11px;">
+              <span style="color:var(--text-3);display:flex;align-items:center;gap:4px;"><svg class="ico" style="width:12px;height:12px;"><use href="#i-cpu"/></svg>Mô hình:</span>
+              <select id="selWhisperModel" style="background:var(--bg-2);border:1px solid var(--line);color:var(--text);border-radius:4px;padding:1px 5px;font-size:10.5px;cursor:pointer;">
+                <option value="small" selected>small (⭐ Khuyên dùng)</option>
+                <option value="base">base (Nhanh)</option>
+                <option value="tiny">tiny (Siêu nhẹ)</option>
+                <option value="medium">medium (Chính xác)</option>
+                <option value="large-v3">large-v3 (Studio)</option>
+              </select>
+              <select id="selWhisperLang" style="background:var(--bg-2);border:1px solid var(--line);color:var(--text);border-radius:4px;padding:1px 5px;font-size:10.5px;cursor:pointer;">
+                <option value="vi" selected>Tiếng Việt</option>
+                <option value="en">English</option>
+                <option value="auto">Tự động</option>
+              </select>
+            </div>
             <div class="cache-demo-controls">
               <button class="cache-tab-btn on" data-c="partial" title="Đã có một phần cache">Một phần (79%)</button>
               <button class="cache-tab-btn" data-c="full" title="Đã có đầy đủ 100% cache">100% Đầy</button>
-              <button class="cache-tab-btn" data-c="empty" title="Chưa tạo cache">Chưa có</button>
+              <button class="cache-tab-btn" data-c="empty" title="Chưa tạo cache">Chưa có (0%)</button>
             </div>
           </div>
         </div>
@@ -1024,12 +1039,23 @@ function renderChapters(mode='partial'){
     if(cBox) cBox.className='cache is-empty';
     if(cPill){ cPill.className='cache-pill empty'; cPill.innerHTML='0 / 67 clip · Chưa có ⚠️'; }
     if(cBar) cBar.style.setProperty('--p','0%');
-    if(cDesc) cDesc.innerHTML='Chưa phân tích lời thoại · Bấm <b style="color:#fcd34d">Quét</b> để tạo cache 1 lần.';
+    if(cDesc) cDesc.innerHTML='Chưa có cache (0/67 clip) · Sẽ tự quét & nạp cache khi bấm [Bắt đầu dựng]';
   } else {
     if(cBox) cBox.className='cache';
     if(cPill){ cPill.className='cache-pill'; cPill.innerHTML='53 / 67 clip · 79%'; }
     if(cBar) cBar.style.setProperty('--p','79%');
     if(cDesc) cDesc.innerHTML='⚡ 53 clip đã nạp cache · 14 clip chờ quét phân tích';
+  }
+
+  const runBtn=$('#runBtn');
+  if(runBtn && P.state !== 'run'){
+    if(mode === 'empty'){
+      runBtn.innerHTML = `<svg class="ico"><use href="#i-play"/></svg>🚀 Quét nguồn & Bắt đầu dựng`;
+    } else if(mode === 'full'){
+      runBtn.innerHTML = `<svg class="ico"><use href="#i-play"/></svg>🎬 Bắt đầu dựng (Dùng Cache 0.1s)`;
+    } else {
+      runBtn.innerHTML = `<svg class="ico"><use href="#i-play"/></svg>⚡ Quét tiếp & Bắt đầu dựng`;
+    }
   }
 }
 
@@ -1041,6 +1067,19 @@ $$('.cache-tab-btn').forEach(btn=>{
     renderChapters(btn.dataset.c);
   });
 });
+
+const selModel = $('#selWhisperModel');
+const selLang = $('#selWhisperLang');
+if(selModel){
+  selModel.addEventListener('change', ()=>{
+    log(`<span class="ai">🤖</span> Đã đổi Faster-Whisper Model: <b>${selModel.value}</b> (${selLang ? selLang.value : 'vi'})`);
+  });
+}
+if(selLang){
+  selLang.addEventListener('change', ()=>{
+    log(`<span class="ai">🌐</span> Đã đổi ngôn ngữ nhận diện: <b>${selLang.value}</b>`);
+  });
+}
 
 let chapSorted=false;
 const sortBtn=$('#btnSortChaps');
