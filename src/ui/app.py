@@ -3214,6 +3214,55 @@ class ChunDVCApp(QMainWindow):
             except Exception as e:
                 self.txt_console.appendPlainText(f"   ⚠ Lỗi khi xuất tệp phụ đề: {e}")
 
+        # 4.1. Xuất file Kịch Bản Chi Tiết (TXT) để người dùng dễ đọc và theo dõi
+        out_script_txt = os.path.join(output_dir, f"{timeline_name}_KichBan_ChiTiet.txt")
+        try:
+            with open(out_script_txt, "w", encoding="utf-8") as f_txt:
+                f_txt.write("="*60 + "\n")
+                f_txt.write(f"KỊCH BẢN BIÊN TẬP VIDEO - AI STORY COPILOT\n")
+                f_txt.write(f"Dự án: {proj_name}\n")
+                f_txt.write(f"Chiến lược dựng: {plan.strategy_summary}\n")
+                f_txt.write("="*60 + "\n\n")
+
+                if plan.global_hook:
+                    h = plan.global_hook
+                    f_txt.write(f"🔥 [TEASER HOOK MỞ ĐẦU]:\n")
+                    f_txt.write(f"   - Tiêu đề: {h.hook_title}\n")
+                    f_txt.write(f"   - Clip nguồn: {h.clip_name or h.clip_index} ({h.start_sec:.1f}s -> {h.end_sec:.1f}s)\n")
+                    f_txt.write(f"   - Lý do chọn: {h.reason}\n\n")
+
+                f_txt.write(f"🎬 [CÁC PHÂN ĐOẠN NỘI DUNG CHÍNH (A-ROLL)]:\n")
+                for s_idx, seg in enumerate(plan.timeline_segments, 1):
+                    dur = seg.end_sec - seg.start_sec
+                    f_txt.write(f"   {s_idx:02d}. [{seg.role.upper()}] Clip: {seg.clip_name or seg.clip_index} ({seg.start_sec:.1f}s -> {seg.end_sec:.1f}s | {dur:.1f}s)\n")
+                    if seg.chapter_name:
+                        f_txt.write(f"       Chương: {seg.chapter_name}\n")
+                    if seg.note:
+                        f_txt.write(f"       Ghi chú: {seg.note}\n")
+                f_txt.write("\n")
+
+                if plan.broll_inserts:
+                    f_txt.write(f"🎨 [GỢI Ý CHÈN B-ROLL / MEME (TRACK VIDEO 2)]:\n")
+                    for b_idx, b in enumerate(plan.broll_inserts, 1):
+                        f_txt.write(f"   {b_idx:02d}. [{b.timeline_sec:.1f}s] ({b.duration_sec:.1f}s) - File: {b.asset_file or 'Tự chọn'}\n")
+                        f_txt.write(f"       Mô tả: {b.description}\n")
+                    f_txt.write("\n")
+
+                if plan.sfx_inserts:
+                    f_txt.write(f"🔊 [HIỆU ỨNG ÂM THANH SFX (TRACK AUDIO 3)]:\n")
+                    for s_idx, s in enumerate(plan.sfx_inserts, 1):
+                        f_txt.write(f"   {s_idx:02d}. [{s.timeline_sec:.1f}s] ({s.duration_sec:.1f}s) - File: {s.asset_file or 'SFX'}\n")
+                        f_txt.write(f"       Mô tả: {s.description}\n")
+                    f_txt.write("\n")
+
+                if plan.call_to_action:
+                    f_txt.write(f"📣 [CALL TO ACTION (CTA) KẾT THÚC]:\n")
+                    f_txt.write(f"   {plan.call_to_action}\n\n")
+
+            self.txt_console.appendPlainText(f"   📄 Đã xuất file Kịch Bản Chi Tiết (TXT): {os.path.basename(out_script_txt)}")
+        except Exception as e:
+            self.txt_console.appendPlainText(f"   ⚠ Lỗi khi xuất tệp kịch bản text: {e}")
+
         # 5. Tách riêng Timeline Hook (Intro Highlight Teaser) độc lập
         out_hook_fcp7xml = None
         out_hook_fcpxml = None
