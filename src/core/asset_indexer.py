@@ -20,8 +20,9 @@ class AssetIndexer:
         self.transitions_dir.mkdir(parents=True, exist_ok=True)
 
     def _generate_id(self, path: Path) -> str:
-        # Use string hashing of the relative/absolute path for uniqueness
-        return str(abs(hash(str(path))))
+        # Use a deterministic hash for stable IDs
+        import hashlib
+        return hashlib.md5(str(path).encode()).hexdigest()[:8]
 
     def _find_thumbnail(self, path: Path) -> str | None:
         png_path = path.with_suffix('.png')
@@ -37,11 +38,12 @@ class AssetIndexer:
         if not directory.exists():
             return results
             
-        for ext in extensions:
-            # case sensitive based on OS, but we can just use glob
-            # rglob handles this somewhat, but on Linux it is case sensitive.
-            # Using basic extension matching as requested.
-            for file_path in directory.rglob(f"*{ext}"):
+        target_exts = [ext.lower() for ext in extensions]
+        
+        for file_path in directory.rglob("*"):
+            if not file_path.is_file():
+                continue
+            if file_path.suffix.lower() in target_exts:
                 item = {
                     "id": self._generate_id(file_path),
                     "name": file_path.stem,
