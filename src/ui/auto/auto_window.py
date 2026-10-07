@@ -2045,13 +2045,15 @@ class AutoWindow(QMainWindow):
         # Vùng cuộn ScrollArea
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
         scroll_content = QWidget()
         scroll_content.setStyleSheet("background-color: #09090b;")
         c_vbox = QVBoxLayout(scroll_content)
-        c_vbox.setContentsMargins(28, 24, 28, 24)
-        c_vbox.setSpacing(20)
+        c_vbox.setContentsMargins(18, 12, 18, 12)
+        c_vbox.setSpacing(10)
 
         # Stepper
         stepper_layout = QHBoxLayout()
@@ -2081,11 +2083,8 @@ class AutoWindow(QMainWindow):
 
         # Tiêu đề
         lbl_h2 = QLabel("Bạn muốn dựng video kiểu gì?")
-        lbl_h2.setStyleSheet("font-size: 19px; font-weight: bold; color: #f4f4f5;")
+        lbl_h2.setStyleSheet("font-size: 15px; font-weight: bold; color: #f4f4f5;")
         c_vbox.addWidget(lbl_h2)
-        lbl_sub = QLabel("Chọn một kiểu, app tự bật bộ tính năng phù hợp. Muốn chỉnh từng thông số thì mở phần nâng cao bên dưới.")
-        lbl_sub.setStyleSheet("font-size: 12px; color: #71717a;")
-        c_vbox.addWidget(lbl_sub)
 
         # Hidden Combo để tương thích backend
         self.combo_workflow = QComboBox()
@@ -2099,7 +2098,7 @@ class AutoWindow(QMainWindow):
 
         # 4 Thẻ Preset Cards (Grid 4 cột)
         self.presets_grid = QGridLayout()
-        self.presets_grid.setSpacing(10)
+        self.presets_grid.setSpacing(8)
 
         self.preset_cards = []
         card_data = [
@@ -2113,14 +2112,14 @@ class AutoWindow(QMainWindow):
             btn = QPushButton()
             btn.setCheckable(True)
             btn.setChecked(idx == 0) # Vlog default
-            btn.setFixedHeight(105)
+            btn.setFixedHeight(80)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet("""
                 QPushButton {
                     border: 1px solid #27272a;
-                    border-radius: 10px;
+                    border-radius: 8px;
                     background-color: #18181b;
-                    padding: 10px;
+                    padding: 6px 8px;
                     text-align: left;
                 }
                 QPushButton:hover {
@@ -2132,8 +2131,8 @@ class AutoWindow(QMainWindow):
                 }
             """)
             b_lay = QVBoxLayout(btn)
-            b_lay.setContentsMargins(10, 8, 10, 8)
-            b_lay.setSpacing(4)
+            b_lay.setContentsMargins(8, 6, 8, 6)
+            b_lay.setSpacing(2)
 
             top_row = QHBoxLayout()
             lbl_ic = QLabel(icon)
@@ -2308,23 +2307,47 @@ class AutoWindow(QMainWindow):
         c_vbox.addWidget(self.step_transition_box)
 
         # =========================================================================
-        # TÙY CHỈNH NÂNG CAO (ACCORDION & ĐỘNG CƠ AI ĐẦY ĐỦ)
+        # TÙY CHỈNH NÂNG CAO (ACCORDION & ĐỘNG CƠ AI ĐẦY ĐỦ) - THU GỌN MẶC ĐỊNH
         # =========================================================================
         acc_box = QFrame()
-        acc_box.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 10px;")
+        acc_box.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 8px;")
         acc_layout = QVBoxLayout(acc_box)
         acc_layout.setContentsMargins(0, 0, 0, 0)
         acc_layout.setSpacing(0)
+
+        # 1. Hàng toggle Tùy chỉnh kịch bản nâng cao (Thu gọn mặc định)
+        btn_acc_advanced = QPushButton("⚙️  Thông số cắt gọt & Kịch bản chi tiết  ▾")
+        btn_acc_advanced.setCursor(Qt.PointingHandCursor)
+        btn_acc_advanced.setStyleSheet("""
+            QPushButton {
+                background-color: #18181b;
+                border: none;
+                color: #e4e4e7;
+                font-weight: 500;
+                font-size: 12px;
+                padding: 9px 14px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: #27272a;
+            }
+        """)
+        acc_layout.addWidget(btn_acc_advanced)
+
+        acc_advanced_content = QWidget()
+        acc_adv_lay = QVBoxLayout(acc_advanced_content)
+        acc_adv_lay.setContentsMargins(0, 0, 0, 0)
+        acc_adv_lay.setSpacing(0)
 
         def make_acc_row(icon, title, desc, on_click_fn=None):
             btn = QPushButton()
             btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #18181b;
+                    background-color: #141417;
                     border: none;
-                    border-bottom: 1px solid #27272a;
-                    padding: 8px 14px;
+                    border-top: 1px solid #27272a;
+                    padding: 7px 14px;
                     text-align: left;
                 }
                 QPushButton:hover {
@@ -2334,11 +2357,11 @@ class AutoWindow(QMainWindow):
             r_lay = QHBoxLayout(btn)
             r_lay.setContentsMargins(0, 0, 0, 0)
             lbl_i = QLabel(icon)
-            lbl_i.setStyleSheet("font-size: 14px;")
+            lbl_i.setStyleSheet("font-size: 13px;")
             lbl_t = QLabel(title)
-            lbl_t.setStyleSheet("font-weight: 500; font-size: 12px; color: #f4f4f5;")
+            lbl_t.setStyleSheet("font-weight: 500; font-size: 11px; color: #f4f4f5;")
             lbl_d = QLabel(desc)
-            lbl_d.setStyleSheet("color: #71717a; font-size: 12px;")
+            lbl_d.setStyleSheet("color: #71717a; font-size: 11px;")
             r_lay.addWidget(lbl_i)
             r_lay.addWidget(lbl_t)
             r_lay.addStretch()
@@ -2359,13 +2382,22 @@ class AutoWindow(QMainWindow):
         def on_click_subtitles():
             self.txt_console.appendPlainText("📝 [Phụ đề]: Sẵn sàng sinh phụ đề động bám âm từng từ.")
 
-        acc_layout.addWidget(make_acc_row("✂️", "Cắt khoảng lặng", "-30 dB · tối thiểu 0.6s · tua 8x", on_click_silence))
-        acc_layout.addWidget(make_acc_row("🤖", "Đạo diễn AI", "Clean talk · lọc vấp · lọc lặp", on_click_director))
-        acc_layout.addWidget(make_acc_row("📑", "Mạch kịch bản", "Giữ thứ tự thời gian", on_click_intent))
-        acc_layout.addWidget(make_acc_row("📝", "Phụ đề", "Theo từ · tối đa 6 từ/dòng", on_click_subtitles))
+        acc_adv_lay.addWidget(make_acc_row("✂️", "Cắt khoảng lặng", "-30 dB · tối thiểu 0.6s · tua 8x", on_click_silence))
+        acc_adv_lay.addWidget(make_acc_row("🤖", "Đạo diễn AI", "Clean talk · lọc vấp · lọc lặp", on_click_director))
+        acc_adv_lay.addWidget(make_acc_row("📑", "Mạch kịch bản", "Giữ thứ tự thời gian", on_click_intent))
+        acc_adv_lay.addWidget(make_acc_row("📝", "Phụ đề", "Theo từ · tối đa 6 từ/dòng", on_click_subtitles))
+        acc_advanced_content.setVisible(False)
+        acc_layout.addWidget(acc_advanced_content)
 
-        # Hàng Động cơ AI (Có thể bấm để bung ra)
-        btn_acc_engine = QPushButton("⚡  Động cơ AI (Chọn Web / Cloud / Local)  ▾")
+        def toggle_adv():
+            vis = acc_advanced_content.isVisible()
+            acc_advanced_content.setVisible(not vis)
+            btn_acc_advanced.setText("⚙️  Thông số cắt gọt & Kịch bản chi tiết  " + ("▴" if not vis else "▾"))
+
+        btn_acc_advanced.clicked.connect(toggle_adv)
+
+        # 2. Hàng Động cơ AI (Thu gọn mặc định)
+        btn_acc_engine = QPushButton("⚡  Cấu hình Động cơ AI (Web Prompt / Cloud / Local)  ▾")
         btn_acc_engine.setStyleSheet("""
             QPushButton {
                 background-color: #1f1f23;
@@ -2374,7 +2406,7 @@ class AutoWindow(QMainWindow):
                 color: #c4b5fd;
                 font-weight: bold;
                 font-size: 12px;
-                padding: 10px 14px;
+                padding: 9px 14px;
                 text-align: left;
             }
             QPushButton:hover {
@@ -2527,14 +2559,20 @@ class AutoWindow(QMainWindow):
 
         ai_panel_layout.addWidget(self.ai_stack)
         acc_layout.addWidget(self.ai_engine_panel)
+        self.ai_engine_panel.setVisible(False)  # Thu gọn mặc định
 
         # Toggle Expand/Collapse cho panel Động cơ AI
         def toggle_engine():
             vis = self.ai_engine_panel.isVisible()
             self.ai_engine_panel.setVisible(not vis)
-            btn_acc_engine.setText("⚡  Động cơ AI (Chọn Web / Cloud / Local)  " + ("▾" if not vis else "▴"))
+            btn_acc_engine.setText("⚡  Cấu hình Động cơ AI (Web Prompt / Cloud / Local)  " + ("▴" if not vis else "▾"))
 
         btn_acc_engine.clicked.connect(toggle_engine)
+        self.btn_goto_ai.clicked.connect(lambda: (
+            self.ai_engine_panel.setVisible(True),
+            btn_acc_engine.setText("⚡  Cấu hình Động cơ AI (Web Prompt / Cloud / Local)  ▴"),
+            scroll.ensureWidgetVisible(self.ai_engine_panel)
+        ))
 
         c_vbox.addWidget(acc_box)
         c_vbox.addStretch()
