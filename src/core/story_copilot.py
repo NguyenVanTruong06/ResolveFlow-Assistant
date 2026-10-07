@@ -711,7 +711,7 @@ class StoryCopilot:
                     sub_words = []
                     for w in s.get("words", []):
                         w_st = float(w.get("start", s_st))
-                        w_en = float(w.get("end", s_end))
+                        w_en = float(w.get("end", s_en))
                         if w_en > src_start and w_st < src_end:
                             sub_words.append({
                                 "word": w.get("word", ""),
