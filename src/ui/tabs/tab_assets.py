@@ -932,6 +932,8 @@ class AssetCard(QFrame):
         else:
             if isinstance(self.preset, TextStylePreset) or getattr(self.preset, "tab", "") == "text":
                 self._render_text_thumbnail()
+            elif getattr(self.preset, "tab", "") == "bgm":
+                self._render_bgm_thumbnail()
             elif getattr(self.preset, "tab", "") == "sfx":
                 self._render_sfx_thumbnail()
             elif getattr(self.preset, "tab", "") == "lut":
@@ -1148,6 +1150,64 @@ class AssetCard(QFrame):
         self.waveform_canvas = WaveformCanvas(preset_id=pid, parent=self.thumb)
         th_layout.addWidget(self.waveform_canvas)
 
+    def _render_bgm_thumbnail(self):
+        """Render thẻ nhạc nền BGM: icon nốt nhạc 🎵, mood badge, độ dài và nút quick play."""
+        self.thumb.setStyleSheet(f"""
+            QFrame {{
+                background-color: {ThemeColors.BG_MAIN};
+                border-radius: 8px;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+            }}
+        """)
+        th_layout = QVBoxLayout(self.thumb)
+        th_layout.setContentsMargins(6, 6, 6, 6)
+        th_layout.setSpacing(4)
+
+        h_top = QHBoxLayout()
+        h_top.setContentsMargins(0, 0, 0, 0)
+        h_top.setSpacing(6)
+
+        self.btn_quick_play = QPushButton("▶", self.thumb)
+        self.btn_quick_play.setFixedSize(24, 24)
+        self.btn_quick_play.setCursor(Qt.PointingHandCursor)
+        self.btn_quick_play.setToolTip("Nghe thử nhạc nền nhanh")
+        self.btn_quick_play.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 12px;
+                color: #06b6d4;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #06b6d4;
+                color: #05252c;
+                border-color: #22d3ee;
+            }}
+        """)
+        self.btn_quick_play.clicked.connect(self._toggle_quick_play)
+        h_top.addWidget(self.btn_quick_play)
+
+        sub_txt = getattr(self.preset, "sub", "") or getattr(self.preset, "category", "") or "BGM"
+        lbl_bgm_badge = QLabel(f"🎵 {sub_txt}")
+        lbl_bgm_badge.setStyleSheet(f"color: #67e8f9; font-size: 10px; font-weight: bold;")
+        h_top.addWidget(lbl_bgm_badge)
+        h_top.addStretch()
+
+        dur = getattr(self.preset, "duration", 0.0)
+        mins = int(dur // 60)
+        secs = int(dur % 60)
+        lbl_dur = QLabel(f"{mins}:{secs:02d}" if dur > 0 else "")
+        lbl_dur.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 10px;")
+        h_top.addWidget(lbl_dur)
+
+        th_layout.addLayout(h_top)
+
+        pid = getattr(self.preset, "id", "bgm")
+        self.waveform_canvas = WaveformCanvas(preset_id=pid, parent=self.thumb)
+        th_layout.addWidget(self.waveform_canvas)
+
     def _render_lut_thumbnail(self):
         """Render dải màu 4 sọc tương phản cao + huy hiệu danh mục cho LUT."""
         self.thumb.setStyleSheet(f"""
@@ -1310,11 +1370,11 @@ class AssetCard(QFrame):
             self.waveform_canvas.update()
 
         pid = getattr(self.preset, "id", "")
-        clean_id = pid.replace("sfx_", "")
+        clean_id = pid.replace("sfx_", "").replace("bgm_", "")
         candidate_paths = [
+            getattr(self.preset, "file_path", ""),
             os.path.join("assets", "sfx", f"{clean_id}.wav"),
             os.path.join("assets", "sfx", f"{pid}.wav"),
-            getattr(self.preset, "file_path", "")
         ]
         sound_path = None
         for p in candidate_paths:
@@ -1569,6 +1629,25 @@ class TabAssets(QWidget):
         scanned_overlays = indexer.scan_overlays()
         self.all_overlays = dicts_to_assets(scanned_overlays, "overlay", "cinematic", "Lớp phủ", "✨") if scanned_overlays else MOCKUP_OVERLAYS.copy()
         self.all_icons = MOCKUP_ICONS.copy()
+
+        music_data = indexer.scan_music_assets()
+        scanned_bgm = []
+        for mood, items in music_data.items():
+            for itm in items:
+                scanned_bgm.append(
+                    StudioAsset(
+                        id=itm["id"],
+                        name=itm["name"],
+                        tab="bgm",
+                        category=itm.get("mood", mood),
+                        sub=itm.get("mood", mood),
+                        badge_icon="🎵",
+                        duration=itm.get("duration", 120.0),
+                        file_path=itm.get("file_path", ""),
+                        thumbnail_path=itm.get("thumbnail_path", "")
+                    )
+                )
+        self.all_bgm = scanned_bgm
         
         self.local_assets: List[LocalAsset] = []
 
@@ -1581,6 +1660,7 @@ class TabAssets(QWidget):
         self.all_assets.extend(self.all_overlays)
         self.all_assets.extend(self.all_memes)
         self.all_assets.extend(self.all_sfx)
+        self.all_assets.extend(self.all_bgm)
 
         self.current_rail_tab = "text"
         self.current_sub_cat = "all"
@@ -1666,6 +1746,7 @@ class TabAssets(QWidget):
             ("overlay", "🎞️\nLớp phủ"),
             ("meme", "🎭\nMeme"),
             ("sfx", "🔊\nÂm thanh"),
+            ("bgm", "🎵\nNhạc nền"),
             ("fav", "❤️\nMẫu của tôi")
         ]
 
@@ -2727,6 +2808,7 @@ class TabAssets(QWidget):
             "overlay": "Hiệu ứng lớp phủ",
             "meme": "Meme thịnh hành",
             "sfx": "Âm thanh SFX",
+            "bgm": "🎵 Nhạc Nền (BGM)",
             "fav": "Mẫu đã lưu"
         }
         self.lbl_cats_head.setText(headers_map.get(tab, "Danh mục"))
@@ -2767,6 +2849,13 @@ class TabAssets(QWidget):
                 ("accent", "Nhấn mạnh"),
                 ("fun", "Hài hước"),
                 ("tech", "Kỹ thuật")
+            ])
+        elif tab == "bgm":
+            sub_cats.extend([
+                ("chill_vlog", "🍃 Chill Vlog / Lofi"),
+                ("upbeat_trend", "🔥 Upbeat / TikTok Trend"),
+                ("cinematic", "🎬 Cinematic Điện ảnh"),
+                ("funny", "🎭 Hài hước Meme")
             ])
         elif tab == "overlay":
             sub_cats.extend([
@@ -3093,6 +3182,25 @@ class TabAssets(QWidget):
         scanned_overlays = indexer.scan_overlays()
         self.all_overlays = dicts_to_assets(scanned_overlays, "overlay", "cinematic", "Lớp phủ", "✨") if scanned_overlays else MOCKUP_OVERLAYS.copy()
         
+        music_data = indexer.scan_music_assets()
+        scanned_bgm = []
+        for mood, items in music_data.items():
+            for itm in items:
+                scanned_bgm.append(
+                    StudioAsset(
+                        id=itm["id"],
+                        name=itm["name"],
+                        tab="bgm",
+                        category=itm.get("mood", mood),
+                        sub=itm.get("mood", mood),
+                        badge_icon="🎵",
+                        duration=itm.get("duration", 120.0),
+                        file_path=itm.get("file_path", ""),
+                        thumbnail_path=itm.get("thumbnail_path", "")
+                    )
+                )
+        self.all_bgm = scanned_bgm
+
         self.all_assets = []
         self.all_assets.extend(self.all_presets)
         self.all_assets.extend(self.all_transitions)
@@ -3101,6 +3209,7 @@ class TabAssets(QWidget):
         self.all_assets.extend(self.all_overlays)
         self.all_assets.extend(self.all_memes)
         self.all_assets.extend(self.all_sfx)
+        self.all_assets.extend(self.all_bgm)
         
         self._populate_cards()
         self._refresh_grid()
@@ -3218,6 +3327,7 @@ class TabAssets(QWidget):
         is_text = isinstance(self.selected_asset, TextStylePreset) or getattr(self.selected_asset, "tab", "") == "text"
         is_lut = getattr(self.selected_asset, "tab", "") == "lut"
         is_sfx = getattr(self.selected_asset, "tab", "") == "sfx"
+        is_bgm = getattr(self.selected_asset, "tab", "") == "bgm"
         is_trans = isinstance(self.selected_asset, TransitionStylePreset) or getattr(self.selected_asset, "tab", "") == "trans"
 
         if is_text:
@@ -3302,7 +3412,7 @@ class TabAssets(QWidget):
             self.lut_split_widget.set_lut(name, pal)
             self.btn_insert_title_playhead.setText("🎨 Áp LUT lên Timeline")
 
-        elif is_sfx:
+        elif is_sfx or is_bgm:
             self.inspector_aspect_btn.hide()
             self.inspector_text_preview.hide()
             self.inspector_lut_viewport.hide()
@@ -3327,17 +3437,23 @@ class TabAssets(QWidget):
                 self.grp_trans_pos.hide()
 
             self.combo_target_track.clear()
-            self.combo_target_track.addItems(["Audio Track 2 (A2 - SFX)", "Audio Track 1 (A1)"])
-            self.lbl_track_hint.setText("Gợi ý: Audio Track 2 với bù âm -12dB phù hợp mạng xã hội, không đè giọng nói.")
+            if is_bgm:
+                self.combo_target_track.addItems(["Audio Track 4/5 (A4/A5 - BGM)", "Audio Track 1 (A1)"])
+                self.lbl_track_hint.setText("Nhạc nền stereo chuẩn phát song song trên Track A4/A5.")
+            else:
+                self.combo_target_track.addItems(["Audio Track 2 (A2 - SFX)", "Audio Track 1 (A1)"])
+                self.lbl_track_hint.setText("Gợi ý: Audio Track 2 với bù âm -12dB phù hợp mạng xã hội, không đè giọng nói.")
 
-            pid = getattr(self.selected_asset, "id", "sfx")
-            clean_id = pid.replace("sfx_", "")
-            dur = getattr(self.selected_asset, "duration", 2.0)
+            pid = getattr(self.selected_asset, "id", "sfx" if is_sfx else "bgm")
+            dur = getattr(self.selected_asset, "duration", 2.0 if is_sfx else 120.0)
             self.sfx_waveform_canvas.set_preset_id(pid, num_bars=32)
-            self.sfx_time_lbl.setText(f"{dur:.1f}s")
-            self.sfx_hint_lbl.setText(f"assets/sfx/{clean_id}.wav")
+            mins = int(dur // 60)
+            secs = int(dur % 60)
+            self.sfx_time_lbl.setText(f"{mins}:{secs:02d}" if dur >= 60 else f"{dur:.1f}s")
+            real_file = getattr(self.selected_asset, "file_path", "")
+            self.sfx_hint_lbl.setText(os.path.basename(real_file) if real_file else f"{pid}.wav")
             self.sfx_play_btn.setText("▶ Nghe thử")
-            self.btn_insert_title_playhead.setText("🔊 Chèn âm thanh tại Playhead (A2)")
+            self.btn_insert_title_playhead.setText("🎵 Chèn nhạc nền (A4/A5)" if is_bgm else "🔊 Chèn âm thanh tại Playhead (A2)")
 
         elif is_trans:
             self.inspector_aspect_btn.hide()
@@ -3579,6 +3695,7 @@ class TabAssets(QWidget):
 
         is_text = isinstance(self.selected_asset, TextStylePreset) or getattr(self.selected_asset, "tab", "") == "text"
         is_sfx = getattr(self.selected_asset, "tab", "") == "sfx"
+        is_bgm = getattr(self.selected_asset, "tab", "") == "bgm"
         is_lut = getattr(self.selected_asset, "tab", "") == "lut"
 
         try:
@@ -3608,28 +3725,31 @@ class TabAssets(QWidget):
                     pass
             self.insert_title_requested.emit(text, preset_id, dur)
             self._show_toast(f"Đã chèn “{getattr(self.selected_asset, 'name', text)}” tại Playhead (V2)")
-        elif is_sfx:
+        elif is_sfx or is_bgm:
             real_file_path = getattr(self.selected_asset, "file_path", "")
-            pid = getattr(self.selected_asset, "id", "whoosh")
+            pid = getattr(self.selected_asset, "id", "whoosh" if is_sfx else "bgm")
             if real_file_path and os.path.isfile(real_file_path):
-                sfx_file = real_file_path
+                audio_file = real_file_path
             else:
-                clean_id = pid.replace("sfx_", "")
-                sfx_file = os.path.join("assets", "sfx", f"{clean_id}.wav")
-                if not os.path.exists(sfx_file):
-                    sfx_file = os.path.join("assets", "sfx", f"{pid}.wav")
-            dur = getattr(self.selected_asset, "duration", 1.5)
+                clean_id = pid.replace("sfx_", "").replace("bgm_", "")
+                audio_file = os.path.join("assets", "sfx", f"{clean_id}.wav")
+                if not os.path.exists(audio_file):
+                    audio_file = os.path.join("assets", "sfx", f"{pid}.wav")
+            dur = getattr(self.selected_asset, "duration", 1.5 if is_sfx else 120.0)
+            target_track = 4 if is_bgm else 2
+            vol_offset = -18.0 if is_bgm else -12.0
             if resolve_auto and hasattr(resolve_auto, "insert_sfx_to_track"):
                 try:
                     resolve_auto.insert_sfx_to_track(
-                        sfx_path=os.path.abspath(sfx_file) if os.path.exists(sfx_file) else sfx_file,
-                        target_track=2,
-                        volume_offset_db=-12.0
+                        sfx_path=os.path.abspath(audio_file) if os.path.exists(audio_file) else audio_file,
+                        target_track=target_track,
+                        volume_offset_db=vol_offset
                     )
                 except Exception:
                     pass
-            self.insert_sfx_requested.emit(sfx_file, 2, -12.0)
-            self._show_toast(f"Đã chèn âm thanh “{getattr(self.selected_asset, 'name', pid)}” tại Playhead (A2)")
+            self.insert_sfx_requested.emit(audio_file, target_track, vol_offset)
+            track_name = "A4/A5" if is_bgm else "A2"
+            self._show_toast(f"Đã chèn âm thanh “{getattr(self.selected_asset, 'name', pid)}” tại Playhead ({track_name})")
         elif is_lut:
             lut_name = getattr(self.selected_asset, "name", "")
             pid = getattr(self.selected_asset, "id", "")

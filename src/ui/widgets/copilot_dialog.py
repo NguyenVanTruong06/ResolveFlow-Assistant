@@ -34,12 +34,18 @@ class StoryCopilotDialog(QDialog):
         project_name: str,
         clips_data: List[Dict[str, Any]],
         project_structure: Optional[Any] = None,
+        story_intent: str = "travel_vlog",
+        hook_duration: str = "30_60s",
+        target_duration: str = "full",
         parent=None
     ):
         super().__init__(parent)
         self.project_name = project_name
         self.clips_data = clips_data
         self.project_structure = project_structure
+        self.story_intent = story_intent
+        self.hook_duration = hook_duration
+        self.target_duration = target_duration
         self.current_plan: Optional[CopilotDirectorPlan] = None
 
         self.setWindowTitle("🧠 AI Story Copilot (Claude / ChatGPT / Gemini)")
@@ -214,7 +220,9 @@ class StoryCopilotDialog(QDialog):
             project_name=self.project_name,
             clips_data=self.clips_data,
             project_structure=self.project_structure,
-            story_intent="vlog_hook"
+            story_intent=self.story_intent,
+            hook_duration=self.hook_duration,
+            target_duration=self.target_duration
         )
         self.txt_prompt_preview.setPlainText(prompt)
 
@@ -225,7 +233,7 @@ class StoryCopilotDialog(QDialog):
         QMessageBox.information(
             self,
             "Đã Copy Prompt!",
-            "✔ Đã copy toàn bộ Prompt Kịch bản & Dữ liệu 61 video vào Clipboard!\n\n"
+            f"✔ Đã copy toàn bộ Prompt Kịch bản & Dữ liệu {len(self.clips_data)} video vào Clipboard!\n\n"
             "👉 Hãy mở Claude.ai hoặc ChatGPT, bấm Ctrl + V (Dán) và ấn Enter."
         )
 

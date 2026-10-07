@@ -3,7 +3,8 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QPlainTextEdit, QFileDialog, QMessageBox, QScrollArea, QFrame,
-    QComboBox, QRadioButton, QButtonGroup, QLineEdit, QFormLayout, QStackedWidget
+    QComboBox, QRadioButton, QButtonGroup, QLineEdit, QFormLayout, QStackedWidget,
+    QCheckBox
 )
 from PySide6.QtCore import Qt, Signal as pyqtSignal
 from PySide6.QtGui import QFont
@@ -65,6 +66,13 @@ class TabCopilot(QWidget):
         self.combo_target_duration.addItem("🎬 Khoảng 2-3 phút (Mini Vlog tóm tắt)", "180s")
         self.combo_target_duration.addItem("🎞️ Toàn bộ video (Giữ nguyên luồng dài)", "full")
         form_fmt.addRow("Thời lượng mục tiêu:", self.combo_target_duration)
+
+        self.combo_hook_duration = QComboBox()
+        self.combo_hook_duration.addItem("🔥 Dài 30s - 60s (Chuẩn Teaser Vlog / Highlight mở đầu)", "30_60s")
+        self.combo_hook_duration.addItem("⚡ Dài 15s - 30s (Vừa phải, dồn dập)", "15_30s")
+        self.combo_hook_duration.addItem("🎯 Dài 3s - 5s (Siêu ngắn chuẩn TikTok / Reels)", "3_5s")
+        self.combo_hook_duration.addItem("🚫 Không cần đoạn Hook riêng", "none")
+        form_fmt.addRow("Đoạn Hook Mở Đầu:", self.combo_hook_duration)
 
         layout.addWidget(card_format)
 
@@ -239,9 +247,85 @@ class TabCopilot(QWidget):
         layout.addWidget(card_engine)
 
         # -------------------------------------------------------------
-        # CARD 3: NẠP KỊCH BẢN JSON & THI CÔNG TIMELINE
+        # CARD 3: CHỌN NHẠC NỀN & AUTO BEAT-SYNC
         # -------------------------------------------------------------
-        card_json = SectionCard("📄 3. KHUNG DÁN KỊCH BẢN JSON ➔ XUẤT TIMELINE", accent_color="#10B981")
+        card_bgm = SectionCard("🎵 3. CHỌN NHẠC NỀN & AUTO BEAT-SYNC", accent_color="#06B6D4")
+        v_bgm = QVBoxLayout()
+        card_bgm.set_body_layout(v_bgm)
+
+        form_bgm = QFormLayout()
+        self.combo_bgm_mode = QComboBox()
+        self.combo_bgm_mode.addItem("✨ Tự động theo Mood (AI gợi ý từ kho nhạc)", "auto_mood")
+        self.combo_bgm_mode.addItem("🍃 Chill Vlog (Acoustic / Lo-fi thư giãn)", "mood_chill")
+        self.combo_bgm_mode.addItem("🔥 Upbeat Trend (Beat Drop sôi động, TikTok)", "mood_upbeat")
+        self.combo_bgm_mode.addItem("🎬 Cinematic (Hùng tráng, sâu lắng)", "mood_cinematic")
+        self.combo_bgm_mode.addItem("🎭 Hài hước / Meme (Vui nhộn)", "mood_funny")
+        self.combo_bgm_mode.addItem("📁 Chọn tệp nhạc riêng từ máy tính...", "custom_file")
+        self.combo_bgm_mode.addItem("🚫 Không chèn nhạc nền", "none")
+
+        h_bgm_row = QHBoxLayout()
+        h_bgm_row.addWidget(self.combo_bgm_mode, stretch=3)
+
+        self.btn_preview_bgm = QPushButton("▶ Nghe Thử")
+        self.btn_preview_bgm.setCursor(Qt.PointingHandCursor)
+        self.btn_preview_bgm.setStyleSheet("""
+            QPushButton {
+                background-color: #0E7490;
+                color: white;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 7px 12px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #0891B2;
+            }
+        """)
+        self.btn_browse_bgm = QPushButton("📁 Chọn tệp...")
+        self.btn_browse_bgm.setCursor(Qt.PointingHandCursor)
+        self.btn_browse_bgm.setStyleSheet("""
+            QPushButton {
+                background-color: #1E293B;
+                color: #CBD5E1;
+                border: 1px solid #334155;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 7px 10px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #334155;
+            }
+        """)
+        self.btn_browse_bgm.clicked.connect(self.browse_custom_bgm_file)
+        h_bgm_row.addWidget(self.btn_browse_bgm, stretch=1)
+        h_bgm_row.addWidget(self.btn_preview_bgm, stretch=1)
+        form_bgm.addRow("Nhạc nền (BGM):", h_bgm_row)
+
+        self.chk_beat_sync = QCheckBox("⚡ Tự động Beat-Sync (Cắt cảnh & B-Roll giật theo nhịp nhạc)")
+        self.chk_beat_sync.setChecked(True)
+        self.chk_beat_sync.setStyleSheet("color: #67E8F9; font-weight: bold; font-size: 11px;")
+        form_bgm.addRow(self.chk_beat_sync)
+
+        v_bgm.addLayout(form_bgm)
+
+        self.lbl_bgm_file_info = QLabel("Kho nhạc: Sẵn sàng tự động gợi ý theo nội dung kịch bản.")
+        self.lbl_bgm_file_info.setStyleSheet("color: #94A3B8; font-size: 11px;")
+        v_bgm.addWidget(self.lbl_bgm_file_info)
+
+        self._custom_bgm_file: Optional[str] = None
+        self._bgm_player = None
+        self._bgm_audio_output = None
+        self._is_bgm_playing = False
+
+        self.combo_bgm_mode.currentIndexChanged.connect(self._on_bgm_mode_changed)
+
+        layout.addWidget(card_bgm)
+
+        # -------------------------------------------------------------
+        # CARD 4: NẠP KỊCH BẢN JSON & THI CÔNG TIMELINE
+        # -------------------------------------------------------------
+        card_json = SectionCard("📄 4. KHUNG DÁN KỊCH BẢN JSON ➔ XUẤT TIMELINE", accent_color="#10B981")
         v_json = QVBoxLayout()
         card_json.set_body_layout(v_json)
 
@@ -316,6 +400,127 @@ class TabCopilot(QWidget):
         scroll.setWidget(container)
         main_layout.addWidget(scroll)
 
+    def _on_bgm_mode_changed(self, index: int):
+        mode = self.combo_bgm_mode.currentData()
+        if mode == "custom_file":
+            if getattr(self, "_custom_bgm_file", None):
+                self.lbl_bgm_file_info.setText(f"📁 Đã chọn tệp: {os.path.basename(self._custom_bgm_file)}")
+            else:
+                self.lbl_bgm_file_info.setText("📁 Vui lòng bấm 'Chọn tệp...' để nạp file nhạc.")
+        elif mode == "none":
+            self.lbl_bgm_file_info.setText("🚫 Không chèn nhạc nền vào timeline.")
+        elif mode == "auto_mood":
+            self.lbl_bgm_file_info.setText("✨ Tự động gợi ý từ kho nhạc theo chủ đề kịch bản.")
+        else:
+            self.lbl_bgm_file_info.setText(f"🎵 Nhạc theo Mood: {self.combo_bgm_mode.currentText()}")
+
+    def browse_custom_bgm_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Chọn tệp nhạc nền từ máy tính",
+            "",
+            "Audio Files (*.mp3 *.wav *.m4a *.aac *.flac);;All Files (*.*)"
+        )
+        if file_path:
+            self._custom_bgm_file = os.path.normpath(os.path.abspath(file_path))
+            self.lbl_bgm_file_info.setText(f"📁 Đã chọn tệp: {os.path.basename(file_path)}")
+            idx = self.combo_bgm_mode.findData("custom_file")
+            if idx >= 0:
+                self.combo_bgm_mode.setCurrentIndex(idx)
+
+    def _toggle_bgm_preview(self):
+        if self._is_bgm_playing:
+            self._stop_bgm_preview()
+        else:
+            self._start_bgm_preview()
+
+    def _start_bgm_preview(self):
+        bgm_files = self.get_selected_bgm_files()
+        if not bgm_files or not os.path.exists(bgm_files[0]):
+            QMessageBox.information(self, "Không tìm thấy nhạc", "Chưa tìm thấy tệp nhạc tương ứng để nghe thử.")
+            return
+
+        target_file = bgm_files[0]
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+            from PySide6.QtCore import QUrl
+            if self._bgm_player is None:
+                self._bgm_player = QMediaPlayer(self)
+                self._bgm_audio_output = QAudioOutput(self)
+                self._bgm_player.setAudioOutput(self._bgm_audio_output)
+                self._bgm_player.playbackStateChanged.connect(self._on_bgm_player_state_changed)
+
+            self._bgm_player.setSource(QUrl.fromLocalFile(os.path.abspath(target_file)))
+            self._bgm_audio_output.setVolume(0.8)
+            self._bgm_player.play()
+            self._is_bgm_playing = True
+            self.btn_preview_bgm.setText("⏸ Dừng")
+        except Exception as e:
+            QMessageBox.warning(self, "Lỗi phát nhạc", f"Không thể phát tệp nhạc:\n{e}")
+
+    def _stop_bgm_preview(self):
+        if self._bgm_player is not None:
+            try:
+                self._bgm_player.stop()
+            except Exception:
+                pass
+        self._is_bgm_playing = False
+        self.btn_preview_bgm.setText("▶ Nghe Thử")
+
+    def _on_bgm_player_state_changed(self, state):
+        from PySide6.QtMultimedia import QMediaPlayer
+        if state == QMediaPlayer.StoppedState:
+            self._is_bgm_playing = False
+            self.btn_preview_bgm.setText("▶ Nghe Thử")
+
+    def get_selected_bgm_files(self, project_structure=None) -> list[str]:
+        """
+        Lấy danh sách các đường dẫn tệp BGM dựa trên chế độ người dùng lựa chọn.
+        """
+        mode = self.combo_bgm_mode.currentData()
+        if mode == "none":
+            return []
+
+        if mode == "custom_file":
+            if self._custom_bgm_file and os.path.exists(self._custom_bgm_file):
+                return [self._custom_bgm_file]
+            return []
+
+        from src.core.asset_indexer import AssetIndexer
+        indexer = AssetIndexer()
+        music_assets = indexer.scan_music_assets()
+
+        mood_key = "chill_vlog"
+        if mode == "mood_chill":
+            mood_key = "chill_vlog"
+        elif mode == "mood_upbeat":
+            mood_key = "upbeat_trend"
+        elif mode == "mood_cinematic":
+            mood_key = "cinematic"
+        elif mode == "mood_funny":
+            mood_key = "funny"
+        elif mode == "auto_mood":
+            # Gợi ý dựa trên định dạng câu chuyện hiện tại
+            story_fmt = self.combo_story_format.currentData() or "travel_vlog"
+            if story_fmt == "tiktok_short":
+                mood_key = "upbeat_trend"
+            elif story_fmt == "podcast_summary":
+                mood_key = "chill_vlog"
+            else:
+                mood_key = "chill_vlog"
+
+        items = music_assets.get(mood_key, [])
+        if not items:
+            # Fallback sang bất kỳ mood nào có bài nhạc
+            for m, lst in music_assets.items():
+                if lst:
+                    items = lst
+                    break
+
+        if items:
+            return [items[0]["file_path"]]
+        return []
+
     def _on_apply_clicked(self):
         text = self.txt_json_input.toPlainText().strip()
         if not text:
@@ -337,3 +542,4 @@ class TabCopilot(QWidget):
             QMessageBox.warning(self, "Thiếu API Key", "Vui lòng nhập API Key để sử dụng tính năng này.")
             return
         self.run_cloud_api_requested.emit(fmt, provider, key)
+

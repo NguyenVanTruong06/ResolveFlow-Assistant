@@ -38,6 +38,8 @@ from src.core.marketing_engine import MarketingViralPackGenerator
 from src.core.folder_scanner import ProjectFolderStructure, FolderGroup, scan_project_folder, collect_video_paths
 from src.core.cloud_downloader import GoogleDriveDownloader, parse_google_drive_url
 from src.core.story_copilot import StoryCopilot, CopilotDirectorPlan
+from src.core.audio_beat import AudioBeatDetector
+import shutil
 from src.ui.widgets.drive_dialog import GoogleDriveImportDialog
 from src.ui.widgets.copilot_dialog import StoryCopilotDialog
 from src.ui.bubble.floating_bubble import FloatingBubbleWidget
@@ -2736,20 +2738,41 @@ class ChunDVCApp(QMainWindow):
             return
 
         fmt = "travel_vlog"
+        hook_dur = "30_60s"
+        target_dur = "full"
         if hasattr(self.tab_copilot, "combo_story_format"):
             fmt = self.tab_copilot.combo_story_format.currentData() or "travel_vlog"
+        if hasattr(self.tab_copilot, "combo_hook_duration"):
+            hook_dur = self.tab_copilot.combo_hook_duration.currentData() or "30_60s"
+        if hasattr(self.tab_copilot, "combo_target_duration"):
+            target_dur = self.tab_copilot.combo_target_duration.currentData() or "full"
+
+        # Đọc thông tin BGM & Beat Detection
+        music_beats = None
+        if hasattr(self, "tab_copilot") and hasattr(self.tab_copilot, "get_selected_bgm_files"):
+            bgm_files = self.tab_copilot.get_selected_bgm_files(self.project_structure)
+            beat_sync_enabled = getattr(self.tab_copilot, "chk_beat_sync", None) and self.tab_copilot.chk_beat_sync.isChecked()
+            if bgm_files and os.path.exists(bgm_files[0]) and beat_sync_enabled:
+                try:
+                    music_beats = AudioBeatDetector.detect_beats(bgm_files[0])
+                    self.txt_console.appendPlainText(f"🎵 [Auto Beat-Sync] Đã phát hiện {len(music_beats)} mốc nhịp từ {os.path.basename(bgm_files[0])}")
+                except Exception as e:
+                    self.txt_console.appendPlainText(f"   ⚠ Lỗi phát hiện beat: {e}")
 
         prompt = StoryCopilot.generate_copilot_prompt(
             project_name=proj_name,
             clips_data=clips_data,
             project_structure=self.project_structure,
-            story_intent=fmt
+            story_intent=fmt,
+            hook_duration=hook_dur,
+            target_duration=target_dur,
+            music_beats=music_beats
         )
 
         QApplication.clipboard().setText(prompt)
         self.txt_console.appendPlainText("\n" + "="*60)
         self.txt_console.appendPlainText("📋 [AI Story Copilot] ĐÃ COPY TOÀN BỘ PROMPT ĐẠO DIỄN VÀO CLIPBOARD!")
-        self.txt_console.appendPlainText(f"👉 Định dạng: {fmt.upper()} (Đã tích hợp Framework Marketing & Kho Meme).")
+        self.txt_console.appendPlainText(f"👉 Định dạng: {fmt.upper()} (Hook: {hook_dur}, Target: {target_dur}).")
         self.txt_console.appendPlainText("👉 Hãy chuyển sang trình duyệt (Claude.ai hoặc ChatGPT), bấm Ctrl+V để gửi.")
         self.txt_console.appendPlainText("👉 Khi nhận được đoạn kịch bản JSON, hãy dán vào ô bên dưới và bấm 'THI CÔNG TIMELINE'!")
         self.txt_console.appendPlainText("="*60 + "\n")
@@ -2770,11 +2793,32 @@ class ChunDVCApp(QMainWindow):
             QMessageBox.warning(self, "Chưa chọn video", "Vui lòng chọn video nguồn hoặc quét Cache ở Bước 1 trước khi chạy AI.")
             return
 
+        hook_dur = "30_60s"
+        target_dur = "full"
+        if hasattr(self.tab_copilot, "combo_hook_duration"):
+            hook_dur = self.tab_copilot.combo_hook_duration.currentData() or "30_60s"
+        if hasattr(self.tab_copilot, "combo_target_duration"):
+            target_dur = self.tab_copilot.combo_target_duration.currentData() or "full"
+
+        music_beats = None
+        if hasattr(self, "tab_copilot") and hasattr(self.tab_copilot, "get_selected_bgm_files"):
+            bgm_files = self.tab_copilot.get_selected_bgm_files(self.project_structure)
+            beat_sync_enabled = getattr(self.tab_copilot, "chk_beat_sync", None) and self.tab_copilot.chk_beat_sync.isChecked()
+            if bgm_files and os.path.exists(bgm_files[0]) and beat_sync_enabled:
+                try:
+                    music_beats = AudioBeatDetector.detect_beats(bgm_files[0])
+                    self.txt_console.appendPlainText(f"🎵 [Auto Beat-Sync] Đã phát hiện {len(music_beats)} mốc nhịp từ {os.path.basename(bgm_files[0])}")
+                except Exception as e:
+                    self.txt_console.appendPlainText(f"   ⚠ Lỗi phát hiện beat: {e}")
+
         prompt = StoryCopilot.generate_copilot_prompt(
             project_name=proj_name,
             clips_data=clips_data,
             project_structure=self.project_structure,
-            story_intent=fmt
+            story_intent=fmt,
+            hook_duration=hook_dur,
+            target_duration=target_dur,
+            music_beats=music_beats
         )
         self.txt_console.appendPlainText(f"\n🧠 [Local AI] Bắt đầu yêu cầu kịch bản từ Ollama ({model})...")
         self.btn_run.setEnabled(False)
@@ -2797,11 +2841,32 @@ class ChunDVCApp(QMainWindow):
             QMessageBox.warning(self, "Chưa chọn video", "Vui lòng chọn video nguồn hoặc quét Cache ở Bước 1 trước khi chạy AI.")
             return
 
+        hook_dur = "30_60s"
+        target_dur = "full"
+        if hasattr(self.tab_copilot, "combo_hook_duration"):
+            hook_dur = self.tab_copilot.combo_hook_duration.currentData() or "30_60s"
+        if hasattr(self.tab_copilot, "combo_target_duration"):
+            target_dur = self.tab_copilot.combo_target_duration.currentData() or "full"
+
+        music_beats = None
+        if hasattr(self, "tab_copilot") and hasattr(self.tab_copilot, "get_selected_bgm_files"):
+            bgm_files = self.tab_copilot.get_selected_bgm_files(self.project_structure)
+            beat_sync_enabled = getattr(self.tab_copilot, "chk_beat_sync", None) and self.tab_copilot.chk_beat_sync.isChecked()
+            if bgm_files and os.path.exists(bgm_files[0]) and beat_sync_enabled:
+                try:
+                    music_beats = AudioBeatDetector.detect_beats(bgm_files[0])
+                    self.txt_console.appendPlainText(f"🎵 [Auto Beat-Sync] Đã phát hiện {len(music_beats)} mốc nhịp từ {os.path.basename(bgm_files[0])}")
+                except Exception as e:
+                    self.txt_console.appendPlainText(f"   ⚠ Lỗi phát hiện beat: {e}")
+
         prompt = StoryCopilot.generate_copilot_prompt(
             project_name=proj_name,
             clips_data=clips_data,
             project_structure=self.project_structure,
-            story_intent=fmt
+            story_intent=fmt,
+            hook_duration=hook_dur,
+            target_duration=target_dur,
+            music_beats=music_beats
         )
         self.txt_console.appendPlainText(f"\n⚡ [Cloud AI] Bắt đầu gửi kịch bản sang {provider.upper()} API...")
         self.btn_run.setEnabled(False)
@@ -2929,10 +2994,23 @@ class ChunDVCApp(QMainWindow):
 
         proj_name = self.project_structure.root_name if self.project_structure else (os.path.splitext(os.path.basename(self.selected_files[0]))[0] if len(self.selected_files) == 1 else "Vlog_Project")
 
+        fmt = "travel_vlog"
+        hook_dur = "30_60s"
+        target_dur = "full"
+        if hasattr(self.tab_copilot, "combo_story_format"):
+            fmt = self.tab_copilot.combo_story_format.currentData() or "travel_vlog"
+        if hasattr(self.tab_copilot, "combo_hook_duration"):
+            hook_dur = self.tab_copilot.combo_hook_duration.currentData() or "30_60s"
+        if hasattr(self.tab_copilot, "combo_target_duration"):
+            target_dur = self.tab_copilot.combo_target_duration.currentData() or "full"
+
         dlg = StoryCopilotDialog(
             project_name=proj_name,
             clips_data=clips_data,
             project_structure=self.project_structure,
+            story_intent=fmt,
+            hook_duration=hook_dur,
+            target_duration=target_dur,
             parent=self
         )
         dlg.plan_applied_signal.connect(self._on_copilot_plan_applied)
@@ -3007,7 +3085,51 @@ class ChunDVCApp(QMainWindow):
                 except Exception:
                     pass
 
-        events, subs, markers = StoryCopilot.convert_plan_to_resolve_timeline(plan, path_map)
+        # Thu thập toàn bộ bản ghi transcript lời thoại từ Cache để trích xuất phụ đề
+        cache_mgr = ScanCacheManager()
+        subtitles_by_path: Dict[str, List[Dict[str, Any]]] = {}
+        model_name = self.combo_model.currentText() if hasattr(self, "combo_model") else "medium"
+        lang_name = self.combo_lang.currentText() if hasattr(self, "combo_lang") else "Auto"
+
+        for p_abs in set(path_map.values()):
+            if os.path.exists(p_abs):
+                cached = cache_mgr.get_cached_scan(p_abs, model_name, lang_name)
+                if cached and cached.get("raw_subtitles"):
+                    subtitles_by_path[p_abs] = cached["raw_subtitles"]
+
+        # Lấy BGM & Beat Detection đã chọn từ TabCopilot
+        bgm_files = []
+        music_beats = None
+        if hasattr(self, "tab_copilot") and hasattr(self.tab_copilot, "get_selected_bgm_files"):
+            bgm_files = self.tab_copilot.get_selected_bgm_files(self.project_structure)
+            beat_sync_enabled = getattr(self.tab_copilot, "chk_beat_sync", None) and self.tab_copilot.chk_beat_sync.isChecked()
+            if bgm_files and os.path.exists(bgm_files[0]) and beat_sync_enabled:
+                try:
+                    music_beats = AudioBeatDetector.detect_beats(bgm_files[0])
+                except Exception as e:
+                    self.txt_console.appendPlainText(f"   ⚠ Lỗi phát hiện beat: {e}")
+
+        # Sao chép tệp BGM vào _TIMELINE_IMPORT để DaVinci dễ dàng liên kết
+        copied_bgm_files = []
+        for bgm_f in bgm_files:
+            if os.path.exists(bgm_f):
+                dst_bgm = os.path.join(output_dir, os.path.basename(bgm_f))
+                try:
+                    if os.path.abspath(bgm_f) != os.path.abspath(dst_bgm):
+                        shutil.copy2(bgm_f, dst_bgm)
+                    copied_bgm_files.append(dst_bgm)
+                except Exception:
+                    copied_bgm_files.append(bgm_f)
+            else:
+                copied_bgm_files.append(bgm_f)
+
+        events, subs, markers = StoryCopilot.convert_plan_to_resolve_timeline(
+            plan,
+            path_map,
+            subtitles_by_path=subtitles_by_path,
+            bgm_files=copied_bgm_files if copied_bgm_files else None,
+            music_beats=music_beats
+        )
 
         if not events:
             QMessageBox.warning(self, "Không có phân đoạn", "Bản vẽ không tìm thấy phân đoạn video hợp lệ nào.")
@@ -3040,10 +3162,13 @@ class ChunDVCApp(QMainWindow):
             timeline_name=timeline_name,
             fps=fps,
             aspect_ratio="16:9",
-            markers=markers
+            subtitles=subs if subs else None,
+            markers=markers,
+            bgm_files=copied_bgm_files if copied_bgm_files else None,
+            music_beats=music_beats
         )
 
-        # 2. Sinh FCP7 XML (Multi-Track V1, V2 Meme, A1/A2 Audio, A3 SFX chuẩn DaVinci Resolve Windows)
+        # 2. Sinh FCP7 XML (Multi-Track V1, V2 Meme, A1/A2 Audio, A3 SFX, A4/A5 BGM chuẩn DaVinci Resolve Windows)
         FCPXMLGenerator.generate_fcp7_xml(
             events=v1_events,
             output_xml_path=out_fcp7xml,
@@ -3052,13 +3177,33 @@ class ChunDVCApp(QMainWindow):
             aspect_ratio="16:9",
             broll_inserts=plan.broll_inserts,
             sfx_inserts=plan.sfx_inserts,
-            markers=markers
+            markers=markers,
+            bgm_files=copied_bgm_files if copied_bgm_files else None,
+            music_beats=music_beats
         )
 
         # 3. Sinh EDL CMX3600
         EDLGenerator.create_multi_clip_edl(v1_events, out_edl, markers=markers)
 
-        # 4. Tách riêng Timeline Hook (Intro Highlight Teaser) độc lập
+        # 4. Xuất file phụ đề độc lập (SRT + Karaoke FCPXML)
+        out_sub_srt = None
+        out_sub_fcpxml = None
+        if subs:
+            out_sub_srt = os.path.join(output_dir, f"{timeline_name}_PhuDe.srt")
+            out_sub_fcpxml = os.path.join(output_dir, f"{timeline_name}_PhuDe_Karaoke.fcpxml")
+            try:
+                ResolveAutomation().generate_srt(subs, out_sub_srt)
+                FCPXMLGenerator.generate_karaoke_fcpxml(
+                    subtitles=subs,
+                    output_path=out_sub_fcpxml,
+                    fps=fps,
+                    aspect_ratio="16:9",
+                    markers=markers
+                )
+            except Exception as e:
+                self.txt_console.appendPlainText(f"   ⚠ Lỗi khi xuất tệp phụ đề: {e}")
+
+        # 5. Tách riêng Timeline Hook (Intro Highlight Teaser) độc lập
         out_hook_fcp7xml = None
         out_hook_fcpxml = None
         hook_events = [e for e in events if e.get("is_hook")]
@@ -3120,6 +3265,13 @@ class ChunDVCApp(QMainWindow):
         if out_hook_fcp7xml:
             self.txt_console.appendPlainText(f"   🔥 2. Dedicated Intro Hook Timeline XML: {out_hook_fcp7xml}")
             self.txt_console.appendPlainText(f"   🔥 2. Dedicated Intro Hook Timeline FCPXML: {out_hook_fcpxml}")
+        if out_sub_srt and os.path.exists(out_sub_srt):
+            self.txt_console.appendPlainText(f"   📝 3. Phụ đề Lời thoại (SRT): {out_sub_srt}")
+            self.txt_console.appendPlainText(f"   📝 3. Phụ đề Karaoke Text+ (FCPXML): {out_sub_fcpxml}")
+        if copied_bgm_files:
+            bgm_name = os.path.basename(copied_bgm_files[0])
+            beats_count = len(music_beats) if music_beats else 0
+            self.txt_console.appendPlainText(f"   🎵 4. Nhạc Nền Track A4/A5 (BGM): {bgm_name} ({beats_count} Beat Drops)")
         self.txt_console.appendPlainText(f"   📂 Toàn bộ file lưu tập trung tại: {output_dir}")
 
         resolve_auto = ResolveAutomation()
@@ -3143,17 +3295,33 @@ class ChunDVCApp(QMainWindow):
         if out_hook_fcp7xml:
             hook_info_html = f"🔥 <b>File Intro Hook Riêng Biệt:</b> <code>{os.path.basename(out_hook_fcp7xml)}</code><br>"
 
+        sub_info_html = ""
+        if out_sub_srt and os.path.exists(out_sub_srt):
+            sub_info_html = (
+                f"📝 <b>File Phụ Đề Lời Thoại:</b> <code>{os.path.basename(out_sub_srt)}</code><br>"
+                f"✨ <b>File Phụ Đề Karaoke (Text+):</b> <code>{os.path.basename(out_sub_fcpxml)}</code><br>"
+            )
+
+        bgm_info_html = ""
+        if copied_bgm_files:
+            bgm_name = os.path.basename(copied_bgm_files[0])
+            beats_count = len(music_beats) if music_beats else 0
+            bgm_info_html = f"🎵 <b>Nhạc Nền Track A4/A5:</b> <code>{bgm_name}</code> ({beats_count} Beat Drops)<br>"
+
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("🎉 Đã Tạo Xong Timeline Kịch Bản AI!")
         msg_box.setText(
-            f"<b>✔ Toàn bộ file Timeline đã được tạo tập trung trong thư mục <code>_TIMELINE_IMPORT</code>!</b><br><br>"
+            f"<b>✔ Toàn bộ file Timeline, Phụ đề & Nhạc nền đã được tạo tập trung trong thư mục <code>_TIMELINE_IMPORT</code>!</b><br><br>"
             f"📁 <b>Thư mục chứa:</b> <code>{output_dir}</code><br>"
             f"🎬 <b>File Master Timeline XML:</b> <code>{os.path.basename(out_fcp7xml)}</code><br>"
-            f"{hook_info_html}<br>"
+            f"{hook_info_html}"
+            f"{sub_info_html}"
+            f"{bgm_info_html}<br>"
             f"<b>🎬 Cách đưa vào DaVinci Resolve (Bản Free & Studio):</b><br>"
             f"1. Mở <b>DaVinci Resolve</b>.<br>"
             f"2. Bấm phím tắt <b>Ctrl + Shift + I</b> <i>(hoặc File ➔ Import Timeline ➔ Import AAF, EDL, XML...)</i>.<br>"
-            f"3. Chọn file <b><code>{os.path.basename(out_fcp7xml)}</code></b> (hoặc <code>{os.path.basename(out_hook_fcp7xml) if out_hook_fcp7xml else ''}</code>).<br><br>"
+            f"3. Chọn file <b><code>{os.path.basename(out_fcp7xml)}</code></b> (hoặc <code>{os.path.basename(out_hook_fcp7xml) if out_hook_fcp7xml else ''}</code>).<br>"
+            f"4. Nếu cần phụ đề Karaoke Text+: Kéo thả file <b><code>{os.path.basename(out_sub_fcpxml) if out_sub_fcpxml else ''}</code></b> hoặc <code>.srt</code> vào Timeline!<br><br>"
             f"✨ <i>Âm thanh đối thoại Track A1/A2, Tiếng động SFX Track A3, B-Roll Track V2 và Markers đã được liên kết chuẩn 100%!</i>"
         )
         msg_box.setIcon(QMessageBox.Information)
