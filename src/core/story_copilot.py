@@ -4,7 +4,7 @@ import json
 import urllib.request
 import urllib.error
 import urllib.parse
-from typing import List, Dict, Any, Optional, Tuple, Union
+from typing import List, Dict, Any, Optional, Tuple, Union, Sequence
 from pydantic import BaseModel, Field
 
 
@@ -69,7 +69,10 @@ class StoryCopilot:
    - Tuyệt đối KHÔNG cắt ngang giữa chừng khi nhân vật đang nói (tránh bị cụt chữ, mất nhịp).
    - Hãy để câu nói kết thúc trọn vẹn, nghỉ thở tự nhiên rồi mới chuyển cảnh (10s - 35s/phân đoạn).
    - Bạn CHỈ CẦN CHỈ ĐỊNH CHÍNH XÁC điểm bắt đầu và kết thúc của câu chuyện. Hệ thống sẽ TỰ ĐỘNG tính toán khoảng đệm an toàn.
-3. **Global Hook Độc Lập:** 3-5s câu nói hoặc cú twist đắt giá nhất để mở đầu.
+3. **Đoạn Mở Đầu Teaser / Highlight Hook Độc Lập (30s - 60s):**
+   - Đối với Vlog, hãy chọn một đoạn cao trào gay cấn, hài hước hoặc một câu chuyện dạo đầu kịch tính kéo dài từ 30s đến 60s (hoặc tối thiểu 15s-30s) để làm Teaser Hook mở đầu.
+   - Đoạn này đặt độc lập ở đầu video để kích thích người xem tò mò xem hết vlog.
+   - Trong JSON, đặt tên `hook_title` rõ ràng (Ví dụ: `🔥 [TEASER HOOK 45s] - Tên đoạn mở đầu`) để trên DaVinci Resolve hiển thị rõ ràng, dễ nhận biết và tách sửa.
 4. **Điều Tiết SFX & Meme (Tuyệt Đối Không Lạm Dụng / Spam):**
    - Chỉ chèn SFX khi THỰC SỰ có điểm rơi cảm xúc hoặc chuyển cảnh quan trọng (tối đa 1 SFX mỗi 20-30 giây).
    - Không spam liên tục cùng một âm thanh (như Vine Boom, Whoosh). Phải đa dạng âm thanh hoặc để không gian yên tĩnh tự nhiên.
@@ -170,7 +173,9 @@ class StoryCopilot:
         project_name: str,
         clips_data: List[Dict[str, Any]],
         project_structure: Optional[Any] = None,
-        story_intent: str = "vlog_hook",
+        story_intent: str = "travel_vlog",
+        target_duration: str = "full",
+        hook_duration: str = "30_60s",
         music_beats: Optional[List[float]] = None
     ) -> str:
         """
@@ -184,7 +189,36 @@ class StoryCopilot:
             f"## 📁 THÔNG TIN DỰ ÁN: {project_name}",
             f"- Tổng số clip: {len(clips_data)} video",
             f"- Ý đồ dựng mục tiêu: {story_intent.upper()}",
+            f"- Thời lượng mục tiêu: {target_duration.upper()}",
         ]
+
+        if hook_duration == "30_60s":
+            lines.extend([
+                "",
+                "## 🔥 YÊU CẦU ĐẶC BIỆT VỀ ĐOẠN HOOK MỞ ĐẦU (30s - 60s CHO VLOG):",
+                "- Đối với định dạng Vlog/Storytelling, đoạn `global_hook` BẮT BUỘC DÀI TỪ 30 ĐẾN 60 GIÂY (`end_sec - start_sec` trong khoảng 30.0s đến 60.0s).",
+                "- Hãy chọn một phân đoạn cao trào, gay cấn, hài hước hoặc một câu chuyện dạo đầu kịch tính kéo dài 30s - 60s để cuốn hút người xem ngay từ đầu.",
+                "- Đặt tên `hook_title` bắt đầu bằng `🔥 [TEASER HOOK]` kèm thời lượng và tóm tắt (Ví dụ: `🔥 [TEASER HOOK 45s] CÚ TWIST BẤT NGỜ`) để trên DaVinci Resolve hiển thị rõ ràng, dễ nhận biết và tách sửa."
+            ])
+        elif hook_duration == "15_30s":
+            lines.extend([
+                "",
+                "## 🔥 YÊU CẦU ĐẶC BIỆT VỀ ĐOẠN HOOK MỞ ĐẦU (15s - 30s):",
+                "- Đoạn `global_hook` cần dài từ 15 đến 30 giây (`end_sec - start_sec` từ 15.0s đến 30.0s).",
+                "- Đặt tên `hook_title` bắt đầu bằng `🔥 [TEASER HOOK]` để dễ nhận diện trên timeline DaVinci Resolve."
+            ])
+        elif hook_duration == "3_5s":
+            lines.extend([
+                "",
+                "## 🔥 YÊU CẦU ĐẶC BIỆT VỀ ĐOẠN HOOK MỞ ĐẦU (3s - 5s SHORTS):",
+                "- Đoạn `global_hook` dài từ 3 đến 5 giây, giật tít tức thì cho video ngắn."
+            ])
+        elif hook_duration == "none":
+            lines.extend([
+                "",
+                "## ℹ️ KHÔNG CẦN ĐOẠN HOOK RIÊNG:",
+                "- Hãy để `\"global_hook\": null` và đi thẳng vào câu chuyện chính trong `timeline_segments`."
+            ])
 
         if music_beats:
             beat_strs = [f"{b:.1f}" for b in music_beats[:30]] # Chỉ lấy 30 beats tiêu biểu tránh nổ token
@@ -245,12 +279,12 @@ class StoryCopilot:
             '  "strategy_summary": "Giải thích ngắn gọn lý do chọn Hook và cách sắp xếp mạch chuyện",',
             '  "target_platform": "YouTube Vlog / Shorts",',
             '  "global_hook": {',
-            '    "clip_index": 12,',
+            '    "clip_index": 1,',
             '    "clip_name": "Tên clip được chọn làm hook",',
-            '    "start_sec": 14.0,',
-            '    "end_sec": 18.0,',
-            '    "hook_title": "CHỮ CHÈN MÀN HÌNH GIẬT TÍT (TEXT OVERLAY)",',
-            '    "reason": "Lý do vì sao đoạn này là hook đỉnh nhất",',
+            '    "start_sec": 10.0,',
+            '    "end_sec": 50.0,',
+            '    "hook_title": "🔥 [TEASER HOOK 40s] CÂU CHUYỆN BẤT NGỜ MỞ ĐẦU",',
+            '    "reason": "Đoạn cao trào gay cấn dài 40s mở đầu kích thích người xem xem hết vlog",',
             '    "punch_in": true',
             "  },",
             '  "timeline_segments": [',
@@ -632,7 +666,10 @@ class StoryCopilot:
     def convert_plan_to_resolve_timeline(
         cls,
         plan: CopilotDirectorPlan,
-        video_paths_by_index: Dict[Any, str]
+        video_paths_by_index: Dict[Any, str],
+        subtitles_by_path: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        bgm_files: Optional[Sequence[str]] = None,
+        music_beats: Optional[Sequence[float]] = None
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Chuyển đổi bản vẽ Copilot thành danh sách Events (Track 1 & Track 2), Subtitles, Markers sẵn sàng nạp lên DaVinci Resolve.
@@ -652,6 +689,44 @@ class StoryCopilot:
 
         cursor = 0.0
 
+        def add_subtitles_for_range(vpath: str, src_start: float, src_end: float, base_rec: float, speed_val: float):
+            if not subtitles_by_path:
+                return
+            clip_subs = subtitles_by_path.get(vpath) or subtitles_by_path.get(os.path.abspath(vpath)) or []
+            if not clip_subs:
+                v_base = os.path.basename(vpath).lower()
+                for k, v in subtitles_by_path.items():
+                    if os.path.basename(k).lower() == v_base:
+                        clip_subs = v
+                        break
+            for s in clip_subs:
+                s_st = float(s.get("start", 0.0))
+                s_en = float(s.get("end", 0.0))
+                if s_en > src_start and s_st < src_end:
+                    clipped_st = max(s_st, src_start)
+                    clipped_en = min(s_en, src_end)
+                    rel_st = (clipped_st - src_start) / speed_val
+                    rel_en = (clipped_en - src_start) / speed_val
+                    
+                    sub_words = []
+                    for w in s.get("words", []):
+                        w_st = float(w.get("start", s_st))
+                        w_en = float(w.get("end", s_end))
+                        if w_en > src_start and w_st < src_end:
+                            sub_words.append({
+                                "word": w.get("word", ""),
+                                "start": base_rec + (max(w_st, src_start) - src_start) / speed_val,
+                                "end": base_rec + (min(w_en, src_end) - src_start) / speed_val,
+                            })
+                    
+                    subtitles.append({
+                        "start": base_rec + rel_st,
+                        "end": base_rec + rel_en,
+                        "text": s.get("text", "").strip(),
+                        "words": sub_words,
+                        "video_path": vpath
+                    })
+
         # 1. Chèn Global Hook lên đầu Timeline nếu có
         if plan.global_hook:
             h = plan.global_hook
@@ -667,6 +742,9 @@ class StoryCopilot:
 
                 if start_val < end_val:
                     dur = max(0.5, end_val - start_val)
+                    clip_base = os.path.basename(vpath)
+                    clean_hook_title = h.hook_title or "Intro Teaser"
+                    hook_label = f"🔥 [TEASER HOOK {dur:.0f}s] {clean_hook_title}"
                     events.append({
                         "video_path": vpath,
                         "src_in": start_val,
@@ -678,22 +756,29 @@ class StoryCopilot:
                         "punch_in_scale": 1.15,
                         "is_hook": True,
                         "track": 1,
+                        "clip_name": hook_label,
+                        "chapter": f"🔥 TEASER HOOK ({dur:.0f}s)",
+                        "role": "hook",
+                        "note": f"🔥 [Đoạn Hook Mở Đầu {dur:.0f}s] - Bấm C/B tại {cursor + dur:.1f}s để tách sửa: {h.reason}",
                         "reason": h.reason
                     })
 
                     markers.append({
                         "time": cursor,
                         "duration": dur,
-                        "name": f"🔥 GLOBAL HOOK: {h.hook_title}",
+                        "name": f"🔥 [GLOBAL HOOK {dur:.0f}s] {clean_hook_title[:30]}",
                         "color": "Magenta",
-                        "note": h.reason
+                        "note": f"🔥 [TEASER HOOK MỞ ĐẦU {dur:.0f}s - KẾT THÚC TẠI {cursor + dur:.1f}s]: Dễ dàng nhận diện để cắt/tách hoặc dời vị trí. Lý do: {h.reason}"
                     })
 
-                    if h.hook_title:
+                    if subtitles_by_path:
+                        add_subtitles_for_range(vpath, start_val, end_val, cursor, 1.0)
+                    elif h.hook_title:
                         subtitles.append({
                             "start": cursor,
-                            "end": cursor + dur,
+                            "end": min(cursor + dur, cursor + 5.0),
                             "text": h.hook_title,
+                            "words": [],
                             "video_path": vpath
                         })
 
@@ -752,6 +837,9 @@ class StoryCopilot:
                 "color": m_color,
                 "note": seg.note
             })
+
+            if subtitles_by_path:
+                add_subtitles_for_range(vpath, start_val, end_val, cursor, seg.speed)
 
             cursor += rec_dur
 
@@ -852,5 +940,17 @@ class StoryCopilot:
                 "color": "Purple",
                 "note": plan.call_to_action
             })
+
+        # 6. Thêm Beat Drop Markers nếu có music_beats
+        if music_beats:
+            for b_sec in music_beats:
+                b_val = float(b_sec)
+                markers.append({
+                    "time": b_val,
+                    "duration": 0.1,
+                    "name": "🎵 Beat Drop",
+                    "color": "Cyan",
+                    "note": "Mốc nhịp nhạc nền (Auto Beat-Sync)"
+                })
 
         return events, subtitles, markers

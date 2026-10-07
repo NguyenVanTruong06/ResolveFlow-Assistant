@@ -1,6 +1,6 @@
 import os
 import html
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Sequence
 from src.core.text_preset import TextStylePreset, PresetManager, hex_to_fcpxml_rgba
 
 class FCPXMLGenerator:
@@ -347,6 +347,8 @@ class FCPXMLGenerator:
         highlight_color: str = "1 0.84 0 1",
         preset: Optional[Union[TextStylePreset, str]] = None,
         markers: Optional[List[Dict[str, Any]]] = None,
+        bgm_files: Optional[Sequence[str]] = None,
+        music_beats: Optional[Sequence[float]] = None,
         **kwargs
     ) -> str:
         """
@@ -455,6 +457,30 @@ class FCPXMLGenerator:
     </asset>"""
             )
 
+        if bgm_files:
+            for b_path in bgm_files:
+                if not b_path or (not os.path.exists(b_path) and b_path not in clip_metadata_db):
+                    continue
+                if b_path not in asset_map:
+                    asset_id = f"r_asset_{len(asset_map) + 1}"
+                    asset_map[b_path] = asset_id
+                    meta = clip_metadata_db.get(b_path, {}) if clip_metadata_db else {}
+                    if not meta:
+                        meta = get_media_metadata(b_path)
+                    meta_map[b_path] = meta
+                    abs_path = os.path.abspath(b_path).replace('\\', '/')
+                    file_url = f"file:///{abs_path}" if not abs_path.startswith('/') else f"file://{abs_path}"
+                    clip_name = html.escape(os.path.basename(b_path))
+                    dur_sec = meta.get("duration", 0.0) or 3600.0
+                    dur_frames = to_f(dur_sec)
+                    resources_xml.append(
+                        f"""    <asset id="{asset_id}" name="{clip_name}" src="{html.escape(file_url)}" start="0s" duration="{fr(dur_frames)}" hasVideo="0" format="r_fmt" hasAudio="1">
+      <metadata>
+        <md key="com.apple.proapps.spotlight.kMDItemContentType" value="public.audio"/>
+      </metadata>
+    </asset>"""
+                    )
+
         # Kế hoạch từng clip: vị trí trên timeline được CỘNG DỒN từ thời lượng ĐẦU RA (đã tính tốc độ),
         # nên các clip luôn nối liền nhau, không bao giờ chồng lấn, kể cả đoạn tua nhanh.
         plan: List[Optional[Dict[str, Any]]] = []
@@ -559,6 +585,64 @@ class FCPXMLGenerator:
                 </title>"""
                                 clip_titles_map[ev_idx].append(word_title_xml)
 
+        # Markers and Beats
+        all_markers = list(markers) if markers else []
+        if music_beats:
+            for b_sec in music_beats:
+                all_markers.append({
+                    "time": float(b_sec),
+                    "duration": 1.0 / real_fps,
+                    "name": "🎵 Beat Drop",
+                    "color": "Cyan",
+                    "note": "Mốc nhịp nhạc nền (Auto Beat-Sync)"
+                })
+
+        clip_markers_map = {ev_idx: [] for ev_idx in range(len(events))}
+        if all_markers and events:
+            for m in all_markers:
+                m_t = float(m.get("time", 0.0))
+                m_name = html.escape(str(m.get("name", "Marker")))
+                m_note = html.escape(str(m.get("note", "")))
+                for ev_idx, ev in enumerate(events):
+                    pl = plan[ev_idx]
+                    if pl is None:
+                        continue
+                    if ev["rec_in"] <= m_t < ev["rec_out"]:
+                        v_path = ev["video_path"]
+                        start_tc_f = asset_tc_map.get(v_path, 0)
+                        rel_sec = m_t - ev["rec_in"]
+                        marker_f = start_tc_f + pl["src_in_f"] + to_f(rel_sec)
+                        m_xml = f'\n                <marker start="{fr(marker_f)}" duration="{fr(1)}" value="{m_name}" note="{m_note}"/>'
+                        clip_markers_map[ev_idx].append(m_xml)
+                        break
+
+        # BGM secondary clips (anchored to first event clip in lane="-1")
+        bgm_clips_xml = []
+        if bgm_files and events and len(events) > 0 and plan[0] is not None:
+            first_v_path = events[0]["video_path"]
+            first_start_tc_f = asset_tc_map.get(first_v_path, 0) + plan[0]["src_in_f"]
+            total_tl_f = cursor_f
+            bgm_cursor_f = 0
+            bgm_idx = 0
+            valid_bgm_list = [p for p in bgm_files if p and (os.path.exists(p) or (clip_metadata_db and p in clip_metadata_db))]
+            if valid_bgm_list and total_tl_f > 0:
+                while bgm_cursor_f < total_tl_f:
+                    cur_p = valid_bgm_list[bgm_idx % len(valid_bgm_list)]
+                    bgm_idx += 1
+                    b_meta = meta_map.get(cur_p, {})
+                    b_dur_sec = b_meta.get("duration", 0.0) or 180.0
+                    b_dur_f = to_f(b_dur_sec)
+                    chunk_dur_f = min(total_tl_f - bgm_cursor_f, b_dur_f)
+                    if chunk_dur_f <= 0:
+                        break
+                    b_asset_id = asset_map[cur_p]
+                    b_name = html.escape(os.path.basename(cur_p))
+                    bgm_offset_f = first_start_tc_f + bgm_cursor_f
+                    bgm_clips_xml.append(
+                        f'\n                <asset-clip name="{b_name}" ref="{b_asset_id}" offset="{fr(bgm_offset_f)}" start="0s" duration="{fr(chunk_dur_f)}" lane="-1" role="music" audioRole="music"/>'
+                    )
+                    bgm_cursor_f += chunk_dur_f
+
         spine_elements = []
         for ev_idx, ev in enumerate(events):
             pl = plan[ev_idx]
@@ -572,6 +656,8 @@ class FCPXMLGenerator:
             clip_start_f = start_tc_f + pl["src_in_f"]
 
             inner_titles = "".join(clip_titles_map.get(ev_idx, []))
+            inner_markers = "".join(clip_markers_map.get(ev_idx, []))
+            inner_bgm = "".join(bgm_clips_xml) if ev_idx == 0 else ""
 
             # Đoạn tua nhanh: timeMap ánh xạ thời gian ĐẦU RA (0 -> out_dur) sang thời gian NGUỒN (0 -> src_dur)
             time_map = ""
@@ -584,7 +670,7 @@ class FCPXMLGenerator:
                 )
 
             clip_xml = f"""
-            <asset-clip name="{clip_name}" ref="{asset_id}" offset="{fr(pl["offset_f"])}" start="{fr(clip_start_f)}" duration="{fr(pl["out_dur_f"])}" format="r_fmt" audioRole="dialogue">{time_map}{inner_titles}
+            <asset-clip name="{clip_name}" ref="{asset_id}" offset="{fr(pl["offset_f"])}" start="{fr(clip_start_f)}" duration="{fr(pl["out_dur_f"])}" format="r_fmt" audioRole="dialogue">{time_map}{inner_titles}{inner_markers}{inner_bgm}
             </asset-clip>"""
             spine_elements.append(clip_xml)
 
@@ -628,6 +714,8 @@ class FCPXMLGenerator:
         broll_inserts: list = None,
         sfx_inserts: list = None,
         markers: list = None,
+        bgm_files: Optional[Sequence[str]] = None,
+        music_beats: Optional[Sequence[float]] = None,
         **kwargs
     ) -> str:
         """
@@ -636,7 +724,7 @@ class FCPXMLGenerator:
         - Track V2: B-Roll / Meme minh họa (nếu có).
         - Track A1/A2: Stereo Audio thoại gốc.
         - Track A3: Âm thanh hiệu ứng SFX (Whoosh, Pop, Bell...).
-        - Track A4/A5: Âm thanh kèm theo của video B-Roll (nếu có).
+        - Track A4/A5: Dedicated Stereo Background Music (BGM) tracks (hoặc Audio B-Roll).
         """
         import re
         import xml.etree.ElementTree as ET
@@ -1051,23 +1139,134 @@ class FCPXMLGenerator:
                 for c in sfx_clips:
                     a_track3.append(c)
 
+        valid_bgm = []
+        if bgm_files:
+            for bp in bgm_files:
+                if bp and (os.path.exists(str(bp)) or (clip_metadata_db and str(bp) in clip_metadata_db)):
+                    valid_bgm.append(str(bp))
+
+        # If BGM is requested, ensure Track A3 (SFX) exists so BGM starts on Track A4 / A5
+        if valid_bgm and 'a_track3' not in locals():
+            a_track3 = ET.SubElement(audio, "track")
+
+        # Dedicated Audio Track A4 (Left) & Track A5 (Right) for BGM
+        if valid_bgm and current_timeline_frame > 0:
+            a_track4 = ET.SubElement(audio, "track")
+            a_track5 = ET.SubElement(audio, "track")
+
+            bgm_cursor_f = 0
+            bgm_clip_idx = 1
+            song_idx = 0
+            num_songs = len(valid_bgm)
+
+            while bgm_cursor_f < current_timeline_frame:
+                current_song_path = valid_bgm[song_idx % num_songs]
+                song_idx += 1
+                b_meta = get_or_create_file_meta(current_song_path)
+
+                song_dur_frames = b_meta.get("dur_frames") or sec_to_frame(b_meta.get("duration", 0.0))
+                if song_dur_frames <= 0:
+                    song_dur_frames = max(1, sec_to_frame(180.0))
+
+                chunk_dur_f = min(current_timeline_frame - bgm_cursor_f, song_dur_frames)
+                if chunk_dur_f <= 0:
+                    break
+
+                b_start_f = bgm_cursor_f
+                b_end_f = b_start_f + chunk_dur_f
+                b_tc_base = b_meta.get("start_tc_frames", 0)
+                b_in_f = b_tc_base
+                b_out_f = b_in_f + chunk_dur_f
+                b_clip_dur_f = b_tc_base + song_dur_frames
+                f_bgm_id = f"file-bgm-{((song_idx - 1) % num_songs) + 1}"
+
+                # Audio A4 (Left)
+                a4_item = ET.SubElement(a_track4, "clipitem", id=f"clipitem-bgm-a4-{bgm_clip_idx}")
+                ET.SubElement(a4_item, "name").text = b_meta["name"]
+                ET.SubElement(a4_item, "duration").text = str(b_clip_dur_f)
+                a4_rate = ET.SubElement(a4_item, "rate")
+                ET.SubElement(a4_rate, "timebase").text = timebase_str
+                ET.SubElement(a4_rate, "ntsc").text = ntsc_str
+                ET.SubElement(a4_item, "start").text = str(b_start_f)
+                ET.SubElement(a4_item, "end").text = str(b_end_f)
+                ET.SubElement(a4_item, "in").text = str(b_in_f)
+                ET.SubElement(a4_item, "out").text = str(b_out_f)
+                add_file_node(a4_item, b_meta, f_bgm_id, is_audio_only=True)
+
+                st_a4 = ET.SubElement(a4_item, "sourcetrack")
+                ET.SubElement(st_a4, "mediatype").text = "audio"
+                ET.SubElement(st_a4, "trackindex").text = "1"
+
+                # Audio A5 (Right)
+                a5_item = ET.SubElement(a_track5, "clipitem", id=f"clipitem-bgm-a5-{bgm_clip_idx}")
+                ET.SubElement(a5_item, "name").text = b_meta["name"]
+                ET.SubElement(a5_item, "duration").text = str(b_clip_dur_f)
+                a5_rate = ET.SubElement(a5_item, "rate")
+                ET.SubElement(a5_rate, "timebase").text = timebase_str
+                ET.SubElement(a5_rate, "ntsc").text = ntsc_str
+                ET.SubElement(a5_item, "start").text = str(b_start_f)
+                ET.SubElement(a5_item, "end").text = str(b_end_f)
+                ET.SubElement(a5_item, "in").text = str(b_in_f)
+                ET.SubElement(a5_item, "out").text = str(b_out_f)
+                add_file_node(a5_item, b_meta, f_bgm_id, is_audio_only=True)
+
+                st_a5 = ET.SubElement(a5_item, "sourcetrack")
+                ET.SubElement(st_a5, "mediatype").text = "audio"
+                ET.SubElement(st_a5, "trackindex").text = "2"
+
+                # Link A4 and A5 clipitems together (groupindex = 2)
+                for itm in (a4_item, a5_item):
+                    l_a4 = ET.SubElement(itm, "link")
+                    ET.SubElement(l_a4, "linkclipref").text = f"clipitem-bgm-a4-{bgm_clip_idx}"
+                    ET.SubElement(l_a4, "mediatype").text = "audio"
+                    ET.SubElement(l_a4, "trackindex").text = "4"
+                    ET.SubElement(l_a4, "clipindex").text = str(bgm_clip_idx)
+                    ET.SubElement(l_a4, "groupindex").text = "2"
+
+                    l_a5 = ET.SubElement(itm, "link")
+                    ET.SubElement(l_a5, "linkclipref").text = f"clipitem-bgm-a5-{bgm_clip_idx}"
+                    ET.SubElement(l_a5, "mediatype").text = "audio"
+                    ET.SubElement(l_a5, "trackindex").text = "5"
+                    ET.SubElement(l_a5, "clipindex").text = str(bgm_clip_idx)
+                    ET.SubElement(l_a5, "groupindex").text = "2"
+
+                bgm_cursor_f += chunk_dur_f
+                bgm_clip_idx += 1
+
         # Gắn thêm track A4, A5 cho Audio B-Roll nếu có
         if broll_inserts and 'broll_a1_clips' in locals() and broll_a1_clips:
-            a_track4 = ET.SubElement(audio, "track")
+            a_track_b1 = ET.SubElement(audio, "track")
             for c in broll_a1_clips:
-                a_track4.append(c)
-            a_track5 = ET.SubElement(audio, "track")
+                a_track_b1.append(c)
+            a_track_b2 = ET.SubElement(audio, "track")
             for c in broll_a2_clips:
-                a_track5.append(c)
+                a_track_b2.append(c)
 
-        # 6. Thêm Markers lên Sequence (đã làm sạch emoji)
-        if markers:
-            for m in markers:
-                m_name = clean_str(m.get("name", "Marker"))
+        # 6. Thêm Markers lên Sequence
+        all_markers = list(markers) if markers else []
+        if music_beats:
+            max_tl_sec = current_timeline_frame / real_fps if real_fps > 0 else 0.0
+            for b_sec in music_beats:
+                b_val = float(b_sec)
+                if max_tl_sec <= 0 or b_val < max_tl_sec:
+                    all_markers.append({
+                        "time": b_val,
+                        "duration": 1.0 / real_fps,
+                        "name": "🎵 Beat Drop",
+                        "color": "Cyan",
+                        "note": "Mốc nhịp nhạc nền (Auto Beat-Sync)"
+                    })
+
+        if all_markers:
+            for m in all_markers:
+                m_name = str(m.get("name", "Marker")).strip()
                 m_note = clean_str(m.get("note", ""))
+                m_color = m.get("color")
                 m_el = ET.SubElement(sequence, "marker")
                 ET.SubElement(m_el, "name").text = m_name
                 ET.SubElement(m_el, "comment").text = m_note
+                if m_color:
+                    ET.SubElement(m_el, "color").text = str(m_color)
                 m_in = sec_to_frame(float(m.get("time", 0.0)))
                 m_dur = sec_to_frame(float(m.get("duration", 1.0)))
                 ET.SubElement(m_el, "in").text = str(m_in)
