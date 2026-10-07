@@ -1521,6 +1521,7 @@ class TabAssets(QWidget):
 
         scroll_cats = QScrollArea()
         scroll_cats.setWidgetResizable(True)
+        scroll_cats.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_cats.setStyleSheet("background: transparent; border: none;")
         self.cats_container = QWidget()
         self.cats_vbox = QVBoxLayout(self.cats_container)
@@ -1552,6 +1553,7 @@ class TabAssets(QWidget):
         # CỘT 3: MAIN SECTION - LƯỚI CARD TRỰC QUAN (flex 1)
         # =====================================================================
         self.main_section = QWidget()
+        self.main_section.setMinimumWidth(350)
         self.main_section.setStyleSheet(f"background: {ThemeColors.BG_CARD};")
         main_sec_layout = QVBoxLayout(self.main_section)
         main_sec_layout.setContentsMargins(0, 0, 0, 0)
@@ -1599,6 +1601,7 @@ class TabAssets(QWidget):
 
         scroll_grid = QScrollArea()
         scroll_grid.setWidgetResizable(True)
+        scroll_grid.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_grid.setStyleSheet("background: transparent; border: none;")
         self.grid_container = QWidget()
         self.grid_container.setStyleSheet("background: transparent;")
@@ -1627,6 +1630,7 @@ class TabAssets(QWidget):
 
         scroll_insp = QScrollArea()
         scroll_insp.setWidgetResizable(True)
+        scroll_insp.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_insp.setStyleSheet("background: transparent; border: none;")
         self.insp_content = QWidget()
         self.insp_vbox = QVBoxLayout(self.insp_content)
@@ -3200,12 +3204,17 @@ class TabAssets(QWidget):
             import shutil
             appdata = os.getenv("APPDATA") or ""
             if is_trans:
-                target_dir = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Transitions")
+                target_dir = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Transitions", "ChunDVC")
             else:
-                target_dir = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Titles")
+                target_dir = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Titles", "ChunDVC")
             os.makedirs(target_dir, exist_ok=True)
-            shutil.copy2(real_file_path, target_dir)
-            msg = f"Đã cài đặt file .setting vào DaVinci Resolve ({target_dir})"
+            fname = os.path.basename(real_file_path)
+            if not fname.startswith("ChunDVC_"):
+                dest_file = os.path.join(target_dir, f"ChunDVC_{fname}")
+            else:
+                dest_file = os.path.join(target_dir, fname)
+            shutil.copy2(real_file_path, dest_file)
+            msg = f"Đã cài đặt '{os.path.basename(dest_file)}' vào ChunDVC ({target_dir})"
             count = 1
         else:
             if is_trans:

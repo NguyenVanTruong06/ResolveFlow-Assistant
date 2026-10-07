@@ -754,8 +754,8 @@ class FusionSettingGenerator:
         """Lấy đường dẫn thư mục Fusion Titles Template của DaVinci Resolve trên Windows."""
         app_data = os.environ.get("APPDATA", "")
         if app_data:
-            return os.path.join(app_data, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Titles", "ResolveFlow")
-        return os.path.join(os.path.expanduser("~"), "ResolveFlow_Titles")
+            return os.path.join(app_data, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Titles", "ChunDVC")
+        return os.path.join(os.path.expanduser("~"), "ChunDVC_Titles")
 
     @classmethod
     def install_presets_to_davinci_resolve(cls, presets: Optional[List[TextStylePreset]] = None) -> Tuple[int, str]:
@@ -769,7 +769,7 @@ class FusionSettingGenerator:
         installed_count = 0
         for p in presets:
             clean_name = re.sub(r'[^\w\s-]', '', p.name).strip().replace(' ', '_')
-            filename = f"ResolveFlow_{clean_name}.setting"
+            filename = f"ChunDVC_{clean_name}.setting"
             dest_path = os.path.join(target_dir, filename)
             cls.export_setting_file(p, dest_path, sample_text=f"{p.name}")
             installed_count += 1

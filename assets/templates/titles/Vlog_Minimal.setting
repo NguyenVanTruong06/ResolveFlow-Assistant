@@ -1,0 +1,27 @@
+{
+    Tools = ordered() {
+        RF_Vlog_Minimal = TextPlus {
+            Inputs = {
+                Width = Input { Value = 1920, },
+                Height = Input { Value = 1080, },
+                UseFrameFormatSettings = Input { Value = 1, },
+                Font = Input { Value = "Arial", },
+                Style = Input { Value = "Bold", },
+                Size = Input { Value = 0.0833, },
+                VerticalTopCenterBottom = Input { Value = 1, },
+                HorizontalLeftCenterRight = Input { Value = 0, },
+                Center = Input { Value = { 0.5, 0.15 }, },
+                StyledText = Input { Value = "VLOG LIFE", },
+                Red1 = Input { Value = 1.000, },
+                Green1 = Input { Value = 0.843, },
+                Blue1 = Input { Value = 0.000, },
+                Enabled4 = Input { Value = 1, },
+                ElementShape4 = Input { Value = 2, }, -- Bounding Box
+                Red4 = Input { Value = 0.000, },
+                Green4 = Input { Value = 0.000, },
+                Blue4 = Input { Value = 0.000, },
+            },
+            ViewInfo = OperatorInfo { Pos = { 220, 36.3 } },
+        }
+    }
+}

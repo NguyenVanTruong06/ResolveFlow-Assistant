@@ -37,8 +37,8 @@ def test_install_transitions_to_davinci_resolve(tmp_path):
     )
     assert count == len(BUILTIN_TRANSITIONS)
     for preset in BUILTIN_TRANSITIONS:
-        assert (tmp_path / f"ResolveFlow_{preset.id}.setting").exists() or any(
-            f.name.startswith("ResolveFlow_") and f.name.endswith(".setting")
+        assert (tmp_path / f"ChunDVC_{preset.id}.setting").exists() or (tmp_path / f"ResolveFlow_{preset.id}.setting").exists() or any(
+            (f.name.startswith("ChunDVC_") or f.name.startswith("ResolveFlow_")) and f.name.endswith(".setting")
             for f in tmp_path.glob("*.setting")
         )
 
