@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QSlider, QFrame, QScrollArea, QGridLayout, QApplication, QMessageBox,
     QSizePolicy, QFileDialog, QColorDialog
 )
-from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF
+from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF, QEvent
 from PySide6.QtGui import (
     QDrag, QPixmap, QCursor, QMovie, QPainter, QColor, QPen, QBrush,
     QFont, QPainterPath, QLinearGradient
@@ -798,12 +798,30 @@ class AssetCard(QFrame):
         self._audio_output = None
 
         self.setFixedHeight(148)
-        self.setMinimumWidth(160)
+        self.setMinimumWidth(125)
         self.setFrameShape(QFrame.StyledPanel)
         self.setCursor(Qt.PointingHandCursor)
         self._apply_style()
 
         self._init_ui()
+
+    def set_card_scale(self, cols: int):
+        """Co giãn kích thước thẻ linh hoạt theo số cột lưới (Zoom)."""
+        if cols >= 4:
+            self.setMinimumWidth(100)
+            self.setFixedHeight(126)
+            if hasattr(self, "thumb"):
+                self.thumb.setFixedHeight(66)
+        elif cols <= 2:
+            self.setMinimumWidth(160)
+            self.setFixedHeight(175)
+            if hasattr(self, "thumb"):
+                self.thumb.setFixedHeight(105)
+        else:
+            self.setMinimumWidth(125)
+            self.setFixedHeight(148)
+            if hasattr(self, "thumb"):
+                self.thumb.setFixedHeight(80)
 
     def _apply_style(self):
         border_col = ThemeColors.PRIMARY if self.is_selected else ThemeColors.BORDER_DEFAULT
@@ -1705,14 +1723,39 @@ class TabAssets(QWidget):
 
         fb_layout.addStretch()
 
-        lbl_zoom = QLabel("🖼️ Cỡ lưới:")
+        lbl_zoom = QLabel("🖼️ Cỡ:")
         lbl_zoom.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
         fb_layout.addWidget(lbl_zoom)
 
+        # 3 Nút chuyển cỡ siêu nhanh (DVC Pro style): Nhỏ (5) | Vừa (3) | Lớn (2)
+        self.btn_size_compact = QPushButton("Nhỏ")
+        self.btn_size_compact.setToolTip("Thu nhỏ (5 cột) - Nhìn bao quát nhiều mẫu nhất")
+        self.btn_size_medium = QPushButton("Vừa")
+        self.btn_size_medium.setToolTip("Chuẩn (3 cột) - Cân đối hình ảnh & thông tin")
+        self.btn_size_large = QPushButton("Lớn")
+        self.btn_size_large.setToolTip("Phóng to (2 cột) - Xem chi tiết thumbnail")
+
+        self.grid_size_buttons = [
+            (self.btn_size_compact, 5),
+            (self.btn_size_medium, 3),
+            (self.btn_size_large, 2)
+        ]
+
+        for btn, cols in self.grid_size_buttons:
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(24)
+            btn.clicked.connect(lambda _, c=cols: self._on_grid_cols_changed(c))
+            fb_layout.addWidget(btn)
+        self.btn_size_medium.setChecked(True)
+        self._update_grid_size_button_styles()
+
+        # Thanh trượt tùy chỉnh mượt mà (hỗ trợ cả Ctrl + Lăn chuột)
         self.slide_card_cols = QSlider(Qt.Horizontal)
         self.slide_card_cols.setRange(2, 5)
         self.slide_card_cols.setValue(3)
-        self.slide_card_cols.setFixedWidth(80)
+        self.slide_card_cols.setFixedWidth(70)
+        self.slide_card_cols.setToolTip("Kéo thanh trượt hoặc giữ Ctrl + Cuộn chuột trên lưới để phóng to/thu nhỏ")
         self.slide_card_cols.setStyleSheet(f"""
             QSlider::groove:horizontal {{ height: 4px; background: {ThemeColors.BG_CARD}; border-radius: 2px; }}
             QSlider::sub-page:horizontal {{ background: {ThemeColors.PRIMARY}; border-radius: 2px; }}
@@ -1725,20 +1768,21 @@ class TabAssets(QWidget):
         self.lbl_cols_val.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 11px; font-weight: bold;")
         fb_layout.addWidget(self.lbl_cols_val)
 
-        scroll_grid = QScrollArea()
-        scroll_grid.setWidgetResizable(True)
-        scroll_grid.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll_grid.setStyleSheet("background: transparent; border: none;")
+        self.scroll_grid = QScrollArea()
+        self.scroll_grid.setWidgetResizable(True)
+        self.scroll_grid.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_grid.setStyleSheet("background: transparent; border: none;")
+        self.scroll_grid.viewport().installEventFilter(self)
         self.grid_container = QWidget()
         self.grid_container.setStyleSheet("background: transparent;")
         self.grid = QGridLayout(self.grid_container)
         self.grid.setContentsMargins(16, 16, 16, 16)
         self.grid.setSpacing(12)
-        scroll_grid.setWidget(self.grid_container)
+        self.scroll_grid.setWidget(self.grid_container)
 
         main_sec_layout.addWidget(main_head)
         main_sec_layout.addWidget(filter_bar)
-        main_sec_layout.addWidget(scroll_grid, stretch=1)
+        main_sec_layout.addWidget(self.scroll_grid, stretch=1)
 
         # =====================================================================
         # CỘT 4: BẢNG TINH CHỈNH INSPECTOR (336px)
@@ -2732,9 +2776,58 @@ class TabAssets(QWidget):
                 }}
             """)
 
+    def eventFilter(self, obj, event):
+        if hasattr(self, "scroll_grid") and obj == self.scroll_grid.viewport():
+            if event.type() == QEvent.Wheel and (event.modifiers() & Qt.ControlModifier):
+                delta = event.angleDelta().y()
+                curr = getattr(self, "grid_columns", 3)
+                if delta > 0:
+                    self._on_grid_cols_changed(max(2, curr - 1))
+                elif delta < 0:
+                    self._on_grid_cols_changed(min(5, curr + 1))
+                return True
+        return super().eventFilter(obj, event)
+
+    def _update_grid_size_button_styles(self):
+        curr_cols = getattr(self, "grid_columns", 3)
+        if hasattr(self, "grid_size_buttons"):
+            for btn, cols in self.grid_size_buttons:
+                is_active = (cols == curr_cols) or (cols == 5 and curr_cols >= 4) or (cols == 2 and curr_cols <= 2)
+                btn.setChecked(is_active)
+                bg = ThemeColors.BG_CARD_ACTIVE if is_active else ThemeColors.BG_CARD
+                border = ThemeColors.PRIMARY if is_active else ThemeColors.BORDER_DEFAULT
+                col = "#FFFFFF" if is_active else ThemeColors.TEXT_MUTED
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {bg};
+                        border: 1px solid {border};
+                        border-radius: 4px;
+                        color: {col};
+                        font-size: 11px;
+                        font-weight: {'bold' if is_active else 'normal'};
+                        padding: 1px 7px;
+                    }}
+                    QPushButton:hover {{
+                        border-color: {ThemeColors.PRIMARY};
+                        color: #ffffff;
+                    }}
+                """)
+
     def _on_grid_cols_changed(self, val: int):
         self.grid_columns = val
-        self.lbl_cols_val.setText(f"{val} cột")
+        if hasattr(self, "lbl_cols_val"):
+            self.lbl_cols_val.setText(f"{val} cột")
+        if hasattr(self, "slide_card_cols") and self.slide_card_cols.value() != val:
+            self.slide_card_cols.blockSignals(True)
+            self.slide_card_cols.setValue(val)
+            self.slide_card_cols.blockSignals(False)
+
+        self._update_grid_size_button_styles()
+
+        # Co giãn kích thước thẻ linh hoạt theo số cột
+        for card in self.card_widgets:
+            card.set_card_scale(val)
+
         self._refresh_grid()
 
     def _check_resolve_connection(self):
