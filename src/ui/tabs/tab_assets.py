@@ -805,9 +805,31 @@ class AssetCard(QFrame):
             th_layout = QVBoxLayout(self.thumb)
             th_layout.setContentsMargins(0, 0, 0, 0)
             lbl = QLabel()
-            lbl.setPixmap(QPixmap(thumb_path).scaled(160, 80, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation))
+            
+            src_pixmap = QPixmap(thumb_path)
+            target_w, target_h = 160, 80
+            
+            target_pixmap = QPixmap(target_w, target_h)
+            target_pixmap.fill(Qt.transparent)
+            
+            painter = QPainter(target_pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            
+            path = QPainterPath()
+            path.addRoundedRect(0, 0, target_w, target_h, 8, 8)
+            painter.setClipPath(path)
+            
+            scaled_src = src_pixmap.scaled(target_w, target_h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            
+            x = (target_w - scaled_src.width()) // 2
+            y = (target_h - scaled_src.height()) // 2
+            
+            painter.drawPixmap(x, y, scaled_src)
+            painter.end()
+            
+            lbl.setPixmap(target_pixmap)
             lbl.setAlignment(Qt.AlignCenter)
-            lbl.setStyleSheet("border-radius: 8px; overflow: hidden;")
             th_layout.addWidget(lbl)
         else:
             if isinstance(self.preset, TextStylePreset) or getattr(self.preset, "tab", "") == "text":
