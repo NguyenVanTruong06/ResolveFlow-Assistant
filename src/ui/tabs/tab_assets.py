@@ -63,6 +63,42 @@ class FavoritesManager:
             pass
 
 
+class RecentManager:
+    """Quản lý danh sách các đạo cụ đã dùng hoặc bấm xem gần đây."""
+    FILE_PATH = "data/recent.json"
+    MAX_ITEMS = 60
+
+    @classmethod
+    def load(cls) -> list:
+        if not os.path.exists("data"):
+            os.makedirs("data", exist_ok=True)
+        if not os.path.exists(cls.FILE_PATH):
+            return []
+        try:
+            with open(cls.FILE_PATH, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return []
+
+    @classmethod
+    def add(cls, asset_id: str):
+        if not asset_id:
+            return
+        items = cls.load()
+        if asset_id in items:
+            items.remove(asset_id)
+        items.insert(0, asset_id)
+        items = items[:cls.MAX_ITEMS]
+        if not os.path.exists("data"):
+            os.makedirs("data", exist_ok=True)
+        try:
+            with open(cls.FILE_PATH, 'w', encoding='utf-8') as f:
+                json.dump(items, f)
+        except Exception:
+            pass
+
+
+
 # =========================================================================
 # 2. DỮ LIỆU ĐẠO CỤ CHUẨN TỪ DESIGN MOCKUP
 # =========================================================================
@@ -1581,9 +1617,50 @@ class TabAssets(QWidget):
 
         mh_layout.addStretch()
 
+        # Nút trạng thái DaVinci Resolve
+        self.btn_resolve_status = QPushButton("⚪ Kiểm tra DaVinci")
+        self.btn_resolve_status.setCursor(Qt.PointingHandCursor)
+        self.btn_resolve_status.clicked.connect(self._check_resolve_connection)
+        self.btn_resolve_status.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 5px 10px;
+                color: {ThemeColors.TEXT_MUTED};
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                border-color: {ThemeColors.BORDER_HOVER};
+                color: {ThemeColors.TEXT_PRIMARY};
+            }}
+        """)
+        mh_layout.addWidget(self.btn_resolve_status)
+
+        # Nút quét lại kho tài nguyên
+        self.btn_rescan = QPushButton("🔄 Quét lại kho")
+        self.btn_rescan.setCursor(Qt.PointingHandCursor)
+        self.btn_rescan.clicked.connect(self._rescan_assets)
+        self.btn_rescan.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 5px 10px;
+                color: {ThemeColors.TEXT_PRIMARY};
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                border-color: {ThemeColors.PRIMARY};
+                background: {ThemeColors.BG_CARD_ACTIVE};
+            }}
+        """)
+        mh_layout.addWidget(self.btn_rescan)
+
         self.txt_search = QLineEdit()
         self.txt_search.setPlaceholderText("🔍 Tìm kiếm đạo cụ...")
-        self.txt_search.setFixedWidth(260)
+        self.txt_search.setFixedWidth(220)
         self.txt_search.textChanged.connect(self._refresh_grid)
         self.txt_search.setStyleSheet(f"""
             QLineEdit {{
@@ -1599,6 +1676,55 @@ class TabAssets(QWidget):
         """)
         mh_layout.addWidget(self.txt_search)
 
+        # Thanh công cụ phụ: Bộ lọc nhanh & Slider kích thước thẻ (DVC Pro style)
+        filter_bar = QFrame()
+        filter_bar.setFixedHeight(40)
+        filter_bar.setStyleSheet(f"""
+            QFrame {{
+                background-color: {ThemeColors.BG_MAIN};
+                border-bottom: 1px solid {ThemeColors.BORDER_DEFAULT};
+            }}
+        """)
+        fb_layout = QHBoxLayout(filter_bar)
+        fb_layout.setContentsMargins(16, 4, 16, 4)
+        fb_layout.setSpacing(8)
+
+        self.btn_filter_all = QPushButton("Tất cả")
+        self.btn_filter_fav = QPushButton("⭐ Yêu thích")
+        self.btn_filter_recent = QPushButton("🕒 Đã dùng gần đây")
+        self.filter_buttons = [self.btn_filter_all, self.btn_filter_fav, self.btn_filter_recent]
+
+        for btn, mode in [(self.btn_filter_all, "all"), (self.btn_filter_fav, "fav"), (self.btn_filter_recent, "recent")]:
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedHeight(26)
+            btn.clicked.connect(lambda _, m=mode: self._set_filter_mode(m))
+            fb_layout.addWidget(btn)
+        self.btn_filter_all.setChecked(True)
+        self._update_filter_button_styles()
+
+        fb_layout.addStretch()
+
+        lbl_zoom = QLabel("🖼️ Cỡ lưới:")
+        lbl_zoom.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
+        fb_layout.addWidget(lbl_zoom)
+
+        self.slide_card_cols = QSlider(Qt.Horizontal)
+        self.slide_card_cols.setRange(2, 5)
+        self.slide_card_cols.setValue(3)
+        self.slide_card_cols.setFixedWidth(80)
+        self.slide_card_cols.setStyleSheet(f"""
+            QSlider::groove:horizontal {{ height: 4px; background: {ThemeColors.BG_CARD}; border-radius: 2px; }}
+            QSlider::sub-page:horizontal {{ background: {ThemeColors.PRIMARY}; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: {ThemeColors.CYAN_HI}; width: 10px; margin: -3px 0; border-radius: 5px; }}
+        """)
+        self.slide_card_cols.valueChanged.connect(self._on_grid_cols_changed)
+        fb_layout.addWidget(self.slide_card_cols)
+
+        self.lbl_cols_val = QLabel("3 cột")
+        self.lbl_cols_val.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 11px; font-weight: bold;")
+        fb_layout.addWidget(self.lbl_cols_val)
+
         scroll_grid = QScrollArea()
         scroll_grid.setWidgetResizable(True)
         scroll_grid.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -1611,6 +1737,7 @@ class TabAssets(QWidget):
         scroll_grid.setWidget(self.grid_container)
 
         main_sec_layout.addWidget(main_head)
+        main_sec_layout.addWidget(filter_bar)
         main_sec_layout.addWidget(scroll_grid, stretch=1)
 
         # =====================================================================
@@ -2166,6 +2293,63 @@ class TabAssets(QWidget):
 
         p_layout.addWidget(self.grp_track)
 
+        # E. Vị trí trên clip đang chọn (DVC Pro style - Đầu clip / Cuối clip)
+        self.grp_trans_pos = QWidget()
+        tp_vbox = QVBoxLayout(self.grp_trans_pos)
+        tp_vbox.setContentsMargins(0, 0, 0, 0)
+        tp_vbox.setSpacing(6)
+
+        lbl_tp_title = QLabel("VỊ TRÍ ÁP DỤNG TRÊN CLIP")
+        lbl_tp_title.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {ThemeColors.TEXT_MUTED};")
+        tp_vbox.addWidget(lbl_tp_title)
+
+        seg_tp_box = QWidget()
+        seg_tp_layout = QHBoxLayout(seg_tp_box)
+        seg_tp_layout.setContentsMargins(0, 0, 0, 0)
+        seg_tp_layout.setSpacing(6)
+
+        self.btn_trans_head = QPushButton("▶ Đầu clip (In)")
+        self.btn_trans_head.setCheckable(True)
+        self.btn_trans_head.setCursor(Qt.PointingHandCursor)
+        self.btn_trans_head.setFixedHeight(28)
+        self.btn_trans_head.clicked.connect(lambda: self._set_trans_alignment("head"))
+
+        self.btn_trans_tail = QPushButton("◀ Cuối clip (Out)")
+        self.btn_trans_tail.setCheckable(True)
+        self.btn_trans_tail.setCursor(Qt.PointingHandCursor)
+        self.btn_trans_tail.setFixedHeight(28)
+        self.btn_trans_tail.clicked.connect(lambda: self._set_trans_alignment("tail"))
+
+        seg_tp_layout.addWidget(self.btn_trans_head)
+        seg_tp_layout.addWidget(self.btn_trans_tail)
+        tp_vbox.addWidget(seg_tp_box)
+
+        self.trans_alignment = "tail"
+        self.trans_frames = 12
+        self.btn_trans_tail.setChecked(True)
+        self._update_trans_alignment_styles()
+
+        h_tf = QHBoxLayout()
+        h_tf.addWidget(QLabel("Thời lượng chuyển cảnh:"))
+        self.lbl_trans_frames_val = QLabel("12 frames")
+        self.lbl_trans_frames_val.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 11px; font-weight: bold;")
+        h_tf.addStretch()
+        h_tf.addWidget(self.lbl_trans_frames_val)
+        tp_vbox.addLayout(h_tf)
+
+        self.slide_trans_frames = QSlider(Qt.Horizontal)
+        self.slide_trans_frames.setRange(4, 48)
+        self.slide_trans_frames.setValue(12)
+        self.slide_trans_frames.setStyleSheet(f"""
+            QSlider::groove:horizontal {{ height: 4px; background: {ThemeColors.BG_CARD}; border-radius: 2px; }}
+            QSlider::sub-page:horizontal {{ background: {ThemeColors.PRIMARY}; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: {ThemeColors.CYAN_HI}; width: 12px; margin: -4px 0; border-radius: 6px; }}
+        """)
+        self.slide_trans_frames.valueChanged.connect(self._on_trans_frames_changed)
+        tp_vbox.addWidget(self.slide_trans_frames)
+
+        p_layout.addWidget(self.grp_trans_pos)
+
         self.insp_vbox.addWidget(self.grp_params)
         self.insp_vbox.addStretch()
         scroll_insp.setWidget(self.insp_content)
@@ -2455,6 +2639,8 @@ class TabAssets(QWidget):
         tab = self.current_rail_tab
         cat = self.current_sub_cat
         query = self.txt_search.text().strip().lower()
+        filter_mode = getattr(self, "filter_mode", "all")
+        recent_items = set(RecentManager.load()) if filter_mode == "recent" else set()
 
         visible = []
         for card in self.card_widgets:
@@ -2464,6 +2650,14 @@ class TabAssets(QWidget):
             i_id = getattr(item, "id", "")
             i_name = getattr(item, "name", "").lower()
             i_fav = i_id in self.favorites
+
+            # Lọc theo Filter mode (Tất cả / Yêu thích / Gần đây)
+            if filter_mode == "fav" and not i_fav:
+                card.setVisible(False)
+                continue
+            elif filter_mode == "recent" and i_id not in recent_items:
+                card.setVisible(False)
+                continue
 
             # Lọc theo Tab
             if tab == "fav":
@@ -2489,14 +2683,15 @@ class TabAssets(QWidget):
         # Cập nhật số lượng đếm
         self.lbl_count_badge.setText(f"{len(visible)} mẫu")
 
-        # Đặt vào lưới (3 cột)
-        cols = 3
+        # Đặt vào lưới (số cột động theo slider)
+        cols = getattr(self, "grid_columns", 3)
         for idx, card in enumerate(visible):
             card.setVisible(True)
             self.grid.addWidget(card, idx // cols, idx % cols)
 
     def _on_card_selected(self, preset_id: str):
         self._stop_inspector_sfx_play()
+        RecentManager.add(preset_id)
         # Cập nhật combo_text_preset cho unit tests
         idx = self.combo_text_preset.findData(preset_id)
         if idx >= 0:
@@ -2512,6 +2707,137 @@ class TabAssets(QWidget):
         # Cập nhật Inspector
         self._update_inspector_details()
 
+    def _set_filter_mode(self, mode: str):
+        self.filter_mode = mode
+        self._update_filter_button_styles()
+        self._refresh_grid()
+
+    def _update_filter_button_styles(self):
+        modes = [("all", self.btn_filter_all), ("fav", self.btn_filter_fav), ("recent", self.btn_filter_recent)]
+        for m, btn in modes:
+            is_active = (getattr(self, "filter_mode", "all") == m)
+            btn.setChecked(is_active)
+            bg = ThemeColors.BG_CARD_ACTIVE if is_active else ThemeColors.BG_CARD
+            border = ThemeColors.PRIMARY if is_active else ThemeColors.BORDER_DEFAULT
+            col = ThemeColors.TEXT_PRIMARY if is_active else ThemeColors.TEXT_MUTED
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: {bg};
+                    border: 1px solid {border};
+                    border-radius: 6px;
+                    color: {col};
+                    font-size: 11px;
+                    font-weight: {'bold' if is_active else 'normal'};
+                    padding: 2px 8px;
+                }}
+            """)
+
+    def _on_grid_cols_changed(self, val: int):
+        self.grid_columns = val
+        self.lbl_cols_val.setText(f"{val} cột")
+        self._refresh_grid()
+
+    def _check_resolve_connection(self):
+        try:
+            res = ResolveAutomation()
+            connected = res.is_connected()
+        except Exception:
+            connected = False
+
+        if connected:
+            self.btn_resolve_status.setText("🟢 DaVinci: Đã kết nối")
+            self.btn_resolve_status.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(34, 197, 94, 0.15);
+                    border: 1px solid #22c55e;
+                    border-radius: 6px;
+                    padding: 5px 10px;
+                    color: #86efac;
+                    font-size: 11px;
+                    font-weight: bold;
+                }}
+            """)
+            self._show_toast("DaVinci Resolve đang hoạt động và đã kết nối thành công!")
+        else:
+            self.btn_resolve_status.setText("⚪ DaVinci: Chưa kết nối")
+            self.btn_resolve_status.setStyleSheet(f"""
+                QPushButton {{
+                    background: {ThemeColors.BG_CARD};
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 6px;
+                    padding: 5px 10px;
+                    color: {ThemeColors.TEXT_MUTED};
+                    font-size: 11px;
+                }}
+            """)
+            self._show_toast("Chưa tìm thấy DaVinci Resolve đang mở. Vui lòng mở DaVinci!")
+
+    def _rescan_assets(self):
+        indexer = AssetIndexer()
+        def dicts_to_assets(dicts, tab, category, sub, badge):
+            return [
+                StudioAsset(
+                    id=d["id"], name=d["name"], tab=tab, category=category,
+                    sub=sub, badge_icon=badge, file_path=d.get("file_path", ""),
+                    thumbnail_path=d.get("thumbnail_path", "")
+                ) for d in dicts
+            ]
+        scanned_titles = indexer.scan_titles()
+        self.all_presets = BUILTIN_PRESETS.copy() + dicts_to_assets(scanned_titles, "text", "custom", "Tùy chỉnh", "🔤")
+        scanned_transitions = indexer.scan_transitions()
+        self.all_transitions = BUILTIN_TRANSITIONS.copy() + dicts_to_assets(scanned_transitions, "trans", "custom", "Tùy chỉnh", "🎬")
+        scanned_luts = indexer.scan_luts()
+        self.all_luts = dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else MOCKUP_LUTS.copy()
+        scanned_memes = indexer.scan_memes()
+        self.all_memes = dicts_to_assets(scanned_memes, "meme", "trending", "Meme", "🎭") if scanned_memes else MOCKUP_MEMES.copy()
+        scanned_sfx = indexer.scan_sfx()
+        self.all_sfx = dicts_to_assets(scanned_sfx, "sfx", "accent", "Âm thanh", "🔊") if scanned_sfx else MOCKUP_SFX.copy()
+        
+        self.all_assets = []
+        self.all_assets.extend(self.all_presets)
+        self.all_assets.extend(self.all_transitions)
+        self.all_assets.extend(self.all_luts)
+        self.all_assets.extend(self.all_icons)
+        self.all_assets.extend(self.all_overlays)
+        self.all_assets.extend(self.all_memes)
+        self.all_assets.extend(self.all_sfx)
+        
+        self._populate_cards()
+        self._refresh_grid()
+        self._show_toast("✅ Đã quét và cập nhật lại toàn bộ kho tài nguyên!")
+
+    def _set_trans_alignment(self, align: str):
+        self.trans_alignment = align
+        self._update_trans_alignment_styles()
+
+    def _update_trans_alignment_styles(self):
+        is_head = (getattr(self, "trans_alignment", "tail") == "head")
+        if hasattr(self, "btn_trans_head") and hasattr(self, "btn_trans_tail"):
+            self.btn_trans_head.setChecked(is_head)
+            self.btn_trans_tail.setChecked(not is_head)
+            for btn, checked in [(self.btn_trans_head, is_head), (self.btn_trans_tail, not is_head)]:
+                bg = ThemeColors.BG_CARD_ACTIVE if checked else ThemeColors.BG_CARD
+                border = ThemeColors.PRIMARY if checked else ThemeColors.BORDER_DEFAULT
+                col = "#FFFFFF" if checked else ThemeColors.TEXT_MUTED
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {bg};
+                        border: 1px solid {border};
+                        border-radius: 6px;
+                        color: {col};
+                        font-size: 11px;
+                        font-weight: {'bold' if checked else 'normal'};
+                    }}
+                """)
+            hint = "Áp dụng vào ĐẦU clip đang chọn." if is_head else "Áp dụng vào CUỐI clip đang chọn."
+            frames = getattr(self, "trans_frames", 12)
+            self.lbl_track_hint.setText(f"{hint} ({frames} frames)")
+
+    def _on_trans_frames_changed(self, val: int):
+        self.trans_frames = val
+        if hasattr(self, "lbl_trans_frames_val"):
+            self.lbl_trans_frames_val.setText(f"{val} frames")
+        self._update_trans_alignment_styles()
 
     def _toggle_inspector_aspect_ratio(self):
         if self.current_aspect_ratio == "16:9":
@@ -2615,6 +2941,8 @@ class TabAssets(QWidget):
                 self.grp_motion.show()
             if hasattr(self, "grp_track"):
                 self.grp_track.show()
+            if hasattr(self, "grp_trans_pos"):
+                self.grp_trans_pos.hide()
 
             self.combo_target_track.clear()
             self.combo_target_track.addItems(["Video Track 2 (V2)", "Video Track 3 (V3)", "Video Track 1 (V1)"])
@@ -2663,6 +2991,8 @@ class TabAssets(QWidget):
                 self.grp_motion.hide()
             if hasattr(self, "grp_track"):
                 self.grp_track.show()
+            if hasattr(self, "grp_trans_pos"):
+                self.grp_trans_pos.hide()
 
             self.combo_target_track.clear()
             self.combo_target_track.addItems(["Timeline (Màu toàn bộ)", "Clip đang chọn"])
@@ -2693,6 +3023,8 @@ class TabAssets(QWidget):
                 self.grp_motion.hide()
             if hasattr(self, "grp_track"):
                 self.grp_track.show()
+            if hasattr(self, "grp_trans_pos"):
+                self.grp_trans_pos.hide()
 
             self.combo_target_track.clear()
             self.combo_target_track.addItems(["Audio Track 2 (A2 - SFX)", "Audio Track 1 (A1)"])
@@ -2727,16 +3059,17 @@ class TabAssets(QWidget):
             if hasattr(self, "grp_motion"):
                 self.grp_motion.hide()
             if hasattr(self, "grp_track"):
-                self.grp_track.show()
-
-            self.combo_target_track.clear()
-            self.combo_target_track.addItems(["Video Track 1 (V1 - Cắt cảnh)", "Video Track 2 (V2)"])
-            self.lbl_track_hint.setText("Kéo hoặc chèn vào điểm giao nhau giữa 2 clip.")
+                self.grp_track.hide()
+            if hasattr(self, "grp_trans_pos"):
+                self.grp_trans_pos.show()
 
             kind = getattr(self.selected_asset, "category", "transform")
-            frames = getattr(self.selected_asset, "frames", 20)
+            frames = getattr(self.selected_asset, "frames", getattr(self, "trans_frames", 12))
+            if hasattr(self, "slide_trans_frames"):
+                self.slide_trans_frames.setValue(frames)
             self.trans_loop_widget.set_transition(name, kind, frames)
-            self.btn_insert_title_playhead.setText("🔄 Chèn chuyển cảnh vào Timeline")
+            self._update_trans_alignment_styles()
+            self.btn_insert_title_playhead.setText("➡️ Áp dụng vào Timeline")
 
         else:
             self.inspector_aspect_btn.hide()
@@ -2759,6 +3092,8 @@ class TabAssets(QWidget):
                 self.grp_motion.hide()
             if hasattr(self, "grp_track"):
                 self.grp_track.show()
+            if hasattr(self, "grp_trans_pos"):
+                self.grp_trans_pos.hide()
 
             self.combo_target_track.clear()
             self.combo_target_track.addItems(["Video Track 2 (V2)", "Video Track 3 (V3)", "Video Track 1 (V1)"])
@@ -3012,14 +3347,25 @@ class TabAssets(QWidget):
                 self._show_toast(f"Đã chèn video “{getattr(self.selected_asset, 'name', 'Asset')}” tại Playhead (V3)")
             else:
                 self._show_toast(f"Đã chèn “{getattr(self.selected_asset, 'name', 'Asset')}” vào Timeline")
+        elif isinstance(self.selected_asset, TransitionStylePreset) or getattr(self.selected_asset, "tab", "") == "trans":
+            trans_name = getattr(self.selected_asset, "name", "Chuyển cảnh")
+            align = getattr(self, "trans_alignment", "tail")
+            pos_label = "ĐẦU clip" if align == "head" else "CUỐI clip"
+            frames = getattr(self, "trans_frames", 12)
+            self._show_toast(f"Đã áp chuyển cảnh “{trans_name}” vào {pos_label} ({frames} frames)!")
         else:
             self._show_toast(f"Đã chèn “{getattr(self.selected_asset, 'name', 'Asset')}” vào Timeline")
+
+        # Ghi nhận vào mục Gần đây (Recent)
+        RecentManager.add(getattr(self.selected_asset, "id", ""))
 
     def _create_drag_mime_data(self, asset: Optional[Any] = None) -> QMimeData:
         target = asset if asset is not None else self.selected_asset
         mime_data = QMimeData()
         if not target:
             return mime_data
+
+        RecentManager.add(getattr(target, "id", ""))
 
         file_path = getattr(target, "file_path", "")
         if file_path and os.path.isfile(file_path):
