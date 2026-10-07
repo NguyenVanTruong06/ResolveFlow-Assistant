@@ -4058,8 +4058,15 @@ class AutoWindow(QMainWindow):
             self._set_ui_step_progress(0, "Lỗi cú pháp JSON", -1)
             return
 
-        # Đảm bảo đã có video
-        if not hasattr(self, "video_paths") or not self.video_paths:
+        # Đảm bảo đã có video từ selected_files hoặc project_structure
+        has_videos = False
+        if hasattr(self, "selected_files") and self.selected_files:
+            has_videos = True
+        elif hasattr(self, "project_structure") and self.project_structure and getattr(self.project_structure, "all_video_paths", None):
+            self.selected_files = list(self.project_structure.all_video_paths)
+            has_videos = True
+
+        if not has_videos:
             QMessageBox.warning(self, "Chưa chọn Video nguồn", "Vui lòng nạp các file Video vào danh sách trước khi Thi công Timeline để tool biết đường dẫn ghim vào DaVinci Resolve.")
             self._set_ui_step_progress(0, "Lỗi: Chưa có Video", -1)
             return

@@ -2906,7 +2906,14 @@ class ChunDVCApp(QMainWindow):
             QMessageBox.critical(self, "Lỗi phân tích JSON", f"Không thể phân tích đoạn kịch bản JSON:\n{e}")
             return
 
-        if not hasattr(self, "selected_files") or not self.selected_files:
+        has_videos = False
+        if hasattr(self, "selected_files") and self.selected_files:
+            has_videos = True
+        elif hasattr(self, "project_structure") and self.project_structure and getattr(self.project_structure, "all_video_paths", None):
+            self.selected_files = list(self.project_structure.all_video_paths)
+            has_videos = True
+
+        if not has_videos:
             QMessageBox.warning(self, "Chưa chọn Video nguồn", "Vui lòng chọn thư mục Dự án hoặc các file Video nguồn ở Tab 'Dữ liệu Video' trước khi Thi công Timeline để tool biết đường dẫn ghim vào DaVinci Resolve.")
             return
 
