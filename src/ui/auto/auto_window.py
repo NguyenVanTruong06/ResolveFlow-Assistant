@@ -48,7 +48,8 @@ from PySide6.QtWidgets import (
     QLabel, QComboBox, QLineEdit, QPushButton, QCheckBox, QProgressBar,
     QPlainTextEdit, QGroupBox, QFormLayout, QSlider, QFileDialog,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMessageBox,
-    QDialog, QScrollArea, QInputDialog, QFrame, QTabWidget, QSplitter, QListWidget, QStackedWidget
+    QDialog, QScrollArea, QInputDialog, QFrame, QTabWidget, QSplitter, QListWidget, QStackedWidget,
+    QSizePolicy
 )
 from PySide6.QtCore import QThread, Signal as pyqtSignal, Slot as pyqtSlot, Qt
 from PySide6.QtGui import QFont, QColor, QPixmap, QIcon, QShortcut, QKeySequence
@@ -1625,7 +1626,7 @@ class AutoWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("ChunDVC v1.0 - AI Visual & Director Automation Suite")
         self.resize(1280, 880)
-        self.setMinimumSize(1080, 720)
+        self.setMinimumSize(980, 640)
         self.worker = None
         self.selected_files = []
         self.is_processing = False
@@ -1707,7 +1708,7 @@ class AutoWindow(QMainWindow):
         # CỘT TRÁI (300px): Nguồn footage, Dự án, Cache, Danh sách chương
         # -------------------------------------------------------------------------
         a_left = QFrame()
-        a_left.setFixedWidth(292)
+        a_left.setFixedWidth(270)
         a_left.setStyleSheet("background-color: #111113; border: none;")
         l_vbox = QVBoxLayout(a_left)
         l_vbox.setContentsMargins(14, 14, 14, 14)
@@ -2003,7 +2004,7 @@ class AutoWindow(QMainWindow):
 
         # Đặt a_left vào QScrollArea để hỗ trợ cuộn mượt mà trên mọi độ phân giải màn hình
         a_left_scroll = QScrollArea()
-        a_left_scroll.setFixedWidth(300)
+        a_left_scroll.setFixedWidth(276)
         a_left_scroll.setWidgetResizable(True)
         a_left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         a_left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -2044,6 +2045,7 @@ class AutoWindow(QMainWindow):
 
         # Vùng cuộn ScrollArea
         scroll = QScrollArea()
+        self.scroll_center_area = scroll
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -2052,26 +2054,28 @@ class AutoWindow(QMainWindow):
         scroll_content = QWidget()
         scroll_content.setStyleSheet("background-color: #09090b;")
         c_vbox = QVBoxLayout(scroll_content)
-        c_vbox.setContentsMargins(18, 12, 18, 12)
-        c_vbox.setSpacing(10)
+        c_vbox.setContentsMargins(14, 10, 14, 10)
+        c_vbox.setSpacing(8)
 
-        # Stepper
+        # Stepper (co giãn theo bề ngang)
         stepper_layout = QHBoxLayout()
-        stepper_layout.setSpacing(10)
+        stepper_layout.setSpacing(8)
         s1 = QLabel("✓ 1. Nguồn")
-        s1.setStyleSheet("color: #86efac; font-weight: bold; font-size: 12px;")
+        s1.setStyleSheet("color: #86efac; font-weight: bold; font-size: 11px;")
         line1 = QFrame()
         line1.setFrameShape(QFrame.HLine)
         line1.setStyleSheet("color: #3f3f46;")
-        line1.setFixedWidth(50)
+        line1.setMinimumWidth(10)
+        line1.setMaximumWidth(40)
         s2 = QLabel("● 2. Kiểu dựng")
-        s2.setStyleSheet("color: #a78bfa; font-weight: bold; font-size: 12px;")
+        s2.setStyleSheet("color: #a78bfa; font-weight: bold; font-size: 11px;")
         line2 = QFrame()
         line2.setFrameShape(QFrame.HLine)
         line2.setStyleSheet("color: #27272a;")
-        line2.setFixedWidth(50)
+        line2.setMinimumWidth(10)
+        line2.setMaximumWidth(40)
         s3 = QLabel("○ 3. Chạy và xuất")
-        s3.setStyleSheet("color: #71717a; font-weight: bold; font-size: 12px;")
+        s3.setStyleSheet("color: #71717a; font-weight: bold; font-size: 11px;")
 
         stepper_layout.addWidget(s1)
         stepper_layout.addWidget(line1)
@@ -2083,7 +2087,7 @@ class AutoWindow(QMainWindow):
 
         # Tiêu đề
         lbl_h2 = QLabel("Bạn muốn dựng video kiểu gì?")
-        lbl_h2.setStyleSheet("font-size: 15px; font-weight: bold; color: #f4f4f5;")
+        lbl_h2.setStyleSheet("font-size: 14px; font-weight: bold; color: #f4f4f5;")
         c_vbox.addWidget(lbl_h2)
 
         # Hidden Combo để tương thích backend
@@ -2096,9 +2100,9 @@ class AutoWindow(QMainWindow):
         self.combo_workflow.hide()
         c_vbox.addWidget(self.combo_workflow)
 
-        # 4 Thẻ Preset Cards (Grid 4 cột)
+        # 4 Thẻ Preset Cards (Tự co giãn Responsive 4x1 khi rộng hoặc 2x2 khi hẹp)
         self.presets_grid = QGridLayout()
-        self.presets_grid.setSpacing(8)
+        self.presets_grid.setSpacing(6)
 
         self.preset_cards = []
         card_data = [
@@ -2112,14 +2116,16 @@ class AutoWindow(QMainWindow):
             btn = QPushButton()
             btn.setCheckable(True)
             btn.setChecked(idx == 0) # Vlog default
-            btn.setFixedHeight(80)
+            btn.setFixedHeight(76)
+            btn.setMinimumWidth(80)
+            btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet("""
                 QPushButton {
                     border: 1px solid #27272a;
                     border-radius: 8px;
                     background-color: #18181b;
-                    padding: 6px 8px;
+                    padding: 5px 8px;
                     text-align: left;
                 }
                 QPushButton:hover {
@@ -2131,12 +2137,12 @@ class AutoWindow(QMainWindow):
                 }
             """)
             b_lay = QVBoxLayout(btn)
-            b_lay.setContentsMargins(8, 6, 8, 6)
+            b_lay.setContentsMargins(7, 5, 7, 5)
             b_lay.setSpacing(2)
 
             top_row = QHBoxLayout()
             lbl_ic = QLabel(icon)
-            lbl_ic.setStyleSheet("font-size: 16px;")
+            lbl_ic.setStyleSheet("font-size: 15px;")
             top_row.addWidget(lbl_ic)
             top_row.addStretch()
             lbl_ck = QLabel("✓" if idx == 0 else "○")
@@ -2145,7 +2151,7 @@ class AutoWindow(QMainWindow):
             b_lay.addLayout(top_row)
 
             lbl_t = QLabel(title)
-            lbl_t.setStyleSheet("font-weight: bold; font-size: 12px; color: #f4f4f5;")
+            lbl_t.setStyleSheet("font-weight: bold; font-size: 11px; color: #f4f4f5;")
             b_lay.addWidget(lbl_t)
 
             lbl_d = QLabel(desc)
@@ -2166,58 +2172,68 @@ class AutoWindow(QMainWindow):
             return btn
 
         for i, (ic, t, d, idx) in enumerate(card_data):
-            c_btn = make_preset_card(ic, t, d, idx)
-            self.presets_grid.addWidget(c_btn, 0, i)
+            make_preset_card(ic, t, d, idx)
 
+        self._current_preset_cols = None
+        self._reflow_presets(450)
         c_vbox.addLayout(self.presets_grid)
 
-        # Khối: Thiết lập nhanh
+        # Khối: Thiết lập nhanh (Lưới 2 cột co giãn)
         c_vbox.addWidget(QLabel("<b>Thiết lập nhanh</b>"))
         quick_grid = QGridLayout()
-        quick_grid.setSpacing(12)
+        quick_grid.setSpacing(6)
 
         # Footage Type
-        quick_grid.addWidget(QLabel("Loại footage:"), 0, 0)
-        seg_footage = QHBoxLayout()
+        lbl_ft_title = QLabel("Loại footage:")
+        lbl_ft_title.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        quick_grid.addWidget(lbl_ft_title, 0, 0)
+        
         self.footage_buttons = {}
-        for ft_name in ["Tự nhận diện", "Nói liên tục", "Hỗn hợp", "Du lịch"]:
+        ft_btn_data = ["Tự nhận diện", "Nói liên tục", "Hỗn hợp", "Du lịch"]
+        for i, ft_name in enumerate(ft_btn_data):
             btn_ft = QPushButton(ft_name)
             btn_ft.setCheckable(True)
             btn_ft.setChecked(ft_name == "Du lịch")
             btn_ft.setCursor(Qt.PointingHandCursor)
+            btn_ft.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             btn_ft.setStyleSheet("""
-                QPushButton { background-color: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 4px 8px; font-size: 11px; color: #a1a1aa; }
+                QPushButton { background-color: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 4px 6px; font-size: 11px; color: #a1a1aa; }
                 QPushButton:hover { border-color: #3f3f46; color: #fff; }
                 QPushButton:checked { background-color: #8b5cf6; border-color: #a78bfa; color: #fff; font-weight: bold; }
             """)
             btn_ft.clicked.connect(lambda checked=False, name=ft_name: self._set_quick_footage(name))
             self.footage_buttons[ft_name] = btn_ft
-            seg_footage.addWidget(btn_ft)
-        quick_grid.addLayout(seg_footage, 0, 1)
+            quick_grid.addWidget(btn_ft, i // 2, 1 + (i % 2))
 
         # Nhịp dựng
-        quick_grid.addWidget(QLabel("Nhịp dựng:"), 1, 0)
-        seg_pacing = QHBoxLayout()
+        lbl_pc_title = QLabel("Nhịp dựng:")
+        lbl_pc_title.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        quick_grid.addWidget(lbl_pc_title, 2, 0)
+        
         self.pacing_buttons = {}
-        for pc_name in ["Thong thả", "Cân bằng", "Nhanh"]:
+        pc_btn_data = ["Thong thả", "Cân bằng", "Nhanh"]
+        for i, pc_name in enumerate(pc_btn_data):
             btn_pc = QPushButton(pc_name)
             btn_pc.setCheckable(True)
             btn_pc.setChecked(pc_name == "Cân bằng")
             btn_pc.setCursor(Qt.PointingHandCursor)
+            btn_pc.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             btn_pc.setStyleSheet("""
-                QPushButton { background-color: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 4px 8px; font-size: 11px; color: #a1a1aa; }
+                QPushButton { background-color: #18181b; border: 1px solid #27272a; border-radius: 4px; padding: 4px 6px; font-size: 11px; color: #a1a1aa; }
                 QPushButton:hover { border-color: #3f3f46; color: #fff; }
                 QPushButton:checked { background-color: #8b5cf6; border-color: #a78bfa; color: #fff; font-weight: bold; }
             """)
             btn_pc.clicked.connect(lambda checked=False, name=pc_name: self._set_quick_pacing(name))
             self.pacing_buttons[pc_name] = btn_pc
-            seg_pacing.addWidget(btn_pc)
-        quick_grid.addLayout(seg_pacing, 1, 1)
+            if i < 2:
+                quick_grid.addWidget(btn_pc, 2, 1 + i)
+            else:
+                quick_grid.addWidget(btn_pc, 3, 1, 1, 2)
 
         # Mức độ cắt vấp (Slider)
         self.lbl_master_intensity = QLabel("Mức độ cắt vấp & im lặng: VỪA (Cân bằng)")
-        self.lbl_master_intensity.setStyleSheet("color: #a1a1aa; font-size: 12px;")
-        quick_grid.addWidget(self.lbl_master_intensity, 2, 0)
+        self.lbl_master_intensity.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        quick_grid.addWidget(self.lbl_master_intensity, 4, 0, 1, 3)
         self.slide_master_intensity = QSlider(Qt.Horizontal)
         self.slide_master_intensity.setRange(1, 3)
         self.slide_master_intensity.setValue(2)
@@ -2227,14 +2243,14 @@ class AutoWindow(QMainWindow):
             QSlider::handle:horizontal { background: #fff; width: 14px; margin-top: -4px; margin-bottom: -4px; border-radius: 7px; }
         """)
         self.slide_master_intensity.valueChanged.connect(self._on_master_intensity_changed)
-        quick_grid.addWidget(self.slide_master_intensity, 2, 1)
+        quick_grid.addWidget(self.slide_master_intensity, 5, 0, 1, 3)
 
         c_vbox.addLayout(quick_grid)
 
-        # Khối: Tính năng đang bật (Toggles 3x2)
+        # Khối: Tính năng đang bật (Lưới 2 cột co giãn)
         c_vbox.addWidget(QLabel("<b>Tính năng đang bật</b>"))
         tog_grid = QGridLayout()
-        tog_grid.setSpacing(10)
+        tog_grid.setSpacing(6)
 
         self.check_hook = QCheckBox("Hook mở đầu (3 câu, 5s)")
         self.check_punch_in = QCheckBox("Punch-in (Zoom 1.15x)")
@@ -2249,44 +2265,42 @@ class AutoWindow(QMainWindow):
 
         for i, chk in enumerate(all_chks):
             chk.setChecked(True)
+            chk.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             chk.setStyleSheet("""
                 QCheckBox {
                     background-color: #18181b;
                     border: 1px solid #27272a;
-                    border-radius: 8px;
-                    padding: 8px;
-                    font-size: 12px;
+                    border-radius: 6px;
+                    padding: 6px 8px;
+                    font-size: 11px;
                     color: #f4f4f5;
                 }
                 QCheckBox:hover { border-color: #3f3f46; }
-                QCheckBox::indicator { width: 16px; height: 16px; }
+                QCheckBox::indicator { width: 15px; height: 15px; }
             """)
-            tog_grid.addWidget(chk, i // 3, i % 3)
+            tog_grid.addWidget(chk, i // 2, i % 2)
 
         c_vbox.addLayout(tog_grid)
 
-        # Banner chuyển bước mượt mà sang giai đoạn AI
+        # Banner chuyển bước mượt mà sang giai đoạn AI (Tự wrap text & button)
         self.step_transition_box = QFrame()
         self.step_transition_box.setStyleSheet("""
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(139,92,246,0.18), stop:1 rgba(6,182,212,0.18));
                 border: 1px solid rgba(139,92,246,0.35);
-                border-radius: 10px;
-                padding: 10px;
+                border-radius: 8px;
+                padding: 6px 10px;
             }
         """)
-        trans_lay = QHBoxLayout(self.step_transition_box)
-        trans_lay.setContentsMargins(12, 8, 12, 8)
+        trans_lay = QVBoxLayout(self.step_transition_box)
+        trans_lay.setContentsMargins(10, 8, 10, 8)
+        trans_lay.setSpacing(4)
 
-        info_vbox = QVBoxLayout()
-        info_vbox.setSpacing(2)
+        top_row = QHBoxLayout()
         self.lbl_active_preset_name = QLabel("👉 Đã chọn phong cách: <b style='color:#c4b5fd;'>Vlog có Hook</b>")
-        self.lbl_active_preset_name.setStyleSheet("font-size: 13px; color: #f4f4f5;")
-        lbl_trans_sub = QLabel("Chuyển sang cấu hình Động cơ AI (Web Prompt / Cloud AI / Local) hoặc dán JSON kịch bản.")
-        lbl_trans_sub.setStyleSheet("font-size: 11px; color: #a1a1aa;")
-        info_vbox.addWidget(self.lbl_active_preset_name)
-        info_vbox.addWidget(lbl_trans_sub)
-        trans_lay.addLayout(info_vbox, stretch=1)
+        self.lbl_active_preset_name.setStyleSheet("font-size: 12px; color: #f4f4f5;")
+        self.lbl_active_preset_name.setWordWrap(True)
+        top_row.addWidget(self.lbl_active_preset_name, stretch=1)
 
         self.btn_goto_ai = QPushButton("⚡ Chọn Động cơ AI ➔")
         self.btn_goto_ai.setCursor(Qt.PointingHandCursor)
@@ -2295,15 +2309,22 @@ class AutoWindow(QMainWindow):
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8b5cf6, stop:1 #06b6d4);
                 color: #ffffff;
                 font-weight: bold;
-                padding: 9px 16px;
+                padding: 6px 12px;
                 border-radius: 6px;
-                font-size: 12px;
+                font-size: 11px;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #a78bfa, stop:1 #22d3ee);
             }
         """)
-        trans_lay.addWidget(self.btn_goto_ai)
+        top_row.addWidget(self.btn_goto_ai)
+        trans_lay.addLayout(top_row)
+
+        lbl_trans_sub = QLabel("Chuyển sang cấu hình Động cơ AI (Web Prompt / Cloud AI / Local) hoặc dán JSON kịch bản.")
+        lbl_trans_sub.setStyleSheet("font-size: 11px; color: #a1a1aa;")
+        lbl_trans_sub.setWordWrap(True)
+        trans_lay.addWidget(lbl_trans_sub)
+
         c_vbox.addWidget(self.step_transition_box)
 
         # =========================================================================
@@ -2580,16 +2601,17 @@ class AutoWindow(QMainWindow):
         scroll.setWidget(scroll_content)
         c_outer.addWidget(scroll, stretch=1)
 
-        # Runbar ở chân cột giữa
+        # Runbar ở chân cột giữa (Gọn gàng, không tràn mép khi cửa sổ thu nhỏ)
         runbar = QFrame()
-        runbar.setFixedHeight(56)
-        runbar.setStyleSheet("background-color: #111113; border-top: 1px solid #27272a; padding: 0 20px;")
+        runbar.setFixedHeight(50)
+        runbar.setStyleSheet("background-color: #111113; border-top: 1px solid #27272a;")
         rb_lay = QHBoxLayout(runbar)
-        rb_lay.setContentsMargins(16, 0, 16, 0)
-        rb_lay.setSpacing(12)
+        rb_lay.setContentsMargins(10, 0, 10, 0)
+        rb_lay.setSpacing(6)
 
-        self.btn_save_recipe = QPushButton("💾 Lưu recipe")
-        self.btn_save_recipe.setStyleSheet("background: transparent; border: 1px solid #27272a; border-radius: 6px; padding: 6px 12px; color: #a1a1aa; font-size: 12px;")
+        self.btn_save_recipe = QPushButton("💾 Lưu")
+        self.btn_save_recipe.setToolTip("Lưu thiết lập hiện tại thành Recipe")
+        self.btn_save_recipe.setStyleSheet("background: transparent; border: 1px solid #27272a; border-radius: 6px; padding: 5px 8px; color: #a1a1aa; font-size: 11px;")
         self.btn_save_recipe.clicked.connect(self._save_current_as_recipe)
         rb_lay.addWidget(self.btn_save_recipe)
 
@@ -2597,11 +2619,11 @@ class AutoWindow(QMainWindow):
 
         self.combo_render_preset = QComboBox()
         self.combo_render_preset.addItems(["Xuất: FCPXML 1.9", "Xuất: FCP7 XML", "Xuất: EDL"])
-        self.combo_render_preset.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 6px 10px; border-radius: 6px; color: #f4f4f5; font-size: 12px;")
+        self.combo_render_preset.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 5px 8px; border-radius: 6px; color: #f4f4f5; font-size: 11px;")
         rb_lay.addWidget(self.combo_render_preset)
 
-        btn_scan_mid = QPushButton("Chỉ quét nguồn")
-        btn_scan_mid.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 6px; padding: 8px 14px; color: #f4f4f5; font-weight: 500; font-size: 12px;")
+        btn_scan_mid = QPushButton("Quét nguồn")
+        btn_scan_mid.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 6px; padding: 5px 10px; color: #f4f4f5; font-weight: 500; font-size: 11px;")
         btn_scan_mid.clicked.connect(self._start_phase_1_scan)
         rb_lay.addWidget(btn_scan_mid)
 
@@ -2611,8 +2633,8 @@ class AutoWindow(QMainWindow):
                 background-color: #8b5cf6;
                 color: #fff;
                 font-weight: bold;
-                font-size: 13px;
-                padding: 8px 20px;
+                font-size: 12px;
+                padding: 6px 14px;
                 border-radius: 6px;
             }
             QPushButton:hover {
@@ -2629,7 +2651,7 @@ class AutoWindow(QMainWindow):
         # CỘT PHẢI (340px): Tiến trình, ETA, Các bước Pipeline, Stop, Nhật ký
         # -------------------------------------------------------------------------
         a_right = QFrame()
-        a_right.setFixedWidth(340)
+        a_right.setFixedWidth(300)
         a_right.setStyleSheet("background-color: #111113; border-left: 1px solid #27272a;")
         r_vbox = QVBoxLayout(a_right)
         r_vbox.setContentsMargins(18, 18, 18, 18)
@@ -2822,6 +2844,24 @@ class AutoWindow(QMainWindow):
         self.lbl_file = QLabel()
 
         self._bind_tab_delegates()
+
+    def _reflow_presets(self, center_width: int):
+        """Tự động chuyển đổi giữa lưới 4 cột (màn hình rộng) và lưới 2x2 (màn hình hẹp)."""
+        cols = 4 if center_width >= 620 else 2
+        if getattr(self, "_current_preset_cols", None) != cols:
+            self._current_preset_cols = cols
+            if hasattr(self, "preset_cards") and hasattr(self, "presets_grid"):
+                for i, (btn, idx, ck, t) in enumerate(self.preset_cards):
+                    self.presets_grid.removeWidget(btn)
+                    if cols == 4:
+                        self.presets_grid.addWidget(btn, 0, i)
+                    else:
+                        self.presets_grid.addWidget(btn, i // 2, i % 2)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "scroll_center_area") and self.scroll_center_area:
+            self._reflow_presets(self.scroll_center_area.viewport().width())
 
     def _bind_tab_delegates(self):
         # Forward modern AI widgets to the TabCopilot backend dummy
