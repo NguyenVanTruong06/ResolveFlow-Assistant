@@ -12,6 +12,7 @@ import json
 import uuid
 import tempfile
 import math
+from pathlib import Path
 from typing import Optional, Callable, List, Dict, Any, Tuple
 
 from PySide6.QtWidgets import (
@@ -625,20 +626,40 @@ class IconMemePreviewWidget(QWidget):
         self.badge_icon = "✨"
         self.color_hex = "#facc15"
         self.sub_text = ""
-        self.setFixedHeight(130)
+        self.thumbnail_path = ""
+        self.file_path = ""
+        self._pixmap = None
+        self.setFixedHeight(140)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Click để mở xem trước video")
 
-    def set_item(self, name: str, item_type: str, badge: str, color_hex: str, sub: str):
+    def set_item(self, name: str, item_type: str, badge: str, color_hex: str, sub: str, thumbnail_path: str = "", file_path: str = ""):
         self.item_name = name
         self.item_type = item_type
         self.badge_icon = badge or "✨"
         self.color_hex = color_hex or "#facc15"
         self.sub_text = sub
+        self.thumbnail_path = thumbnail_path
+        self.file_path = file_path
+        if self.thumbnail_path and os.path.isfile(self.thumbnail_path):
+            self._pixmap = QPixmap(self.thumbnail_path)
+        else:
+            self._pixmap = None
         self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.file_path and os.path.isfile(self.file_path):
+            try:
+                os.startfile(os.path.abspath(self.file_path))
+            except Exception:
+                pass
+        super().mousePressEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
         w = self.width()
         h = self.height()
@@ -666,26 +687,49 @@ class IconMemePreviewWidget(QWidget):
             painter.setBrush(QBrush(QColor(0, 0, 0, 180)))
             painter.drawRoundedRect(QRectF(8, 8, 48, 18), 4, 4)
             painter.setPen(QPen(QColor(self.color_hex)))
-            painter.drawText(QRectF(8, 8, 48, 18), Qt.AlignCenter, "VECTOR")
+            painter.drawText(QRectF(8, 8, 48, 18), Qt.AlignCenter, "STICKER")
         else:
-            grad = QLinearGradient(0, 0, w, h)
-            grad.setColorAt(0.0, QColor("#1e1b4b"))
-            grad.setColorAt(1.0, QColor("#09090b"))
-            painter.fillRect(0, 0, w, h, grad)
+            # Video Meme hoặc Overlay
+            if self._pixmap and not self._pixmap.isNull():
+                scaled_pix = self._pixmap.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+                px = (w - scaled_pix.width()) // 2
+                py = (h - scaled_pix.height()) // 2
+                painter.drawPixmap(px, py, scaled_pix)
 
-            painter.setFont(QFont("Segoe UI Emoji", 34))
-            painter.setPen(QColor("#ffffff"))
-            painter.drawText(QRectF(0, 6, w, h - 34), Qt.AlignCenter, self.badge_icon)
+                # Lớp phủ tối nhẹ để nổi bật chữ & nút phát
+                painter.fillRect(0, 0, w, h, QColor(0, 0, 0, 60))
 
+                # Nút Play ở giữa
+                painter.setBrush(QBrush(QColor(0, 0, 0, 160)))
+                painter.setPen(QPen(QColor(ThemeColors.CYAN_HI), 1.5))
+                play_btn_rect = QRectF((w - 110) / 2, (h - 28) / 2, 110, 28)
+                painter.drawRoundedRect(play_btn_rect, 14, 14)
+
+                painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
+                painter.setPen(QColor("#ffffff"))
+                painter.drawText(play_btn_rect, Qt.AlignCenter, "▶ Xem video")
+            else:
+                grad = QLinearGradient(0, 0, w, h)
+                grad.setColorAt(0.0, QColor("#1e1b4b"))
+                grad.setColorAt(1.0, QColor("#09090b"))
+                painter.fillRect(0, 0, w, h, grad)
+
+                painter.setFont(QFont("Segoe UI Emoji", 34))
+                painter.setPen(QColor("#ffffff"))
+                painter.drawText(QRectF(0, 6, w, h - 34), Qt.AlignCenter, self.badge_icon)
+
+            # Badge định dạng video
+            tag = "OVERLAY" if self.item_type == "overlay" else "▶ MP4"
             painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(QColor(6, 182, 212, 180)))
-            painter.drawRoundedRect(QRectF(w - 56, 8, 48, 18), 4, 4)
+            painter.setBrush(QBrush(QColor(6, 182, 212, 200)))
+            painter.drawRoundedRect(QRectF(w - 64, 8, 56, 18), 4, 4)
             painter.setPen(QPen(QColor("#ffffff")))
-            painter.drawText(QRectF(w - 56, 8, 48, 18), Qt.AlignCenter, "▶ MP4")
+            painter.drawText(QRectF(w - 64, 8, 56, 18), Qt.AlignCenter, tag)
 
+        # Thanh tiêu đề dưới đáy
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(QColor(0, 0, 0, 170)))
+        painter.setBrush(QBrush(QColor(0, 0, 0, 190)))
         painter.drawRoundedRect(QRectF(8, h - 26, w - 16, 20), 4, 4)
         painter.setPen(QPen(QColor("#ffffff")))
         painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
@@ -1339,32 +1383,135 @@ class AssetCard(QFrame):
     def _start_drag(self):
         drag = QDrag(self)
         mime_data = QMimeData()
+        temp_dir = tempfile.gettempdir()
 
-        if isinstance(self.preset, LocalAsset):
-            mime_data.setUrls([QUrl.fromLocalFile(self.preset.file_path)])
-        elif isinstance(self.preset, TextStylePreset):
-            temp_setting = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{self.preset.id}_{uuid.uuid4().hex[:6]}.setting")
-            sample_txt = self.sample_text_func() if callable(self.sample_text_func) else self.preset.name
-            FusionSettingGenerator.export_setting_file(self.preset, temp_setting, sample_text=sample_txt)
-            mime_data.setUrls([QUrl.fromLocalFile(temp_setting)])
-        elif isinstance(self.preset, TransitionStylePreset):
-            temp_setting = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{self.preset.id}_{uuid.uuid4().hex[:6]}.setting")
-            TransitionMacroGenerator.export_setting_file(self.preset, temp_setting)
-            mime_data.setUrls([QUrl.fromLocalFile(temp_setting)])
-        else:
-            pid = getattr(self.preset, "id", "item")
-            clean_id = pid.replace("sfx_", "")
-            sfx_file = os.path.join("assets", "sfx", f"{clean_id}.wav")
-            if os.path.exists(sfx_file):
-                mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(sfx_file))])
+        target = self.preset
+        file_path = getattr(target, "file_path", "")
+        tab_type = getattr(target, "tab", "")
+        asset_id = getattr(target, "id", "asset")
+
+        # 1. Nếu đã có file_path thực tế trên đĩa (wav, mp4, cube, setting, png, v.v.)
+        if file_path and os.path.isfile(file_path):
+            abs_p = os.path.abspath(file_path)
+            mime_data.setUrls([QUrl.fromLocalFile(abs_p)])
+            mime_data.setText(abs_p)
+
+        # 2. LocalAsset
+        elif isinstance(target, LocalAsset):
+            abs_p = os.path.abspath(target.file_path)
+            mime_data.setUrls([QUrl.fromLocalFile(abs_p)])
+            mime_data.setText(abs_p)
+
+        # 3. TextStylePreset hoặc tab == 'text'
+        elif isinstance(target, TextStylePreset) or tab_type == "text":
+            temp_setting = os.path.join(temp_dir, f"ChunDVC_{asset_id}_{uuid.uuid4().hex[:6]}.setting")
+            sample_txt = self.sample_text_func() if callable(self.sample_text_func) else getattr(target, "name", "ChunDVC Title")
+            if isinstance(target, TextStylePreset):
+                FusionSettingGenerator.export_setting_file(target, temp_setting, sample_text=sample_txt)
             else:
-                temp_path = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{pid}.txt")
-                with open(temp_path, "w", encoding="utf-8") as f:
-                    f.write(getattr(self.preset, "name", "ResolveFlow Asset"))
-                mime_data.setUrls([QUrl.fromLocalFile(temp_path)])
+                native = getattr(target, "native_preset", None)
+                if isinstance(native, TextStylePreset):
+                    FusionSettingGenerator.export_setting_file(native, temp_setting, sample_text=sample_txt)
+                else:
+                    with open(temp_setting, "w", encoding="utf-8") as f:
+                        f.write(FusionSettingGenerator.generate_setting_content(TextStylePreset(id=asset_id, name=getattr(target, "name", "Title")), sample_text=sample_txt))
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(temp_setting))])
+            mime_data.setText(os.path.abspath(temp_setting))
 
-        drag.setMimeData(mime_data)
-        drag.exec_(Qt.CopyAction)
+        # 4. TransitionStylePreset hoặc tab == 'trans'
+        elif isinstance(target, TransitionStylePreset) or tab_type == "trans":
+            temp_setting = os.path.join(temp_dir, f"ChunDVC_{asset_id}_{uuid.uuid4().hex[:6]}.setting")
+            if isinstance(target, TransitionStylePreset):
+                TransitionMacroGenerator.export_setting_file(target, temp_setting)
+            else:
+                native = getattr(target, "native_preset", None)
+                if isinstance(native, TransitionStylePreset):
+                    TransitionMacroGenerator.export_setting_file(native, temp_setting)
+                else:
+                    TransitionMacroGenerator.export_setting_file(TransitionStylePreset(id=asset_id, name=getattr(target, "name", "Transition")), temp_setting)
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(temp_setting))])
+            mime_data.setText(os.path.abspath(temp_setting))
+
+        # 5. SFX (.wav)
+        elif tab_type == "sfx":
+            clean_id = asset_id.replace("sfx_", "")
+            candidate_paths = [
+                os.path.join("assets", "sfx", f"{clean_id}.wav"),
+                os.path.join("assets", "sfx", f"{asset_id}.wav"),
+                file_path
+            ]
+            sfx_file = None
+            for p in candidate_paths:
+                if p and os.path.isfile(p):
+                    sfx_file = os.path.abspath(p)
+                    break
+            if not sfx_file:
+                sfx_file = os.path.join(temp_dir, f"ChunDVC_{clean_id}.wav")
+                if not os.path.exists(sfx_file):
+                    with open(sfx_file, "wb") as f:
+                        f.write(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00D\xac\x00\x00\x88X\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(sfx_file))])
+            mime_data.setText(os.path.abspath(sfx_file))
+
+        # 6. Meme / Overlay (.mp4)
+        elif tab_type in ("meme", "overlay"):
+            dir_name = "memes" if tab_type == "meme" else "overlays"
+            candidate_paths = [
+                os.path.join("assets", "broll_memes", dir_name, f"{asset_id}.mp4"),
+                os.path.join("assets", "broll_memes", f"{asset_id}.mp4"),
+                file_path
+            ]
+            vid_file = None
+            for p in candidate_paths:
+                if p and os.path.isfile(p):
+                    vid_file = os.path.abspath(p)
+                    break
+            if vid_file:
+                mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(vid_file))])
+                mime_data.setText(os.path.abspath(vid_file))
+
+        # 7. LUT (.cube)
+        elif tab_type == "lut":
+            candidate_paths = [
+                os.path.join("assets", "luts", f"{asset_id}.cube"),
+                os.path.join("assets", "luts", f"ResolveFlow_{asset_id}.cube"),
+                file_path
+            ]
+            lut_file = None
+            for p in candidate_paths:
+                if p and os.path.isfile(p):
+                    lut_file = os.path.abspath(p)
+                    break
+            if not lut_file:
+                lut_file = os.path.join(temp_dir, f"ChunDVC_{asset_id}.cube")
+                if not os.path.exists(lut_file):
+                    with open(lut_file, "w", encoding="utf-8") as f:
+                        f.write(f'TITLE "ChunDVC_{asset_id}"\nLUT_3D_SIZE 2\n0.0 0.0 0.0\n1.0 0.0 0.0\n0.0 1.0 0.0\n1.0 1.0 0.0\n0.0 0.0 1.0\n1.0 0.0 1.0\n0.0 1.0 1.0\n1.0 1.0 1.0\n')
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(lut_file))])
+            mime_data.setText(os.path.abspath(lut_file))
+
+        # 8. Sticker / Icon (Sinh ảnh Transparent PNG nét căng để kéo vào Track V2)
+        elif tab_type == "icon":
+            badge = getattr(target, "badge_icon", "✨")
+            color_hex = getattr(target, "color_hex", "#facc15")
+            png_path = os.path.join(temp_dir, f"ChunDVC_Sticker_{asset_id}.png")
+            pixmap = QPixmap(512, 512)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.TextAntialiasing)
+            font = QFont("Segoe UI Emoji", 260)
+            painter.setFont(font)
+            painter.setPen(QColor(color_hex))
+            painter.drawText(QRectF(0, 0, 512, 512), Qt.AlignCenter, badge)
+            painter.end()
+            pixmap.save(png_path, "PNG")
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(png_path))])
+            mime_data.setText(os.path.abspath(png_path))
+
+        if mime_data.hasUrls():
+            drag.setMimeData(mime_data)
+            drag.exec_(Qt.CopyAction)
 
 
 # =========================================================================
@@ -1419,8 +1566,9 @@ class TabAssets(QWidget):
         scanned_sfx = indexer.scan_sfx()
         self.all_sfx = dicts_to_assets(scanned_sfx, "sfx", "accent", "Âm thanh", "🔊") if scanned_sfx else MOCKUP_SFX.copy()
         
+        scanned_overlays = indexer.scan_overlays()
+        self.all_overlays = dicts_to_assets(scanned_overlays, "overlay", "cinematic", "Lớp phủ", "✨") if scanned_overlays else MOCKUP_OVERLAYS.copy()
         self.all_icons = MOCKUP_ICONS.copy()
-        self.all_overlays = MOCKUP_OVERLAYS.copy()
         
         self.local_assets: List[LocalAsset] = []
 
@@ -1440,7 +1588,12 @@ class TabAssets(QWidget):
         self.card_widgets: List[AssetCard] = []
         self.selected_asset = self.all_presets[0] if self.all_presets else None
 
+        self.setAcceptDrops(True)
         self._init_ui()
+        if hasattr(self, "scroll_grid"):
+            self.scroll_grid.setAcceptDrops(True)
+            self.scroll_grid.viewport().installEventFilter(self)
+
         self.sfx_playback_timer = QTimer(self)
         self.sfx_playback_timer.timeout.connect(self._on_inspector_sfx_playback_finished)
         self.toast_timer = QTimer(self)
@@ -1675,6 +1828,28 @@ class TabAssets(QWidget):
             }}
         """)
         mh_layout.addWidget(self.btn_rescan)
+
+        # Nút nhập file/thư mục tự động liên kết DaVinci
+        self.btn_import_assets = QPushButton("➕ Nhập tệp...")
+        self.btn_import_assets.setToolTip("Thêm mẫu chữ .setting, video meme, SFX, LUTs (Tự động liên kết vào DaVinci Resolve)")
+        self.btn_import_assets.setCursor(Qt.PointingHandCursor)
+        self.btn_import_assets.clicked.connect(lambda: self._import_files_or_folders())
+        self.btn_import_assets.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 5px 10px;
+                color: #c4b5fd;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                border-color: {ThemeColors.PRIMARY};
+                background: {ThemeColors.BG_CARD_ACTIVE};
+            }}
+        """)
+        mh_layout.addWidget(self.btn_import_assets)
 
         self.txt_search = QLineEdit()
         self.txt_search.setPlaceholderText("🔍 Tìm kiếm đạo cụ...")
@@ -2786,7 +2961,37 @@ class TabAssets(QWidget):
                 elif delta < 0:
                     self._on_grid_cols_changed(min(5, curr + 1))
                 return True
+            elif event.type() in (QEvent.DragEnter, QEvent.DragMove) and event.mimeData().hasUrls():
+                event.acceptProposedAction()
+                return True
+            elif event.type() == QEvent.Drop and event.mimeData().hasUrls():
+                paths = [u.toLocalFile() for u in event.mimeData().urls() if u.toLocalFile()]
+                if paths:
+                    self._import_files_or_folders(paths)
+                event.acceptProposedAction()
+                return True
         return super().eventFilter(obj, event)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            paths = [u.toLocalFile() for u in event.mimeData().urls() if u.toLocalFile()]
+            if paths:
+                self._import_files_or_folders(paths)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
     def _update_grid_size_button_styles(self):
         curr_cols = getattr(self, "grid_columns", 3)
@@ -2885,6 +3090,8 @@ class TabAssets(QWidget):
         self.all_memes = dicts_to_assets(scanned_memes, "meme", "trending", "Meme", "🎭") if scanned_memes else MOCKUP_MEMES.copy()
         scanned_sfx = indexer.scan_sfx()
         self.all_sfx = dicts_to_assets(scanned_sfx, "sfx", "accent", "Âm thanh", "🔊") if scanned_sfx else MOCKUP_SFX.copy()
+        scanned_overlays = indexer.scan_overlays()
+        self.all_overlays = dicts_to_assets(scanned_overlays, "overlay", "cinematic", "Lớp phủ", "✨") if scanned_overlays else MOCKUP_OVERLAYS.copy()
         
         self.all_assets = []
         self.all_assets.extend(self.all_presets)
@@ -3195,8 +3402,19 @@ class TabAssets(QWidget):
             tab_type = getattr(self.selected_asset, "tab", "icon")
             badge = getattr(self.selected_asset, "badge_icon", "✨")
             color_hex = getattr(self.selected_asset, "color_hex", "#facc15")
-            self.icon_meme_widget.set_item(name, tab_type, badge, color_hex, sub)
-            self.btn_insert_title_playhead.setText("➕ Chèn vào Timeline")
+            thumb_path = getattr(self.selected_asset, "thumbnail_path", "")
+            fpath = getattr(self.selected_asset, "file_path", "")
+            self.icon_meme_widget.set_item(name, tab_type, badge, color_hex, sub, thumb_path, fpath)
+
+            if tab_type == "meme":
+                self.lbl_track_hint.setText("🎬 Đề xuất: Kéo thả trực tiếp card vào DaVinci Timeline để chèn meme.")
+                self.btn_insert_title_playhead.setText("🎬 Chèn Video Meme tại Playhead")
+            elif tab_type == "overlay":
+                self.lbl_track_hint.setText("✨ Đề xuất Track V2: Light leak chọn Composite Mode = Screen. Phông xanh dùng 3D Keyer.")
+                self.btn_insert_title_playhead.setText("✨ Chèn Lớp phủ (Overlay) lên V2")
+            else:
+                self.lbl_track_hint.setText("🎨 Đề xuất Track V2: Kéo thả ảnh trong suốt (Transparent PNG) đè lên video chính.")
+                self.btn_insert_title_playhead.setText("🎨 Chèn Sticker lên Track V2")
 
     def _on_sample_text_changed(self, text: str):
         self._update_text_preview_from_params()
@@ -3574,6 +3792,25 @@ class TabAssets(QWidget):
 
         elif isinstance(target, LocalAsset):
             mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(target.file_path))])
+            mime_data.setText(os.path.abspath(target.file_path))
+
+        elif tab_type == "icon":
+            badge = getattr(target, "badge_icon", "✨")
+            color_hex = getattr(target, "color_hex", "#facc15")
+            png_path = os.path.join(temp_dir, f"ChunDVC_Sticker_{asset_id}.png")
+            pixmap = QPixmap(512, 512)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.TextAntialiasing)
+            font = QFont("Segoe UI Emoji", 260)
+            painter.setFont(font)
+            painter.setPen(QColor(color_hex))
+            painter.drawText(QRectF(0, 0, 512, 512), Qt.AlignCenter, badge)
+            painter.end()
+            pixmap.save(png_path, "PNG")
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(png_path))])
+            mime_data.setText(os.path.abspath(png_path))
 
         else:
             temp_path = os.path.join(temp_dir, f"ResolveFlow_{asset_id}.txt")
@@ -3637,11 +3874,34 @@ class TabAssets(QWidget):
 
     def _install_to_fusion(self) -> Tuple[int, str]:
         is_trans = isinstance(self.selected_asset, TransitionStylePreset) or getattr(self.selected_asset, "tab", "") == "trans"
-        
+        is_lut = getattr(self.selected_asset, "tab", "") == "lut" or self.current_rail_tab == "lut"
+        appdata = os.getenv("APPDATA") or ""
         real_file_path = getattr(self.selected_asset, "file_path", "")
+
+        if is_lut:
+            target_dir = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "LUT", "ChunDVC")
+            os.makedirs(target_dir, exist_ok=True)
+            import shutil
+            count = 0
+            if real_file_path and os.path.isfile(real_file_path) and real_file_path.endswith(".cube"):
+                fname = os.path.basename(real_file_path)
+                dest = os.path.join(target_dir, fname)
+                shutil.copy2(real_file_path, dest)
+                count = 1
+                msg = f"Đã đồng bộ LUT '{fname}' vào DaVinci Resolve ({target_dir})"
+            else:
+                luts_dir = os.path.join("assets", "luts")
+                if os.path.isdir(luts_dir):
+                    for f in os.listdir(luts_dir):
+                        if f.lower().endswith(".cube"):
+                            shutil.copy2(os.path.join(luts_dir, f), os.path.join(target_dir, f))
+                            count += 1
+                msg = f"Đã đồng bộ {count} LUT màu vào DaVinci Resolve ({target_dir})"
+            self._show_toast(msg)
+            return count, target_dir
+
         if real_file_path and os.path.isfile(real_file_path) and real_file_path.endswith(".setting"):
             import shutil
-            appdata = os.getenv("APPDATA") or ""
             if is_trans:
                 target_dir = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Transitions", "ChunDVC")
             else:
@@ -3665,6 +3925,108 @@ class TabAssets(QWidget):
         self.install_presets_requested.emit()
         self._show_toast(msg)
         return count, target_dir
+
+    def _import_files_or_folders(self, paths: Optional[List[str]] = None):
+        if not paths:
+            files, _ = QFileDialog.getOpenFileNames(
+                self,
+                "Chọn tệp nhập kho (Title .setting, Meme/Overlay .mp4, SFX .wav, LUT .cube, Sticker .png)",
+                "",
+                "Tất cả tài nguyên (*.setting *.mp4 *.mov *.wav *.mp3 *.cube *.png);;Fusion Setting (*.setting);;Video (*.mp4 *.mov);;Audio (*.wav *.mp3);;LUT (*.cube);;Sticker (*.png);;Tất cả tệp (*.*)"
+            )
+            if not files:
+                return
+            paths = files
+
+        appdata = os.getenv("APPDATA") or ""
+        titles_dvc = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Titles", "ChunDVC")
+        trans_dvc = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Transitions", "ChunDVC")
+        lut_dvc = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "LUT", "ChunDVC")
+
+        import shutil
+        added_count = 0
+        sync_dvc_count = 0
+
+        # Thu thập toàn bộ tệp (hỗ trợ cả kéo thả thư mục)
+        all_file_paths = []
+        for p in paths:
+            if os.path.isdir(p):
+                for root, _, files in os.walk(p):
+                    for f in files:
+                        all_file_paths.append(os.path.join(root, f))
+            elif os.path.isfile(p):
+                all_file_paths.append(p)
+
+        indexer = AssetIndexer()
+
+        for fp in all_file_paths:
+            ext = os.path.splitext(fp)[1].lower()
+            fname = os.path.basename(fp)
+
+            if ext == ".setting":
+                is_trans = False
+                try:
+                    with open(fp, "r", encoding="utf-8", errors="ignore") as f:
+                        c = f.read()
+                        if "Transition" in c or "CrossDissolve" in c or "fromClip" in c:
+                            is_trans = True
+                except Exception:
+                    pass
+
+                target_dir = "assets/templates/transitions" if is_trans else "assets/templates/titles"
+                dvc_dir = trans_dvc if is_trans else titles_dvc
+                os.makedirs(target_dir, exist_ok=True)
+                os.makedirs(dvc_dir, exist_ok=True)
+
+                dest_local = os.path.join(target_dir, fname)
+                shutil.copy2(fp, dest_local)
+
+                dvc_name = fname if fname.startswith("ChunDVC_") else f"ChunDVC_{fname}"
+                dest_dvc = os.path.join(dvc_dir, dvc_name)
+                shutil.copy2(fp, dest_dvc)
+
+                added_count += 1
+                sync_dvc_count += 1
+
+            elif ext == ".cube":
+                os.makedirs("assets/luts", exist_ok=True)
+                os.makedirs(lut_dvc, exist_ok=True)
+
+                dest_local = os.path.join("assets/luts", fname)
+                shutil.copy2(fp, dest_local)
+
+                dest_dvc = os.path.join(lut_dvc, fname)
+                shutil.copy2(fp, dest_dvc)
+
+                added_count += 1
+                sync_dvc_count += 1
+
+            elif ext in (".wav", ".mp3"):
+                os.makedirs("assets/sfx", exist_ok=True)
+                dest_local = os.path.join("assets/sfx", fname)
+                shutil.copy2(fp, dest_local)
+                added_count += 1
+
+            elif ext in (".mp4", ".mov"):
+                target_sub = "overlays" if self.current_rail_tab == "overlay" else "memes"
+                target_dir = os.path.join("assets", "broll_memes", target_sub)
+                os.makedirs(target_dir, exist_ok=True)
+                dest_local = os.path.join(target_dir, fname)
+                shutil.copy2(fp, dest_local)
+                # Tự động xuất thumbnail khung hình đầu bằng ffmpeg
+                indexer._find_thumbnail(Path(dest_local))
+                added_count += 1
+
+            elif ext == ".png":
+                target_dir = os.path.join("assets", "broll_memes", "overlays")
+                os.makedirs(target_dir, exist_ok=True)
+                dest_local = os.path.join(target_dir, fname)
+                shutil.copy2(fp, dest_local)
+                added_count += 1
+
+        self._rescan_assets()
+        msg = f"✅ Đã thêm {added_count} tệp vào Kho! (Tự động đồng bộ {sync_dvc_count} tệp sang DaVinci Resolve)"
+        self._show_toast(msg)
 
     def _on_insert_single_title_clicked(self):
         self._insert_at_playhead()
