@@ -14,14 +14,18 @@ Người dùng muốn tích hợp tính năng tự động chèn nhạc nền (B
 ### 1.2. Mục tiêu chính
 1. **Kho Nhạc Nền & Quản lý Mood (`assets/music/`):**
    - Hỗ trợ kho bài hát chia theo phân loại Mood/Style (`chill_vlog`, `upbeat_trend`, `cinematic`, `funny`).
+   - Tự động tải về và đóng gói sẵn **Bộ Nhạc Nền Mẫu Miễn Phí Bản Quyền (Starter BGM Pack)** cho từng thể loại để người dùng mở app là có sẵn nhạc dùng ngay.
    - Tự động quét (Auto-Indexer) file nhạc `.mp3`, `.wav`, `.m4a`, `.aac` và tích hợp vào **Kho Đạo Cụ (TabAssets)**.
    - Hỗ trợ nghe thử trực tiếp (Play / Pause preview) và kéo thả vào DaVinci Resolve.
-2. **Bộ tách nhịp Audio Beat Detector (`src/core/audio_beat.py`):**
+2. **Cơ Chế Ghép Nối Âm Thanh (1 Bài hoặc Ghép Nhiều Bài Tùy Thời Lượng):**
+   - **Chế độ 1 Bài (Single Track):** Nếu video dài hơn bài nhạc, tự động Loop lại với Crossfade và Fade Out êm dịu khi kết thúc timeline.
+   - **Chế độ Ghép Nối Thông Minh (Smart Playlist Chaining):** Khi video dài (Vlog 5-15 phút), AI tự động chọn chuỗi các bài nhạc cùng Mood (hoặc chuyển biến theo diễn biến câu chuyện) để ghép nối phủ kín toàn bộ thời lượng video.
+3. **Bộ tách nhịp Audio Beat Detector (`src/core/audio_beat.py`):**
    - Nhận diện các mốc Beat Drop của bài nhạc bằng thuật toán phân tích năng lượng sóng (RMS / Energy Peak / Onset envelope) sử dụng `numpy` + `ffmpeg` siêu tốc (dưới 0.5s/bài), hoạt động offline 100% không phụ thuộc thư viện nặng.
-3. **Tích hợp vào Đạo Diễn AI (TabCopilot & StoryCopilot):**
+4. **Tích hợp vào Đạo Diễn AI (TabCopilot & StoryCopilot):**
    - Thêm bộ chọn nhạc nền trong Tab Đạo Diễn AI (Tự động theo Mood kịch bản, chọn bài cụ thể trong kho, hoặc tải bài riêng).
    - Truyền danh sách các mốc thời gian Beat Drop (`music_beats`) vào Prompt AI để AI ưu tiên cắt B-Roll, chuyển cảnh và Hook đúng nhịp giật.
-4. **Thi công Timeline DaVinci Resolve:**
+5. **Thi công Timeline DaVinci Resolve:**
    - Đưa bài nhạc vào Audio Track chuyên biệt (Track Audio A4/A5 stereo) trong `FCP7 XML` và `FCPXML`.
    - Tạo các **Marker nhịp (Beat Markers)** màu Xanh Dương (`Cyan`/`Blue`) trên timeline DaVinci Resolve để người dựng nhìn thấy rõ nhịp bài nhạc.
    - Sao chép / link file nhạc vào thư mục `_TIMELINE_IMPORT`.
