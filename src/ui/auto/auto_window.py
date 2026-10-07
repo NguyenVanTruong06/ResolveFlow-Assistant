@@ -2575,7 +2575,7 @@ class AutoWindow(QMainWindow):
         self.btn_mode_ollama.clicked.connect(lambda: switch_mode(2))
 
         self.btn_quick_copy.clicked.connect(self._quick_copy_copilot_prompt)
-        self.btn_apply_json.clicked.connect(self._toggle_pipeline_execution)
+        self.btn_apply_json.clicked.connect(self._on_btn_apply_json_clicked)
         self.txt_json_input.textChanged.connect(self._on_json_text_changed)
         self.btn_run_ollama.clicked.connect(lambda: self._run_local_ollama_pipeline("travel_vlog", self.combo_ollama_model.currentText(), "http://localhost:11434"))
         self.btn_run_api.clicked.connect(lambda: self._run_cloud_api_pipeline("travel_vlog", self.combo_cloud_provider.currentText(), self.txt_api_key.text()))
@@ -4020,6 +4020,30 @@ class AutoWindow(QMainWindow):
             self.bubble.update_progress(pct, status)
         QApplication.processEvents()
 
+    def _on_btn_apply_json_clicked(self):
+        json_text = self.txt_json_input.toPlainText().strip()
+        if not json_text:
+            QMessageBox.warning(self, "Chưa có kịch bản JSON", "Vui lòng dán đoạn mã JSON kịch bản trước khi thi công.")
+            return
+            
+        # Clean markdown code blocks
+        if json_text.startswith("```json"):
+            json_text = json_text[7:]
+        elif json_text.startswith("```"):
+            json_text = json_text[3:]
+        if json_text.endswith("```"):
+            json_text = json_text[:-3]
+            
+        json_text = json_text.strip()
+        
+        # Thêm ngoặc nhọn nếu bị thiếu do copy thiếu
+        if not json_text.startswith("{") and '"timeline_segments"' in json_text:
+            json_text = "{" + json_text
+        if not json_text.endswith("}") and '"timeline_segments"' in json_text:
+            json_text = json_text + "}"
+            
+        self._apply_json_text_plan(json_text)
+
     def _apply_json_text_plan(self, json_text: str):
         """Phân tích và thi công kịch bản JSON nhập từ ô văn bản TabCopilot."""
         if not json_text or not json_text.strip():
@@ -4030,8 +4054,14 @@ class AutoWindow(QMainWindow):
         try:
             plan = StoryCopilot.parse_copilot_response(json_text)
         except Exception as e:
-            QMessageBox.critical(self, "Lỗi phân tích JSON", f"Không thể phân tích đoạn kịch bản JSON:\n{e}")
+            QMessageBox.critical(self, "Lỗi phân tích JSON", f"Không thể phân tích đoạn kịch bản JSON:\n{e}\n\nVui lòng kiểm tra lại xem bạn đã copy đầy đủ JSON từ ngoặc mở {{ tới ngoặc đóng }} chưa.")
             self._set_ui_step_progress(0, "Lỗi cú pháp JSON", -1)
+            return
+
+        # Đảm bảo đã có video
+        if not hasattr(self, "video_paths") or not self.video_paths:
+            QMessageBox.warning(self, "Chưa chọn Video nguồn", "Vui lòng nạp các file Video vào danh sách trước khi Thi công Timeline để tool biết đường dẫn ghim vào DaVinci Resolve.")
+            self._set_ui_step_progress(0, "Lỗi: Chưa có Video", -1)
             return
 
         self._on_copilot_plan_applied(plan)
