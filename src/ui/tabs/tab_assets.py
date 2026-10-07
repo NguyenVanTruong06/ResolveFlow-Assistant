@@ -2959,11 +2959,15 @@ class TabAssets(QWidget):
             self.insert_title_requested.emit(text, preset_id, dur)
             self._show_toast(f"Đã chèn “{getattr(self.selected_asset, 'name', text)}” tại Playhead (V2)")
         elif is_sfx:
+            real_file_path = getattr(self.selected_asset, "file_path", "")
             pid = getattr(self.selected_asset, "id", "whoosh")
-            clean_id = pid.replace("sfx_", "")
-            sfx_file = os.path.join("assets", "sfx", f"{clean_id}.wav")
-            if not os.path.exists(sfx_file):
-                sfx_file = os.path.join("assets", "sfx", f"{pid}.wav")
+            if real_file_path and os.path.isfile(real_file_path):
+                sfx_file = real_file_path
+            else:
+                clean_id = pid.replace("sfx_", "")
+                sfx_file = os.path.join("assets", "sfx", f"{clean_id}.wav")
+                if not os.path.exists(sfx_file):
+                    sfx_file = os.path.join("assets", "sfx", f"{pid}.wav")
             dur = getattr(self.selected_asset, "duration", 1.5)
             if resolve_auto and hasattr(resolve_auto, "insert_sfx_to_track"):
                 try:
@@ -2979,14 +2983,31 @@ class TabAssets(QWidget):
         elif is_lut:
             lut_name = getattr(self.selected_asset, "name", "")
             pid = getattr(self.selected_asset, "id", "")
-            lut_file = os.path.join("assets", "luts", f"ResolveFlow_{pid}.cube")
+            real_file_path = getattr(self.selected_asset, "file_path", "")
+            if real_file_path and os.path.isfile(real_file_path):
+                lut_file = real_file_path
+            else:
+                lut_file = os.path.join("assets", "luts", f"ResolveFlow_{pid}.cube")
             if resolve_auto and hasattr(resolve_auto, "apply_look_lut"):
                 try:
-                    resolve_auto.apply_look_lut(lut_path=lut_file, scope="timeline")
+                    resolve_auto.apply_look_lut(lut_path=os.path.abspath(lut_file) if os.path.exists(lut_file) else lut_file, scope="timeline")
                 except Exception:
                     pass
             self.apply_lut_requested.emit(pid)
             self._show_toast(f"Đã áp LUT “{lut_name}” lên Timeline")
+        elif getattr(self.selected_asset, "tab", "") in ("meme", "overlay"):
+            real_file_path = getattr(self.selected_asset, "file_path", "")
+            if real_file_path and os.path.isfile(real_file_path):
+                if resolve_auto and hasattr(resolve_auto, "insert_media_at_playhead"):
+                    try:
+                        resolve_auto.insert_media_at_playhead(media_path=os.path.abspath(real_file_path), target_track=3)
+                    except Exception:
+                        pass
+                else:
+                    print(f"Requested insertion of video {real_file_path} to V3")
+                self._show_toast(f"Đã chèn video “{getattr(self.selected_asset, 'name', 'Asset')}” tại Playhead (V3)")
+            else:
+                self._show_toast(f"Đã chèn “{getattr(self.selected_asset, 'name', 'Asset')}” vào Timeline")
         else:
             self._show_toast(f"Đã chèn “{getattr(self.selected_asset, 'name', 'Asset')}” vào Timeline")
 
@@ -2994,6 +3015,11 @@ class TabAssets(QWidget):
         target = asset if asset is not None else self.selected_asset
         mime_data = QMimeData()
         if not target:
+            return mime_data
+
+        file_path = getattr(target, "file_path", "")
+        if file_path and os.path.isfile(file_path):
+            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(file_path))])
             return mime_data
 
         temp_dir = tempfile.gettempdir()
@@ -3168,12 +3194,26 @@ class TabAssets(QWidget):
 
     def _install_to_fusion(self) -> Tuple[int, str]:
         is_trans = isinstance(self.selected_asset, TransitionStylePreset) or getattr(self.selected_asset, "tab", "") == "trans"
-        if is_trans:
-            count, target_dir = TransitionMacroGenerator.install_transitions_to_davinci_resolve()
-            msg = f"Đã cài đặt {count} chuyển cảnh vào DaVinci Resolve ({target_dir})"
+        
+        real_file_path = getattr(self.selected_asset, "file_path", "")
+        if real_file_path and os.path.isfile(real_file_path) and real_file_path.endswith(".setting"):
+            import shutil
+            appdata = os.getenv("APPDATA") or ""
+            if is_trans:
+                target_dir = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Transitions")
+            else:
+                target_dir = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Titles")
+            os.makedirs(target_dir, exist_ok=True)
+            shutil.copy2(real_file_path, target_dir)
+            msg = f"Đã cài đặt file .setting vào DaVinci Resolve ({target_dir})"
+            count = 1
         else:
-            count, target_dir = FusionSettingGenerator.install_presets_to_davinci_resolve()
-            msg = f"Đã cài đặt {count} mẫu chữ vào DaVinci Resolve ({target_dir})"
+            if is_trans:
+                count, target_dir = TransitionMacroGenerator.install_transitions_to_davinci_resolve()
+                msg = f"Đã cài đặt {count} chuyển cảnh vào DaVinci Resolve ({target_dir})"
+            else:
+                count, target_dir = FusionSettingGenerator.install_presets_to_davinci_resolve()
+                msg = f"Đã cài đặt {count} mẫu chữ vào DaVinci Resolve ({target_dir})"
         self.install_presets_requested.emit()
         self._show_toast(msg)
         return count, target_dir
