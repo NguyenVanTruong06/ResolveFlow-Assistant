@@ -203,7 +203,7 @@ def test_inspector_live_previews(qapp):
     assert hasattr(tab, "inspector_lut_viewport"), "TabAssets must have inspector_lut_viewport"
 
     # Chọn một LUT
-    lut_asset = MOCKUP_LUTS[0]
+    lut_asset = tab.all_luts[0]
     tab._on_card_selected(lut_asset.id)
     assert tab.selected_asset.id == lut_asset.id
     assert tab.inspector_lut_viewport.isVisible()
@@ -218,7 +218,7 @@ def test_inspector_live_previews(qapp):
     assert hasattr(tab, "sfx_play_btn"), "TabAssets must have sfx_play_btn playback controller"
     assert hasattr(tab, "sfx_time_lbl"), "TabAssets must have sfx_time_lbl time indicator"
 
-    sfx_asset = MOCKUP_SFX[0]
+    sfx_asset = tab.all_sfx[0]
     tab._on_card_selected(sfx_asset.id)
     assert tab.selected_asset.id == sfx_asset.id
     assert tab.inspector_sfx_viewport.isVisible()
@@ -229,19 +229,19 @@ def test_inspector_live_previews(qapp):
 
     # 4. Transition Visual Loop Preview
     assert hasattr(tab, "inspector_trans_viewport"), "TabAssets must have inspector_trans_viewport"
-    trans_asset = BUILTIN_TRANSITIONS[0]
+    trans_asset = tab.all_transitions[0]
     tab._on_card_selected(trans_asset.id)
     assert tab.selected_asset.id == trans_asset.id
     assert tab.inspector_trans_viewport.isVisible()
 
     # 5. Icon/Meme Vector / Emoji / Thumbnail Preview
     assert hasattr(tab, "inspector_icon_viewport"), "TabAssets must have inspector_icon_viewport"
-    icon_asset = MOCKUP_ICONS[0]
+    icon_asset = tab.all_icons[0]
     tab._on_card_selected(icon_asset.id)
     assert tab.selected_asset.id == icon_asset.id
     assert tab.inspector_icon_viewport.isVisible()
 
-    meme_asset = MOCKUP_MEMES[0]
+    meme_asset = tab.all_memes[0]
     tab._on_card_selected(meme_asset.id)
     assert tab.selected_asset.id == meme_asset.id
     assert tab.inspector_icon_viewport.isVisible() or hasattr(tab, "inspector_meme_viewport")
@@ -312,7 +312,7 @@ def test_asset_actions_and_drag_drop(qapp, monkeypatch):
     assert any("V2" in t for t in track_items_text)
 
     # Khi chọn SFX -> Chuyển track Audio Track 2 và có gợi ý -12dB compensation hint
-    sfx_asset = MOCKUP_SFX[0]
+    sfx_asset = tab.all_sfx[0]
     tab._on_card_selected(sfx_asset.id)
     track_items_sfx = [tab.combo_target_track.itemText(i) for i in range(tab.combo_target_track.count())]
     assert any("A2" in t or "Audio" in t for t in track_items_sfx)

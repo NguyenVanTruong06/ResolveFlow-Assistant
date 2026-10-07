@@ -31,6 +31,7 @@ from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS
 from src.core.text_preset import TextStylePreset, BUILTIN_PRESETS, FusionSettingGenerator
 from src.core.transition_preset import TransitionStylePreset, BUILTIN_TRANSITIONS, TransitionMacroGenerator
 from src.core.resolve_api import ResolveAutomation
+from src.core.asset_indexer import AssetIndexer
 
 
 # =========================================================================
@@ -80,7 +81,9 @@ class StudioAsset:
         frames: int = 24,
         color_hex: str = "#FFFFFF",
         svg_path: str = "",
-        native_preset: Any = None
+        native_preset: Any = None,
+        file_path: str = "",
+        thumbnail_path: str = ""
     ):
         self.id = id
         self.name = name
@@ -94,6 +97,8 @@ class StudioAsset:
         self.color_hex = color_hex
         self.svg_path = svg_path
         self.native_preset = native_preset
+        self.file_path = file_path
+        self.thumbnail_path = thumbnail_path
 
 
 # Danh sách LUTs điện ảnh chuẩn từ mockup
@@ -795,18 +800,28 @@ class AssetCard(QFrame):
         """)
 
         # Điều phối tới bộ render chuyên biệt theo từng loại đạo cụ
-        if isinstance(self.preset, TextStylePreset) or getattr(self.preset, "tab", "") == "text":
-            self._render_text_thumbnail()
-        elif getattr(self.preset, "tab", "") == "sfx":
-            self._render_sfx_thumbnail()
-        elif getattr(self.preset, "tab", "") == "lut":
-            self._render_lut_thumbnail()
-        elif isinstance(self.preset, TransitionStylePreset) or getattr(self.preset, "tab", "") == "trans":
-            self._render_transition_thumbnail()
-        elif getattr(self.preset, "tab", "") in ("icon", "meme", "overlay") or hasattr(self.preset, "badge_icon"):
-            self._render_icon_thumbnail()
+        thumb_path = getattr(self.preset, "thumbnail_path", "")
+        if thumb_path and os.path.isfile(thumb_path):
+            th_layout = QVBoxLayout(self.thumb)
+            th_layout.setContentsMargins(0, 0, 0, 0)
+            lbl = QLabel()
+            lbl.setPixmap(QPixmap(thumb_path).scaled(160, 80, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation))
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setStyleSheet("border-radius: 8px; overflow: hidden;")
+            th_layout.addWidget(lbl)
         else:
-            self._render_icon_thumbnail()
+            if isinstance(self.preset, TextStylePreset) or getattr(self.preset, "tab", "") == "text":
+                self._render_text_thumbnail()
+            elif getattr(self.preset, "tab", "") == "sfx":
+                self._render_sfx_thumbnail()
+            elif getattr(self.preset, "tab", "") == "lut":
+                self._render_lut_thumbnail()
+            elif isinstance(self.preset, TransitionStylePreset) or getattr(self.preset, "tab", "") == "trans":
+                self._render_transition_thumbnail()
+            elif getattr(self.preset, "tab", "") in ("icon", "meme", "overlay") or hasattr(self.preset, "badge_icon"):
+                self._render_icon_thumbnail()
+            else:
+                self._render_icon_thumbnail()
 
         layout.addWidget(self.thumb)
 
@@ -1296,13 +1311,41 @@ class TabAssets(QWidget):
         self.favorites = FavoritesManager.load()
 
         # Dữ liệu nạp sẵn
-        self.all_presets = BUILTIN_PRESETS.copy()
-        self.all_transitions = BUILTIN_TRANSITIONS.copy()
-        self.all_luts = MOCKUP_LUTS.copy()
+        indexer = AssetIndexer()
+        
+        # Helper to convert dicts to StudioAsset
+        def dicts_to_assets(dicts, tab, category, sub, badge):
+            return [
+                StudioAsset(
+                    id=d["id"], name=d["name"], tab=tab, category=category,
+                    sub=sub, badge_icon=badge, file_path=d.get("file_path", ""),
+                    thumbnail_path=d.get("thumbnail_path", "")
+                ) for d in dicts
+            ]
+        
+        # Combine builtins with scanned settings
+        scanned_titles = indexer.scan_titles()
+        self.all_presets = BUILTIN_PRESETS.copy() + dicts_to_assets(
+            scanned_titles, "text", "custom", "Tùy chỉnh", "🔤"
+        )
+        
+        scanned_transitions = indexer.scan_transitions()
+        self.all_transitions = BUILTIN_TRANSITIONS.copy() + dicts_to_assets(
+            scanned_transitions, "trans", "custom", "Tùy chỉnh", "🎬"
+        )
+
+        scanned_luts = indexer.scan_luts()
+        self.all_luts = dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else MOCKUP_LUTS.copy()
+        
+        scanned_memes = indexer.scan_memes()
+        self.all_memes = dicts_to_assets(scanned_memes, "meme", "trending", "Meme", "🎭") if scanned_memes else MOCKUP_MEMES.copy()
+        
+        scanned_sfx = indexer.scan_sfx()
+        self.all_sfx = dicts_to_assets(scanned_sfx, "sfx", "accent", "Âm thanh", "🔊") if scanned_sfx else MOCKUP_SFX.copy()
+        
         self.all_icons = MOCKUP_ICONS.copy()
         self.all_overlays = MOCKUP_OVERLAYS.copy()
-        self.all_memes = MOCKUP_MEMES.copy()
-        self.all_sfx = MOCKUP_SFX.copy()
+        
         self.local_assets: List[LocalAsset] = []
 
         # Tổng hợp danh sách đối tượng

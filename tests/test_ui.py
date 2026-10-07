@@ -1331,8 +1331,9 @@ def test_tab_assets_integrated_in_auto_window(qapp, monkeypatch):
 
     # 3.2 SFX Card Selection & Waveform
     window.tab_titles._filter_by_rail("sfx")
-    window.tab_titles._on_card_selected("sfx_whoosh")
-    assert window.tab_titles.selected_asset.id == "sfx_whoosh"
+    sfx_id = window.tab_titles.all_sfx[0].id
+    window.tab_titles._on_card_selected(sfx_id)
+    assert window.tab_titles.selected_asset.id == sfx_id
     assert not window.tab_titles.inspector_sfx_viewport.isHidden()
     assert window.tab_titles.inspector_text_preview.isHidden()
     assert hasattr(window.tab_titles, "sfx_waveform_canvas")
@@ -1341,8 +1342,9 @@ def test_tab_assets_integrated_in_auto_window(qapp, monkeypatch):
 
     # 3.3 LUT Card Selection & Split Widget
     window.tab_titles._filter_by_rail("lut")
-    window.tab_titles._on_card_selected("cinematic_teal_orange")
-    assert window.tab_titles.selected_asset.id == "cinematic_teal_orange"
+    lut_id = window.tab_titles.all_luts[0].id
+    window.tab_titles._on_card_selected(lut_id)
+    assert window.tab_titles.selected_asset.id == lut_id
     assert not window.tab_titles.inspector_lut_viewport.isHidden()
     assert window.tab_titles.inspector_text_preview.isHidden()
     assert hasattr(window.tab_titles, "lut_split_widget")
@@ -1406,7 +1408,7 @@ def test_tab_assets_integrated_in_auto_window(qapp, monkeypatch):
     assert mime_text.hasUrls()
     assert mime_text.urls()[0].toLocalFile().endswith(".setting")
 
-    sfx_asset = [s for s in window.tab_titles.all_sfx if s.id == "sfx_whoosh"][0]
+    sfx_asset = window.tab_titles.all_sfx[0]
     mime_sfx = window.tab_titles._create_drag_mime_data(sfx_asset)
     assert mime_sfx.hasUrls()
     assert mime_sfx.urls()[0].toLocalFile().endswith(".wav")
