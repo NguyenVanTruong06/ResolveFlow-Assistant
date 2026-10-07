@@ -33,6 +33,8 @@ installer_output/
 *.mkv
 *.avi
 *.m4a
+!assets/music/**/*.wav
+!assets/music/**/*.mp3
 
 # ==========================================
 # Environment Configuration

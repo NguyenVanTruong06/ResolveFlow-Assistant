@@ -485,6 +485,10 @@ class EDLGenerator:
         return get_video_fps(video_path)
 
     @staticmethod
+    def get_video_duration(video_path: str) -> float:
+        return float(get_media_metadata(video_path).get("duration", 0.0))
+
+    @staticmethod
     def generate_edl_content(
         video_path: str, 
         keep_intervals: List[Tuple[float, float]], 
