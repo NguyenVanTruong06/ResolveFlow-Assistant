@@ -61,10 +61,10 @@ class TabCopilot(QWidget):
         form_fmt.addRow("Phong cách Video:", self.combo_story_format)
 
         self.combo_target_duration = QComboBox()
+        self.combo_target_duration.addItem("🎞️ Toàn bộ video (Full Vlog dài 15-30 phút)", "full")
+        self.combo_target_duration.addItem("🎬 Khoảng 2-3 phút (Mini Vlog tóm tắt)", "180s")
         self.combo_target_duration.addItem("⚡ Khoảng 60 giây (Chuẩn Shorts/TikTok/Teaser)", "60s")
         self.combo_target_duration.addItem("⏱️ Khoảng 30-45 giây (Siêu ngắn, cô đọng)", "30s")
-        self.combo_target_duration.addItem("🎬 Khoảng 2-3 phút (Mini Vlog tóm tắt)", "180s")
-        self.combo_target_duration.addItem("🎞️ Toàn bộ video (Giữ nguyên luồng dài)", "full")
         form_fmt.addRow("Thời lượng mục tiêu:", self.combo_target_duration)
 
         self.combo_hook_duration = QComboBox()
