@@ -3338,15 +3338,24 @@ class ChunDVCApp(QMainWindow):
         connected = resolve_auto.connect()
 
         if connected:
-            success = resolve_auto.import_fcpxml_timeline(out_fcp7xml if os.path.exists(out_fcp7xml) else out_fcpxml)
+            self.txt_console.appendPlainText("🚀 [DaVinci Resolve Studio API] Đang tự động nạp Timeline vào dự án...")
+            primary_path = out_fcpxml if os.path.exists(out_fcpxml) else out_fcp7xml
+            success = resolve_auto.import_fcpxml_timeline(
+                edl_path=primary_path,
+                video_path=getattr(self, "selected_files", []),
+                timeline_name=timeline_name,
+                log_callback=self.txt_console.appendPlainText
+            )
             if success:
                 self.txt_console.appendPlainText(f"🎉 Đã nạp thành công Master Timeline '{timeline_name}' vào DaVinci Resolve Studio!")
                 QMessageBox.information(
                     self,
                     "Dựng Phim Hoàn Tất!",
-                    f"🎉 Đã nạp thành công Master Timeline '{timeline_name}' lên DaVinci Resolve theo đúng 100% kịch bản của AI Copilot!"
+                    f"🎉 Đã nạp thành công Master Timeline '{timeline_name}' lên DaVinci Resolve Studio theo đúng 100% kịch bản của AI Copilot!"
                 )
                 return
+            else:
+                self.txt_console.appendPlainText("⚠️ API Studio tự động nạp không thành công, chuyển sang chế độ hướng dẫn nạp.")
 
         # Dành cho DaVinci Resolve Free (hoặc khi chưa kết nối API Studio)
         self.txt_console.appendPlainText("💡 [DaVinci Resolve Free Mode] File Timeline FCP7 XML / FCPXML đã sẵn sàng để nạp vào DaVinci Resolve.")

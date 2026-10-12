@@ -494,29 +494,57 @@ class ResolveAutomation:
             self.import_media_to_media_pool(v_list, log_callback=log)
 
         first_dir = os.path.dirname(v_list[0]) if v_list else ""
-        file_ext = os.path.splitext(edl_path)[1].lower()
-        # Ưu tiên liên kết chính xác với Media Pool Item vừa nạp (importSourceClips = False)
-        # để tránh việc Resolve tự quét cả thư mục và liên kết nhầm sang video khác trong cùng folder
-        import_options = {
-            "timelineName": timeline_name,
-            "importSourceClips": False,
-            "sourceClipsPath": first_dir
-        }
 
-        try:
-            timeline = media_pool.ImportTimelineFromFile(os.path.abspath(edl_path), import_options)
-            if not timeline:
-                # Nếu importSourceClips = False không tìm thấy, thử lại với importSourceClips = True
-                import_options["importSourceClips"] = True
-                timeline = media_pool.ImportTimelineFromFile(os.path.abspath(edl_path), import_options)
+        # Chuẩn bị danh sách tệp ứng viên: Ưu tiên Apple FCPXML (.fcpxml) cho API Studio vì tương thích tốt nhất
+        candidate_paths = [os.path.abspath(edl_path)]
+        dir_name = os.path.dirname(os.path.abspath(edl_path))
+        base_stem = os.path.splitext(os.path.basename(edl_path))[0]
 
-            if timeline:
-                log(f" 🎉 Đã tự động import Timeline '{timeline_name}' thành công trong DaVinci Resolve (Media đã liên kết đúng tệp nguồn)!")
-                return True
-        except Exception as e:
-            log(f" ⚠️ Lỗi khi gọi API ImportTimelineFromFile: {str(e)}")
+        if edl_path.lower().endswith(".xml"):
+            alt_fcpxml = os.path.join(dir_name, f"{base_stem}.fcpxml")
+            if os.path.exists(alt_fcpxml):
+                candidate_paths.insert(0, alt_fcpxml)
+        elif edl_path.lower().endswith(".fcpxml"):
+            alt_xml = os.path.join(dir_name, f"{base_stem}.xml")
+            if os.path.exists(alt_xml):
+                candidate_paths.append(alt_xml)
 
-        log(" ➖ Cần import thủ công tệp Timeline (.fcpxml / .edl) vào DaVinci Resolve.")
+        for target_file in candidate_paths:
+            # Các biến thể tùy chọn import để tương thích tối đa với mọi bản DaVinci Resolve Studio (18, 19, 21)
+            trial_options = []
+
+            # Thử 1: Đặt tên timeline và liên kết với Media Pool
+            opt1 = {"timelineName": timeline_name, "importSourceClips": False}
+            if first_dir:
+                opt1["sourceClipsPath"] = first_dir
+            trial_options.append(opt1)
+
+            # Thử 2: Tự động quét và import clip nguồn nếu thiếu
+            opt2 = {"timelineName": timeline_name, "importSourceClips": True}
+            if first_dir:
+                opt2["sourceClipsPath"] = first_dir
+            trial_options.append(opt2)
+
+            # Thử 3: Chỉ truyền timelineName
+            trial_options.append({"timelineName": timeline_name})
+
+            # Thử 4: Gọi trực tiếp không truyền dict tùy chọn
+            trial_options.append(None)
+
+            for opt in trial_options:
+                try:
+                    if opt is not None:
+                        timeline = media_pool.ImportTimelineFromFile(target_file, opt)
+                    else:
+                        timeline = media_pool.ImportTimelineFromFile(target_file)
+
+                    if timeline:
+                        log(f" 🎉 Đã tự động import Timeline '{timeline_name}' thành công từ {os.path.basename(target_file)}!")
+                        return True
+                except Exception as e:
+                    log(f" ℹ Thử import {os.path.basename(target_file)}: {e}")
+
+        log(" ➖ Cần import thủ công tệp Timeline (.fcpxml / .xml) vào DaVinci Resolve.")
         return False
 
     # ------------------------------------------------------------------
