@@ -50,23 +50,38 @@ class ResolveAutomation:
     @staticmethod
     def _locate_fusionscript() -> Optional[str]:
         """
-        Tìm fusionscript.dll: biến môi trường RESOLVE_SCRIPT_LIB, thư mục cài mặc định, hoặc thư mục của tiến trình
-        Resolve.exe đang chạy (trường hợp cài ở ổ/thư mục khác như E:\\APP).
+        Tìm fusionscript library: biến môi trường RESOLVE_SCRIPT_LIB, thư mục cài mặc định
+        (Windows, Linux /opt/resolve, macOS), hoặc thư mục của tiến trình Resolve đang chạy.
         """
         candidates = []
         env = os.environ.get("RESOLVE_SCRIPT_LIB")
         if env:
             candidates.append(env)
-        candidates.append(r"C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll")
+
+        if sys.platform.startswith("linux"):
+            candidates.append("/opt/resolve/libs/Fusion/fusionscript.so")
+        elif sys.platform.startswith("darwin"):
+            candidates.append("/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fusionscript.dylib")
+        else:
+            candidates.append(r"C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll")
+
         try:
             import subprocess
-            out = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-Command",
-                 "(Get-Process Resolve -ErrorAction SilentlyContinue | Select-Object -First 1).Path"],
-                capture_output=True, text=True, timeout=10
-            ).stdout.strip()
-            if out:
-                candidates.append(os.path.join(os.path.dirname(out), "fusionscript.dll"))
+            if sys.platform.startswith("win"):
+                out = subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-Command",
+                     "(Get-Process Resolve -ErrorAction SilentlyContinue | Select-Object -First 1).Path"],
+                    capture_output=True, text=True, timeout=10
+                ).stdout.strip()
+                if out:
+                    candidates.append(os.path.join(os.path.dirname(out), "fusionscript.dll"))
+            elif sys.platform.startswith("linux"):
+                out = subprocess.run(
+                    ["pgrep", "-f", "/opt/resolve/bin/resolve"],
+                    capture_output=True, text=True, timeout=5
+                ).stdout.strip()
+                if out:
+                    candidates.append("/opt/resolve/libs/Fusion/fusionscript.so")
         except Exception:
             pass
         return next((c for c in candidates if c and os.path.exists(c)), None)
@@ -74,15 +89,13 @@ class ResolveAutomation:
     def connect(self) -> bool:
         """
         Kết nối tới ứng dụng DaVinci Resolve đang chạy.
-        Tự động đăng ký đường dẫn Modules của Resolve trên Windows vào sys.path.
+        Tự động đăng ký đường dẫn Modules của Resolve vào sys.path trên từng hệ điều hành.
 
         Returns:
             bool: True nếu kết nối thành công.
         """
-        # Đường dẫn Module lập trình mặc định của DaVinci Resolve trên Windows
-        resolve_script_path = r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\Modules"
-        if os.path.exists(resolve_script_path) and resolve_script_path not in sys.path:
-            sys.path.append(resolve_script_path)
+        from src.core.resolve_bridge import setup_resolve_environment
+        setup_resolve_environment()
 
         self.last_connect_error = ""
         lib = self._locate_fusionscript()
@@ -129,17 +142,32 @@ class ResolveAutomation:
         if self.connect():
             return True
 
-        resolve_exe = r"C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe"
-        if os.path.exists(resolve_exe):
-            log(" 🔍 Không tìm thấy DaVinci Resolve đang chạy. Đang tự động mở DaVinci Resolve...")
+        if sys.platform.startswith("linux"):
+            candidates_exe = ["/opt/resolve/bin/resolve"]
+            import shutil
+            which_res = shutil.which("resolve")
+            if which_res and which_res not in candidates_exe:
+                candidates_exe.append(which_res)
+        elif sys.platform.startswith("darwin"):
+            candidates_exe = [
+                "/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/MacOS/Resolve"
+            ]
+        else:
+            candidates_exe = [
+                r"C:\Program Files\Blackmagic Design\DaVinci Resolve\Resolve.exe"
+            ]
+
+        resolve_exe = next((exe for exe in candidates_exe if os.path.exists(exe)), None)
+        if resolve_exe:
+            log(f" 🔍 Không tìm thấy DaVinci Resolve đang chạy. Đang tự động mở: {resolve_exe}...")
             import subprocess
             import time
             try:
                 subprocess.Popen([resolve_exe])
                 log(" 🚀 Đang khởi động DaVinci Resolve... Vui lòng chờ vài giây và mở một dự án (Project).")
                 
-                # Thử kết nối lại trong vòng 15 giây
-                for i in range(15):
+                # Thử kết nối lại trong vòng 20 giây (khởi động cold start trên Linux/SSD có thể mất 10-15s)
+                for i in range(20):
                     time.sleep(1)
                     if self.connect():
                         log(" ✔ Đã kết nối thành công tới DaVinci Resolve!")
@@ -148,7 +176,7 @@ class ResolveAutomation:
             except Exception as e:
                 log(f" ❌ Không thể khởi chạy DaVinci Resolve tự động: {str(e)}")
         else:
-            log(" ❌ Không tìm thấy đường dẫn cài đặt mặc định của DaVinci Resolve tại C:\\Program Files\\...")
+            log(" ❌ Không tìm thấy đường dẫn cài đặt DaVinci Resolve (kiểm tra /opt/resolve/bin/resolve hoặc C:\\Program Files\\...).")
         return False
 
     def is_connected(self) -> bool:
@@ -550,7 +578,29 @@ class ResolveAutomation:
     # ------------------------------------------------------------------
     # LUT / Color: phát hiện LUT đã gắn sẵn và áp dụng không ghi đè
     # ------------------------------------------------------------------
-    RESOLVE_LUT_DIR = r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\LUT"
+    @classmethod
+    def get_resolve_lut_dir(cls) -> str:
+        """Lấy thư mục lưu trữ LUT mặc định của DaVinci Resolve trên từng hệ điều hành."""
+        if sys.platform.startswith("linux"):
+            user_lut = os.path.expanduser("~/.local/share/DaVinciResolve/LUT")
+            if os.path.exists(user_lut):
+                return user_lut
+            opt_lut = "/opt/resolve/LUT"
+            if os.path.exists(opt_lut) and os.access(opt_lut, os.W_OK):
+                return opt_lut
+            os.makedirs(user_lut, exist_ok=True)
+            return user_lut
+        elif sys.platform.startswith("darwin"):
+            user_lut = os.path.expanduser("~/Library/Application Support/Blackmagic Design/DaVinci Resolve/LUT")
+            if os.path.exists(user_lut):
+                return user_lut
+            return "/Library/Application Support/Blackmagic Design/DaVinci Resolve/LUT"
+        else:
+            return r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\LUT"
+
+    @property
+    def RESOLVE_LUT_DIR(self) -> str:
+        return self.get_resolve_lut_dir()
 
     @staticmethod
     def _graph_luts(graph: Any) -> List[str]:
@@ -619,7 +669,8 @@ class ResolveAutomation:
             pass
         import shutil
         try:
-            target_dir = os.path.join(self.RESOLVE_LUT_DIR, "ResolveFlow")
+            lut_base_dir = self.get_resolve_lut_dir()
+            target_dir = os.path.join(lut_base_dir, "ResolveFlow")
             os.makedirs(target_dir, exist_ok=True)
             shutil.copy2(lut_path, os.path.join(target_dir, os.path.basename(lut_path)))
             if self.current_project:
