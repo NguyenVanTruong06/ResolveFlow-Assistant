@@ -5097,8 +5097,9 @@ class AutoWindow(QMainWindow):
             return (
                 "❌ Không tìm thấy công cụ FFmpeg trong hệ thống.\n\n"
                 "👉 Cách khắc phục:\n"
-                "1. Tải FFmpeg từ https://ffmpeg.org/download.html (hoặc bản build sẵn).\n"
-                "2. Thêm thư mục chứa ffmpeg.exe vào biến môi trường PATH của Windows hoặc đặt file ffmpeg.exe cạnh tệp main.py."
+                "1. Trên Linux (Ubuntu/Debian): chạy lệnh 'sudo apt install -y ffmpeg'.\n"
+                "2. Trên macOS: chạy lệnh 'brew install ffmpeg'.\n"
+                "3. Trên Windows: tải FFmpeg và thêm vào biến môi trường PATH."
             )
         elif "resolve" in err_lower or "davinci" in err_lower or "scripting" in err_lower:
             return (

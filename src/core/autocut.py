@@ -422,7 +422,9 @@ def get_media_metadata(video_path: str) -> Dict[str, Any]:
     width = int(video_stream.get('width', 1920)) if video_stream else 1920
     height = int(video_stream.get('height', 1080)) if video_stream else 1080
 
-    has_audio = any(s.get('codec_type') == 'audio' for s in probe.get('streams', [])) if probe else True
+    audio_stream = next((s for s in probe.get('streams', []) if s.get('codec_type') == 'audio'), None) if probe else None
+    has_audio = audio_stream is not None if probe else True
+    audio_codec = str(audio_stream.get('codec_name', '')).lower() if audio_stream else None
 
     return {
         "fps": fps,
@@ -431,7 +433,8 @@ def get_media_metadata(video_path: str) -> Dict[str, Any]:
         "duration": duration,
         "width": width,
         "height": height,
-        "has_audio": has_audio
+        "has_audio": has_audio,
+        "audio_codec": audio_codec
     }
 
 def get_video_fps(video_path: str) -> float:
