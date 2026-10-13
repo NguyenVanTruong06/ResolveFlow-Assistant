@@ -2,6 +2,7 @@ import os
 import html
 from typing import List, Dict, Any, Optional, Union, Sequence
 from src.core.text_preset import TextStylePreset, PresetManager, hex_to_fcpxml_rgba
+from src.utils.path_utils import PosixPathAdapter
 
 class FCPXMLGenerator:
     """
@@ -429,12 +430,8 @@ class FCPXMLGenerator:
                 start_tc_f, _, _ = FCPXMLGenerator.get_clip_start_frame_and_tc(path, int(round(real_fps)))
             asset_tc_map[path] = start_tc_f
 
-            # Không dùng as_uri() vì nó mã hóa phần trăm (ví dụ: %20), làm Resolve trên Windows bị lỗi Media Offline
-            abs_path = os.path.abspath(path).replace('\\', '/')
-            if not abs_path.startswith('/'):
-                file_url = f"file:///{abs_path}"
-            else:
-                file_url = f"file://{abs_path}"
+            # Định dạng URI chuẩn RFC 3986 qua PosixPathAdapter
+            file_url = PosixPathAdapter.to_fcpxml_uri(path)
             clip_name = html.escape(os.path.basename(path))
             
             total_dur_sec = meta.get("duration", 0.0)
@@ -468,8 +465,7 @@ class FCPXMLGenerator:
                     if not meta:
                         meta = get_media_metadata(b_path)
                     meta_map[b_path] = meta
-                    abs_path = os.path.abspath(b_path).replace('\\', '/')
-                    file_url = f"file:///{abs_path}" if not abs_path.startswith('/') else f"file://{abs_path}"
+                    file_url = PosixPathAdapter.to_fcpxml_uri(b_path)
                     clip_name = html.escape(os.path.basename(b_path))
                     dur_sec = meta.get("duration", 0.0) or 3600.0
                     dur_frames = to_f(dur_sec)
@@ -746,10 +742,7 @@ class FCPXMLGenerator:
             return int(round(sec * real_fps))
 
         def clean_path_url(path: str) -> str:
-            p = os.path.abspath(path).replace('\\', '/')
-            if not p.startswith('/'):
-                return f"file:///{p}"
-            return f"file://{p}"
+            return PosixPathAdapter.to_fcpxml_uri(path)
 
         def clean_str(val: Any) -> str:
             if not val:

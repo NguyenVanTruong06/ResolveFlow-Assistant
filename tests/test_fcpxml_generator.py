@@ -456,4 +456,21 @@ def test_generate_timeline_fcpxml_with_camera_timecode(tmp_path):
     assert 'start="1776723/30s"' in content
 
 
+def test_fcpxml_asset_uri_rfc3986_with_spaces(tmp_path):
+    clip = tmp_path / "My Clip With Spaces.mp4"
+    clip.touch()
+    out_xml = tmp_path / "test_spaces.fcpxml"
+    events = [{
+        "video_path": str(clip),
+        "src_in": 0.0, "src_out": 2.0,
+        "rec_in": 0.0, "rec_out": 2.0, "fps": 25.0
+    }]
+    FCPXMLGenerator.generate_timeline_fcpxml(events, str(out_xml))
+    with open(out_xml, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "file:///" in content
+    assert "My%20Clip%20With%20Spaces.mp4" in content
+
+
+
 
