@@ -303,7 +303,7 @@ class DraggableAssetLabel(QLabel):
         if mime_data:
             drag.setMimeData(mime_data)
             self.setCursor(Qt.OpenHandCursor)
-            drag.exec_(Qt.CopyAction)
+            drag.exec(Qt.DropAction.CopyAction)
 
 
 class DraggableActionButton(QPushButton):
@@ -329,7 +329,7 @@ class DraggableActionButton(QPushButton):
             if mime_data and mime_data.hasUrls():
                 drag = QDrag(self)
                 drag.setMimeData(mime_data)
-                drag.exec_(Qt.CopyAction)
+                drag.exec(Qt.DropAction.CopyAction)
 
 
 
@@ -1571,7 +1571,7 @@ class AssetCard(QFrame):
 
         if mime_data.hasUrls():
             drag.setMimeData(mime_data)
-            drag.exec_(Qt.CopyAction)
+            drag.exec(Qt.DropAction.CopyAction)
 
 
 # =========================================================================

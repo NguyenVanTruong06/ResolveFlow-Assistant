@@ -172,7 +172,7 @@ class DraggableLUTCard(QFrame):
             mime_data = QMimeData()
             mime_data.setUrls([QUrl.fromLocalFile(lut_file_path)])
             drag.setMimeData(mime_data)
-            drag.exec_(Qt.CopyAction)
+            drag.exec(Qt.DropAction.CopyAction)
 
 
 class TabExport(QWidget):

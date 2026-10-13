@@ -67,10 +67,16 @@ class TabSFX(QWidget):
         except Exception:
             pass
 
-        # Fallback Windows Standard Library winsound
+        # Fallback: trên Windows dùng winsound; trên Linux dùng paplay hoặc aplay
         try:
-            import winsound
-            winsound.PlaySound(wav_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            if sys.platform.startswith("win"):
+                import winsound
+                winsound.PlaySound(wav_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            else:
+                import subprocess, shutil
+                player = shutil.which("paplay") or shutil.which("aplay")
+                if player:
+                    subprocess.Popen([player, str(Path(wav_path).expanduser().resolve())], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 

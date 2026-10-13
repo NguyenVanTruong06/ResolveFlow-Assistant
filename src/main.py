@@ -1,4 +1,11 @@
+import os
 import sys
+
+# Cấu hình chuẩn cho Qt6 trên Linux (XCB display server & FFmpeg media engine)
+if sys.platform.startswith("linux"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+    os.environ.setdefault("QT_MEDIA_BACKEND", "ffmpeg")
+
 from PySide6.QtWidgets import QApplication
 from src.ui.bubble.floating_bubble import FloatingBubbleWidget
 from src.ui.auto.auto_window import AutoWindow
