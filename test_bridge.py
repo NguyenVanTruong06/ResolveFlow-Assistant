@@ -24,7 +24,13 @@ def main():
     if not current_resolve:
         import os
         import sys
-        resolve_script_path = r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\Modules"
+        if sys.platform.startswith("linux"):
+            resolve_script_path = "/opt/resolve/Developer/Scripting/Modules"
+        elif sys.platform.startswith("darwin"):
+            resolve_script_path = "/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting/Modules"
+        else:
+            resolve_script_path = r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\Modules"
+
         if os.path.exists(resolve_script_path) and resolve_script_path not in sys.path:
             sys.path.append(resolve_script_path)
             
