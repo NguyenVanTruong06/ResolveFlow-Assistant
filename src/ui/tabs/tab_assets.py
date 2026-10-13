@@ -3993,13 +3993,13 @@ class TabAssets(QWidget):
 }}"""
 
     def _install_to_fusion(self) -> Tuple[int, str]:
+        from src.core.asset_manager import AssetManager
         is_trans = isinstance(self.selected_asset, TransitionStylePreset) or getattr(self.selected_asset, "tab", "") == "trans"
         is_lut = getattr(self.selected_asset, "tab", "") == "lut" or self.current_rail_tab == "lut"
-        appdata = os.getenv("APPDATA") or ""
         real_file_path = getattr(self.selected_asset, "file_path", "")
 
         if is_lut:
-            target_dir = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "LUT", "ChunDVC")
+            target_dir = str(AssetManager.get_lut_install_dir())
             os.makedirs(target_dir, exist_ok=True)
             import shutil
             count = 0
@@ -4023,17 +4023,17 @@ class TabAssets(QWidget):
         if real_file_path and os.path.isfile(real_file_path) and real_file_path.endswith(".setting"):
             import shutil
             if is_trans:
-                target_dir = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Transitions", "ChunDVC")
+                target_dir = str(AssetManager.get_fusion_template_dir("Transitions"))
             else:
-                target_dir = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Titles", "ChunDVC")
+                target_dir = str(AssetManager.get_fusion_template_dir("Titles"))
             os.makedirs(target_dir, exist_ok=True)
             fname = os.path.basename(real_file_path)
-            if not fname.startswith("ChunDVC_"):
-                dest_file = os.path.join(target_dir, f"ChunDVC_{fname}")
+            if not fname.startswith("ResolveFlow_"):
+                dest_file = os.path.join(target_dir, f"ResolveFlow_{fname}")
             else:
                 dest_file = os.path.join(target_dir, fname)
             shutil.copy2(real_file_path, dest_file)
-            msg = f"Đã cài đặt '{os.path.basename(dest_file)}' vào ChunDVC ({target_dir})"
+            msg = f"Đã cài đặt '{os.path.basename(dest_file)}' vào ResolveFlow ({target_dir})"
             count = 1
         else:
             if is_trans:
@@ -4058,10 +4058,10 @@ class TabAssets(QWidget):
                 return
             paths = files
 
-        appdata = os.getenv("APPDATA") or ""
-        titles_dvc = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Titles", "ChunDVC")
-        trans_dvc = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Transitions", "ChunDVC")
-        lut_dvc = os.path.join(appdata, "Blackmagic Design", "DaVinci Resolve", "Support", "LUT", "ChunDVC")
+        from src.core.asset_manager import AssetManager
+        titles_dvc = str(AssetManager.get_fusion_template_dir("Titles"))
+        trans_dvc = str(AssetManager.get_fusion_template_dir("Transitions"))
+        lut_dvc = str(AssetManager.get_lut_install_dir())
 
         import shutil
         added_count = 0

@@ -209,15 +209,9 @@ class TransitionMacroGenerator:
 
     @staticmethod
     def get_davinci_resolve_transitions_dir() -> str:
-        """Lấy đường dẫn thư mục Fusion Transitions Template của DaVinci Resolve trên Windows."""
-        app_data = os.environ.get("APPDATA", "")
-        if app_data:
-            return os.path.join(app_data, "Blackmagic Design", "DaVinci Resolve", "Support", "Fusion", "Templates", "Edit", "Transitions", "ChunDVC")
-        home = os.path.expanduser("~")
-        mac_path = os.path.join(home, "Library", "Application Support", "Blackmagic Design", "DaVinci Resolve", "Fusion", "Templates", "Edit", "Transitions", "ChunDVC")
-        if os.path.exists(os.path.dirname(mac_path)):
-            return mac_path
-        return os.path.join(home, "ChunDVC_Transitions")
+        """Lấy đường dẫn thư mục Fusion Transitions Template của DaVinci Resolve qua AssetManager."""
+        from src.core.asset_manager import AssetManager
+        return str(AssetManager.get_fusion_template_dir("Transitions"))
 
     @classmethod
     def install_transitions_to_davinci_resolve(
@@ -237,7 +231,7 @@ class TransitionMacroGenerator:
         installed_count = 0
         for p in presets:
             clean_name = re.sub(r'[^\w\s-]', '', p.name).strip().replace(' ', '_')
-            filename = f"ChunDVC_{clean_name}.setting"
+            filename = f"ResolveFlow_{clean_name}.setting"
             dest_path = os.path.join(target_dir, filename)
             cls.export_setting_file(p, dest_path)
             installed_count += 1
