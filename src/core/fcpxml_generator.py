@@ -361,18 +361,13 @@ class FCPXMLGenerator:
             total_frames = (hh * 3600 + mm * 60 + ss) * target_fps + ff
             dropped_frames = 2 * (total_minutes - total_minutes // 10)
             real_frames = total_frames - dropped_frames
+            df_str = f"{hh:02d}:{mm:02d}:{ss:02d};{ff:02d}"
+            return real_frames, df_str, "DF"
         else:
             real_frames = (hh * 3600 + mm * 60 + ss) * target_fps + ff
+            ndf_str = f"{hh:02d}:{mm:02d}:{ss:02d}:{ff:02d}"
+            return real_frames, ndf_str, "NDF"
 
-        ff_ndf = real_frames % target_fps
-        total_s = real_frames // target_fps
-        ss_ndf = total_s % 60
-        total_m = total_s // 60
-        mm_ndf = total_m % 60
-        hh_ndf = total_m // 60
-        ndf_str = f'{hh_ndf:02d}:{mm_ndf:02d}:{ss_ndf:02d}:{ff_ndf:02d}'
-
-        return real_frames, ndf_str, 'NDF'
 
     @staticmethod
     def generate_timeline_fcpxml(
