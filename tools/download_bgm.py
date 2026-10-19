@@ -34,7 +34,8 @@ def get_wikimedia_url(filename):
     return None
 
 def download_and_convert():
-    base_dir = os.path.join(os.getcwd(), 'assets', 'music')
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base_dir = os.path.join(root_dir, 'assets', 'music')
     for category, (wiki_file, out_name) in FILES.items():
         print(f"Processing {category} -> {wiki_file}")
         url = get_wikimedia_url(wiki_file)

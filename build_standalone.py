@@ -77,6 +77,8 @@ def get_hidden_imports() -> List[str]:
         "src.core.story_arranger",
         "src.core.story_copilot",
         "src.core.story_planner",
+        "src.core.lut_generator",
+        "src.core.sfx_generator",
         "src.core.text_preset",
         "src.core.transcriber",
         "src.core.validator",

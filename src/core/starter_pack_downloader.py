@@ -122,7 +122,7 @@ class StarterPackDownloader:
         # 1. Sinh SFX
         report(15, "Đang nạp 40+ hiệu ứng âm thanh SFX...")
         try:
-            from generate_sfx import generate_all_sfx
+            from src.core.sfx_generator import generate_all_sfx
             sfx_dir = "assets/sfx"
             sfx_count = generate_all_sfx(sfx_dir)
             summary["sfx"] = sfx_count

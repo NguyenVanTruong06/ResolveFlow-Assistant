@@ -14,7 +14,7 @@ from src.core.lut_generator import LUT3DGenerator, BUILTIN_COLOR_LOOKS
 from src.core.text_preset import PresetManager, BUILTIN_PRESETS
 from src.core.recipe_manager import RecipeManager
 from src.core.transition_preset import BUILTIN_TRANSITIONS
-from generate_sfx import SFX_REGISTRY, generate_all_sfx, SAMPLE_RATE
+from src.core.sfx_generator import SFX_REGISTRY, generate_all_sfx, SAMPLE_RATE
 
 
 def test_sfx_registry_and_48khz_spec():
