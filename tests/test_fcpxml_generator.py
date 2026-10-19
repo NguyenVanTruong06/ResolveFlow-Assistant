@@ -471,6 +471,16 @@ def test_fcpxml_asset_uri_rfc3986_with_spaces(tmp_path):
     assert "file:///" in content
     assert "My%20Clip%20With%20Spaces.mp4" in content
 
-
-
-
+def test_snap_time_to_frame_various_fps():
+    from src.core.fcpxml_generator import FCPXMLGenerator
+    # 30 fps -> frame duration = 1/30 = 0.033333...s
+    assert FCPXMLGenerator.snap_time_to_frame(0.034, 30.0) == 1.0 / 30.0
+    assert FCPXMLGenerator.snap_time_to_frame(0.000, 30.0) == 0.0
+    assert FCPXMLGenerator.snap_time_to_frame(1.000, 24.0) == 1.0
+    # 29.97 fps frame snapping
+    snapped = FCPXMLGenerator.snap_time_to_frame(1.0, 29.97)
+    assert abs(snapped - round(1.0 * 29.97) / 29.97) < 1e-6
+    # 25 fps
+    assert FCPXMLGenerator.snap_time_to_frame(0.041, 25.0) == 1.0 / 25.0
+    # Negative or 0 fps fallback
+    assert FCPXMLGenerator.snap_time_to_frame(1.0, 0.0) == 1.0

@@ -110,6 +110,24 @@ class FCPXMLGenerator:
             return "1/30s"
 
     @staticmethod
+    def snap_time_to_frame(seconds: float, fps: float) -> float:
+        """
+        Quy đổi timestamp (giây) về mốc biên khung hình nguyên bản gần nhất (Frame-Boundary Snapping).
+        Chống triệt để khe hở 1 frame (chớp đen) và lệch hình-tiếng tích luỹ trong DaVinci Resolve.
+        """
+        if fps <= 0:
+            return float(seconds)
+        frame_idx = round(seconds * fps)
+        return frame_idx / fps
+
+    @staticmethod
+    def seconds_to_frame_count(seconds: float, fps: float) -> int:
+        """Quy đổi số giây sang số nguyên khung hình (Frames) theo FPS."""
+        if fps <= 0:
+            fps = 30.0
+        return int(round(seconds * fps))
+
+    @staticmethod
     def generate_karaoke_fcpxml(
         subtitles: List[Dict[str, Any]], 
         output_path: str, 

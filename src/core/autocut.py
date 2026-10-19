@@ -309,6 +309,15 @@ class SilenceDetector:
             })
         return timeline_segments
 
+def snap_time_to_frame(seconds: float, fps: float = 30.0) -> float:
+    """
+    Quy đổi timestamp (giây) về mốc biên khung hình nguyên bản gần nhất (Frame-Boundary Snapping).
+    Chống khe hở 1 frame (chớp đen) và lệch tích luỹ trong DaVinci Resolve.
+    """
+    if fps <= 0:
+        return float(seconds)
+    return round(seconds * fps) / fps
+
 def parse_timecode_to_seconds(tc_str: str, fps: float = 30.0) -> float:
     """
     Chuyển đổi chuỗi Timecode (HH:MM:SS:FF hoặc HH:MM:SS;FF) thành số giây (float).
