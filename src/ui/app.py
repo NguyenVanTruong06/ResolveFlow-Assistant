@@ -3449,7 +3449,8 @@ class ChunDVCApp(QMainWindow):
 
         if connected:
             self.txt_console.appendPlainText("🚀 [DaVinci Resolve Studio API] Đang tự động nạp Timeline vào dự án...")
-            primary_path = out_fcpxml if os.path.exists(out_fcpxml) else out_fcp7xml
+            # Ưu tiên FCP7 XML (.xml) vì hỗ trợ đầy đủ Multi-Track (V1 A-Roll, V2 Meme/B-roll, A1/A2 Audio, A3 SFX, A4/A5 BGM)
+            primary_path = out_fcp7xml if os.path.exists(out_fcp7xml) else out_fcpxml
             success = resolve_auto.import_fcpxml_timeline(
                 edl_path=primary_path,
                 video_path=getattr(self, "selected_files", []),

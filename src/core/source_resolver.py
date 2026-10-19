@@ -8,7 +8,7 @@ import os
 import re
 import copy
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from src.core.story_copilot import CopilotDirectorPlan, CopilotMediaInsert
 
@@ -62,13 +62,16 @@ class SourceResolver:
                 os.path.join(os.path.dirname(__file__), "..", "..", "assets")
             )
 
-    def _index_directory(self, folder_path: str) -> Dict[str, str]:
-        """Tạo từ điển ánh xạ {lowercase_filename: full_path}."""
+    def _index_directory(self, folder_path: str, valid_extensions: Optional[Tuple[str, ...]] = None) -> Dict[str, str]:
+        """Tạo từ điển ánh xạ {lowercase_filename: full_path} với lọc định dạng file hợp lệ."""
         mapping = {}
         if not os.path.exists(folder_path):
             return mapping
         for root, _, files in os.walk(folder_path):
             for f in files:
+                ext = os.path.splitext(f)[1].lower()
+                if valid_extensions and ext not in valid_extensions:
+                    continue
                 mapping[f.lower()] = os.path.join(root, f)
         return mapping
 
@@ -110,15 +113,22 @@ class SourceResolver:
 
         # 2. Kiểm tra Meme & B-Roll
         broll_dir = os.path.join(self.assets_dir, "broll_memes")
-        meme_map = self._index_directory(broll_dir) if os.path.exists(broll_dir) else self._index_directory(self.assets_dir)
+        video_exts = ('.mp4', '.mov', '.webm', '.mkv', '.avi')
+        meme_map = self._index_directory(broll_dir, valid_extensions=video_exts) if os.path.exists(broll_dir) else self._index_directory(self.assets_dir, valid_extensions=video_exts)
 
         for b in plan.broll_inserts:
             af = b.asset_file.strip()
-            if af.lower() in meme_map:
+            af_lower = af.lower()
+            # Tìm trực tiếp hoặc thử với đuôi mp4 nếu chưa có đuôi
+            matched_path = meme_map.get(af_lower)
+            if not matched_path and not os.path.splitext(af_lower)[1]:
+                matched_path = meme_map.get(f"{af_lower}.mp4")
+
+            if matched_path:
                 result.found_memes.append({
                     "timeline_sec": b.timeline_sec,
                     "asset_file": af,
-                    "path": meme_map[af.lower()],
+                    "path": matched_path,
                     "description": b.description
                 })
             else:
@@ -130,15 +140,21 @@ class SourceResolver:
 
         # 3. Kiểm tra SFX
         sfx_dir = os.path.join(self.assets_dir, "sfx")
-        sfx_map = self._index_directory(sfx_dir) if os.path.exists(sfx_dir) else self._index_directory(self.assets_dir)
+        audio_exts = ('.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg')
+        sfx_map = self._index_directory(sfx_dir, valid_extensions=audio_exts) if os.path.exists(sfx_dir) else self._index_directory(self.assets_dir, valid_extensions=audio_exts)
 
         for s in plan.sfx_inserts:
             af = s.asset_file.strip()
-            if af.lower() in sfx_map:
+            af_lower = af.lower()
+            matched_path = sfx_map.get(af_lower)
+            if not matched_path and not os.path.splitext(af_lower)[1]:
+                matched_path = sfx_map.get(f"{af_lower}.wav")
+
+            if matched_path:
                 result.found_sfx.append({
                     "timeline_sec": s.timeline_sec,
                     "asset_file": af,
-                    "path": sfx_map[af.lower()],
+                    "path": matched_path,
                     "description": s.description
                 })
             else:
@@ -159,9 +175,11 @@ class SourceResolver:
 
         sfx_dir = os.path.join(self.assets_dir, "sfx")
         broll_dir = os.path.join(self.assets_dir, "broll_memes")
+        video_exts = ('.mp4', '.mov', '.webm', '.mkv', '.avi')
+        audio_exts = ('.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg')
 
-        sfx_map = self._index_directory(sfx_dir) if os.path.exists(sfx_dir) else self._index_directory(self.assets_dir)
-        meme_map = self._index_directory(broll_dir) if os.path.exists(broll_dir) else self._index_directory(self.assets_dir)
+        sfx_map = self._index_directory(sfx_dir, valid_extensions=audio_exts) if os.path.exists(sfx_dir) else self._index_directory(self.assets_dir, valid_extensions=audio_exts)
+        meme_map = self._index_directory(broll_dir, valid_extensions=video_exts) if os.path.exists(broll_dir) else self._index_directory(self.assets_dir, valid_extensions=video_exts)
 
         # 1. Giải quyết SFX còn thiếu
         sfx_synonyms = {

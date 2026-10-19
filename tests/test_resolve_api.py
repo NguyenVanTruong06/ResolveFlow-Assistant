@@ -54,8 +54,8 @@ def test_connect_fail() -> None:
     mà không làm sập (crash) ứng dụng.
     """
     automator = ResolveAutomation()
-    # Mocking sys.path và module import để tránh nạp SDK thực tế khi test offline
-    with patch('os.path.exists', return_value=False):
+    # Mocking load_resolve_api để mô phỏng không có Resolve chạy nền
+    with patch('src.core.resolve_bridge.load_resolve_api', return_value=(None, "No Resolve")):
         connected = automator.connect()
         assert connected is False
 

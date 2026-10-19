@@ -562,7 +562,7 @@ class ResolveAutomation:
         elif isinstance(video_path, str) and video_path and os.path.exists(video_path):
             v_list = [os.path.abspath(video_path)]
 
-        # Chuẩn bị danh sách tệp ứng viên: Ưu tiên Apple FCPXML (.fcpxml) cho API Studio vì tương thích tốt nhất
+        # Chuẩn bị danh sách tệp ứng viên: Ưu tiên tệp do caller chỉ định (nhất là FCP7 XML đa track), sau đó đến tệp thay thế
         candidate_paths = [os.path.abspath(edl_path)]
         dir_name = os.path.dirname(os.path.abspath(edl_path))
         base_stem = os.path.splitext(os.path.basename(edl_path))[0]
@@ -570,7 +570,7 @@ class ResolveAutomation:
         if edl_path.lower().endswith(".xml"):
             alt_fcpxml = os.path.join(dir_name, f"{base_stem}.fcpxml")
             if os.path.exists(alt_fcpxml):
-                candidate_paths.insert(0, alt_fcpxml)
+                candidate_paths.append(alt_fcpxml)
         elif edl_path.lower().endswith(".fcpxml"):
             alt_xml = os.path.join(dir_name, f"{base_stem}.xml")
             if os.path.exists(alt_xml):
