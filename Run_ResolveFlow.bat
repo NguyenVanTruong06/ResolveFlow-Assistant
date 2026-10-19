@@ -1,19 +1,24 @@
 @echo off
-title ResolveFlow Assistant v4.1
+title ResolveFlow-Assistant v1.0.0
 cd /d "%~dp0"
 
 echo =======================================================
-echo    Khoi dong ResolveFlow Assistant v4.1...
+echo    ResolveFlow-Assistant v1.0.0 (Windows 11 Edition)   
 echo =======================================================
 
-if exist "venv\Scripts\python.exe" (
-    venv\Scripts\python.exe main.py
+set PYTHONPATH=%~dp0;%PYTHONPATH%
+
+if exist "%~dp0.venv\Scripts\python.exe" (
+    "%~dp0.venv\Scripts\python.exe" -m src.main %*
+) else if exist "%~dp0venv\Scripts\python.exe" (
+    "%~dp0venv\Scripts\python.exe" -m src.main %*
 ) else (
-    python main.py
+    python -m src.main %*
 )
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo Gap loi khi khoi chay! Vui long chay setup_project.ps1 de cai dat moi truong.
+    echo [ERROR] Gap loi khi khoi chay ResolveFlow-Assistant!
+    echo Vui long kiem tra moi truong Python / virtualenv (.venv).
     pause
 )

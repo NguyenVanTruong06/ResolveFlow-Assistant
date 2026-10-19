@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "======================================================="
-echo "   Khởi động ResolveFlow Assistant (Linux Studio Edition)"
+echo "   ResolveFlow-Assistant v1.0.0 (Linux Pro Edition)   "
 echo "======================================================="
 
 # 1. Qt6 Configuration (XCB Display Server & FFmpeg Multimedia Backend)
