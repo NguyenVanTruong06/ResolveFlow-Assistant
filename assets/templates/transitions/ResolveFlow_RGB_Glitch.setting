@@ -1,0 +1,59 @@
+{
+	Tools = ordered() {
+		ResolveFlow_Rgb_Glitch = MacroOperator {
+			Inputs = ordered() {
+				Input1 = InstanceInput {
+					SourceOp = "Dissolve1",
+					Source = "Background",
+					Name = "From",
+				},
+				Input2 = InstanceInput {
+					SourceOp = "Dissolve1",
+					Source = "Foreground",
+					Name = "To",
+				},
+				Transition = InstanceInput {
+					SourceOp = "AnimCurves1",
+					Source = "Transition",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "Displace1",
+					Source = "Output",
+				}
+			},
+			ViewInfo = GroupInfo { Pos = { 0, 0 } },
+			Tools = ordered() {
+				Dissolve1 = Dissolve {
+					Transitions = {
+						[0] = "DFVisualTransition",
+					},
+					Inputs = {
+						Mix = Input {
+							SourceOp = "AnimCurves1",
+							Source = "Value",
+						},
+					},
+					ViewInfo = OperatorInfo { Pos = { 220, 36.3 } },
+				},
+				AnimCurves1 = AnimCurves {
+					Inputs = {
+						Curve = Input { Value = FuID { "EaseInOut" }, },
+					},
+				},
+				Displace1 = Displace {
+					Inputs = {
+						Type = Input { Value = 1, },
+						XOffset = Input { Value = 0.02, },
+						Input = Input {
+							SourceOp = "Dissolve1",
+							Source = "Output",
+						},
+					},
+					ViewInfo = OperatorInfo { Pos = { 330, 36.3 } },
+				},
+			},
+		}
+	}
+}

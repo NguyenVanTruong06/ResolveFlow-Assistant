@@ -1,0 +1,29 @@
+{
+  "id": "luxury_gold_serif",
+  "name": "Luxury Gold Serif (Sang Trọng & Thượng Lưu)",
+  "category": "clean_minimal",
+  "badge_icon": "👑",
+  "tags": [
+    "Luxury",
+    "Gold",
+    "Serif",
+    "HighEnd",
+    "RealEstate",
+    "Jewelry"
+  ],
+  "description": "Font serif quý phái ánh vàng hoàng gia kết hợp hiệu ứng nổi nhẹ nhàng cho bất động sản và thương hiệu cao cấp.",
+  "font": "Georgia",
+  "size": 46,
+  "weight": "bold",
+  "standard_color": "#F8FAFC",
+  "highlight_color": "#F59E0B",
+  "outline_color": "#451A03",
+  "outline_width": 0.1,
+  "animation": "fade_up",
+  "timing_curve": "ease-in-out",
+  "position_y_16_9": 0.12,
+  "position_y_9_16": 0.26,
+  "box_color": null,
+  "glow_color": "#FBBF24",
+  "gradient_colors": null
+}

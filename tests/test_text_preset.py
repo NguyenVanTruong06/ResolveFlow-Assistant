@@ -158,3 +158,13 @@ def test_render_preview_frames():
     for p in paths1:
         if os.path.exists(p):
             os.remove(p)
+
+def test_resolve_system_font():
+    from src.utils.path_utils import resolve_system_font
+    font = resolve_system_font("Arial")
+    assert isinstance(font, str)
+    assert len(font) > 0
+    # Trên Linux không có Arial, sẽ fallback về font hợp lệ như Liberation Sans hoặc DejaVu Sans
+    if os.name != "nt":
+        assert font in ["Arial", "Liberation Sans", "DejaVu Sans", "Noto Sans", "Ubuntu", "Sans"]
+

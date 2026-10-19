@@ -1,0 +1,35 @@
+{
+    Tools = ordered() {
+        RF_Neon_Pulse = TextPlus {
+            Inputs = {
+                Width = Input { Value = 1920, },
+                Height = Input { Value = 1080, },
+                UseFrameFormatSettings = Input { Value = 1, },
+                Font = Input { Value = "Liberation Sans", },
+                Style = Input { Value = "Bold", },
+                Size = Input { Value = 0.0833, },
+                VerticalTopCenterBottom = Input { Value = 1, },
+                HorizontalLeftCenterRight = Input { Value = 0, },
+                Center = Input { Value = { 0.5, 0.15 }, },
+                StyledText = Input { Value = "ResolveFlow Studio", },
+                Red1 = Input { Value = 0.878, },
+                Green1 = Input { Value = 0.251, },
+                Blue1 = Input { Value = 0.984, },
+                Enabled2 = Input { Value = 1, },
+                ElementShape2 = Input { Value = 1, }, -- Outline
+                Red2 = Input { Value = 0.416, },
+                Green2 = Input { Value = 0.106, },
+                Blue2 = Input { Value = 0.604, },
+                Thickness2 = Input { Value = 0.024, },
+                JoinStyle2 = Input { Value = 2, }, -- Round
+                Enabled3 = Input { Value = 1, },
+                ElementShape3 = Input { Value = 3, }, -- Glow
+                Red3 = Input { Value = 0.000, },
+                Green3 = Input { Value = 0.898, },
+                Blue3 = Input { Value = 1.000, },
+                Softness3 = Input { Value = 10, },
+            },
+            ViewInfo = OperatorInfo { Pos = { 220, 36.3 } },
+        }
+    }
+}

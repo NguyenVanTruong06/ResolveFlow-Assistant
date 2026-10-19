@@ -4,7 +4,10 @@ import json
 import tempfile
 import uuid
 import traceback
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Sequence, Tuple
+
+from src.utils.path_utils import PosixPathAdapter
 
 from src.core.validator import DryRunValidator
 from src.core.transcriber import ModelConfig, ResolveTranscriber
@@ -53,12 +56,16 @@ from PySide6.QtWidgets import (
     QDialog, QScrollArea, QInputDialog, QFrame, QTabWidget, QSplitter, QListWidget, QStackedWidget,
     QSizePolicy
 )
-from PySide6.QtCore import QThread, Signal as pyqtSignal, Slot as pyqtSlot, Qt
+from PySide6.QtCore import QThread, Signal as pyqtSignal, Slot as pyqtSlot, Qt, QRunnable, QThreadPool, QObject
 from PySide6.QtGui import QFont, QColor, QPixmap, QIcon, QShortcut, QKeySequence
 
-from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS, MODULE_DESCRIPTIONS, get_application_stylesheet
+from src.ui.theme import (
+    ThemeColors, ThemeFonts, TOOLTIPS, MODULE_DESCRIPTIONS,
+    get_application_stylesheet, get_badge_style, get_card_style, get_button_style
+)
 from src.ui.tabs import TabCopilot, TabAutoCut, TabAssets, TabSFX, TabExport
 from src.ui.bubble.floating_bubble import create_vector_icon
+from src.ui.widgets.mini_timeline import MiniTimelineWidget
 
 class PreviewDialog(QDialog):
     """Hộp thoại hiển thị xem trước nhanh (Quick Preview) kiểu chữ phụ đề Text+."""
@@ -66,17 +73,17 @@ class PreviewDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"Quick Preview: {preset.name} ({aspect_ratio})")
         self.resize(680, 440)
-        self.setStyleSheet("background-color: #16161A; color: #E0E0E6;")
+        self.setStyleSheet(f"background-color: {ThemeColors.BG_CARD}; color: {ThemeColors.TEXT_PRIMARY};")
 
         layout = QVBoxLayout(self)
 
         info_lbl = QLabel(f"<b>Kiểu chữ:</b> {preset.name} | <b>Animation:</b> {preset.animation.upper()} ({preset.timing_curve}) | <b>Tỷ lệ:</b> {aspect_ratio}")
-        info_lbl.setStyleSheet("color: #90CAF9; font-size: 13px;")
+        info_lbl.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 13px;")
         layout.addWidget(info_lbl)
 
         self.img_lbl = QLabel()
         self.img_lbl.setAlignment(Qt.AlignCenter)
-        self.img_lbl.setStyleSheet("background-color: #0E0E10; border: 1px solid #2A2A35; border-radius: 6px;")
+        self.img_lbl.setStyleSheet(f"background-color: {ThemeColors.BG_CONSOLE}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 6px;")
         layout.addWidget(self.img_lbl, stretch=1)
 
         # Render preview image
@@ -95,6 +102,19 @@ class PreviewDialog(QDialog):
             self.img_lbl.setText(f"Không thể tạo ảnh xem trước: {e}")
 
         btn_close = QPushButton("Đóng (Close)")
+        btn_close.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_INPUT};
+                color: {ThemeColors.TEXT_PRIMARY};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 6px 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.BG_CARD_ACTIVE};
+                border-color: {ThemeColors.BORDER_HOVER};
+            }}
+        """)
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
 
@@ -201,7 +221,11 @@ class PipelineWorker(QThread):
         video_type="auto",
         hide_weak_subs=True,
         story_arrangement_override=None,
-        project_structure=None
+        project_structure=None,
+        enable_evidence_hunter=True,
+        enable_shotbook=True,
+        enable_geometry_checker=True,
+        safe_zone_platform="tiktok"
     ):
         super().__init__()
         self.video_paths = video_paths
@@ -246,6 +270,10 @@ class PipelineWorker(QThread):
         self.story_target = story_target
         self.story_arrangement_override = story_arrangement_override
         self.project_structure = project_structure
+        self.enable_evidence_hunter = enable_evidence_hunter
+        self.enable_shotbook = enable_shotbook
+        self.enable_geometry_checker = enable_geometry_checker
+        self.safe_zone_platform = safe_zone_platform
         
         self.proposed_segments = []
         self.clip_data_out_cache = []
@@ -1068,6 +1096,83 @@ class PipelineWorker(QThread):
 
                 subs_to_embed = merged_cut_subtitles if self.enable_subtitles else None
 
+                # --- 📐 DYNAMIC SHOTBOOK ORCHESTRATION & WEB EVIDENCE HUNTER & GEOMETRY CHECKER ---
+                active_shotbook_plan = None
+                evidence_targets = []
+                if self.enable_shotbook and merged_edl_events:
+                    try:
+                        subs_for_evidence = merged_cut_subtitles if merged_cut_subtitles else (subs_to_embed or [])
+
+                        # 1. Web Evidence Hunter
+                        if self.enable_evidence_hunter and subs_for_evidence:
+                            from src.core.evidence_grabber import EvidenceKeywordDetector, WebScreenshotEngine
+                            self.log_signal.emit("\n🌐 [Web Evidence Hunter] Quét transcript tìm URL & thương hiệu công nghệ minh chứng...")
+                            ev_detector = EvidenceKeywordDetector()
+                            evidence_cache_dir = os.path.join(base_dir, "cache", "evidence")
+                            os.makedirs(evidence_cache_dir, exist_ok=True)
+                            screenshot_engine = WebScreenshotEngine(output_dir=evidence_cache_dir, timeout=6.0)
+
+                            for sub in subs_for_evidence:
+                                sub_txt = sub.get("text", "")
+                                st = float(sub.get("start", 0.0))
+                                et = float(sub.get("end", st + 2.0))
+                                targets = ev_detector.detect_targets(sub_txt, start_time=st, end_time=et)
+                                for tgt in targets:
+                                    img_path = screenshot_engine.capture_screenshot(tgt.target_url)
+                                    tgt.evidence_path = img_path
+                                    evidence_targets.append(tgt)
+                                    self.log_signal.emit(f"   🔍 Minh chứng: '{tgt.keyword}' -> {tgt.target_url} (đã lưu: {os.path.basename(img_path)})")
+
+                            if evidence_targets:
+                                self.log_signal.emit(f"   ✅ [Web Evidence Hunter] Đã thu thập {len(evidence_targets)} ảnh B-Roll minh chứng Web.")
+                                # Bổ sung vào all_broll_cues cho FCP7 XML (Windows DaVinci)
+                                try:
+                                    from src.core.broll_sfx import BRollCue
+                                    for ev in evidence_targets:
+                                        if ev.evidence_path:
+                                            dur = max(1.0, ev.end_time - ev.start_time)
+                                            all_broll_cues.append(BRollCue(
+                                                start=ev.start_time,
+                                                end=ev.end_time,
+                                                duration=dur,
+                                                keyword=ev.keyword,
+                                                search_prompt=ev.target_url,
+                                                track_index=2
+                                            ))
+                                except Exception:
+                                    pass
+
+                        # 2. Dynamic Shotbook Orchestrator
+                        from src.core.shotbook_orchestrator import ShotbookOrchestrator
+                        self.log_signal.emit("\n📐 [Dynamic SHOTBOOK] Phân vai ngữ nghĩa (Hook, Punchline, Evidence, Normal) cho DaVinci Resolve...")
+                        orchestrator = ShotbookOrchestrator(punch_in_scale=self.punch_in_scale)
+                        segments_for_plan = subs_for_evidence if subs_for_evidence else [
+                            {"start": ev["rec_in"], "end": ev["rec_out"], "text": ""} for ev in merged_edl_events
+                        ]
+                        active_shotbook_plan = orchestrator.create_shotbook_plan(
+                            segments=segments_for_plan,
+                            evidence_targets=evidence_targets,
+                            aspect_ratio=target_aspect
+                        )
+
+                        # 3. Geometry & Layout Conflict Checker
+                        if self.enable_geometry_checker and active_shotbook_plan:
+                            self.log_signal.emit(f"\n🛡️ [Geometry Checker] Khử xung đột bố cục & bảo vệ Safe Zone ({self.safe_zone_platform.upper()})...")
+                            active_shotbook_plan, conflicts = orchestrator.audit_with_geometry_checker(
+                                plan=active_shotbook_plan,
+                                face_detections=None,
+                                platform=self.safe_zone_platform,
+                                aspect_ratio=target_aspect
+                            )
+                            if conflicts:
+                                self.log_signal.emit(f"   ⚡ Đã giải quyết {len(conflicts)} xung đột bố cục (lật góc PiP / dời vị trí tránh che mặt).")
+                            else:
+                                self.log_signal.emit("   ✨ Bố cục hình ảnh an toàn, không phát hiện xung đột.")
+
+                    except Exception as e:
+                        self.log_signal.emit(f"   ⚠️ [SHOTBOOK / Evidence Warning]: {e}, tiếp tục xuất timeline tiêu chuẩn.")
+                        active_shotbook_plan = None
+
                 FCPXMLGenerator.generate_timeline_fcpxml(
                     events=merged_edl_events,
                     output_xml_path=output_timeline_fcpxml,
@@ -1077,7 +1182,8 @@ class PipelineWorker(QThread):
                     subtitles=subs_to_embed,
                     font_name=self.font_name,
                     font_size=self.font_size,
-                    preset=self.text_preset_id
+                    preset=self.text_preset_id,
+                    shotbook_plan=active_shotbook_plan
                 )
 
                 FCPXMLGenerator.generate_fcp7_xml(
@@ -1618,12 +1724,42 @@ class PipelineStepTrackerWidget(QFrame):
             row["time"].setText("")
 
 
+class CacheCheckSignals(QObject):
+    finished = pyqtSignal(int, int, dict)
+
+
+class CacheCheckWorker(QRunnable):
+    """Worker background chạy kiểm tra scan cache bất đồng bộ, không làm nghẽn Main Thread."""
+    def __init__(self, raw_paths: List[str], model: str, lang: str):
+        super().__init__()
+        self.raw_paths = list(raw_paths)
+        self.model = model
+        self.lang = lang
+        self.signals = CacheCheckSignals()
+
+    def run(self):
+        cache_mgr = ScanCacheManager()
+        cached_count = 0
+        path_cached_map = {}
+        for vp in self.raw_paths:
+            try:
+                is_c = cache_mgr.get_cached_scan(vp, self.model, self.lang) is not None
+                path_cached_map[vp] = is_c
+                if is_c:
+                    cached_count += 1
+            except Exception:
+                path_cached_map[vp] = False
+        self.signals.finished.emit(cached_count, len(self.raw_paths), path_cached_map)
+
+
 class AutoWindow(QMainWindow):
     """
     Lớp giao diện người dùng chính (Main Dashboard) của ChunDVC v1.0.
     Tích hợp Workflow Mode 1-click, Phân tầng 2 lớp Cơ bản/Nâng cao, Hệ thống Text Style Preset,
     Hệ thống Recipe và Scan Cache siêu tốc.
     """
+    open_studio_requested = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ChunDVC v1.0 - AI Visual & Director Automation Suite")
@@ -1666,51 +1802,60 @@ class AutoWindow(QMainWindow):
         # =========================================================================
         header = QWidget()
         header.setFixedHeight(48)
-        header.setStyleSheet("background-color: #111113; border-bottom: 1px solid #27272a;")
+        header.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border-bottom: 1px solid {ThemeColors.BORDER_DEFAULT};")
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(16, 0, 16, 0)
         h_layout.setSpacing(12)
 
         lbl_logo = QLabel("⚡")
-        lbl_logo.setStyleSheet("font-size: 16px; color: #a78bfa;")
+        lbl_logo.setStyleSheet(f"font-size: 16px; color: {ThemeColors.PRIMARY_HOVER};")
         h_layout.addWidget(lbl_logo)
 
         lbl_title = QLabel("AI Director")
-        lbl_title.setStyleSheet("color: #f4f4f5; font-size: 14px; font-weight: bold;")
+        lbl_title.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 14px; font-weight: bold;")
         h_layout.addWidget(lbl_title)
 
         lbl_crumb = QLabel("/ ResolveFlow_H264")
-        lbl_crumb.setStyleSheet("color: #71717a; font-size: 13px;")
+        lbl_crumb.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 13px;")
         h_layout.addWidget(lbl_crumb)
 
         h_layout.addStretch()
 
+        # Nút chuyển nhanh sang Cửa sổ Kho Đạo Cụ
+        self.btn_switch_studio = QPushButton("🎬 Kho Đạo Cụ")
+        self.btn_switch_studio.setProperty("role", "nav-switch")
+        self.btn_switch_studio.setCursor(Qt.PointingHandCursor)
+        self.btn_switch_studio.setToolTip("Chuyển sang Cửa sổ Kho Đạo Cụ (Chữ, Màu, SFX, Meme)")
+        self.btn_switch_studio.clicked.connect(self.open_studio_requested.emit)
+        h_layout.addWidget(self.btn_switch_studio)
+
         pill_status = QLabel("● Đang nhận diện lời thoại")
-        pill_status.setStyleSheet("background-color: rgba(139,92,246,0.15); color: #c4b5fd; padding: 4px 10px; border-radius: 12px; font-size: 12px;")
+        pill_status.setStyleSheet(f"background-color: {ThemeColors.VIOLET_LO}; color: {ThemeColors.TEXT_ACCENT}; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500;")
         h_layout.addWidget(pill_status)
 
         pill_resolve = QLabel("● DaVinci Resolve đã kết nối")
-        pill_resolve.setStyleSheet("background-color: rgba(34,197,94,0.15); color: #86efac; padding: 4px 10px; border-radius: 12px; font-size: 12px;")
+        pill_resolve.setStyleSheet(f"background-color: rgba(34,197,94,0.15); color: {ThemeColors.TEXT_SUCCESS}; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500;")
         h_layout.addWidget(pill_resolve)
 
         window_layout.addWidget(header)
 
         # =========================================================================
-        # 2. MAIN WORKSPACE (Grid 3 Cột: Left 300px | Center Stretch | Right 340px)
+        # 2. MAIN WORKSPACE (Splitter 3 Cột: Left | Center Stretch | Right)
         # =========================================================================
         workspace = QWidget()
-        workspace_layout = QHBoxLayout(workspace)
+        workspace_layout = QVBoxLayout(workspace)
         workspace_layout.setContentsMargins(0, 0, 0, 0)
         workspace_layout.setSpacing(0)
 
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        workspace_layout.addWidget(self.main_splitter)
+
         # -------------------------------------------------------------------------
-        # CỘT TRÁI (300px): Nguồn footage, Dự án, Cache, Danh sách chương
-        # -------------------------------------------------------------------------
-        # -------------------------------------------------------------------------
-        # CỘT TRÁI (300px): Nguồn footage, Dự án, Cache, Danh sách chương
+        # CỘT TRÁI: Nguồn footage, Dự án, Cache, Danh sách chương
         # -------------------------------------------------------------------------
         a_left = QFrame()
-        a_left.setFixedWidth(270)
+        a_left.setMinimumWidth(240)
         a_left.setStyleSheet("background-color: #111113; border: none;")
         l_vbox = QVBoxLayout(a_left)
         l_vbox.setContentsMargins(14, 14, 14, 14)
@@ -2006,7 +2151,7 @@ class AutoWindow(QMainWindow):
 
         # Đặt a_left vào QScrollArea để hỗ trợ cuộn mượt mà trên mọi độ phân giải màn hình
         a_left_scroll = QScrollArea()
-        a_left_scroll.setFixedWidth(276)
+        a_left_scroll.setMinimumWidth(240)
         a_left_scroll.setWidgetResizable(True)
         a_left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         a_left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -2034,12 +2179,14 @@ class AutoWindow(QMainWindow):
             }
         """)
         a_left_scroll.setWidget(a_left)
-        workspace_layout.addWidget(a_left_scroll)
+        self.a_left_scroll = a_left_scroll
+        self.main_splitter.addWidget(a_left_scroll)
 
         # -------------------------------------------------------------------------
         # CỘT GIỮA (Expanding): Stepper, Presets, Thiết lập nhanh, Toggles, Động cơ AI
         # -------------------------------------------------------------------------
         a_center = QWidget()
+        a_center.setMinimumWidth(420)
         a_center.setStyleSheet("background-color: #09090b;")
         c_outer = QVBoxLayout(a_center)
         c_outer.setContentsMargins(0, 0, 0, 0)
@@ -2260,10 +2407,13 @@ class AutoWindow(QMainWindow):
         self.check_sfx = QCheckBox("Tự chèn SFX (Cách 15s)")
         self.check_reframe = QCheckBox("Reframe 9:16 (Bám mặt)")
         self.check_subtitle = QCheckBox("Phụ đề (Karaoke Pop)")
+        self.check_evidence = QCheckBox("🌐 Săn B-Roll Web (Evidence)")
+        self.check_geometry = QCheckBox("🛡️ Khử đè mặt & Safe Zone")
         self.check_cut = QCheckBox("Cắt khoảng lặng")
 
         all_chks = [self.check_hook, self.check_punch_in, self.check_broll,
-                    self.check_sfx, self.check_reframe, self.check_subtitle]
+                    self.check_sfx, self.check_reframe, self.check_subtitle,
+                    self.check_evidence, self.check_geometry]
 
         for i, chk in enumerate(all_chks):
             chk.setChecked(True)
@@ -2606,14 +2756,14 @@ class AutoWindow(QMainWindow):
         # Runbar ở chân cột giữa (Gọn gàng, không tràn mép khi cửa sổ thu nhỏ)
         runbar = QFrame()
         runbar.setFixedHeight(50)
-        runbar.setStyleSheet("background-color: #111113; border-top: 1px solid #27272a;")
+        runbar.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border-top: 1px solid {ThemeColors.BORDER_DEFAULT};")
         rb_lay = QHBoxLayout(runbar)
         rb_lay.setContentsMargins(10, 0, 10, 0)
         rb_lay.setSpacing(6)
 
         self.btn_save_recipe = QPushButton("💾 Lưu")
         self.btn_save_recipe.setToolTip("Lưu thiết lập hiện tại thành Recipe")
-        self.btn_save_recipe.setStyleSheet("background: transparent; border: 1px solid #27272a; border-radius: 6px; padding: 5px 8px; color: #a1a1aa; font-size: 11px;")
+        self.btn_save_recipe.setStyleSheet(f"background: transparent; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 6px; padding: 5px 8px; color: {ThemeColors.TEXT_SECONDARY}; font-size: 11px;")
         self.btn_save_recipe.clicked.connect(self._save_current_as_recipe)
         rb_lay.addWidget(self.btn_save_recipe)
 
@@ -2621,50 +2771,53 @@ class AutoWindow(QMainWindow):
 
         self.combo_render_preset = QComboBox()
         self.combo_render_preset.addItems(["Xuất: FCPXML 1.9", "Xuất: FCP7 XML", "Xuất: EDL"])
-        self.combo_render_preset.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 5px 8px; border-radius: 6px; color: #f4f4f5; font-size: 11px;")
+        self.combo_render_preset.setStyleSheet(f"background-color: {ThemeColors.BG_INPUT}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; padding: 5px 8px; border-radius: 6px; color: {ThemeColors.TEXT_PRIMARY}; font-size: 11px;")
         rb_lay.addWidget(self.combo_render_preset)
 
         btn_scan_mid = QPushButton("Quét nguồn")
-        btn_scan_mid.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 6px; padding: 5px 10px; color: #f4f4f5; font-weight: 500; font-size: 11px;")
+        btn_scan_mid.setStyleSheet(f"background-color: {ThemeColors.BG_INPUT}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 6px; padding: 5px 10px; color: {ThemeColors.TEXT_PRIMARY}; font-weight: 500; font-size: 11px;")
         btn_scan_mid.clicked.connect(self._start_phase_1_scan)
         rb_lay.addWidget(btn_scan_mid)
 
         self.btn_run = QPushButton("▶ Bắt đầu dựng")
-        self.btn_run.setStyleSheet("""
-            QPushButton {
-                background-color: #8b5cf6;
-                color: #fff;
+        self.btn_run.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.PRIMARY_HOVER};
+                color: #ffffff;
                 font-weight: bold;
                 font-size: 12px;
                 padding: 6px 14px;
                 border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #7c3aed;
-            }
+                border: 1px solid {ThemeColors.PRIMARY_HOVER};
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.PRIMARY};
+            }}
+            QPushButton:pressed {{
+                background-color: {ThemeColors.PRIMARY_PRESSED};
+            }}
         """)
         self.btn_run.clicked.connect(self._toggle_pipeline_execution)
         rb_lay.addWidget(self.btn_run)
 
         c_outer.addWidget(runbar)
-        workspace_layout.addWidget(a_center, stretch=1)
+        self.main_splitter.addWidget(a_center)
 
         # -------------------------------------------------------------------------
-        # CỘT PHẢI (340px): Tiến trình, ETA, Các bước Pipeline, Stop, Nhật ký
+        # CỘT PHẢI: Tiến trình, ETA, Các bước Pipeline, Stop, Nhật ký
         # -------------------------------------------------------------------------
         a_right = QFrame()
-        a_right.setFixedWidth(300)
-        a_right.setStyleSheet("background-color: #111113; border-left: 1px solid #27272a;")
+        a_right.setStyleSheet(f"background-color: {ThemeColors.BG_MAIN}; border: none;")
         r_vbox = QVBoxLayout(a_right)
-        r_vbox.setContentsMargins(18, 18, 18, 18)
+        r_vbox.setContentsMargins(16, 16, 16, 16)
         r_vbox.setSpacing(12)
 
         # Header Phần trăm lớn & Trạng thái
         pct_row = QHBoxLayout()
         self.lbl_pct_big = QLabel("0%")
-        self.lbl_pct_big.setStyleSheet("font-size: 32px; font-weight: bold; color: #71717a;")
+        self.lbl_pct_big.setStyleSheet(f"font-size: 32px; font-weight: bold; color: {ThemeColors.TEXT_MUTED};")
         self.lbl_eta = QLabel("Sẵn sàng")
-        self.lbl_eta.setStyleSheet("color: #71717a; font-size: 12px; margin-top: 10px;")
+        self.lbl_eta.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 12px; margin-top: 10px;")
         pct_row.addWidget(self.lbl_pct_big)
         pct_row.addStretch()
         pct_row.addWidget(self.lbl_eta)
@@ -2675,15 +2828,16 @@ class AutoWindow(QMainWindow):
         self.progress_bar.setFixedHeight(6)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setValue(0)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                background-color: #27272a;
+        self.progress_bar.setStyleSheet(f"""
+            QProgressBar {{
+                background-color: {ThemeColors.BORDER_DEFAULT};
                 border-radius: 3px;
-            }
-            QProgressBar::chunk {
-                background-color: #8b5cf6;
+                border: none;
+            }}
+            QProgressBar::chunk {{
+                background-color: {ThemeColors.CYAN_HI};
                 border-radius: 3px;
-            }
+            }}
         """)
         r_vbox.addWidget(self.progress_bar)
 
@@ -2723,11 +2877,13 @@ class AutoWindow(QMainWindow):
         log_head.addStretch()
         btn_copy_log = QPushButton("Sao chép")
         btn_copy_log.setStyleSheet("background: transparent; color: #71717a; border: none; font-size: 11px;")
+        btn_copy_log.clicked.connect(lambda: QApplication.clipboard().setText(self.txt_console.toPlainText()))
         log_head.addWidget(btn_copy_log)
         r_vbox.addLayout(log_head)
 
         self.txt_console = QPlainTextEdit()
         self.txt_console.setReadOnly(True)
+        self.txt_console.setMinimumHeight(120)
         self.txt_console.setStyleSheet("""
             QPlainTextEdit {
                 background-color: #18181b;
@@ -2741,32 +2897,48 @@ class AutoWindow(QMainWindow):
         """)
         r_vbox.addWidget(self.txt_console, stretch=1)
 
-        workspace_layout.addWidget(a_right)
+        # Bọc a_right vào QScrollArea để hỗ trợ co giãn và không bị che khuất
+        a_right_scroll = QScrollArea()
+        a_right_scroll.setMinimumWidth(260)
+        a_right_scroll.setWidgetResizable(True)
+        a_right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        a_right_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        a_right_scroll.setFrameShape(QFrame.NoFrame)
+        a_right_scroll.setStyleSheet("QScrollArea { border: none; background-color: #111113; border-left: 1px solid #27272a; }")
+        a_right_scroll.setWidget(a_right)
+        self.a_right_scroll = a_right_scroll
+
+        self.main_splitter.addWidget(a_right_scroll)
+        self.main_splitter.setSizes([276, 700, 300])
+        self.main_splitter.setStretchFactor(0, 0)
+        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setStretchFactor(2, 0)
+
         window_layout.addWidget(workspace, stretch=1)
 
         # =========================================================================
-        # 3. MINI TIMELINE (Dưới cùng: Chiều cao 178px)
+        # 3. MINI TIMELINE (Dưới cùng: Chiều cao 178px, có thể thu gọn xuống 32px)
         # =========================================================================
-        tl_frame = QFrame()
-        tl_frame.setFixedHeight(178)
-        tl_frame.setStyleSheet("background-color: #09090b; border-top: 1px solid #27272a;")
-        tl_layout = QVBoxLayout(tl_frame)
-        tl_layout.setContentsMargins(16, 8, 16, 8)
-        tl_layout.setSpacing(6)
+        self.tl_frame = QFrame()
+        self.tl_frame.setFixedHeight(178)
+        self.tl_frame.setStyleSheet("background-color: #09090b; border-top: 1px solid #27272a;")
+        tl_layout = QVBoxLayout(self.tl_frame)
+        tl_layout.setContentsMargins(16, 6, 16, 6)
+        tl_layout.setSpacing(4)
 
-        # Header Timeline (Tracks)
+        # Header Timeline (Tracks + Nút thu gọn/mở rộng)
         tl_head = QHBoxLayout()
-        lbl_tl_time = QLabel("Timeline 21:01")
-        lbl_tl_time.setStyleSheet("font-weight: bold; color: #f4f4f5; font-size: 12px;")
-        tl_head.addWidget(lbl_tl_time)
+        self.lbl_tl_time = QLabel("Timeline Preview")
+        self.lbl_tl_time.setStyleSheet("font-weight: bold; color: #f4f4f5; font-size: 12px;")
+        tl_head.addWidget(self.lbl_tl_time)
         tl_head.addSpacing(16)
 
         trk_info = [
-            ("V2 B-roll", "#22d3ee"),
-            ("V1 Footage", "#a78bfa"),
-            ("A1 Thoại", "#86efac"),
-            ("A2 SFX", "#fcd34d"),
-            ("A3 Nhạc", "#f472b6"),
+            ("Voice", "#10B981"),
+            ("Cut", "#EF4444"),
+            ("Speedup", "#F59E0B"),
+            ("Hook", "#8B5CF6"),
+            ("Subtitles", "#3B82F6"),
         ]
         for trk_name, trk_color in trk_info:
             lbl_trk = QLabel(f"■ {trk_name}")
@@ -2775,35 +2947,48 @@ class AutoWindow(QMainWindow):
             tl_head.addSpacing(8)
 
         tl_head.addStretch()
+
+        self.btn_toggle_timeline = QPushButton("▼")
+        self.btn_toggle_timeline.setToolTip("Thu gọn / Mở rộng thanh Timeline")
+        self.btn_toggle_timeline.setFixedSize(24, 20)
+        self.btn_toggle_timeline.setStyleSheet("""
+            QPushButton {
+                background: #18181b;
+                border: 1px solid #27272a;
+                border-radius: 4px;
+                color: #a1a1aa;
+                font-size: 10px;
+            }
+            QPushButton:hover {
+                background: #27272a;
+                color: #f4f4f5;
+                border-color: #8b5cf6;
+            }
+        """)
+
+        def _toggle_footer_timeline():
+            is_collapsed = self.mini_timeline.isHidden()
+            if is_collapsed:
+                self.mini_timeline.show()
+                self.tl_frame.setFixedHeight(178)
+                self.btn_toggle_timeline.setText("▼")
+            else:
+                self.mini_timeline.hide()
+                self.tl_frame.setFixedHeight(32)
+                self.btn_toggle_timeline.setText("▲")
+
+        self.btn_toggle_timeline.clicked.connect(_toggle_footer_timeline)
+        tl_head.addWidget(self.btn_toggle_timeline)
         tl_layout.addLayout(tl_head)
 
-        # Body Mini Timeline Visualizer
-        tl_canvas = QFrame()
-        tl_canvas.setStyleSheet("background-color: #111113; border: 1px solid #1f1f23; border-radius: 6px;")
-        tl_body_lay = QVBoxLayout(tl_canvas)
-        tl_body_lay.setContentsMargins(8, 6, 8, 6)
-        tl_body_lay.setSpacing(3)
+        # Real MiniTimelineWidget instance with full interactive scrubbing and visualization
+        self.mini_timeline = MiniTimelineWidget(self)
+        self.mini_timeline.setMinimumHeight(130)
+        self.mini_timeline.setMaximumHeight(140)
+        self.mini_timeline.playhead_changed.connect(self._on_mini_timeline_playhead_changed)
+        tl_layout.addWidget(self.mini_timeline, stretch=1)
 
-        tracks = [
-            ("#22d3ee", "V2: B-roll (Mèo khóc, Cái nịt...)"),
-            ("#a78bfa", "V1: 14 clips (Hook -> Suối Tràn -> Thác)"),
-            ("#86efac", "A1: Audio Thoại Clean"),
-            ("#fcd34d", "A2: SFX Hits & Whooshes"),
-            ("#f472b6", "A3: Nhạc Lofi Background"),
-        ]
-        for col, desc in tracks:
-            lane = QFrame()
-            lane.setFixedHeight(18)
-            lane.setStyleSheet(f"background-color: rgba(255,255,255,0.03); border-left: 3px solid {col}; border-radius: 3px;")
-            l_desc = QLabel(f" {desc}")
-            l_desc.setStyleSheet(f"color: {col}; font-size: 10px;")
-            lane_lay = QHBoxLayout(lane)
-            lane_lay.setContentsMargins(4, 0, 0, 0)
-            lane_lay.addWidget(l_desc)
-            tl_body_lay.addWidget(lane)
-
-        tl_layout.addWidget(tl_canvas, stretch=1)
-        window_layout.addWidget(tl_frame)
+        window_layout.addWidget(self.tl_frame)
 
         # =========================================================================
         # TƯƠNG THÍCH BACKEND (Giữ nguyên các tab ẩn và dummies)
@@ -2811,7 +2996,7 @@ class AutoWindow(QMainWindow):
         self.tab_widget = QTabWidget()
         self.tab_copilot = TabCopilot()
         self.tab_autocut = TabAutoCut()
-        self.tab_titles = TabAssets()
+        self.tab_titles = TabAssets(headless=True)
         self.tab_sfx = TabSFX()
         self.tab_export = TabExport()
 
@@ -2893,7 +3078,7 @@ class AutoWindow(QMainWindow):
         self.check_repeats = self.tab_autocut.check_repeats
         self.lbl_master_intensity = self.tab_autocut.lbl_master_intensity
         self.group_timeline = self.tab_autocut.group_timeline
-        self.mini_timeline = self.tab_autocut.mini_timeline
+        self.tab_autocut.mini_timeline = self.mini_timeline
         self.btn_toggle_advanced = self.tab_autocut.btn_toggle_advanced
         self.advanced_container = self.tab_autocut.advanced_container
         self.group_ai = self.tab_autocut.group_ai
@@ -2914,6 +3099,8 @@ class AutoWindow(QMainWindow):
         self.check_reframe = self.tab_autocut.check_reframe
         self.check_broll = self.tab_autocut.check_broll
         self.check_sfx = self.tab_autocut.check_sfx
+        self.check_evidence = getattr(self.tab_autocut, "check_evidence", getattr(self, "check_evidence", None))
+        self.check_geometry = getattr(self.tab_autocut, "check_geometry", getattr(self, "check_geometry", None))
         self.group_cut = self.tab_autocut.group_cut
         self.check_cut = self.tab_autocut.check_cut
         self.check_speedup = self.tab_autocut.check_speedup
@@ -3617,27 +3804,31 @@ class AutoWindow(QMainWindow):
             self.lbl_proj_meta.setText(f"{len(proj.groups)} nhóm · {proj.total_files} video")
         if hasattr(self, "list_chapters"):
             self.list_chapters.clear()
-            cache_mgr = ScanCacheManager()
-            model = self.combo_model.currentText()
-            lang = self.combo_lang.currentText()
-            for grp in proj.groups:
-                all_cached = True
-                has_any = False
-                for vp in grp.video_paths:
-                    if cache_mgr.get_cached_scan(vp, model, lang) is not None:
-                        has_any = True
+            if proj.total_files <= 3:
+                cache_mgr = ScanCacheManager()
+                model = self.combo_model.currentText()
+                lang = self.combo_lang.currentText()
+                for grp in proj.groups:
+                    all_cached = True
+                    has_any = False
+                    for vp in grp.video_paths:
+                        if cache_mgr.get_cached_scan(vp, model, lang) is not None:
+                            has_any = True
+                        else:
+                            all_cached = False
+                    if all_cached and grp.video_paths:
+                        dot_symbol = "🟢"
+                        tag = "Cache"
+                    elif has_any:
+                        dot_symbol = "🔵"
+                        tag = "Quét"
                     else:
-                        all_cached = False
-                if all_cached and grp.video_paths:
-                    dot_symbol = "🟢"
-                    tag = "Cache"
-                elif has_any:
-                    dot_symbol = "🔵"
-                    tag = "Quét"
-                else:
-                    dot_symbol = "⚪"
-                    tag = "Chờ"
-                self.list_chapters.addItem(f"{dot_symbol} {grp.name}  ({len(grp.video_paths)} clips)  [{tag}]")
+                        dot_symbol = "⚪"
+                        tag = "Chờ"
+                    self.list_chapters.addItem(f"{dot_symbol} {grp.name}  ({len(grp.video_paths)} clips)  [{tag}]")
+            else:
+                for grp in proj.groups:
+                    self.list_chapters.addItem(f"⚪ {grp.name}  ({len(grp.video_paths)} clips)  [Chờ]")
         self.txt_console.appendPlainText("\n" + "="*60)
         self.txt_console.appendPlainText("🚀 [CẤU TRÚC THƯ MỤC DỰ ÁN PHÂN TẦNG ĐÃ NẠP]")
         self.txt_console.appendPlainText(proj.summary_tree())
@@ -3706,28 +3897,8 @@ class AutoWindow(QMainWindow):
             self._suggest_whisper_model_for_file(local_path)
             self._check_project_cache_status()
 
-    def _check_project_cache_status(self):
-        """Kiểm tra xem toàn bộ các video trong dự án đã có cache trong máy hay chưa và cập nhật UI."""
+    def _apply_cache_status_ui(self, cached_count: int, total: int, path_cached_map: Optional[Dict[str, bool]] = None):
         raw_paths = getattr(self, "selected_files", [])
-        if not raw_paths:
-            if hasattr(self, "lbl_s1_cache_status"):
-                self.lbl_s1_cache_status.setText("⚪ Chưa chọn video. Vui lòng chọn tệp hoặc thư mục.")
-                self.lbl_s1_cache_status.setStyleSheet("background-color: #031e22; color: #39c1d3; border: 1px solid #0c3d44; border-radius: 6px; padding: 8px; font-size: 12px;")
-            if hasattr(self, "lbl_cache_badge"):
-                self.lbl_cache_badge.setText("⚪ Chưa chọn video")
-                self.lbl_cache_badge.setStyleSheet("background-color: #031e22; color: #39c1d3; border: 1px solid #0c3d44; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;")
-            return
-
-        cache_mgr = ScanCacheManager()
-        model = self.combo_model.currentText()
-        lang = self.combo_lang.currentText()
-
-        cached_count = 0
-        for vp in raw_paths:
-            if cache_mgr.get_cached_scan(vp, model, lang) is not None:
-                cached_count += 1
-
-        total = len(raw_paths)
         if total > 0 and cached_count == total:
             status_msg = f"🎉 ĐÃ CÓ SẴN CACHE (100% - {total}/{total} clips)! Dữ liệu đã sẵn sàng. Bạn có thể sang Bước 2 hoặc nạp JSON để xuất timeline ngay trong 0.1s!"
             status_style = "background-color: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid #10B981; border-radius: 6px; padding: 8px; font-weight: bold; font-size: 12px;"
@@ -3778,11 +3949,71 @@ class AutoWindow(QMainWindow):
             self.lbl_cache_badge.setText(badge_txt)
             self.lbl_cache_badge.setStyleSheet(badge_style)
         if hasattr(self, "lbl_s1_media_info"):
-            proj_title = self.project_structure.root_name if self.project_structure else (os.path.basename(raw_paths[0]) if total == 1 else f"{total} videos")
+            proj_title = self.project_structure.root_name if getattr(self, "project_structure", None) else (os.path.basename(raw_paths[0]) if (raw_paths and total == 1) else f"{total} videos")
             self.lbl_s1_media_info.setText(f"📁 <b>Dự án:</b> {proj_title} | <b>Tổng cộng:</b> {total} video tệp")
+
+        if path_cached_map and getattr(self, "project_structure", None) and hasattr(self, "list_chapters"):
+            self.list_chapters.clear()
+            for grp in self.project_structure.groups:
+                all_cached = True
+                has_any = False
+                for vp in grp.video_paths:
+                    if path_cached_map.get(vp, False):
+                        has_any = True
+                    else:
+                        all_cached = False
+                if all_cached and grp.video_paths:
+                    dot_symbol = "🟢"
+                    tag = "Cache"
+                elif has_any:
+                    dot_symbol = "🔵"
+                    tag = "Quét"
+                else:
+                    dot_symbol = "⚪"
+                    tag = "Chờ"
+                self.list_chapters.addItem(f"{dot_symbol} {grp.name}  ({len(grp.video_paths)} clips)  [{tag}]")
 
         if hasattr(self, "btn_run") and not getattr(self, "is_processing", False):
             self._update_run_button_state(False)
+
+    def _check_project_cache_status(self):
+        """Kiểm tra xem toàn bộ các video trong dự án đã có cache trong máy hay chưa và cập nhật UI."""
+        raw_paths = getattr(self, "selected_files", [])
+        if not raw_paths:
+            if hasattr(self, "lbl_s1_cache_status"):
+                self.lbl_s1_cache_status.setText("⚪ Chưa chọn video. Vui lòng chọn tệp hoặc thư mục.")
+                self.lbl_s1_cache_status.setStyleSheet("background-color: #031e22; color: #39c1d3; border: 1px solid #0c3d44; border-radius: 6px; padding: 8px; font-size: 12px;")
+            if hasattr(self, "lbl_cache_badge"):
+                self.lbl_cache_badge.setText("⚪ Chưa chọn video")
+                self.lbl_cache_badge.setStyleSheet("background-color: #031e22; color: #39c1d3; border: 1px solid #0c3d44; padding: 4px 8px; border-radius: 6px; font-weight: bold; font-size: 11px;")
+            return
+
+        model = self.combo_model.currentText()
+        lang = self.combo_lang.currentText()
+        total = len(raw_paths)
+
+        if total <= 3:
+            cache_mgr = ScanCacheManager()
+            cached_count = 0
+            path_cached_map = {}
+            for vp in raw_paths:
+                is_c = cache_mgr.get_cached_scan(vp, model, lang) is not None
+                path_cached_map[vp] = is_c
+                if is_c:
+                    cached_count += 1
+            self._apply_cache_status_ui(cached_count, total, path_cached_map)
+        else:
+            if hasattr(self, "lbl_s1_cache_status"):
+                self.lbl_s1_cache_status.setText("⏳ Đang kiểm tra bộ nhớ đệm...")
+                self.lbl_s1_cache_status.setStyleSheet("background-color: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid #0284c7; border-radius: 6px; padding: 8px; font-size: 12px;")
+            if hasattr(self, "lbl_cache_badge"):
+                self.lbl_cache_badge.setText("⏳ Đang kiểm tra...")
+                self.lbl_cache_badge.setStyleSheet("background-color: rgba(56, 189, 248, 0.1); color: #38bdf8; border: 1px solid #0284c7; padding: 2px 8px; border-radius: 999px; font-weight: bold; font-size: 11px;")
+
+            worker = CacheCheckWorker(raw_paths, model, lang)
+            worker.signals.finished.connect(self._apply_cache_status_ui)
+            self._current_cache_worker = worker
+            QThreadPool.globalInstance().start(worker)
 
     def _build_copilot_clips_data(self) -> Tuple[str, List[Dict[str, Any]]]:
         """Tổng hợp danh sách clip và transcript từ cache để phục vụ các động cơ AI."""
@@ -4195,8 +4426,19 @@ class AutoWindow(QMainWindow):
             self.txt_console.appendPlainText(f"🔊 Số hiệu ứng SFX: {len(plan.sfx_inserts)} cues")
         self.txt_console.appendPlainText("="*60 + "\n")
 
+        # Thu thập đầy đủ video từ selected_files, video_paths, project_structure, hoặc lbl_file
+        cur_files = getattr(self, "selected_files", []) or []
+        if not cur_files and hasattr(self, "video_paths") and self.video_paths:
+            cur_files = list(self.video_paths)
+        if not cur_files and hasattr(self, "lbl_file") and self.lbl_file.text().strip():
+            raw_t = self.lbl_file.text().strip()
+            cur_files = [p.strip() for p in raw_t.split(";") if p.strip() and os.path.exists(p.strip())]
+        if not cur_files and self.project_structure and hasattr(self.project_structure, "all_video_paths"):
+            cur_files = list(self.project_structure.all_video_paths)
+        self.selected_files = cur_files
+
         # Xác định thư mục gốc dự án
-        first_v = self.selected_files[0] if hasattr(self, "selected_files") and self.selected_files else ""
+        first_v = self.selected_files[0] if self.selected_files else ""
         if self.project_structure and getattr(self.project_structure, "root_path", None):
             project_root_dir = self.project_structure.root_path
         else:
@@ -4207,8 +4449,8 @@ class AutoWindow(QMainWindow):
                 project_root_dir = os.path.dirname(os.path.abspath(first_v)) if first_v else os.getcwd()
 
         base_d = project_root_dir
-        output_dir = os.path.join(project_root_dir, "_TIMELINE_IMPORT")
-        os.makedirs(output_dir, exist_ok=True)
+        output_dir = str(Path(project_root_dir) / "_TIMELINE_IMPORT")
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
         # Nạp kho tài nguyên B-Roll / SFX của dự án
         asset_pool = GlobalAssetPool.get_instance()
@@ -4216,10 +4458,20 @@ class AutoWindow(QMainWindow):
         if n_pm > 0 or n_ps > 0:
             self.txt_console.appendPlainText(f"📦 [Project Assets Pool] Đã nạp {n_pm} video B-roll/Meme và {n_ps} file SFX từ thư mục dự án.")
 
+        # Tự động đối soát và giải quyết các asset còn thiếu bằng SourceResolver
+        from src.core.source_resolver import SourceResolver
+        resolver = SourceResolver(available_videos=self.selected_files)
+        audit = resolver.audit_plan(plan)
+        self.txt_console.appendPlainText(f"🔍 [Đối Soát Nguồn] Video gốc: {len(audit.found_footage)}/{len(audit.found_footage)+len(audit.missing_footage)} clips ({audit.footage_readiness}%)")
+        self.txt_console.appendPlainText(f"🎭 [Đối Soát Đạo Cụ] Meme có sẵn: {len(audit.found_memes)}/{len(plan.broll_inserts)}, SFX có sẵn: {len(audit.found_sfx)}/{len(plan.sfx_inserts)}")
+        if audit.missing_memes or audit.missing_sfx:
+            self.txt_console.appendPlainText("⚡ [Auto-Resolve] Đang tự động tìm và ánh xạ asset tương đương trong Kho Đạo Cụ...")
+            plan = resolver.auto_resolve_missing_assets(plan)
+
         # Ánh xạ phong phú index, filename, stem, relative path -> video_path
         path_map: Dict[Any, str] = {}
         for idx, vp in enumerate(getattr(self, "selected_files", [])):
-            p_abs = os.path.abspath(vp)
+            p_abs = str(PosixPathAdapter.resolve_path(vp))
             b_name = os.path.basename(p_abs).lower()
             s_name = os.path.splitext(b_name)[0]
             path_map[idx + 1] = p_abs
@@ -4232,21 +4484,25 @@ class AutoWindow(QMainWindow):
             path_map[b_name] = p_abs
             path_map[s_name] = p_abs
             try:
-                p_rel = os.path.relpath(p_abs, project_root_dir).replace('\\', '/').lower()
-                path_map[p_rel] = p_abs
+                rel_str = PosixPathAdapter.to_posix(os.path.relpath(p_abs, project_root_dir))
+                path_map[rel_str] = p_abs
+                norm_rel = PosixPathAdapter.normalize_for_comparison(rel_str)
+                path_map[norm_rel] = p_abs
             except Exception:
                 pass
 
         if self.project_structure and hasattr(self.project_structure, "all_video_paths"):
             for vp in self.project_structure.all_video_paths:
-                p_abs = os.path.abspath(vp)
+                p_abs = str(PosixPathAdapter.resolve_path(vp))
                 b_name = os.path.basename(p_abs).lower()
                 s_name = os.path.splitext(b_name)[0]
                 path_map[b_name] = p_abs
                 path_map[s_name] = p_abs
                 try:
-                    p_rel = os.path.relpath(p_abs, project_root_dir).replace('\\', '/').lower()
-                    path_map[p_rel] = p_abs
+                    rel_str = PosixPathAdapter.to_posix(os.path.relpath(p_abs, project_root_dir))
+                    path_map[rel_str] = p_abs
+                    norm_rel = PosixPathAdapter.normalize_for_comparison(rel_str)
+                    path_map[norm_rel] = p_abs
                 except Exception:
                     pass
 
@@ -4307,9 +4563,9 @@ class AutoWindow(QMainWindow):
         timeline_name = f"{proj_name}_Copilot_Cut"
 
         # Đặt toàn bộ file xuất TRỰC TIẾP trong thư mục _TIMELINE_IMPORT
-        out_fcpxml = os.path.join(output_dir, f"{timeline_name}.fcpxml")
-        out_fcp7xml = os.path.join(output_dir, f"{timeline_name}.xml")
-        out_edl = os.path.join(output_dir, f"{timeline_name}.edl")
+        out_fcpxml = str(Path(output_dir) / f"{timeline_name}.fcpxml")
+        out_fcp7xml = str(Path(output_dir) / f"{timeline_name}.xml")
+        out_edl = str(Path(output_dir) / f"{timeline_name}.edl")
 
         # Lọc danh sách events cho track 1 chính (A-Roll)
         v1_events = [e for e in events if e.get("track", 1) == 1 and not e.get("is_broll_overlay") and not e.get("is_sfx")]
@@ -4357,8 +4613,8 @@ class AutoWindow(QMainWindow):
         out_sub_srt = None
         out_sub_fcpxml = None
         if subs:
-            out_sub_srt = os.path.join(output_dir, f"{timeline_name}_PhuDe.srt")
-            out_sub_fcpxml = os.path.join(output_dir, f"{timeline_name}_PhuDe_Karaoke.fcpxml")
+            out_sub_srt = str(Path(output_dir) / f"{timeline_name}_PhuDe.srt")
+            out_sub_fcpxml = str(Path(output_dir) / f"{timeline_name}_PhuDe_Karaoke.fcpxml")
             try:
                 ResolveAutomation().generate_srt(subs, out_sub_srt)
                 FCPXMLGenerator.generate_karaoke_fcpxml(
@@ -4372,7 +4628,7 @@ class AutoWindow(QMainWindow):
                 self.txt_console.appendPlainText(f"   ⚠ Lỗi khi xuất tệp phụ đề: {e}")
 
         # 4.1. Xuất file Kịch Bản Chi Tiết (TXT) để người dùng dễ đọc và theo dõi
-        out_script_txt = os.path.join(output_dir, f"{timeline_name}_KichBan_ChiTiet.txt")
+        out_script_txt = str(Path(output_dir) / f"{timeline_name}_KichBan_ChiTiet.txt")
         try:
             with open(out_script_txt, "w", encoding="utf-8") as f_txt:
                 f_txt.write("="*60 + "\n")
@@ -4445,9 +4701,9 @@ class AutoWindow(QMainWindow):
 
         if hook_events:
             hook_timeline_name = f"{proj_name}_Timeline_Intro_Hook"
-            out_hook_fcp7xml = os.path.join(output_dir, f"{hook_timeline_name}.xml")
-            out_hook_fcpxml = os.path.join(output_dir, f"{hook_timeline_name}.fcpxml")
-            out_hook_edl = os.path.join(output_dir, f"{hook_timeline_name}.edl")
+            out_hook_fcp7xml = str(Path(output_dir) / f"{hook_timeline_name}.xml")
+            out_hook_fcpxml = str(Path(output_dir) / f"{hook_timeline_name}.fcpxml")
+            out_hook_edl = str(Path(output_dir) / f"{hook_timeline_name}.edl")
             
             hook_markers = [
                 {
@@ -4562,7 +4818,13 @@ class AutoWindow(QMainWindow):
         
         if msg_box.clickedButton() == btn_open_folder:
             import subprocess
-            subprocess.run(f'explorer /select,"{os.path.abspath(out_fcp7xml)}"', shell=True)
+            target_path = os.path.abspath(out_fcp7xml)
+            if sys.platform.startswith("win"):
+                subprocess.run(f'explorer /select,"{target_path}"', shell=True)
+            elif sys.platform.startswith("darwin"):
+                subprocess.run(["open", "-R", target_path])
+            else:
+                subprocess.run(["xdg-open", os.path.dirname(target_path)])
         elif msg_box.clickedButton() == btn_copy_path:
             QApplication.clipboard().setText(os.path.abspath(out_fcp7xml))
 
@@ -4973,6 +5235,8 @@ class AutoWindow(QMainWindow):
         enable_reframe = self.check_reframe.isChecked()
         enable_broll = self.check_broll.isChecked()
         enable_sfx = self.check_sfx.isChecked()
+        enable_evidence_hunter = self.check_evidence.isChecked() if hasattr(self, "check_evidence") and self.check_evidence else True
+        enable_geometry_checker = self.check_geometry.isChecked() if hasattr(self, "check_geometry") and self.check_geometry else True
         run_cut = self.check_cut.isChecked()
         speed_up_silence = self.check_speedup.isChecked()
         silence_db = float(self.slide_db.value())
@@ -5064,7 +5328,11 @@ class AutoWindow(QMainWindow):
             hide_weak_subs=self.check_hide_weak_subs.isChecked(),
             api_key=self.txt_api_key.text().strip() or None,
             story_arrangement_override=self.story_review_state.arrangement if getattr(self, "story_review_state", None) else None,
-            project_structure=self.project_structure
+            project_structure=self.project_structure,
+            enable_evidence_hunter=enable_evidence_hunter,
+            enable_shotbook=enable_punch_in,
+            enable_geometry_checker=enable_geometry_checker,
+            safe_zone_platform="tiktok" if enable_reframe else "youtube"
         )
 
         self.worker.log_signal.connect(self._log_message)

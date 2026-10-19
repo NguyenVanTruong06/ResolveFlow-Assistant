@@ -24,8 +24,9 @@ class ModelConfig(BaseModel):
 
 def register_nvidia_dll_dirs() -> List[str]:
     """
-    Đăng ký thư mục DLL của các gói pip nvidia-cublas-cu12 / nvidia-cudnn-cu12 (nếu có) để Windows tìm thấy
-    cuBLAS/cuDNN khi chạy Whisper bằng GPU mà không cần cài CUDA Toolkit. Trả về danh sách thư mục đã đăng ký.
+    Đăng ký thư mục thư viện của các gói pip nvidia-cublas-cu12 / nvidia-cudnn-cu12 (nếu có)
+    để Windows & Linux tìm thấy cuBLAS/cuDNN khi chạy Whisper bằng GPU mà không cần cài CUDA Toolkit toàn cục.
+    Trả về danh sách thư mục đã đăng ký.
     """
     added: List[str] = []
     try:
@@ -34,11 +35,18 @@ def register_nvidia_dll_dirs() -> List[str]:
         spec = importlib.util.find_spec("nvidia")
         roots = list(spec.submodule_search_locations) if spec and spec.submodule_search_locations else []
         for root in roots:
+            # 1. Windows DLLs (*\bin)
             for bin_dir in glob.glob(os.path.join(root, "*", "bin")):
                 if hasattr(os, "add_dll_directory"):
                     os.add_dll_directory(bin_dir)
                 os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
                 added.append(bin_dir)
+            # 2. Linux Shared Objects (*\lib)
+            for lib_dir in glob.glob(os.path.join(root, "*", "lib")):
+                cur_ld = os.environ.get("LD_LIBRARY_PATH", "")
+                if lib_dir not in cur_ld:
+                    os.environ["LD_LIBRARY_PATH"] = lib_dir + (os.pathsep + cur_ld if cur_ld else "")
+                added.append(lib_dir)
     except Exception:
         pass
     return added
@@ -288,10 +296,20 @@ class ResolveTranscriber:
 
     def unload_model(self) -> None:
         """
-        Giải phóng mô hình khỏi bộ nhớ RAM và thu hồi triệt để VRAM của GPU.
+        Giải phóng mô hình khỏi bộ nhớ RAM và thu hồi triệt để VRAM của GPU cho CTranslate2.
         """
         if self.model is not None:
+            if hasattr(self.model, "model"):
+                try:
+                    del self.model.model
+                except Exception:
+                    pass
+            try:
+                del self.model
+            except Exception:
+                pass
             self.model = None
+            gc.collect()
             gc.collect()
             try:
                 import torch

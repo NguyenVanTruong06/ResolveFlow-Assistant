@@ -1439,4 +1439,40 @@ def test_tab_assets_integrated_in_auto_window(qapp, monkeypatch):
     qapp.processEvents()
 
 
+def test_footer_mini_timeline_and_splitter(qapp):
+    """Kiểm tra bố cục splitter 3 cột và thanh Mini Timeline tương tác thật tại footer của AutoWindow."""
+    from src.ui.auto.auto_window import AutoWindow
+    window = AutoWindow()
+
+    assert hasattr(window, "main_splitter")
+    assert hasattr(window, "btn_toggle_timeline")
+    assert hasattr(window, "mini_timeline")
+    assert hasattr(window, "a_right_scroll")
+
+    # Kiểm tra QSplitter
+    sizes = window.main_splitter.sizes()
+    assert len(sizes) == 3
+
+    # Kiểm tra trạng thái ban đầu của Footer Timeline
+    assert not window.mini_timeline.isHidden()
+    assert window.tl_frame.height() == 178
+    assert window.btn_toggle_timeline.text() == "▼"
+
+    # Thu gọn Footer Timeline
+    window.btn_toggle_timeline.click()
+    assert window.mini_timeline.isHidden()
+    assert window.tl_frame.height() == 32
+    assert window.btn_toggle_timeline.text() == "▲"
+
+    # Mở rộng lại Footer Timeline
+    window.btn_toggle_timeline.click()
+    assert not window.mini_timeline.isHidden()
+    assert window.tl_frame.height() == 178
+    assert window.btn_toggle_timeline.text() == "▼"
+
+    window.close()
+    window.deleteLater()
+    qapp.processEvents()
+
+
 

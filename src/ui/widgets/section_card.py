@@ -15,8 +15,11 @@ class SectionCard(QFrame):
                 background-color: {ThemeColors.BG_CARD};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-left: 4px solid {accent_color};
-                border-radius: 6px;
+                border-radius: 8px;
                 margin-top: 4px;
+            }}
+            SectionCard:hover {{
+                border-color: {ThemeColors.BORDER_HOVER};
             }}
             SectionCard[active="true"] {{
                 background-color: {ThemeColors.BG_CARD_ACTIVE};

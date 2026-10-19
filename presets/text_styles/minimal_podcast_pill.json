@@ -1,0 +1,28 @@
+{
+  "id": "minimal_podcast_pill",
+  "name": "Minimal Podcast Pill (Khung Bo Tròn Tinh Tế)",
+  "category": "highlighter_paper",
+  "badge_icon": "🎙️",
+  "tags": [
+    "Podcast",
+    "Pill",
+    "Modern",
+    "Interview",
+    "MinimalBox"
+  ],
+  "description": "Khung nền đen mờ bo góc kiểu viên thuốc (Pill Box) bọc gọn câu từ, đảm bảo đọc rõ ràng trên mọi cảnh quay.",
+  "font": "Arial",
+  "size": 42,
+  "weight": "bold",
+  "standard_color": "#FFFFFF",
+  "highlight_color": "#38BDF8",
+  "outline_color": "#000000",
+  "outline_width": 0.0,
+  "animation": "box_highlight",
+  "timing_curve": "ease-in-out",
+  "position_y_16_9": 0.12,
+  "position_y_9_16": 0.25,
+  "box_color": "#0F172A",
+  "glow_color": null,
+  "gradient_colors": null
+}

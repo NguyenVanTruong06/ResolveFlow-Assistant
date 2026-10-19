@@ -1,0 +1,28 @@
+{
+  "id": "true_crime_documentary",
+  "name": "True Crime Documentary (Hồ Sơ Vụ Án)",
+  "category": "retro_film",
+  "badge_icon": "🕵️",
+  "tags": [
+    "TrueCrime",
+    "Documentary",
+    "Mystery",
+    "Investigation",
+    "Netflix"
+  ],
+  "description": "Không khí tài liệu trinh thám điều tra u tối, chữ gõ nhịp chậm rãi kèm tông đỏ thẫm bí ẩn.",
+  "font": "Georgia",
+  "size": 44,
+  "weight": "bold",
+  "standard_color": "#E2E8F0",
+  "highlight_color": "#EF4444",
+  "outline_color": "#0F172A",
+  "outline_width": 0.14,
+  "animation": "typewriter",
+  "timing_curve": "linear",
+  "position_y_16_9": 0.12,
+  "position_y_9_16": 0.25,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

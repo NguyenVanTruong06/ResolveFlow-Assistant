@@ -122,6 +122,66 @@ BUILTIN_COLOR_LOOKS: List[ColorLookPreset] = [
         tags=["BlackAndWhite", "Noir", "Monochrome", "HighContrast", "Artistic"],
         palette_hex=["#FFFFFF", "#BDBDBD", "#616161", "#000000"],
         file_name="ResolveFlow_High_Contrast_BW.cube"
+    ),
+    ColorLookPreset(
+        id="fuji_eterna",
+        name="Fuji Eterna 500T Cinema",
+        category="cinematic",
+        badge_icon="🎞️",
+        description="Màu phim nhựa Fujifilm Eterna 500T êm dịu, bóng đổ ngả lục-lam mềm mại, tương phản thấp nhẹ nhàng tôn vinh làn da.",
+        tags=["Fujifilm", "Eterna", "Cinema", "Soft", "Muted", "FilmLook"],
+        palette_hex=["#78909C", "#B0BEC5", "#E0E0E0", "#37474F"],
+        file_name="ResolveFlow_Fuji_Eterna_500T.cube"
+    ),
+    ColorLookPreset(
+        id="crisp_tech",
+        name="Crisp Tech Review",
+        category="natural",
+        badge_icon="💻",
+        description="Độ nét và tương phản cực cao cho video review công nghệ / unboxing: Trắng tinh khiết, đen sâu, màu sản phẩm chuẩn xác tách bạch.",
+        tags=["Tech", "Review", "Clarity", "Studio", "Unboxing", "Sharp"],
+        palette_hex=["#FFFFFF", "#0284C7", "#10B981", "#1E293B"],
+        file_name="ResolveFlow_Crisp_Tech_Review.cube"
+    ),
+    ColorLookPreset(
+        id="vintage_vhs",
+        name="Vintage VHS 90s Camcorder",
+        category="vintage",
+        badge_icon="📼",
+        description="Màu băng từ VHS thập niên 90: Nâng black level mờ ảo (washed blacks), sắc ấm bão hòa kèm chút quang sai cổ điển.",
+        tags=["VHS", "Retro", "90s", "Analog", "Tape", "Nostalgia"],
+        palette_hex=["#D97706", "#B45309", "#78350F", "#451A03"],
+        file_name="ResolveFlow_Vintage_VHS_90s.cube"
+    ),
+    ColorLookPreset(
+        id="emerald_matrix",
+        name="Emerald Matrix Sci-Fi",
+        category="cyber",
+        badge_icon="🟢",
+        description="Tông xanh ngọc bích ma trận điện ảnh giả tưởng: Shadow và midtone ngả xanh ngọc lục bảo bí ẩn sắc bén.",
+        tags=["Matrix", "Emerald", "SciFi", "Hacker", "GreenTint", "Cyber"],
+        palette_hex=["#059669", "#10B981", "#34D399", "#064E3B"],
+        file_name="ResolveFlow_Emerald_Matrix.cube"
+    ),
+    ColorLookPreset(
+        id="bleach_bypass",
+        name="Bleach Bypass Silver Grit",
+        category="cinematic",
+        badge_icon="⚔️",
+        description="Hiệu ứng rửa phim bỏ qua bước tẩy bạc: Giảm bão hòa mạnh, tăng tương phản gai góc và sắc sảo.",
+        tags=["BleachBypass", "Silver", "Gritty", "Action", "HighContrast", "Desaturated"],
+        palette_hex=["#CBD5E1", "#64748B", "#334155", "#0F172A"],
+        file_name="ResolveFlow_Bleach_Bypass.cube"
+    ),
+    ColorLookPreset(
+        id="warm_nostalgia_vn",
+        name="Saigon Nostalgia Nắng Vàng Phố Cổ",
+        category="vlog",
+        badge_icon="🛵",
+        description="Màu nắng chiều Sài Gòn & Hội An hoài niệm: Vàng đất hoàng thổ ấm áp, rực rỡ nhưng dịu mắt, mang trọn hồn cốt Việt Nam.",
+        tags=["Vietnam", "Saigon", "HoiAn", "NangVang", "PhoCo", "Nostalgia", "Warm"],
+        palette_hex=["#F59E0B", "#D97706", "#B45309", "#78350F"],
+        file_name="ResolveFlow_Saigon_Nostalgia_VN.cube"
     )
 ]
 
@@ -256,6 +316,62 @@ class LUT3DGenerator:
             # Đen trắng tương phản cao
             bw = cls._apply_curve(lum, 0.55)
             return bw, bw, bw
+
+        elif look_id == "fuji_eterna":
+            # Fuji Eterna 500T: dịu dàng, tương phản thấp, shadow ngả cyan-green nhẹ
+            sat_factor = 0.88
+            r_sat = lum + (r - lum) * sat_factor
+            g_sat = lum + (g - lum) * (sat_factor * 1.02)
+            b_sat = lum + (b - lum) * sat_factor
+            shadow_mask = max(0.0, 1.0 - lum * 1.8)
+            g_o = g_sat + shadow_mask * 0.03
+            b_o = b_sat + shadow_mask * 0.04
+            r_o = r_sat - shadow_mask * 0.02
+            return cls._apply_curve(r_o, 0.18), cls._apply_curve(g_o, 0.18), cls._apply_curve(b_o, 0.18)
+
+        elif look_id == "crisp_tech":
+            # Crisp Tech: tương phản nét căng, vùng tối sâu, màu tươi tắn
+            r_o = cls._apply_curve(r, 0.35)
+            g_o = cls._apply_curve(g, 0.35)
+            b_o = cls._apply_curve(b, 0.35)
+            lum_o = 0.2126 * r_o + 0.7152 * g_o + 0.0722 * b_o
+            r_o = lum_o + (r_o - lum_o) * 1.15
+            g_o = lum_o + (g_o - lum_o) * 1.15
+            b_o = lum_o + (b_o - lum_o) * 1.15
+            return r_o, g_o, b_o
+
+        elif look_id == "vintage_vhs":
+            # Vintage VHS: nâng đen mờ ảo, ngả vàng cam, giảm tương phản highlight
+            r_o = r * 0.88 + 0.08
+            g_o = g * 0.85 + 0.07
+            b_o = b * 0.78 + 0.06
+            return cls._apply_curve(r_o, 0.25), cls._apply_curve(g_o, 0.25), cls._apply_curve(b_o, 0.2)
+
+        elif look_id == "emerald_matrix":
+            # Emerald Matrix: shadow ngả xanh lục bảo, highlight trong xanh
+            shadow_mask = max(0.0, 1.0 - lum * 1.5)
+            r_o = r * 0.80 - shadow_mask * 0.05
+            g_o = g * 1.08 + shadow_mask * 0.12
+            b_o = b * 0.88 + shadow_mask * 0.04
+            return cls._apply_curve(r_o, 0.35), cls._apply_curve(g_o, 0.35), cls._apply_curve(b_o, 0.35)
+
+        elif look_id == "bleach_bypass":
+            # Bleach Bypass: giảm bão hòa 60%, S-curve rất gắt
+            sat_factor = 0.40
+            r_sat = lum + (r - lum) * sat_factor
+            g_sat = lum + (g - lum) * sat_factor
+            b_sat = lum + (b - lum) * sat_factor
+            r_o = cls._apply_curve(r_sat, 0.60)
+            g_o = cls._apply_curve(g_sat, 0.60)
+            b_o = cls._apply_curve(b_sat, 0.60)
+            return r_o, g_o, b_o
+
+        elif look_id == "warm_nostalgia_vn":
+            # Nắng Vàng Phố Cổ: tone vàng đất hoàng thổ trầm ấm, da mịn, nắng ngọt ngào
+            r_o = r * 1.10 + 0.04
+            g_o = g * 1.02 + 0.02
+            b_o = b * 0.80 + 0.01
+            return cls._apply_curve(r_o, 0.28), cls._apply_curve(g_o, 0.28), cls._apply_curve(b_o, 0.22)
 
         return r, g, b
 

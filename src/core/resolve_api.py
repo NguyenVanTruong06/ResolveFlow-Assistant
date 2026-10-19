@@ -53,17 +53,28 @@ class ResolveAutomation:
         Tìm fusionscript library: biến môi trường RESOLVE_SCRIPT_LIB, thư mục cài mặc định
         (Windows, Linux /opt/resolve, macOS), hoặc thư mục của tiến trình Resolve đang chạy.
         """
+        from src.core.resolve_bridge import setup_resolve_environment
+        _, lib_path = setup_resolve_environment()
+        if lib_path and os.path.exists(lib_path):
+            return lib_path
+
         candidates = []
         env = os.environ.get("RESOLVE_SCRIPT_LIB")
         if env:
             candidates.append(env)
 
         if sys.platform.startswith("linux"):
-            candidates.append("/opt/resolve/libs/Fusion/fusionscript.so")
+            candidates.extend([
+                "/opt/resolve/libs/Fusion/fusionscript.so",
+                "/opt/resolve/libs/Fusion/libfusionscript.so",
+                "/opt/resolve/libs/fusionscript.so",
+                "/opt/resolve/libs/libfusionscript.so",
+            ])
         elif sys.platform.startswith("darwin"):
             candidates.append("/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fusionscript.dylib")
         else:
-            candidates.append(r"C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll")
+            prog_files = os.environ.get("PROGRAMFILES", r"C:\Program Files")
+            candidates.append(os.path.join(prog_files, "Blackmagic Design", "DaVinci Resolve", "fusionscript.dll"))
 
         try:
             import subprocess
@@ -82,44 +93,57 @@ class ResolveAutomation:
                 ).stdout.strip()
                 if out:
                     candidates.append("/opt/resolve/libs/Fusion/fusionscript.so")
+                    candidates.append("/opt/resolve/libs/Fusion/libfusionscript.so")
         except Exception:
             pass
         return next((c for c in candidates if c and os.path.exists(c)), None)
 
-    def connect(self) -> bool:
+    def connect(self, timeout: float = 2.0) -> bool:
         """
         Kết nối tới ứng dụng DaVinci Resolve đang chạy.
         Tự động đăng ký đường dẫn Modules của Resolve vào sys.path trên từng hệ điều hành.
+        Được bảo vệ bằng cơ chế kiểm tra tiến trình nhanh & timeout không chặn UI.
 
         Returns:
             bool: True nếu kết nối thành công.
         """
-        from src.core.resolve_bridge import setup_resolve_environment
-        setup_resolve_environment()
-
+        import concurrent.futures
+        from src.core.resolve_bridge import load_resolve_api
         self.last_connect_error = ""
-        lib = self._locate_fusionscript()
-        if lib and not os.environ.get("RESOLVE_SCRIPT_LIB"):
-            os.environ["RESOLVE_SCRIPT_LIB"] = lib
+
+        # Kiểm tra nhanh xem tiến trình DaVinci Resolve có đang tồn tại trên OS không
+        if sys.platform.startswith("linux"):
+            try:
+                import subprocess
+                p_check = subprocess.run(["pgrep", "-f", "resolve"], capture_output=True, text=True, timeout=0.5)
+                if p_check.returncode != 0:
+                    self.last_connect_error = "Tiến trình DaVinci Resolve chưa được bật trên hệ thống."
+                    return False
+            except Exception:
+                pass
+
         try:
-            import DaVinciResolveScript as dvr_script
-            # Gọi ứng dụng Resolve thông qua cổng FusionScript
-            self.resolve = dvr_script.scriptapp("Resolve")
-            if self.resolve:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(load_resolve_api)
+                resolve_app, status_msg = future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            self.last_connect_error = f"Hết thời gian chờ kết nối DaVinci Resolve ({timeout}s). Ứng dụng có thể đang bận."
+            return False
+        except Exception as e:
+            self.last_connect_error = f"Lỗi trong quá trình kết nối API Resolve: {e}"
+            return False
+
+        if resolve_app:
+            self.resolve = resolve_app
+            try:
                 self.project_manager = self.resolve.GetProjectManager()
                 self.current_project = self.project_manager.GetCurrentProject()
                 return True
-            self.last_connect_error = "Resolve không phản hồi. Mở Resolve và bật Preferences > General > External scripting using = Local."
-        except (ImportError, AttributeError) as e:
-            # Không tìm thấy thư viện SDK hoặc Resolve chưa được khởi chạy
-            self.last_connect_error = f"Không nạp được thư viện kết nối Resolve ({str(e)[:80]})."
-        except Exception as e:
-            # vd SystemError "initialization of fusionscript failed": scripting ngoài bị tắt, hoặc Resolve bản Free
-            self.last_connect_error = (
-                "Resolve từ chối kết nối scripting ngoài. Hãy bật Preferences > General > External scripting using = Local; "
-                "lưu ý bản DaVinci Resolve Free thường không hỗ trợ scripting ngoài (cần Studio). "
-                "Bạn vẫn có thể import file .fcpxml thủ công bằng File > Import > Timeline."
-            )
+            except Exception as e:
+                self.last_connect_error = f"Lỗi lấy ProjectManager từ Resolve: {e}"
+                return False
+
+        self.last_connect_error = status_msg
         return False
 
     def ensure_resolve_running(self, log_callback: Optional[Any] = None) -> bool:
@@ -248,7 +272,19 @@ class ResolveAutomation:
             if not self.connect():
                 return False
 
-        valid_paths = [os.path.abspath(p) for p in paths if os.path.exists(p)]
+        valid_paths = []
+        for p in paths:
+            if not p:
+                continue
+            abs_p = os.path.abspath(p)
+            if os.path.exists(abs_p):
+                valid_paths.append(abs_p)
+                # Trên Linux: nếu tồn tại symlink Cac_O_Dia trong Videos, thêm phiên bản đường dẫn qua mount của DaVinci
+                if sys.platform.startswith("linux") and abs_p.startswith("/media/vanntruongg/"):
+                    sym_p = abs_p.replace("/media/vanntruongg/", "/home/vanntruongg/Videos/Cac_O_Dia/")
+                    if os.path.exists(sym_p) and sym_p not in valid_paths:
+                        valid_paths.append(sym_p)
+
         if not valid_paths:
             return False
 
@@ -266,11 +302,11 @@ class ResolveAutomation:
 
         if not imported and media_storage:
             try:
-                res = media_storage.AddFileListToMediaPool(valid_paths)
+                res = media_storage.AddItemListToMediaPool(valid_paths)
                 if res:
                     imported = True
             except Exception as e:
-                log(f" ℹ MediaStorage AddFileList: {str(e)}")
+                log(f" ℹ MediaStorage AddItemList: {str(e)}")
 
         if imported:
             log(f" ✔ Đã tự động nạp {len(valid_paths)} tệp video nguồn vào Media Pool của Resolve!")
@@ -518,11 +554,6 @@ class ResolveAutomation:
         elif isinstance(video_path, str) and video_path and os.path.exists(video_path):
             v_list = [os.path.abspath(video_path)]
 
-        if v_list:
-            self.import_media_to_media_pool(v_list, log_callback=log)
-
-        first_dir = os.path.dirname(v_list[0]) if v_list else ""
-
         # Chuẩn bị danh sách tệp ứng viên: Ưu tiên Apple FCPXML (.fcpxml) cho API Studio vì tương thích tốt nhất
         candidate_paths = [os.path.abspath(edl_path)]
         dir_name = os.path.dirname(os.path.abspath(edl_path))
@@ -537,18 +568,48 @@ class ResolveAutomation:
             if os.path.exists(alt_xml):
                 candidate_paths.append(alt_xml)
 
+        # Trích xuất toàn bộ media từ XML/FCPXML để đảm bảo không bị thiếu video trên Timeline
+        try:
+            import xml.etree.ElementTree as ET
+            from src.core.validator import DryRunValidator
+            for cand in candidate_paths:
+                if os.path.exists(cand):
+                    try:
+                        tree = ET.parse(cand)
+                        root = tree.getroot()
+                        for asset in root.findall(".//asset"):
+                            src = asset.attrib.get("src")
+                            if src:
+                                p = DryRunValidator._uri_to_local_path(src)
+                                if p and os.path.exists(p) and p not in v_list:
+                                    v_list.append(os.path.abspath(p))
+                        for pathurl in root.findall(".//pathurl"):
+                            if pathurl.text:
+                                p = DryRunValidator._uri_to_local_path(pathurl.text)
+                                if p and os.path.exists(p) and p not in v_list:
+                                    v_list.append(os.path.abspath(p))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        if v_list:
+            self.import_media_to_media_pool(v_list, log_callback=log)
+
+        first_dir = os.path.dirname(v_list[0]) if v_list else ""
+
         for target_file in candidate_paths:
             # Các biến thể tùy chọn import để tương thích tối đa với mọi bản DaVinci Resolve Studio (18, 19, 21)
             trial_options = []
 
-            # Thử 1: Đặt tên timeline và liên kết với Media Pool
-            opt1 = {"timelineName": timeline_name, "importSourceClips": False}
+            # Thử 1: Luôn ưu tiên tự động quét và nạp/liên kết clip nguồn (importSourceClips = True) để chống mất video
+            opt1 = {"timelineName": timeline_name, "importSourceClips": True}
             if first_dir:
                 opt1["sourceClipsPath"] = first_dir
             trial_options.append(opt1)
 
-            # Thử 2: Tự động quét và import clip nguồn nếu thiếu
-            opt2 = {"timelineName": timeline_name, "importSourceClips": True}
+            # Thử 2: Đặt tên timeline và liên kết với Media Pool (importSourceClips = False)
+            opt2 = {"timelineName": timeline_name, "importSourceClips": False}
             if first_dir:
                 opt2["sourceClipsPath"] = first_dir
             trial_options.append(opt2)
@@ -567,6 +628,15 @@ class ResolveAutomation:
                         timeline = media_pool.ImportTimelineFromFile(target_file)
 
                     if timeline:
+                        # Kiểm tra xem timeline có thực sự chứa video track 1 hay không
+                        try:
+                            v_items = timeline.GetItemListInTrack("video", 1) or []
+                            if not v_items and opt == opt2:
+                                # Nếu importSourceClips: False nạp timeline nhưng rỗng video, tiếp tục thử tùy chọn khác
+                                continue
+                        except Exception:
+                            pass
+
                         log(f" 🎉 Đã tự động import Timeline '{timeline_name}' thành công từ {os.path.basename(target_file)}!")
                         return True
                 except Exception as e:
@@ -575,28 +645,17 @@ class ResolveAutomation:
         log(" ➖ Cần import thủ công tệp Timeline (.fcpxml / .xml) vào DaVinci Resolve.")
         return False
 
+    # Alias tương thích ngược cho các màn hình UI gọi import_fcpxml_timeline
+    import_fcpxml_timeline = import_edl_to_timeline
+
     # ------------------------------------------------------------------
     # LUT / Color: phát hiện LUT đã gắn sẵn và áp dụng không ghi đè
     # ------------------------------------------------------------------
     @classmethod
     def get_resolve_lut_dir(cls) -> str:
         """Lấy thư mục lưu trữ LUT mặc định của DaVinci Resolve trên từng hệ điều hành."""
-        if sys.platform.startswith("linux"):
-            user_lut = os.path.expanduser("~/.local/share/DaVinciResolve/LUT")
-            if os.path.exists(user_lut):
-                return user_lut
-            opt_lut = "/opt/resolve/LUT"
-            if os.path.exists(opt_lut) and os.access(opt_lut, os.W_OK):
-                return opt_lut
-            os.makedirs(user_lut, exist_ok=True)
-            return user_lut
-        elif sys.platform.startswith("darwin"):
-            user_lut = os.path.expanduser("~/Library/Application Support/Blackmagic Design/DaVinci Resolve/LUT")
-            if os.path.exists(user_lut):
-                return user_lut
-            return "/Library/Application Support/Blackmagic Design/DaVinci Resolve/LUT"
-        else:
-            return r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\LUT"
+        from src.core.asset_manager import AssetManager
+        return str(AssetManager.get_lut_install_dir())
 
     @property
     def RESOLVE_LUT_DIR(self) -> str:
@@ -1021,21 +1080,50 @@ class ResolveAutomation:
             log(f" ⚠️ Lỗi khi thêm Render Job: {str(e)}")
             return False
 
-def is_vertical_video(video_path: str) -> bool:
+# Bộ nhớ đệm metadata video (duration, is_vertical, width, height) tránh gọi subprocess ffprobe lặp lại
+_VIDEO_META_CACHE: Dict[str, Dict[str, Any]] = {}
+
+def get_video_metadata(video_path: str) -> Dict[str, Any]:
     """
-    Kiểm tra xem video là dọc (portrait) hay ngang (landscape) bằng ffprobe.
+    Truy xuất và lưu đệm siêu dữ liệu video (thời lượng, kích thước, chiều dọc/ngang).
     """
+    if not video_path:
+        return {"duration": 0.0, "is_vertical": False, "width": 1920, "height": 1080}
+    norm_path = os.path.normpath(os.path.abspath(video_path))
+    if norm_path in _VIDEO_META_CACHE:
+        return _VIDEO_META_CACHE[norm_path]
+
+    meta = {"duration": 0.0, "is_vertical": False, "width": 1920, "height": 1080}
     try:
         import ffmpeg
-        probe = ffmpeg.probe(video_path)
-        video_stream = next((stream for stream in probe['streams'] if stream['codec_type'] == 'video'), None)
+        probe = ffmpeg.probe(norm_path)
+        video_stream = next((stream for stream in probe.get('streams', []) if stream.get('codec_type') == 'video'), None)
         if video_stream:
             width = int(video_stream.get('width', 1920))
             height = int(video_stream.get('height', 1080))
-            return height > width
+            meta["width"] = width
+            meta["height"] = height
+            meta["is_vertical"] = height > width
+        format_info = probe.get("format", {})
+        if "duration" in format_info:
+            meta["duration"] = float(format_info["duration"])
     except Exception:
         pass
-    return False
+
+    _VIDEO_META_CACHE[norm_path] = meta
+    return meta
+
+def is_vertical_video(video_path: str) -> bool:
+    """
+    Kiểm tra xem video là dọc (portrait) hay ngang (landscape) với bộ nhớ đệm chống blocking.
+    """
+    if not video_path:
+        return False
+    norm_path = os.path.normpath(os.path.abspath(video_path))
+    if norm_path in _VIDEO_META_CACHE:
+        return _VIDEO_META_CACHE[norm_path].get("is_vertical", False)
+    meta = get_video_metadata(video_path)
+    return meta.get("is_vertical", False)
 
 def split_subtitles(
     subtitles: List[Dict[str, Any]], 

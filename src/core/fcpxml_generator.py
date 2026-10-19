@@ -2,7 +2,7 @@ import os
 import html
 from typing import List, Dict, Any, Optional, Union, Sequence
 from src.core.text_preset import TextStylePreset, PresetManager, hex_to_fcpxml_rgba
-from src.utils.path_utils import PosixPathAdapter
+from src.utils.path_utils import PosixPathAdapter, resolve_system_font
 
 class FCPXMLGenerator:
     """
@@ -31,7 +31,7 @@ class FCPXMLGenerator:
             preset_obj = None
 
         if preset_obj:
-            f_name = preset_obj.font
+            f_name = resolve_system_font(preset_obj.font)
             f_size = preset_obj.size
             std_col = preset_obj.get_fcpxml_standard_color()
             hl_col = preset_obj.get_fcpxml_highlight_color()
@@ -70,7 +70,7 @@ class FCPXMLGenerator:
             std_col = hex_to_fcpxml_rgba(standard_color)
             hl_col = hex_to_fcpxml_rgba(highlight_color)
             return {
-                "font_name": font_name,
+                "font_name": resolve_system_font(font_name),
                 "font_size": font_size,
                 "highlight_size": int(font_size * 1.2),
                 "standard_color": std_col,
@@ -273,13 +273,14 @@ class FCPXMLGenerator:
     ) -> str:
         escaped_text = html.escape(text)
         lane_attr = f' lane="{lane}"' if lane else ''
+        res_font = resolve_system_font(font_name)
         return f"""
               <title ref="r2" offset="{offset_ms}/1000s" duration="{dur_ms}/1000s" start="0s" role="Video"{lane_attr}>
                 <text>
                   <text-style ref="ts_normal">{escaped_text}</text-style>
                 </text>
                 <text-style-def id="ts_normal">
-                  <text-style font="{font_name}" fontSize="{font_size}" fontColor="{color}"{stroke_attrs} alignment="center" bold="{bold}"/>
+                  <text-style font="{res_font}" fontSize="{font_size}" fontColor="{color}"{stroke_attrs} alignment="center" bold="{bold}"/>
                 </text-style-def>
               </title>"""
 
@@ -288,23 +289,44 @@ class FCPXMLGenerator:
         """
         Trích xuất timecode gốc từ file media và quy đổi thành frame count + NDF timecode string
         tương thích 100% với cơ chế import của DaVinci Resolve.
+        Ưu tiên trích xuất in-memory qua PyAV, tự động fallback sang ffprobe.
         """
-        import subprocess, json, re
-        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'stream_tags=timecode:format_tags=timecode', '-of', 'json', file_path]
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            d = json.loads(res.stdout)
-        except Exception:
-            return 0, '00:00:00:00', 'NDF'
-
+        import re
         tc_str = None
-        for st in d.get('streams', []):
-            tc = st.get('tags', {}).get('timecode')
-            if tc:
-                tc_str = tc
-                break
+
+        # 1. Thử trích xuất qua PyAV (nhanh, in-memory, không phụ thuộc PATH OS)
+        try:
+            import av
+            c = av.open(file_path)
+            for st in c.streams:
+                tc = st.metadata.get("timecode")
+                if tc:
+                    tc_str = tc
+                    break
+            if not tc_str:
+                tc_str = c.metadata.get("timecode")
+            c.close()
+        except Exception:
+            tc_str = None
+
+        # 2. Dự phòng qua ffprobe nếu PyAV chưa lấy được
         if not tc_str:
-            tc_str = d.get('format', {}).get('tags', {}).get('timecode')
+            try:
+                import subprocess, json
+                from src.core.ffmpeg_utils import get_ffprobe_path
+                ffprobe_bin = get_ffprobe_path() or "ffprobe"
+                cmd = [ffprobe_bin, '-v', 'error', '-show_entries', 'stream_tags=timecode:format_tags=timecode', '-of', 'json', file_path]
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                d = json.loads(res.stdout)
+                for st in d.get('streams', []):
+                    tc = st.get('tags', {}).get('timecode')
+                    if tc:
+                        tc_str = tc
+                        break
+                if not tc_str:
+                    tc_str = d.get('format', {}).get('tags', {}).get('timecode')
+            except Exception:
+                pass
 
         if not tc_str:
             return 0, '00:00:00:00', 'NDF'
@@ -350,16 +372,19 @@ class FCPXMLGenerator:
         markers: Optional[List[Dict[str, Any]]] = None,
         bgm_files: Optional[Sequence[str]] = None,
         music_beats: Optional[Sequence[float]] = None,
+        shotbook_plan: Optional[Any] = None,
         **kwargs
     ) -> str:
         """
         Sinh tệp FCPXML v1.9 tạo dựng Timeline hoàn chỉnh (Clips + Audio + Cuts)
-        và chèn phụ đề Karaoke động (Text+) trên Track Video 2 theo preset đã chọn.
+        và chèn phụ đề Karaoke động (Text+) trên Track Video 2/3 theo preset đã chọn.
         """
         import pathlib
         from src.core.autocut import get_media_metadata
 
         format_name = "FFVideoFormat1080x1920p" if aspect_ratio == "9:16" else "FFVideoFormat1080p"
+        canvas_w = 1080.0 if aspect_ratio == "9:16" else 1920.0
+        canvas_h = 1920.0 if aspect_ratio == "9:16" else 1080.0
         frame_dur_str = FCPXMLGenerator._get_fcpxml_frame_duration(fps)
 
         style = FCPXMLGenerator._resolve_preset(
@@ -443,12 +468,14 @@ class FCPXMLGenerator:
             dur_frames = to_f(total_dur_sec)
             has_audio_val = "1" if meta.get("has_audio", True) else "0"
 
+            reel_name = html.escape(os.path.splitext(os.path.basename(path))[0])
             escaped_file_url = html.escape(file_url)
             start_tc_str_val = fr(start_tc_f)
             dur_tc_str_val = fr(dur_frames)
             resources_xml.append(
                 f"""    <asset id="{asset_id}" name="{clip_name}" src="{escaped_file_url}" start="{start_tc_str_val}" duration="{dur_tc_str_val}" hasVideo="1" format="r_fmt" hasAudio="{has_audio_val}">
       <metadata>
+        <md key="com.apple.proapps.studio.reel" value="{reel_name}"/>
         <md key="com.apple.proapps.spotlight.kMDItemContentType" value="public.movie"/>
       </metadata>
     </asset>"""
@@ -469,13 +496,53 @@ class FCPXMLGenerator:
                     clip_name = html.escape(os.path.basename(b_path))
                     dur_sec = meta.get("duration", 0.0) or 3600.0
                     dur_frames = to_f(dur_sec)
+                    b_reel_name = html.escape(os.path.splitext(os.path.basename(b_path))[0])
                     resources_xml.append(
                         f"""    <asset id="{asset_id}" name="{clip_name}" src="{html.escape(file_url)}" start="0s" duration="{fr(dur_frames)}" hasVideo="0" format="r_fmt" hasAudio="1">
       <metadata>
+        <md key="com.apple.proapps.studio.reel" value="{b_reel_name}"/>
         <md key="com.apple.proapps.spotlight.kMDItemContentType" value="public.audio"/>
       </metadata>
     </asset>"""
                     )
+
+        # Thu thập và khai báo các tài nguyên Evidence từ shotbook_plan (nếu có)
+        evidence_paths = []
+        if shotbook_plan and hasattr(shotbook_plan, "items"):
+            for item in shotbook_plan.items:
+                ev_p = getattr(item, "evidence_path", None)
+                if ev_p and ev_p not in evidence_paths:
+                    evidence_paths.append(ev_p)
+
+        title_lane = "2" if evidence_paths else "1"
+
+        if evidence_paths:
+            for ev_path in evidence_paths:
+                if not ev_path or ev_path in asset_map:
+                    continue
+                ev_asset_id = f"r_asset_{len(asset_map) + 1}"
+                asset_map[ev_path] = ev_asset_id
+                ev_meta = clip_metadata_db.get(ev_path, {}) if clip_metadata_db else {}
+                if not ev_meta and os.path.exists(ev_path):
+                    ev_meta = get_media_metadata(ev_path)
+                meta_map[ev_path] = ev_meta
+                ev_file_url = PosixPathAdapter.to_fcpxml_uri(ev_path)
+                ev_clip_name = html.escape(os.path.basename(ev_path))
+                ev_reel_name = html.escape(os.path.splitext(os.path.basename(ev_path))[0])
+                ev_ext = os.path.splitext(ev_path)[1].lower()
+                is_img = ev_ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"]
+                content_type = "public.png" if ev_ext == ".png" else ("public.image" if is_img else "public.movie")
+                has_audio = "0" if is_img else ("1" if ev_meta.get("has_audio", False) else "0")
+                ev_dur_sec = ev_meta.get("duration", 0.0) or 3600.0
+                ev_dur_f = to_f(ev_dur_sec)
+                resources_xml.append(
+                    f"""    <asset id="{ev_asset_id}" name="{ev_clip_name}" src="{html.escape(ev_file_url)}" start="0s" duration="{fr(ev_dur_f)}" hasVideo="1" format="r_fmt" hasAudio="{has_audio}">
+      <metadata>
+        <md key="com.apple.proapps.studio.reel" value="{ev_reel_name}"/>
+        <md key="com.apple.proapps.spotlight.kMDItemContentType" value="{content_type}"/>
+      </metadata>
+    </asset>"""
+                )
 
         # Kế hoạch từng clip: vị trí trên timeline được CỘNG DỒN từ thời lượng ĐẦU RA (đã tính tốc độ),
         # nên các clip luôn nối liền nhau, không bao giờ chồng lấn, kể cả đoạn tua nhanh.
@@ -536,7 +603,7 @@ class FCPXMLGenerator:
                             if not at:
                                 continue
                             title_xml = f"""
-                <title ref="r2" offset="{at[0]}" duration="{at[1]}" start="0s" role="Video" lane="1">
+                <title ref="r2" offset="{at[0]}" duration="{at[1]}" start="0s" role="Video" lane="{title_lane}">
                   <text>
                     <text-style ref="ts_normal">{html.escape(card_text)}</text-style>
                   </text>
@@ -570,7 +637,7 @@ class FCPXMLGenerator:
                                 full_word_text = " ".join(word_text_xml)
 
                                 word_title_xml = f"""
-                <title ref="r2" offset="{at[0]}" duration="{at[1]}" start="0s" role="Video" lane="1">
+                <title ref="r2" offset="{at[0]}" duration="{at[1]}" start="0s" role="Video" lane="{title_lane}">
                   <text>{full_word_text}</text>
                   <text-style-def id="ts_highlight">
                     <text-style font="{f_name}" fontSize="{hl_size}" fontColor="{hl_col}"{stroke_attrs} alignment="center" bold="{bold_val}"/>
@@ -634,10 +701,105 @@ class FCPXMLGenerator:
                     b_asset_id = asset_map[cur_p]
                     b_name = html.escape(os.path.basename(cur_p))
                     bgm_offset_f = first_start_tc_f + bgm_cursor_f
+                    b_reel_name = html.escape(os.path.splitext(os.path.basename(cur_p))[0])
                     bgm_clips_xml.append(
-                        f'\n                <asset-clip name="{b_name}" ref="{b_asset_id}" offset="{fr(bgm_offset_f)}" start="0s" duration="{fr(chunk_dur_f)}" lane="-1" role="music" audioRole="music"/>'
+                        f'\n                <asset-clip name="{b_name}" ref="{b_asset_id}" offset="{fr(bgm_offset_f)}" start="0s" duration="{fr(chunk_dur_f)}" lane="-1" role="music" audioRole="music">'
+                        f'\n                  <metadata><md key="com.apple.proapps.studio.reel" value="{b_reel_name}"/></metadata>'
+                        f'\n                </asset-clip>'
                     )
                     bgm_cursor_f += chunk_dur_f
+
+        # Map Evidence clips sang từng event clip (Track V2)
+        clip_evidence_map = {ev_idx: [] for ev_idx in range(len(events))}
+        if shotbook_plan and hasattr(shotbook_plan, "items") and events:
+            for item in shotbook_plan.items:
+                ev_p = getattr(item, "evidence_path", None)
+                if not ev_p or ev_p not in asset_map:
+                    continue
+                item_st = float(getattr(item, "start_time", 0.0))
+                item_et = float(getattr(item, "end_time", item_st + 2.0))
+                if item_et <= item_st:
+                    continue
+
+                for ev_idx, ev in enumerate(events):
+                    pl = plan[ev_idx]
+                    if pl is None or pl["retimed"]:
+                        continue
+                    ev_rec_in = ev.get("rec_in", pl["offset_f"] / real_fps)
+                    ev_rec_out = ev.get("rec_out", (pl["offset_f"] + pl["out_dur_f"]) / real_fps)
+                    ov_start = max(item_st, ev_rec_in)
+                    ov_end = min(item_et, ev_rec_out)
+                    if ov_end > ov_start:
+                        v_path = ev["video_path"]
+                        start_tc_f = asset_tc_map.get(v_path, 0)
+                        clip_start_f = start_tc_f + pl["src_in_f"]
+                        offset_f = clip_start_f + to_f(ov_start - ev_rec_in)
+                        dur_f = max(1, to_f(ov_end - ov_start))
+                        dur_f = min(dur_f, (start_tc_f + pl["src_out_f"]) - offset_f)
+                        if dur_f >= 1 and offset_f >= clip_start_f:
+                            ev_asset_id = asset_map[ev_p]
+                            ev_name = html.escape(os.path.basename(ev_p))
+                            ev_reel = html.escape(os.path.splitext(os.path.basename(ev_p))[0])
+                            ev_xml = f"""
+                <asset-clip name="{ev_name}" ref="{ev_asset_id}" offset="{fr(offset_f)}" duration="{fr(dur_f)}" start="0s" lane="1" role="Video">
+                  <metadata>
+                    <md key="com.apple.proapps.studio.reel" value="{ev_reel}"/>
+                  </metadata>
+                </asset-clip>"""
+                            clip_evidence_map[ev_idx].append(ev_xml)
+
+        # Map Transforms cho từng event clip (Track V1)
+        clip_transform_map = {ev_idx: "" for ev_idx in range(len(events))}
+        if shotbook_plan and hasattr(shotbook_plan, "items") and events:
+            for ev_idx, ev in enumerate(events):
+                pl = plan[ev_idx]
+                if pl is None:
+                    continue
+                ev_rec_in = ev.get("rec_in", pl["offset_f"] / real_fps)
+                ev_rec_out = ev.get("rec_out", (pl["offset_f"] + pl["out_dur_f"]) / real_fps)
+
+                best_item = None
+                max_overlap = -1.0
+
+                for item in shotbook_plan.items:
+                    item_st = float(getattr(item, "start_time", 0.0))
+                    item_et = float(getattr(item, "end_time", item_st + 2.0))
+                    ov = min(item_et, ev_rec_out) - max(item_st, ev_rec_in)
+                    if ov > 0:
+                        is_special = (
+                            str(getattr(item, "layout_mode", "")) in ["punch_in", "pip_corner"] or
+                            str(getattr(item, "role", "")) in ["hook", "punchline", "evidence"] or
+                            abs(float(getattr(item, "zoom_scale", 1.0)) - 1.0) > 1e-3
+                        )
+                        weight = ov * (2.0 if is_special else 1.0)
+                        if weight > max_overlap:
+                            max_overlap = weight
+                            best_item = item
+
+                if best_item is None and ev_idx < len(shotbook_plan.items):
+                    best_item = shotbook_plan.items[ev_idx]
+
+                if best_item:
+                    zoom = float(getattr(best_item, "zoom_scale", 1.0))
+                    px = float(getattr(best_item, "pan_x", 0.0))
+                    py = float(getattr(best_item, "pan_y", 0.0))
+                    layout = str(getattr(best_item, "layout_mode", "full_center"))
+
+                    needs_tf = (
+                        layout in ["punch_in", "pip_corner"] or
+                        abs(zoom - 1.0) > 1e-3 or
+                        abs(px) > 1e-3 or
+                        abs(py) > 1e-3
+                    )
+                    if needs_tf:
+                        if abs(px) <= 1.0 and abs(py) <= 1.0:
+                            pos_x = round(px * (canvas_w / 2.0), 1)
+                            pos_y = round(py * (canvas_h / 2.0), 1)
+                        else:
+                            pos_x = round(px, 1)
+                            pos_y = round(py, 1)
+                        scale_str = f"{zoom:.2f} {zoom:.2f}"
+                        clip_transform_map[ev_idx] = f'\n              <adjust-transform position="{pos_x} {pos_y}" scale="{scale_str}"/>'
 
         spine_elements = []
         for ev_idx, ev in enumerate(events):
@@ -651,6 +813,8 @@ class FCPXMLGenerator:
             start_tc_f = asset_tc_map.get(v_path, 0)
             clip_start_f = start_tc_f + pl["src_in_f"]
 
+            inner_transform = clip_transform_map.get(ev_idx, "")
+            inner_evidence = "".join(clip_evidence_map.get(ev_idx, []))
             inner_titles = "".join(clip_titles_map.get(ev_idx, []))
             inner_markers = "".join(clip_markers_map.get(ev_idx, []))
             inner_bgm = "".join(bgm_clips_xml) if ev_idx == 0 else ""
@@ -666,7 +830,10 @@ class FCPXMLGenerator:
                 )
 
             clip_xml = f"""
-            <asset-clip name="{clip_name}" ref="{asset_id}" offset="{fr(pl["offset_f"])}" start="{fr(clip_start_f)}" duration="{fr(pl["out_dur_f"])}" format="r_fmt" audioRole="dialogue">{time_map}{inner_titles}{inner_markers}{inner_bgm}
+            <asset-clip name="{clip_name}" ref="{asset_id}" offset="{fr(pl["offset_f"])}" start="{fr(clip_start_f)}" duration="{fr(pl["out_dur_f"])}" format="r_fmt" audioRole="dialogue">{inner_transform}
+              <metadata>
+                <md key="com.apple.proapps.studio.reel" value="{reel_name}"/>
+              </metadata>{time_map}{inner_evidence}{inner_titles}{inner_markers}{inner_bgm}
             </asset-clip>"""
             spine_elements.append(clip_xml)
 

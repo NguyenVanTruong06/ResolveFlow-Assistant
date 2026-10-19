@@ -62,13 +62,18 @@ class ThemeColors:
     DANGER_HOVER = "#dc2626"
     DANGER_PRESSED = "#b91c1c"
 
+    ERROR = "#ef4444"
+    ERROR_HOVER = "#dc2626"
+    INFO = "#06b6d4"
+    INFO_LIGHT = "#22d3ee"
+
     WARNING = "#f59e0b"
     WARNING_HOVER = "#d97706"
 
 
 class ThemeFonts:
-    FAMILY = "'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif"
-    FAMILY_MONO = "'Cascadia Mono', 'Consolas', 'Courier New', monospace"
+    FAMILY = "'Inter', 'Segoe UI Variable Text', 'Segoe UI', 'Ubuntu', 'Noto Sans', 'Cantarell', system-ui, sans-serif"
+    FAMILY_MONO = "'JetBrains Mono', 'Cascadia Mono', 'Fira Code', 'Consolas', 'DejaVu Sans Mono', monospace"
 
     SIZE_TITLE = 16
     SIZE_SUBTITLE = 11
@@ -150,17 +155,17 @@ def get_application_stylesheet() -> str:
 
     QScrollBar:vertical {{
         background-color: transparent;
-        width: 10px;
+        width: 6px;
         margin: 0px;
-        border-radius: 5px;
+        border-radius: 3px;
     }}
     QScrollBar::handle:vertical {{
-        background-color: #34343c;
-        min-height: 30px;
-        border-radius: 5px;
+        background-color: #33333a;
+        min-height: 20px;
+        border-radius: 3px;
     }}
     QScrollBar::handle:vertical:hover {{
-        background-color: {ThemeColors.BORDER_LINE3};
+        background-color: #8b5cf6;
     }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0px;
@@ -171,20 +176,23 @@ def get_application_stylesheet() -> str:
 
     QScrollBar:horizontal {{
         background-color: transparent;
-        height: 10px;
+        height: 6px;
         margin: 0px;
-        border-radius: 5px;
+        border-radius: 3px;
     }}
     QScrollBar::handle:horizontal {{
-        background-color: #34343c;
-        min-width: 30px;
-        border-radius: 5px;
+        background-color: #33333a;
+        min-width: 20px;
+        border-radius: 3px;
     }}
     QScrollBar::handle:horizontal:hover {{
-        background-color: {ThemeColors.BORDER_LINE3};
+        background-color: #8b5cf6;
     }}
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
         width: 0px;
+    }}
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+        background: transparent;
     }}
 
     /* --- CARDS & GROUPBOXES --- */
@@ -454,13 +462,60 @@ def get_application_stylesheet() -> str:
     }}
 
     /* --- SPLITTER --- */
-    QSplitter::handle {{
-        background-color: {ThemeColors.BORDER_DEFAULT};
-        width: 1px;
+    QSplitter::handle:horizontal {{
+        background-color: transparent;
+        width: 4px;
         margin: 0px;
     }}
-    QSplitter::handle:hover {{
-        background-color: {ThemeColors.BORDER_FOCUS};
+    QSplitter::handle:horizontal:hover {{
+        background-color: #8b5cf6;
+    }}
+    QSplitter::handle:vertical {{
+        background-color: transparent;
+        height: 4px;
+        margin: 0px;
+    }}
+    QSplitter::handle:vertical:hover {{
+        background-color: #8b5cf6;
+    }}
+
+    /* --- SEMANTIC ROLES & PROPERTY SELECTORS --- */
+    QFrame[role="card"] {{
+        background-color: {ThemeColors.BG_CARD};
+        border: 1px solid {ThemeColors.BORDER_DEFAULT};
+        border-radius: 10px;
+    }}
+    QFrame[role="card"]:hover {{
+        border-color: {ThemeColors.BORDER_HOVER};
+    }}
+
+    QFrame[role="panel"] {{
+        background-color: {ThemeColors.BG_MAIN};
+        border: 1px solid {ThemeColors.BORDER_DEFAULT};
+        border-radius: 8px;
+    }}
+
+    QFrame[role="header"] {{
+        background-color: {ThemeColors.BG_MAIN};
+        border-bottom: 1px solid {ThemeColors.BORDER_DEFAULT};
+    }}
+
+    QPushButton[role="nav-switch"] {{
+        background-color: #26262d;
+        color: {ThemeColors.TEXT_PRIMARY};
+        border: 1px solid #33333a;
+        border-radius: 6px;
+        padding: 5px 12px;
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    QPushButton[role="nav-switch"]:hover {{
+        background-color: rgba(124, 58, 237, 0.16);
+        border-color: #8b5cf6;
+        color: #ffffff;
+    }}
+    QPushButton[role="nav-switch"]:pressed {{
+        background-color: rgba(124, 58, 237, 0.28);
     }}
 
     /* --- TOOLTIPS --- */
@@ -490,3 +545,101 @@ def get_application_stylesheet() -> str:
         color: {ThemeColors.PRIMARY_HOVER};
     }}
     """
+
+
+def get_badge_style(color: str = ThemeColors.PRIMARY, bg_color: str = ThemeColors.VIOLET_LO, font_size: int = 11) -> str:
+    """Tạo stylesheet đồng bộ cho các nhãn badge / pill."""
+    return f"""
+        color: {color};
+        background-color: {bg_color};
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-size: {font_size}px;
+        font-weight: 600;
+    """
+
+
+def get_card_style(active: bool = False, accent_color: str = None) -> str:
+    """Tạo stylesheet đồng bộ cho thẻ QFrame/SectionCard."""
+    bg = ThemeColors.BG_CARD_ACTIVE if active else ThemeColors.BG_CARD
+    border = ThemeColors.BORDER_ACTIVE if active else ThemeColors.BORDER_DEFAULT
+    border_left = f"border-left: 4px solid {accent_color};" if accent_color else f"border-left: 1px solid {border};"
+    return f"""
+        background-color: {bg};
+        border: 1px solid {border};
+        {border_left}
+        border-radius: 8px;
+    """
+
+
+def get_button_style(variant: str = "secondary") -> str:
+    """Tạo stylesheet đồng bộ cho các nút QPushButton theo variant."""
+    if variant == "primary":
+        return f"""
+            QPushButton {{
+                background-color: {ThemeColors.PRIMARY};
+                color: {ThemeColors.PRIMARY_TEXT};
+                border: 1px solid {ThemeColors.PRIMARY};
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.PRIMARY_HOVER};
+                border-color: {ThemeColors.PRIMARY_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: {ThemeColors.PRIMARY_PRESSED};
+            }}
+        """
+    elif variant == "gradient":
+        return f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {ThemeColors.PRIMARY_HOVER}, stop:1 {ThemeColors.PRIMARY});
+                color: #ffffff;
+                border: none;
+                border-radius: 8px;
+                padding: 6px 14px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #a78bfa, stop:1 {ThemeColors.PRIMARY_HOVER});
+            }}
+            QPushButton:pressed {{
+                background-color: {ThemeColors.PRIMARY_PRESSED};
+            }}
+        """
+    elif variant == "danger":
+        return f"""
+            QPushButton {{
+                background-color: {ThemeColors.DANGER};
+                color: #ffffff;
+                border: 1px solid {ThemeColors.DANGER};
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.DANGER_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: {ThemeColors.DANGER_PRESSED};
+            }}
+        """
+    else:  # secondary
+        return f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_INPUT};
+                color: {ThemeColors.TEXT_PRIMARY};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 6px 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.BG_CARD_ACTIVE};
+                border-color: {ThemeColors.BORDER_HOVER};
+            }}
+            QPushButton:pressed {{
+                background-color: {ThemeColors.BG_CARD};
+            }}
+        """

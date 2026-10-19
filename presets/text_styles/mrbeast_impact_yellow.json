@@ -1,0 +1,29 @@
+{
+  "id": "mrbeast_impact_yellow",
+  "name": "MrBeast Viral Impact (Vàng Nổi)",
+  "category": "kinetic",
+  "badge_icon": "⚡",
+  "tags": [
+    "MrBeast",
+    "Viral",
+    "YouTube",
+    "Impact",
+    "HighEnergy",
+    "Yellow"
+  ],
+  "description": "Chữ in hoa bùng nổ tông vàng chanh rực rỡ, viền đen dày dặn chuẩn phong cách thumbnail và video MrBeast.",
+  "font": "Arial",
+  "size": 58,
+  "weight": "extra_bold",
+  "standard_color": "#FFFFFF",
+  "highlight_color": "#FFE600",
+  "outline_color": "#000000",
+  "outline_width": 0.2,
+  "animation": "bounce",
+  "timing_curve": "spring",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

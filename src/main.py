@@ -33,6 +33,15 @@ def start_app():
     bubble.open_studio_requested.connect(studio_win.raise_)
     bubble.open_studio_requested.connect(studio_win.activateWindow)
     
+    # 3.1. Điều hướng liên thông trực tiếp giữa AutoWindow <-> StudioWindow
+    auto_win.open_studio_requested.connect(studio_win.show)
+    auto_win.open_studio_requested.connect(studio_win.raise_)
+    auto_win.open_studio_requested.connect(studio_win.activateWindow)
+
+    studio_win.open_auto_requested.connect(auto_win.show)
+    studio_win.open_auto_requested.connect(auto_win.raise_)
+    studio_win.open_auto_requested.connect(auto_win.activateWindow)
+    
     # 4. Gắn tín hiệu báo cáo tiến trình & điều khiển từ Bubble ngược lại AutoWindow
     bubble.stop_requested.connect(auto_win._stop_pipeline)
     if hasattr(auto_win, '_pause_pipeline'):
@@ -46,8 +55,17 @@ def start_app():
 
     bubble.insert_timeline_requested.connect(_on_insert_timeline_clicked)
     
-    # Hiển thị Bubble ngay khi khởi động
+    # Khởi động: Chỉ hiển thị Bong bóng nổi (Desktop Bubble) làm điểm chạm đầu tiên.
+    # Người dùng click vào quả cầu để chọn mở 'AI Director' hoặc 'Kho Đạo Cụ'.
     bubble.show()
+    bubble.raise_()
+    bubble.activateWindow()
+
+    # Hỗ trợ tùy chọn mở thẳng cửa sổ nếu truyền cờ CLI (--auto hoặc --studio)
+    if "--auto" in sys.argv:
+        auto_win.show()
+    elif "--studio" in sys.argv:
+        studio_win.show()
     
     sys.exit(app.exec())
 

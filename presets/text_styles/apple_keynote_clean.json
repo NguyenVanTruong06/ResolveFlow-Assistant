@@ -1,0 +1,29 @@
+{
+  "id": "apple_keynote_clean",
+  "name": "Apple Keynote (Tối Giản Đẳng Cấp)",
+  "category": "clean_minimal",
+  "badge_icon": "🍎",
+  "tags": [
+    "Apple",
+    "Keynote",
+    "Minimal",
+    "Tech",
+    "Elegant",
+    "Clean"
+  ],
+  "description": "Phong cách thuyết trình tối giản đặc trưng của Apple, phông chữ thanh thoát, bóng đổ nhẹ không viền gắt.",
+  "font": "Arial",
+  "size": 46,
+  "weight": "bold",
+  "standard_color": "#F5F5F7",
+  "highlight_color": "#38BDF8",
+  "outline_color": "#1E293B",
+  "outline_width": 0.08,
+  "animation": "fade_up",
+  "timing_curve": "ease-in-out",
+  "position_y_16_9": 0.12,
+  "position_y_9_16": 0.28,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

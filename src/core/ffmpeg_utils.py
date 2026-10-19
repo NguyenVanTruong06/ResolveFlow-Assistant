@@ -4,14 +4,55 @@ from typing import Optional, List, Union
 from pathlib import Path
 
 
+import sys
+import os
+
 def get_ffmpeg_path() -> Optional[str]:
-    """Tìm đường dẫn binary ffmpeg trong PATH hệ thống (không hardcode đuôi .exe)."""
-    return shutil.which("ffmpeg")
+    """Tìm đường dẫn binary ffmpeg trong PATH hệ thống hoặc venv/static-ffmpeg."""
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
+    # Fallback 1: check sys.prefix / bin / ffmpeg
+    cand = os.path.join(sys.prefix, "bin", "ffmpeg")
+    if os.path.exists(cand) and os.access(cand, os.X_OK):
+        return cand
+    # Fallback 2: static-ffmpeg
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()
+        p = shutil.which("ffmpeg")
+        if p:
+            return p
+    except Exception:
+        pass
+    # Fallback 3: imageio_ffmpeg
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.exists(exe):
+            return exe
+    except Exception:
+        pass
+    return None
 
 
 def get_ffprobe_path() -> Optional[str]:
-    """Tìm đường dẫn binary ffprobe trong PATH hệ thống (không hardcode đuôi .exe)."""
-    return shutil.which("ffprobe")
+    """Tìm đường dẫn binary ffprobe trong PATH hệ thống hoặc venv/static-ffmpeg."""
+    p = shutil.which("ffprobe")
+    if p:
+        return p
+    cand = os.path.join(sys.prefix, "bin", "ffprobe")
+    if os.path.exists(cand) and os.access(cand, os.X_OK):
+        return cand
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()
+        p = shutil.which("ffprobe")
+        if p:
+            return p
+    except Exception:
+        pass
+    return None
 
 
 def is_ffmpeg_available() -> bool:
@@ -39,6 +80,10 @@ def run_ffmpeg(args: List[str], timeout: Optional[int] = None) -> subprocess.Com
         )
 
     cmd = [ffmpeg_bin] + args
+    kwargs = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
     return subprocess.run(
         cmd,
         stdout=subprocess.PIPE,
@@ -46,5 +91,6 @@ def run_ffmpeg(args: List[str], timeout: Optional[int] = None) -> subprocess.Com
         text=True,
         timeout=timeout,
         encoding="utf-8",
-        errors="replace"
+        errors="replace",
+        **kwargs
     )

@@ -2,8 +2,23 @@ import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+# Bộ nhớ đệm toàn cục (Singleton Cache) tránh quét ổ đĩa nhiều lần
+_GLOBAL_ASSET_CACHE: Dict[str, Any] = {}
+
 
 class AssetIndexer:
+    @classmethod
+    def clear_cache(cls):
+        """Xóa toàn bộ bộ nhớ đệm quét tài nguyên."""
+        _GLOBAL_ASSET_CACHE.clear()
+
+    def _get_cache_key(self, category: str) -> str:
+        try:
+            resolved_base = str(self.base_dir.resolve())
+        except Exception:
+            resolved_base = str(self.base_dir)
+        return f"{resolved_base}_{category}"
+
     def __init__(self, base_dir: str = "assets"):
         self.base_dir = Path(base_dir)
         if (self.base_dir / "assets").is_dir():
@@ -106,7 +121,11 @@ class AssetIndexer:
         # 3. Fallback duration
         return 30.0
 
-    def scan_music_assets(self) -> Dict[str, List[Dict[str, Any]]]:
+    def scan_music_assets(self, force_refresh: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+        key = self._get_cache_key("music")
+        if not force_refresh and key in _GLOBAL_ASSET_CACHE:
+            return {k: [dict(item) for item in v] for k, v in _GLOBAL_ASSET_CACHE[key].items()}
+
         results: Dict[str, List[Dict[str, Any]]] = {
             "chill_vlog": [],
             "upbeat_trend": [],
@@ -121,7 +140,8 @@ class AssetIndexer:
             target_dir = self.base_dir / "music"
 
         if not target_dir.exists():
-            return results
+            _GLOBAL_ASSET_CACHE[key] = results
+            return {k: [dict(item) for item in v] for k, v in results.items()}
 
         recognized_exts = {".mp3", ".wav", ".m4a", ".aac", ".flac"}
 
@@ -150,36 +170,101 @@ class AssetIndexer:
                 }
                 results[mood].append(item)
 
-        return results
+        _GLOBAL_ASSET_CACHE[key] = results
+        return {k: [dict(item) for item in v] for k, v in results.items()}
 
-    def scan_sfx(self) -> list[dict]:
-        return self._scan_dir(self.sfx_dir, ['.wav'])
+    @staticmethod
+    def _detect_sfx_emotion(stem: str) -> str:
+        s = stem.lower()
+        if any(k in s for k in ["whoosh", "swoosh", "riser", "swell", "chuyen", "trans", "reverse"]):
+            return "chuyen_canh"
+        elif any(k in s for k in ["boom", "braam", "bass", "drop", "hit", "shock", "pulse", "tim", "heartbeat"]):
+            return "giat_minh"
+        elif any(k in s for k in ["cuoi", "laugh", "airhorn", "horn", "bonk", "de_keu", "funny", "coi"]):
+            return "hai_huoc"
+        elif any(k in s for k in ["pop", "ding", "bell", "shutter", "ting", "camera", "cash", "coin", "tada"]):
+            return "diem_nhan"
+        elif any(k in s for k in ["glitch", "click", "bleep", "beep", "censor", "type", "keyboard", "laser", "tech"]):
+            return "cong_nghe"
+        return "accent"
 
-    def scan_luts(self) -> list[dict]:
-        return self._scan_dir(self.luts_dir, ['.cube'])
+    @staticmethod
+    def _detect_meme_emotion(stem: str) -> str:
+        s = stem.lower()
+        if any(k in s for k in ["do_mixi", "pewpew", "con_dung_cai_nit", "huan", "thay_ba", "boman", "vtv", "xach_balo", "vo_tay", "may_mu"]):
+            return "vietnam_viral"
+        elif any(k in s for k in ["khaby", "meo_khoc", "banana", "cat_vibin", "wow", "facepalm", "nhun_vai", "reaction"]):
+            return "reaction"
+        elif any(k in s for k in ["cham_hoi", "da_den", "confused", "question", "hoi_cham"]):
+            return "cham_hoi"
+        elif any(k in s for k in ["cay_cu", "dap_ban", "so_qua", "nhin_lau", "toang"]):
+            return "cay_cu"
+        elif any(k in s for k in ["green_screen", "phong_xanh"]):
+            return "green_screen"
+        return "trending"
 
-    def scan_memes(self) -> list[dict]:
-        return self._scan_dir(self.memes_dir, ['.mp4', '.mov'], find_thumb=True)
+    def scan_sfx(self, force_refresh: bool = False) -> list[dict]:
+        key = self._get_cache_key("sfx")
+        if not force_refresh and key in _GLOBAL_ASSET_CACHE:
+            return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
+        res = self._scan_dir(self.sfx_dir, ['.wav'])
+        for item in res:
+            item["category"] = self._detect_sfx_emotion(item["name"])
+        _GLOBAL_ASSET_CACHE[key] = res
+        return [dict(x) for x in res]
 
-    def scan_overlays(self) -> list[dict]:
-        return self._scan_dir(self.overlays_dir, ['.mp4', '.mov', '.png'], find_thumb=True)
+    def scan_luts(self, force_refresh: bool = False) -> list[dict]:
+        key = self._get_cache_key("luts")
+        if not force_refresh and key in _GLOBAL_ASSET_CACHE:
+            return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
+        res = self._scan_dir(self.luts_dir, ['.cube'])
+        _GLOBAL_ASSET_CACHE[key] = res
+        return [dict(x) for x in res]
 
-    def scan_titles(self) -> list[dict]:
-        return self._scan_dir(self.titles_dir, ['.setting'], find_thumb=True)
+    def scan_memes(self, force_refresh: bool = False) -> list[dict]:
+        key = self._get_cache_key("memes")
+        if not force_refresh and key in _GLOBAL_ASSET_CACHE:
+            return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
+        res = self._scan_dir(self.memes_dir, ['.mp4', '.mov'], find_thumb=True)
+        for item in res:
+            item["category"] = self._detect_meme_emotion(item["name"])
+        _GLOBAL_ASSET_CACHE[key] = res
+        return [dict(x) for x in res]
 
-    def scan_transitions(self) -> list[dict]:
-        return self._scan_dir(self.transitions_dir, ['.setting'], find_thumb=True)
+    def scan_overlays(self, force_refresh: bool = False) -> list[dict]:
+        key = self._get_cache_key("overlays")
+        if not force_refresh and key in _GLOBAL_ASSET_CACHE:
+            return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
+        res = self._scan_dir(self.overlays_dir, ['.mp4', '.mov', '.png'], find_thumb=True)
+        _GLOBAL_ASSET_CACHE[key] = res
+        return [dict(x) for x in res]
 
-    def scan_all_assets(self) -> Dict[str, List[Dict[str, Any]]]:
-        music_data = self.scan_music_assets()
+    def scan_titles(self, force_refresh: bool = False) -> list[dict]:
+        key = self._get_cache_key("titles")
+        if not force_refresh and key in _GLOBAL_ASSET_CACHE:
+            return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
+        res = self._scan_dir(self.titles_dir, ['.setting'], find_thumb=True)
+        _GLOBAL_ASSET_CACHE[key] = res
+        return [dict(x) for x in res]
+
+    def scan_transitions(self, force_refresh: bool = False) -> list[dict]:
+        key = self._get_cache_key("transitions")
+        if not force_refresh and key in _GLOBAL_ASSET_CACHE:
+            return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
+        res = self._scan_dir(self.transitions_dir, ['.setting'], find_thumb=True)
+        _GLOBAL_ASSET_CACHE[key] = res
+        return [dict(x) for x in res]
+
+    def scan_all_assets(self, force_refresh: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+        music_data = self.scan_music_assets(force_refresh=force_refresh)
         all_bgm = [item for items in music_data.values() for item in items]
         all_assets: Dict[str, List[Dict[str, Any]]] = {
-            "sfx": self.scan_sfx(),
-            "luts": self.scan_luts(),
-            "memes": self.scan_memes(),
-            "overlays": self.scan_overlays(),
-            "titles": self.scan_titles(),
-            "transitions": self.scan_transitions(),
+            "sfx": self.scan_sfx(force_refresh=force_refresh),
+            "luts": self.scan_luts(force_refresh=force_refresh),
+            "memes": self.scan_memes(force_refresh=force_refresh),
+            "overlays": self.scan_overlays(force_refresh=force_refresh),
+            "titles": self.scan_titles(force_refresh=force_refresh),
+            "transitions": self.scan_transitions(force_refresh=force_refresh),
             "bgm": all_bgm,
         }
         for mood, items in music_data.items():

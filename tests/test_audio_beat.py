@@ -102,7 +102,10 @@ def test_detect_beats_min_interval(tmp_path):
 
 
 def test_detect_beats_ffmpeg_fallback(tmp_path):
+    import shutil
     import subprocess
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg không có sẵn trong hệ thống PATH")
     wav_path = tmp_path / "input.wav"
     mp3_path = tmp_path / "input.mp3"
     create_synthetic_wav(wav_path, burst_times=[0.5, 1.0, 1.5])

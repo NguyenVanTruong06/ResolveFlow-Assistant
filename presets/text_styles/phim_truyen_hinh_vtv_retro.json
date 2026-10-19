@@ -1,0 +1,29 @@
+{
+  "id": "phim_truyen_hinh_vtv_retro",
+  "name": "VTV Phim Truyền Hình Retro",
+  "category": "retro_film",
+  "badge_icon": "📺",
+  "tags": [
+    "VTV",
+    "PhimViet",
+    "Retro",
+    "TruyenHinh",
+    "CoDien",
+    "Nostalgia"
+  ],
+  "description": "Chữ vàng chanh viền đen kinh điển của những bộ phim truyền hình VTV thập niên 90-2000 in đậm trong ký ức.",
+  "font": "Arial",
+  "size": 46,
+  "weight": "bold",
+  "standard_color": "#FFEB3B",
+  "highlight_color": "#FFFFFF",
+  "outline_color": "#000000",
+  "outline_width": 0.16,
+  "animation": "static",
+  "timing_curve": "linear",
+  "position_y_16_9": 0.12,
+  "position_y_9_16": 0.24,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

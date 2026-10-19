@@ -1,0 +1,29 @@
+{
+  "id": "comic_manga_burst",
+  "name": "Comic Manga Burst (Truyện Tranh Hành Động)",
+  "category": "kinetic",
+  "badge_icon": "💥",
+  "tags": [
+    "Comic",
+    "Manga",
+    "Action",
+    "Gaming",
+    "Punchy",
+    "Anime"
+  ],
+  "description": "Phong cách truyện tranh siêu anh hùng bùng nổ, viền đen cực dày, chữ nghiêng năng động tạo xung lực mạnh mẽ.",
+  "font": "Arial",
+  "size": 56,
+  "weight": "extra_bold",
+  "standard_color": "#FFF176",
+  "highlight_color": "#FF0055",
+  "outline_color": "#000000",
+  "outline_width": 0.22,
+  "animation": "pop",
+  "timing_curve": "spring",
+  "position_y_16_9": 0.16,
+  "position_y_9_16": 0.36,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}

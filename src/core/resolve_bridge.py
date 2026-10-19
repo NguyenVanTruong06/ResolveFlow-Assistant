@@ -20,13 +20,20 @@ def setup_resolve_environment() -> Tuple[Optional[str], Optional[str]]:
 
     if sys.platform.startswith("linux"):
         default_api = "/opt/resolve/Developer/Scripting"
-        default_lib = "/opt/resolve/libs/Fusion/fusionscript.so"
+        linux_lib_candidates = [
+            "/opt/resolve/libs/Fusion/fusionscript.so",
+            "/opt/resolve/libs/Fusion/libfusionscript.so",
+            "/opt/resolve/libs/fusionscript.so",
+            "/opt/resolve/libs/libfusionscript.so",
+        ]
         if not api_dir and os.path.isdir(default_api):
             api_dir = default_api
-        if not lib_path and os.path.isfile(default_lib):
-            lib_path = default_lib
+        if not lib_path:
+            lib_path = next((c for c in linux_lib_candidates if os.path.isfile(c)), None)
+            if not lib_path:
+                lib_path = linux_lib_candidates[0]
 
-        # Nạp trước thư viện fusionscript.so với cờ RTLD_GLOBAL để các symbol C++ được chia sẻ
+        # Nạp trước thư viện chia sẻ fusionscript với cờ RTLD_GLOBAL để các symbol C++ được chia sẻ
         if lib_path and os.path.exists(lib_path):
             try:
                 ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -86,7 +93,11 @@ def load_resolve_api() -> Tuple[Optional[Any], str]:
             "Preferences > General > External scripting using = Local."
         )
     except Exception as e:
-        return None, f"Lỗi khởi tạo cổng FusionScript: {e}"
+        return None, (
+            "Resolve từ chối kết nối scripting ngoài. Hãy bật Preferences > General > External scripting using = Local; "
+            "lưu ý bản DaVinci Resolve Free thường không hỗ trợ scripting ngoài (cần Studio). "
+            "Bạn vẫn có thể import file .fcpxml thủ công bằng File > Import > Timeline."
+        )
 
 
 # Lazy import to avoid circular dependency

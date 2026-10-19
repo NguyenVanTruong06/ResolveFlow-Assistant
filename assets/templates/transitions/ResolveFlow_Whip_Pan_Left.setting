@@ -1,0 +1,60 @@
+{
+	Tools = ordered() {
+		ResolveFlow_Whip_Pan_Left = MacroOperator {
+			Inputs = ordered() {
+				Input1 = InstanceInput {
+					SourceOp = "Dissolve1",
+					Source = "Background",
+					Name = "From",
+				},
+				Input2 = InstanceInput {
+					SourceOp = "Dissolve1",
+					Source = "Foreground",
+					Name = "To",
+				},
+				Transition = InstanceInput {
+					SourceOp = "AnimCurves1",
+					Source = "Transition",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "Transform1",
+					Source = "Output",
+				}
+			},
+			ViewInfo = GroupInfo { Pos = { 0, 0 } },
+			Tools = ordered() {
+				Dissolve1 = Dissolve {
+					Transitions = {
+						[0] = "DFVisualTransition",
+					},
+					Inputs = {
+						Mix = Input {
+							SourceOp = "AnimCurves1",
+							Source = "Value",
+						},
+					},
+					ViewInfo = OperatorInfo { Pos = { 220, 36.3 } },
+				},
+				AnimCurves1 = AnimCurves {
+					Inputs = {
+						Curve = Input { Value = FuID { "EaseInOut" }, },
+					},
+				},
+				Transform1 = Transform {
+					Inputs = {
+						MotionBlur = Input { Value = 1, },
+						Quality = Input { Value = 4, },
+						ShutterAngle = Input { Value = 180, },
+						Input = Input {
+							SourceOp = "Dissolve1",
+							Source = "Output",
+						},
+					},
+					ViewInfo = OperatorInfo { Pos = { 330, 36.3 } },
+				},
+			},
+		}
+	}
+}

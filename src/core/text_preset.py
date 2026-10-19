@@ -5,6 +5,8 @@ import hashlib
 from typing import List, Dict, Any, Optional, Literal, Tuple
 from pydantic import BaseModel, Field
 
+from src.utils.path_utils import resolve_system_font
+
 def hex_to_fcpxml_rgba(hex_color: str) -> str:
     """
     Chuyển đổi mã màu Hex (ví dụ: '#FFD700' hoặc '#FFD700FF') sang định dạng RGBA 'r g b a'
@@ -89,7 +91,7 @@ class TextStylePreset(BaseModel):
     highlight_color: str = Field(default="#FFD700", description="Màu chữ highlight khi đang đọc (Hex)")
     outline_color: str = Field(default="#000000", description="Màu viền chữ (Hex)")
     outline_width: float = Field(default=0.12, description="Độ dày viền chữ (0.0 đến 0.5)")
-    animation: Literal["pop", "bounce", "typewriter", "slide", "box_highlight", "glow", "static"] = Field(
+    animation: Literal["pop", "bounce", "typewriter", "slide", "box_highlight", "glow", "static", "fade_up", "fade"] = Field(
         default="pop", description="Kiểu hoạt ảnh từ / dòng"
     )
     timing_curve: Literal["ease-in-out", "spring", "linear"] = Field(
@@ -384,6 +386,201 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
         timing_curve="ease-in-out",
         position_y_16_9=0.15,
         position_y_9_16=0.35
+    ),
+    # --- 6 Global Text Presets ---
+    TextStylePreset(
+        id="mrbeast_impact_yellow",
+        name="MrBeast Viral Impact (Vàng Nổi)",
+        category="kinetic",
+        badge_icon="⚡",
+        tags=["MrBeast", "Viral", "YouTube", "Impact", "HighEnergy", "Yellow"],
+        description="Chữ in hoa bùng nổ tông vàng chanh rực rỡ, viền đen dày dặn chuẩn phong cách thumbnail và video MrBeast.",
+        font="Arial",
+        size=58,
+        weight="extra_bold",
+        standard_color="#FFFFFF",
+        highlight_color="#FFE600",
+        outline_color="#000000",
+        outline_width=0.20,
+        animation="bounce",
+        timing_curve="spring",
+        position_y_16_9=0.15,
+        position_y_9_16=0.35
+    ),
+    TextStylePreset(
+        id="apple_keynote_clean",
+        name="Apple Keynote (Tối Giản Đẳng Cấp)",
+        category="clean_minimal",
+        badge_icon="🍎",
+        tags=["Apple", "Keynote", "Minimal", "Tech", "Elegant", "Clean"],
+        description="Phong cách thuyết trình tối giản đặc trưng của Apple, phông chữ thanh thoát, bóng đổ nhẹ không viền gắt.",
+        font="Arial",
+        size=46,
+        weight="bold",
+        standard_color="#F5F5F7",
+        highlight_color="#38BDF8",
+        outline_color="#1E293B",
+        outline_width=0.08,
+        animation="fade_up",
+        timing_curve="ease-in-out",
+        position_y_16_9=0.12,
+        position_y_9_16=0.28
+    ),
+    TextStylePreset(
+        id="true_crime_documentary",
+        name="True Crime Documentary (Hồ Sơ Vụ Án)",
+        category="retro_film",
+        badge_icon="🕵️",
+        tags=["TrueCrime", "Documentary", "Mystery", "Investigation", "Netflix"],
+        description="Không khí tài liệu trinh thám điều tra u tối, chữ gõ nhịp chậm rãi kèm tông đỏ thẫm bí ẩn.",
+        font="Georgia",
+        size=44,
+        weight="bold",
+        standard_color="#E2E8F0",
+        highlight_color="#EF4444",
+        outline_color="#0F172A",
+        outline_width=0.14,
+        animation="typewriter",
+        timing_curve="linear",
+        position_y_16_9=0.12,
+        position_y_9_16=0.25
+    ),
+    TextStylePreset(
+        id="comic_manga_burst",
+        name="Comic Manga Burst (Truyện Tranh Hành Động)",
+        category="kinetic",
+        badge_icon="💥",
+        tags=["Comic", "Manga", "Action", "Gaming", "Punchy", "Anime"],
+        description="Phong cách truyện tranh siêu anh hùng bùng nổ, viền đen cực dày, chữ nghiêng năng động tạo xung lực mạnh mẽ.",
+        font="Arial",
+        size=56,
+        weight="extra_bold",
+        standard_color="#FFF176",
+        highlight_color="#FF0055",
+        outline_color="#000000",
+        outline_width=0.22,
+        animation="pop",
+        timing_curve="spring",
+        position_y_16_9=0.16,
+        position_y_9_16=0.36
+    ),
+    TextStylePreset(
+        id="luxury_gold_serif",
+        name="Luxury Gold Serif (Sang Trọng & Thượng Lưu)",
+        category="clean_minimal",
+        badge_icon="👑",
+        tags=["Luxury", "Gold", "Serif", "HighEnd", "RealEstate", "Jewelry"],
+        description="Font serif quý phái ánh vàng hoàng gia kết hợp hiệu ứng nổi nhẹ nhàng cho bất động sản và thương hiệu cao cấp.",
+        font="Georgia",
+        size=46,
+        weight="bold",
+        standard_color="#F8FAFC",
+        highlight_color="#F59E0B",
+        outline_color="#451A03",
+        outline_width=0.10,
+        glow_color="#FBBF24",
+        animation="fade_up",
+        timing_curve="ease-in-out",
+        position_y_16_9=0.12,
+        position_y_9_16=0.26
+    ),
+    TextStylePreset(
+        id="minimal_podcast_pill",
+        name="Minimal Podcast Pill (Khung Bo Tròn Tinh Tế)",
+        category="highlighter_paper",
+        badge_icon="🎙️",
+        tags=["Podcast", "Pill", "Modern", "Interview", "MinimalBox"],
+        description="Khung nền đen mờ bo góc kiểu viên thuốc (Pill Box) bọc gọn câu từ, đảm bảo đọc rõ ràng trên mọi cảnh quay.",
+        font="Arial",
+        size=42,
+        weight="bold",
+        standard_color="#FFFFFF",
+        highlight_color="#38BDF8",
+        outline_color="#000000",
+        outline_width=0.0,
+        box_color="#0F172A",
+        animation="box_highlight",
+        timing_curve="ease-in-out",
+        position_y_16_9=0.12,
+        position_y_9_16=0.25
+    ),
+    # --- 4 Vietnamese Creator Text Presets ---
+    TextStylePreset(
+        id="schannel_vlog_nhanh",
+        name="Schannel Vlog Nhịp Nhanh",
+        category="kinetic",
+        badge_icon="🔥",
+        tags=["Schannel", "Vlog", "Vietnamese", "TechReview", "Dynamic", "GenZ"],
+        description="Phong cách phụ đề dí dỏm, nhịp nhảy chữ dồn dập bắt tai bắt mắt quen thuộc của kênh Schannel & review đồ chơi công nghệ.",
+        font="Arial",
+        size=52,
+        weight="extra_bold",
+        standard_color="#FFFFFF",
+        highlight_color="#FFD700",
+        outline_color="#18181B",
+        outline_width=0.18,
+        animation="bounce",
+        timing_curve="spring",
+        position_y_16_9=0.15,
+        position_y_9_16=0.35
+    ),
+    TextStylePreset(
+        id="khoai_lang_thang_chua_lanh",
+        name="Khoai Lang Thang Chữa Lành",
+        category="clean_minimal",
+        badge_icon="🌾",
+        tags=["KhoaiLangThang", "ChuaLanh", "Travel", "MocMac", "Acoustic", "Vlog"],
+        description="Tông chữ trắng ấm ngà dịu mắt, chuyển động êm đềm như những chuyến đi bình yên khám phá ẩm thực văn hóa Việt Nam.",
+        font="Arial",
+        size=44,
+        weight="bold",
+        standard_color="#FEF3C7",
+        highlight_color="#F59E0B",
+        outline_color="#27272A",
+        outline_width=0.10,
+        animation="fade_up",
+        timing_curve="ease-in-out",
+        position_y_16_9=0.12,
+        position_y_9_16=0.26
+    ),
+    TextStylePreset(
+        id="phim_truyen_hinh_vtv_retro",
+        name="VTV Phim Truyền Hình Retro",
+        category="retro_film",
+        badge_icon="📺",
+        tags=["VTV", "PhimViet", "Retro", "TruyenHinh", "CoDien", "Nostalgia"],
+        description="Chữ vàng chanh viền đen kinh điển của những bộ phim truyền hình VTV thập niên 90-2000 in đậm trong ký ức.",
+        font="Arial",
+        size=46,
+        weight="bold",
+        standard_color="#FFEB3B",
+        highlight_color="#FFFFFF",
+        outline_color="#000000",
+        outline_width=0.16,
+        animation="static",
+        timing_curve="linear",
+        position_y_16_9=0.12,
+        position_y_9_16=0.24
+    ),
+    TextStylePreset(
+        id="giat_gan_showbiz_tiktok",
+        name="Giật Gân Showbiz Drama TikTok",
+        category="glitch_cyber",
+        badge_icon="🚨",
+        tags=["Drama", "Showbiz", "TikTok", "GiatGan", "HotNews", "HongBien"],
+        description="Màu hồng neon kết hợp phát sáng xanh cyan giật nảy liên tục, giữ chân người xem từng giây với tin nóng hổi.",
+        font="Arial",
+        size=54,
+        weight="extra_bold",
+        standard_color="#FFF0F5",
+        highlight_color="#FF0055",
+        outline_color="#4A0E2E",
+        outline_width=0.16,
+        glow_color="#00FFFF",
+        animation="pop",
+        timing_curve="spring",
+        position_y_16_9=0.15,
+        position_y_9_16=0.35
     )
 ]
 
@@ -576,12 +773,22 @@ class TextPreviewRenderer:
             font_size = 16
 
         font_obj = None
+        resolved_font_name = resolve_system_font(preset.font)
         font_candidates = [
             f"C:/Windows/Fonts/{preset.font.lower()}.ttf",
             f"C:/Windows/Fonts/{preset.font}.ttf",
             "C:/Windows/Fonts/arial.ttf",
             "C:/Windows/Fonts/arialbd.ttf",
-            "C:/Windows/Fonts/segoeui.ttf"
+            "C:/Windows/Fonts/segoeui.ttf",
+            # Linux font paths
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+            # macOS font paths
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/Library/Fonts/Arial.ttf",
         ]
         for fc in font_candidates:
             if os.path.exists(fc):
@@ -622,7 +829,7 @@ class TextPreviewRenderer:
 
             # Vị trí Y cho animation (Bounce / Pop)
             w_y = target_center_y - (w_h // 2)
-            if is_active and preset.animation in ["pop", "bounce"]:
+            if is_active and preset.animation in ["pop", "bounce", "fade_up"]:
                 w_y -= int(font_size * 0.15) # Nảy lên nhẹ
 
             # Nếu có Box Highlight
@@ -721,7 +928,7 @@ class FusionSettingGenerator:
                 Width = Input {{ Value = 1920, }},
                 Height = Input {{ Value = 1080, }},
                 UseFrameFormatSettings = Input {{ Value = 1, }},
-                Font = Input {{ Value = "{preset.font}", }},
+                Font = Input {{ Value = "{resolve_system_font(preset.font)}", }},
                 Style = Input {{ Value = "{preset.weight.title() if preset.weight != 'normal' else 'Regular'}", }},
                 Size = Input {{ Value = {fusion_size}, }},
                 VerticalTopCenterBottom = Input {{ Value = 1, }},

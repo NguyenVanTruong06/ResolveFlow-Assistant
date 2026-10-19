@@ -89,3 +89,59 @@ def test_floating_bubble_tray_dimensions_and_buttons(qapp):
 
     assert len(ai_clicked) == 1
     assert len(studio_clicked) == 1
+
+
+def test_floating_bubble_pipeline_status(qapp):
+    from src.ui.theme import ThemeColors
+    bubble = FloatingBubbleWidget()
+
+    # 1. Trạng thái Connected
+    bubble.set_pipeline_status("connected")
+    assert bubble.pipeline_status == "connected"
+    assert bubble.status_dot_color == ThemeColors.SUCCESS
+    assert bubble.is_davinci_connected is True
+
+    # 2. Trạng thái Running
+    bubble.set_pipeline_status("running")
+    assert bubble.pipeline_status == "running"
+    assert bubble.status_dot_color == ThemeColors.PRIMARY_HOVER
+
+    # 3. Trạng thái Error
+    bubble.set_pipeline_status("error")
+    assert bubble.pipeline_status == "error"
+    assert bubble.status_dot_color == ThemeColors.ERROR
+
+    # 4. Trạng thái Idle
+    bubble.set_pipeline_status("idle")
+    assert bubble.pipeline_status == "idle"
+    assert bubble.status_dot_color == ThemeColors.TEXT_MUTED
+
+
+def test_floating_bubble_snap_to_edge(qapp):
+    bubble = FloatingBubbleWidget()
+    bubble.move(10, 100)
+    bubble.snap_to_edge()
+    # Sau khi snap_to_edge, bubble phải dính mép trái an toàn
+    assert bubble.x() >= 0
+    assert bubble.y() >= 0
+
+
+def test_floating_bubble_click_toggle_tray(qapp):
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtCore import QPointF, Qt
+    bubble = FloatingBubbleWidget()
+    assert bubble.tray.isHidden() is True
+
+    # 1. Click chuột trái vào quả cầu -> Khay hiển thị
+    press_event = QMouseEvent(QMouseEvent.MouseButtonPress, QPointF(20, 20), QPointF(20, 20), Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    bubble.mousePressEvent(press_event)
+    release_event = QMouseEvent(QMouseEvent.MouseButtonRelease, QPointF(20, 20), QPointF(20, 20), Qt.LeftButton, Qt.NoButton, Qt.NoModifier)
+    bubble.mouseReleaseEvent(release_event)
+    assert bubble.tray.isVisible() is True
+
+    # 2. Click lại lần nữa -> Khay đóng lại
+    bubble.mousePressEvent(press_event)
+    bubble.mouseReleaseEvent(release_event)
+    assert bubble.tray.isHidden() is True
+
+

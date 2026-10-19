@@ -17,10 +17,11 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QCheckBox, QGroupBox, QFormLayout,
     QFrame, QScrollArea, QGridLayout, QApplication, QMessageBox
 )
-from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl
-from PySide6.QtGui import QDrag, QPixmap
+from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QPoint
+from PySide6.QtGui import QDrag, QPixmap, QPainter
 from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS
 from src.core.lut_generator import ColorLookPreset, BUILTIN_COLOR_LOOKS, LUT3DGenerator
+from src.utils.path_utils import PosixPathAdapter
 
 
 class DraggableLUTCard(QFrame):
@@ -172,6 +173,20 @@ class DraggableLUTCard(QFrame):
             mime_data = QMimeData()
             mime_data.setUrls([QUrl.fromLocalFile(lut_file_path)])
             drag.setMimeData(mime_data)
+            try:
+                pix = self.grab()
+                if not pix.isNull():
+                    ghost = pix.scaledToWidth(180, Qt.SmoothTransformation) if pix.width() > 180 else pix
+                    transparent_pix = QPixmap(ghost.size())
+                    transparent_pix.fill(Qt.transparent)
+                    p = QPainter(transparent_pix)
+                    p.setOpacity(0.85)
+                    p.drawPixmap(0, 0, ghost)
+                    p.end()
+                    drag.setPixmap(transparent_pix)
+                    drag.setHotSpot(QPoint(ghost.width() // 2, ghost.height() // 2))
+            except Exception:
+                pass
             drag.exec(Qt.DropAction.CopyAction)
 
 
@@ -184,7 +199,7 @@ class TabExport(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.luts_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "assets", "luts"))
+        self.luts_dir = str(PosixPathAdapter.get_asset_path("luts"))
         os.makedirs(self.luts_dir, exist_ok=True)
         LUT3DGenerator.ensure_all_luts_exist(self.luts_dir)
         

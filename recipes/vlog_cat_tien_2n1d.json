@@ -1,0 +1,556 @@
+{
+  "strategy_summary": "Tái cấu trúc toàn bộ 67 clip theo đúng mạch thời gian thực tế (Chronological Flow) dựa trên timestamp quay từ ngày 30/08 đến 31/08/2026 của chuyến khám phá Vườn Quốc Gia Cát Tiên: (1) Ngày 1: Chạy xe máy xuất phát -> Mua đồ nhậu tại chợ -> Đêm nhậu lầy lội; (2) Ngày 2: Gọi nhau dậy sớm & Ăn sáng Cà phê muối -> Mua vé qua phà (100% sức khỏe) -> Đạp xe xuyên rừng gặp sự cố xe & mưa rừng -> Vượt Suối Trăn & Cầu Khỉ -> Khám phá Thác & Cây Tung Cổ Thụ (cạn kiệt pin). Chọn đoạn Teaser Hook 35.9s ở cảnh đạp xe dưới mưa to trong rừng (Clip 28) làm mở đầu để tạo sự kịch tính, giữ chân người xem. Loại bỏ hoàn toàn các clip lỗi nhận diện giọng nói ảo (hallucination 'Hãy subscribe cho kênh Ghiền Mì Gõ / La La School') và các đoạn quay chết. SFX được tiết chế tối đa, đa dạng hóa và căn chuẩn xác theo các mốc Beat Drop.",
+  "target_platform": "YouTube Vlog / Shorts",
+  "global_hook": {
+    "clip_index": 28,
+    "clip_name": "DJI_20260831114657_0010_D.MP4",
+    "start_sec": 0.0,
+    "end_sec": 35.9,
+    "hook_title": "🔥 [TEASER HOOK 35.9s] ĐẠP XE XUYÊN RỪNG CÁT TIÊN GẶP MƯA LỚN BẤT NGỜ",
+    "reason": "Trích trọn vẹn 35.9s cảnh cả nhóm đang đạp xe sâu trong rừng thì trời đổ mưa to, đồng đội vừa đội mưa vừa hát hò vượt khó. Đoạn này giàu năng lượng, hình ảnh chân thực và kích thích sự tò mò về hành trình trước và sau cơn mưa.",
+    "punch_in": true
+  },
+  "timeline_segments": [
+    {
+      "clip_index": 54,
+      "clip_name": "DJI_20260830113907_0076_D.MP4",
+      "chapter_name": "01_Hanh_Trinh_Xuat_Phat",
+      "start_sec": 5.0,
+      "end_sec": 20.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "intro",
+      "note": "Cảnh visual B-Roll mở đầu hành trình chạy xe máy lên đường (Ngày 1 - Trưa 30/08)"
+    },
+    {
+      "clip_index": 56,
+      "clip_name": "DJI_20260830121454_0078_D.MP4",
+      "chapter_name": "01_Hanh_Trinh_Xuat_Phat",
+      "start_sec": 15.0,
+      "end_sec": 45.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Cả nhóm chào hỏi trên xe máy, điểm danh các thành viên trên đường đi"
+    },
+    {
+      "clip_index": 57,
+      "clip_name": "DJI_20260830121828_0079_D.MP4",
+      "chapter_name": "01_Hanh_Trinh_Xuat_Phat",
+      "start_sec": 0.0,
+      "end_sec": 36.1,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Giữ trọn vẹn lời thoại hào hứng: 'Nam Cát Tiên ơi chạy đi, Nguyễn Xuân Trường và Ami tới rồi!'"
+    },
+    {
+      "clip_index": 19,
+      "clip_name": "DJI_20260830174401_0081_D.MP4",
+      "chapter_name": "02_Chuan_Bi_Do_Nhau_Va_Dem_Homestay",
+      "start_sec": 5.0,
+      "end_sec": 30.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Đến nơi lúc chiều tối, bắt đầu đi chợ review và mua đồ chuẩn bị bữa tối"
+    },
+    {
+      "clip_index": 20,
+      "clip_name": "DJI_20260830174529_0082_D.MP4",
+      "chapter_name": "02_Chuan_Bi_Do_Nhau_Va_Dem_Homestay",
+      "start_sec": 35.0,
+      "end_sec": 70.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Trải nghiệm một ngày ở Đồng Nai, cả nhóm bàn bạc chọn món ăn địa phương"
+    },
+    {
+      "clip_index": 22,
+      "clip_name": "DJI_20260830175112_0084_D.MP4",
+      "chapter_name": "02_Chuan_Bi_Do_Nhau_Va_Dem_Homestay",
+      "start_sec": 25.0,
+      "end_sec": 60.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "highlight",
+      "note": "Màn trả giá và chia tiền mua đồ nhậu hài hước của anh em"
+    },
+    {
+      "clip_index": 23,
+      "clip_name": "DJI_20260830181439_0085_D.MP4",
+      "chapter_name": "02_Chuan_Bi_Do_Nhau_Va_Dem_Homestay",
+      "start_sec": 10.0,
+      "end_sec": 45.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Đợi mượn nồi và chuẩn bị bày biện bàn tiệc tại Homestay"
+    },
+    {
+      "clip_index": 31,
+      "clip_name": "DJI_20260830201726_0088_D.MP4",
+      "chapter_name": "02_Chuan_Bi_Do_Nhau_Va_Dem_Homestay",
+      "start_sec": 1390.0,
+      "end_sec": 1425.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "highlight",
+      "note": "Cao trào bữa nhậu buổi tối: Anh em cụng ly 50% - 100% cực kỳ rôm rả"
+    },
+    {
+      "clip_index": 33,
+      "clip_name": "DJI_20260830215045_0090_D.MP4",
+      "chapter_name": "02_Chuan_Bi_Do_Nhau_Va_Dem_Homestay",
+      "start_sec": 15.0,
+      "end_sec": 45.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Kết thúc đêm tiệc vui vẻ, dọn dẹp nghỉ ngơi lấy sức vào rừng"
+    },
+    {
+      "clip_index": 47,
+      "clip_name": "DJI_20260831061646_0091_D.MP4",
+      "chapter_name": "03_Binh_Minh_Va_An_Sang",
+      "start_sec": 35.0,
+      "end_sec": 70.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Sáng sớm ngày 2 (6h16): Đánh thức đồng đội dậy đón bình minh"
+    },
+    {
+      "clip_index": 49,
+      "clip_name": "DJI_20260831074916_0093_D.MP4",
+      "chapter_name": "03_Binh_Minh_Va_An_Sang",
+      "start_sec": 0.0,
+      "end_sec": 31.3,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Giữ trọn vẹn câu thoại giới thiệu xuất phát từ Homestay đi ăn sáng trước khi vào Nam Cát Tiên"
+    },
+    {
+      "clip_index": 51,
+      "clip_name": "DJI_20260831075200_0095_D.MP4",
+      "chapter_name": "03_Binh_Minh_Va_An_Sang",
+      "start_sec": 20.0,
+      "end_sec": 55.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Chào buổi sáng chính thức và giới thiệu lịch trình khám phá trong ngày"
+    },
+    {
+      "clip_index": 52,
+      "clip_name": "DJI_20260831075731_0096_D.MP4",
+      "chapter_name": "03_Binh_Minh_Va_An_Sang",
+      "start_sec": 0.0,
+      "end_sec": 29.8,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Giữ nguyên clip thưởng thức cà phê muối buổi sáng và tương tác cùng nhóm bạn"
+    },
+    {
+      "clip_index": 53,
+      "clip_name": "DJI_20260831081050_0097_D.MP4",
+      "chapter_name": "03_Binh_Minh_Va_An_Sang",
+      "start_sec": 0.0,
+      "end_sec": 18.4,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Trọn vẹn phân đoạn đi ăn bún bò nạp năng lượng"
+    },
+    {
+      "clip_index": 12,
+      "clip_name": "DJI_20260831085151_0101_D.MP4",
+      "chapter_name": "04_Mua_Ve_Qua_Pha_Vao_Rung",
+      "start_sec": 0.0,
+      "end_sec": 14.5,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Cả nhóm có mặt tại bến, mua vé chuẩn bị qua phà vào rừng"
+    },
+    {
+      "clip_index": 13,
+      "clip_name": "DJI_20260831090044_0102_D.MP4",
+      "chapter_name": "04_Mua_Ve_Qua_Pha_Vao_Rung",
+      "start_sec": 10.0,
+      "end_sec": 45.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "highlight",
+      "note": "Check-in trạng thái 'Trước khi vào rừng: 100% sức khỏe' (Tạo tiền đề đối lập với lúc ra khỏi rừng)"
+    },
+    {
+      "clip_index": 16,
+      "clip_name": "DJI_20260831091408_0105_D.MP4",
+      "chapter_name": "04_Mua_Ve_Qua_Pha_Vao_Rung",
+      "start_sec": 0.0,
+      "end_sec": 38.9,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Bước lên phà vượt sông Đồng Nai tiến vào Vườn Quốc Gia Cát Tiên"
+    },
+    {
+      "clip_index": 17,
+      "clip_name": "DJI_20260831091958_0106_D.MP4",
+      "chapter_name": "04_Mua_Ve_Qua_Pha_Vao_Rung",
+      "start_sec": 15.0,
+      "end_sec": 35.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "broll",
+      "note": "Cảnh quay visual B-Roll khung cảnh sông nước yên bình từ trên phà"
+    },
+    {
+      "clip_index": 59,
+      "clip_name": "DJI_20260831094325_0108_D.MP4",
+      "chapter_name": "05_Hanh_Trinh_Dap_Xe_Va_Suoi_Tran",
+      "start_sec": 0.0,
+      "end_sec": 11.3,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Đúng 9h41 sáng: Nhận xe đạp và chính thức bấm giờ xuất phát xuyên rừng"
+    },
+    {
+      "clip_index": 60,
+      "clip_name": "DJI_20260831094656_0109_D.MP4",
+      "chapter_name": "05_Hanh_Trinh_Dap_Xe_Va_Suoi_Tran",
+      "start_sec": 30.0,
+      "end_sec": 65.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Đạp xe dưới tán rừng xanh mát, nghêu ngao hát hò cực chill"
+    },
+    {
+      "clip_index": 64,
+      "clip_name": "DJI_20260831095123_0117_D.MP4",
+      "chapter_name": "05_Hanh_Trinh_Dap_Xe_Va_Suoi_Tran",
+      "start_sec": 0.0,
+      "end_sec": 32.8,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Trọn vẹn phân đoạn tấu hài dọc đường rừng của các thành viên"
+    },
+    {
+      "clip_index": 67,
+      "clip_name": "DJI_20260831095755_0121_D.MP4",
+      "chapter_name": "05_Hanh_Trinh_Dap_Xe_Va_Suoi_Tran",
+      "start_sec": 10.0,
+      "end_sec": 45.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "highlight",
+      "note": "Sự cố đầu tiên: Xe đạp của đồng đội gặp trục trặc giữa đường phải gọi hỗ trợ đổi xe"
+    },
+    {
+      "clip_index": 34,
+      "clip_name": "DJI_20260831100257_0123_D.MP4",
+      "chapter_name": "05_Hanh_Trinh_Dap_Xe_Va_Suoi_Tran",
+      "start_sec": 15.0,
+      "end_sec": 48.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Thử thách vượt ngầm Suối Trăn: Cả nhóm tìm cách chạy xe qua làn nước chảy"
+    },
+    {
+      "clip_index": 35,
+      "clip_name": "DJI_20260831100402_0124_D.MP4",
+      "chapter_name": "05_Hanh_Trinh_Dap_Xe_Va_Suoi_Tran",
+      "start_sec": 15.0,
+      "end_sec": 45.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Canh góc máy quay cảnh Vương và Hoàng đạp xe băng qua suối"
+    },
+    {
+      "clip_index": 24,
+      "clip_name": "DJI_20260831101134_0126_D.MP4",
+      "chapter_name": "06_Mua_Rung_Va_Thu_Thach_Cau_Khi",
+      "start_sec": 0.0,
+      "end_sec": 14.9,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Đạp xe tốn sức bắt đầu nóng bức, dừng nghỉ nhanh trước khi đi tiếp"
+    },
+    {
+      "clip_index": 26,
+      "clip_name": "DJI_20260831101945_0128_D.MP4",
+      "chapter_name": "06_Mua_Rung_Va_Thu_Thach_Cau_Khi",
+      "start_sec": 115.0,
+      "end_sec": 150.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Tăng tốc đạp xe sâu vào các cung đường mòn bên trong rừng"
+    },
+    {
+      "clip_index": 27,
+      "clip_name": "DJI_20260831102414_0129_D.MP4",
+      "chapter_name": "06_Mua_Rung_Va_Thu_Thach_Cau_Khi",
+      "start_sec": 100.0,
+      "end_sec": 135.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Bốn bề trước sau đều là rừng rậm, khám phá hệ sinh thái dưới mặt đất"
+    },
+    {
+      "clip_index": 28,
+      "clip_name": "DJI_20260831114657_0010_D.MP4",
+      "chapter_name": "06_Mua_Rung_Va_Thu_Thach_Cau_Khi",
+      "start_sec": 0.0,
+      "end_sec": 35.9,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "highlight",
+      "note": "Cao trào giữa chuyến đi: Cơn mưa rừng ập tới, cả đội vừa trú mưa vừa đi bộ ca hát"
+    },
+    {
+      "clip_index": 8,
+      "clip_name": "DJI_20260831115400_0011_D.MP4",
+      "chapter_name": "06_Mua_Rung_Va_Thu_Thach_Cau_Khi",
+      "start_sec": 240.0,
+      "end_sec": 275.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Tới khu vực Cầu Khỉ: Bỏ xe lại phía ngoài để chuẩn bị đi bộ trekking vào sâu bên trong"
+    },
+    {
+      "clip_index": 9,
+      "clip_name": "DJI_20260831121738_0054_D.MP4",
+      "chapter_name": "06_Mua_Rung_Va_Thu_Thach_Cau_Khi",
+      "start_sec": 55.0,
+      "end_sec": 90.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "highlight",
+      "note": "Lần lượt từng thành viên dò dẫm vượt qua cây cầu khỉ chênh vênh giữa rừng"
+    },
+    {
+      "clip_index": 43,
+      "clip_name": "DJI_20260831122655_0057_D.MP4",
+      "chapter_name": "07_Chinh_Phuc_Thac_Va_Cay_Tung_Co_Thu",
+      "start_sec": 10.0,
+      "end_sec": 45.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Phụ giúp cầm cặp sách và hỗ trợ nhau khi xe đạp lại bị tuột xích/đổ ngã"
+    },
+    {
+      "clip_index": 44,
+      "clip_name": "DJI_20260831122813_0058_D.MP4",
+      "chapter_name": "07_Chinh_Phuc_Thac_Va_Cay_Tung_Co_Thu",
+      "start_sec": 40.0,
+      "end_sec": 75.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Ngỡ ngàng trước khung cảnh hoang sơ tuyệt đẹp của khu vực thác nước"
+    },
+    {
+      "clip_index": 46,
+      "clip_name": "DJI_20260831125805_0060_D.MP4",
+      "chapter_name": "07_Chinh_Phuc_Thac_Va_Cay_Tung_Co_Thu",
+      "start_sec": 35.0,
+      "end_sec": 70.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "highlight",
+      "note": "Cập nhật tình trạng sau nửa ngày trekking: Thở không ra hơi, không nói nên lời (Đối lập hoàn toàn với lúc 100% sức khỏe buổi sáng)"
+    },
+    {
+      "clip_index": 42,
+      "clip_name": "DJI_20260831133044_0081_D.MP4",
+      "chapter_name": "07_Chinh_Phuc_Thac_Va_Cay_Tung_Co_Thu",
+      "start_sec": 30.0,
+      "end_sec": 65.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Quay trở lại điểm Suối Trăn tập hợp đội hình, quay chung kỷ niệm"
+    },
+    {
+      "clip_index": 2,
+      "clip_name": "DJI_20260831134237_0085_D.MP4",
+      "chapter_name": "07_Chinh_Phuc_Thac_Va_Cay_Tung_Co_Thu",
+      "start_sec": 50.0,
+      "end_sec": 85.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "highlight",
+      "note": "Đích đến cuối cùng - Cây Tung Cổ Thụ khổng lồ: Từng người bước vào gốc cây tạo dáng"
+    },
+    {
+      "clip_index": 6,
+      "clip_name": "DJI_20260831135537_0129_D.MP4",
+      "chapter_name": "07_Chinh_Phuc_Thac_Va_Cay_Tung_Co_Thu",
+      "start_sec": 30.0,
+      "end_sec": 65.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "story",
+      "note": "Hướng dẫn góc máy nghiêng theo chiều gốc cây Tung đại thụ để lấy trọn khung hình"
+    },
+    {
+      "clip_index": 7,
+      "clip_name": "DJI_20260831140828_0130_D.MP4",
+      "chapter_name": "07_Chinh_Phuc_Thac_Va_Cay_Tung_Co_Thu",
+      "start_sec": 20.0,
+      "end_sec": 60.0,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "outro",
+      "note": "Tổng kết hành trình tại điểm cuối, các thành viên giới thiệu tên và chia sẻ cảm xúc"
+    },
+    {
+      "clip_index": 4,
+      "clip_name": "DJI_20260831135221_0107_D.MP4",
+      "chapter_name": "07_Chinh_Phuc_Thac_Va_Cay_Tung_Co_Thu",
+      "start_sec": 0.0,
+      "end_sec": 3.1,
+      "action": "keep",
+      "speed": 1.0,
+      "role": "outro",
+      "note": "Vẫy tay chào Bye-bye khép lại Vlog trọn vẹn"
+    }
+  ],
+  "broll_inserts": [
+    {
+      "timeline_sec": 36.0,
+      "duration_sec": 3.0,
+      "src_in": 0.0,
+      "asset_file": "xach_balo_len_va_di.mp4",
+      "asset_type": "meme",
+      "description": "Khớp nhịp Beat Drop 36.0s ngay sau khi kết thúc Teaser Hook 35.9s để mở màn chuyến hành trình Xách ba lô lên và đi"
+    },
+    {
+      "timeline_sec": 79.4,
+      "duration_sec": 2.5,
+      "src_in": 0.0,
+      "asset_file": "do_mixi_cuoi_sac_sua.mp4",
+      "asset_type": "meme",
+      "description": "Khớp nhịp Beat Drop 79.4s khi cả nhóm đang phấn khích gào tên nhau trên xe máy tiến về Nam Cát Tiên"
+    },
+    {
+      "timeline_sec": 560.0,
+      "duration_sec": 2.5,
+      "src_in": 0.0,
+      "asset_file": "02_facepalm_toang_reaction.mp4",
+      "asset_type": "meme",
+      "description": "Chèn khi xe đạp gặp sự cố hỏng giữa đường rừng phải gọi người đổi xe (Clip 67)"
+    },
+    {
+      "timeline_sec": 850.0,
+      "duration_sec": 3.0,
+      "src_in": 0.0,
+      "asset_file": "con_dung_cai_nit.mp4",
+      "asset_type": "meme",
+      "description": "Chèn ở phân đoạn Clip 46 khi cả nhóm thở hồng hộc không nói nên lời sau khi tự nhận '100% sức khỏe' lúc sáng"
+    }
+  ],
+  "sfx_inserts": [
+    {
+      "timeline_sec": 6.0,
+      "duration_sec": 0.8,
+      "asset_file": "cinematic_braam_hit.wav",
+      "asset_type": "sfx",
+      "description": "Nhấn nhịp Beat Drop 6.0s tạo độ kịch tính ngay trong đoạn mở đầu Teaser mưa rừng"
+    },
+    {
+      "timeline_sec": 36.0,
+      "duration_sec": 0.8,
+      "asset_file": "whoosh_deep_cinematic.wav",
+      "asset_type": "sfx",
+      "description": "Chuyển cảnh mượt mà tại mốc Beat Drop 36.0s từ đoạn Hook sang Chương 1 khởi hành"
+    },
+    {
+      "timeline_sec": 63.5,
+      "duration_sec": 0.8,
+      "asset_file": "coi_xe_may_bip_bip.wav",
+      "asset_type": "sfx",
+      "description": "Khớp mốc Beat Drop 63.5s tạo không khí thực tế khi cả đoàn đang vi vu trên xe máy"
+    },
+    {
+      "timeline_sec": 80.0,
+      "duration_sec": 1.0,
+      "asset_file": "cuoi_khan_gia_haha.wav",
+      "asset_type": "sfx",
+      "description": "Khớp mốc Beat Drop 80.0s cộng hưởng với tiếng hò hét vui nhộn của nhóm bạn"
+    },
+    {
+      "timeline_sec": 175.0,
+      "duration_sec": 0.8,
+      "asset_file": "cash_register_ching.wav",
+      "asset_type": "sfx",
+      "description": "Hiệu ứng tính tiền vui nhộn lúc cả nhóm chia tiền mua đồ nhậu ở chợ (Clip 22)"
+    },
+    {
+      "timeline_sec": 240.0,
+      "duration_sec": 1.0,
+      "asset_file": "airhorn_party_blast.wav",
+      "asset_type": "sfx",
+      "description": "Khuấy động không khí khi bước vào cao trào cụng ly 100% đêm tiệc Homestay (Clip 31)"
+    },
+    {
+      "timeline_sec": 440.0,
+      "duration_sec": 0.8,
+      "asset_file": "ding_bright_bell.wav",
+      "asset_type": "sfx",
+      "description": "Nhấn vào khoảnh khắc tự tin tuyên bố 'Trước khi vào rừng: 100% sức khỏe' (Clip 13)"
+    },
+    {
+      "timeline_sec": 560.0,
+      "duration_sec": 0.8,
+      "asset_file": "record_scratch_short.wav",
+      "asset_type": "sfx",
+      "description": "Tạo điểm dừng bất ngờ khi đang đạp xe chill thì phát hiện xe đồng đội bị hỏng (Clip 67)"
+    },
+    {
+      "timeline_sec": 850.0,
+      "duration_sec": 1.0,
+      "asset_file": "error_buzzer_wrong.wav",
+      "asset_type": "sfx",
+      "description": "Nhấn mạnh sự đối lập hài hước khi cả bọn sập nguồn, thở không ra hơi ở Thác (Clip 46)"
+    },
+    {
+      "timeline_sec": 920.0,
+      "duration_sec": 1.0,
+      "asset_file": "tada_fanfare.wav",
+      "asset_type": "sfx",
+      "description": "Chúc mừng khoảnh khắc cả đoàn chinh phục thành công đích đến Cây Tung Cổ Thụ (Clip 2)"
+    }
+  ],
+  "viral_headlines": [
+    "Khám Phá Rừng Nam Cát Tiên 2N1Đ: Lúc Đi 100% Sức Khỏe, Lúc Về Thở Không Ra Hơi!",
+    "Đạp Xe Xuyên Rừng Cát Tiên Gặp Mưa Lớn & Cú Twist Hỏng Xe Nhớ Đời!",
+    "Thử Thách Sinh Tồn Nam Cát Tiên: Vượt Cầu Khỉ, Băng Suối Trăn Tìm Cây Tung Cổ Thụ",
+    "Vlog Du Lịch Nam Cát Tiên Cùng Hội Bạn Thân: Đêm Nhậu Tới Bến, Sáng Trekking Sập Nguồn!",
+    "Bỏ Phố Về Rừng Nam Cát Tiên: Chuyến Đi Bão Táp Nhưng Cười Điêng Đầu!"
+  ],
+  "call_to_action": "Nếu các bạn thích hành trình lầy lội này tại Vườn Quốc Gia Cát Tiên của tụi mình, đừng quên bấm Like, Subscribe và bật Chuông thông báo để đón chờ những chuyến phiêu lưu tiếp theo nhé! Bye-bye!",
+  "seo_hashtags": [
+    "#NamCatTien",
+    "#TravelVlog",
+    "#DuLichBui",
+    "#TrekkingVietNam",
+    "#VuonQuocGiaCatTien",
+    "#ResolveFlow",
+    "#VlogDuLich"
+  ]
+}

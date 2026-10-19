@@ -1,0 +1,29 @@
+{
+  "id": "giat_gan_showbiz_tiktok",
+  "name": "Giật Gân Showbiz Drama TikTok",
+  "category": "glitch_cyber",
+  "badge_icon": "🚨",
+  "tags": [
+    "Drama",
+    "Showbiz",
+    "TikTok",
+    "GiatGan",
+    "HotNews",
+    "HongBien"
+  ],
+  "description": "Màu hồng neon kết hợp phát sáng xanh cyan giật nảy liên tục, giữ chân người xem từng giây với tin nóng hổi.",
+  "font": "Arial",
+  "size": 54,
+  "weight": "extra_bold",
+  "standard_color": "#FFF0F5",
+  "highlight_color": "#FF0055",
+  "outline_color": "#4A0E2E",
+  "outline_width": 0.16,
+  "animation": "pop",
+  "timing_curve": "spring",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": null,
+  "glow_color": "#00FFFF",
+  "gradient_colors": null
+}

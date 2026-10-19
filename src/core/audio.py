@@ -87,11 +87,26 @@ class AudioExtractor:
             raise FileNotFoundError(f"Không tìm thấy tệp tại: {norm_path}")
 
         try:
+            from src.core.resolve_api import _VIDEO_META_CACHE
+            if norm_path in _VIDEO_META_CACHE and _VIDEO_META_CACHE[norm_path].get("duration", 0.0) > 0:
+                return _VIDEO_META_CACHE[norm_path]["duration"]
+        except Exception:
+            pass
+
+        try:
             probe = ffmpeg.probe(norm_path)
             format_info = probe.get("format", {})
             duration = format_info.get("duration")
             if duration is not None:
-                return float(duration)
+                dur_val = float(duration)
+                try:
+                    from src.core.resolve_api import _VIDEO_META_CACHE
+                    if norm_path not in _VIDEO_META_CACHE:
+                        _VIDEO_META_CACHE[norm_path] = {}
+                    _VIDEO_META_CACHE[norm_path]["duration"] = dur_val
+                except Exception:
+                    pass
+                return dur_val
             raise ValueError("Không tìm thấy trường thời lượng (duration) trong siêu dữ liệu định dạng.")
         except ffmpeg.Error as e:
             stderr_msg = e.stderr.decode("utf-8") if e.stderr else str(e)

@@ -352,8 +352,10 @@ def get_media_metadata(video_path: str) -> Dict[str, Any]:
     except Exception:
         import subprocess
         import json
+        from src.core.ffmpeg_utils import get_ffprobe_path
+        ffprobe_bin = get_ffprobe_path() or "ffprobe"
         cmd = [
-            "ffprobe", "-v", "quiet", "-print_format", "json",
+            ffprobe_bin, "-v", "quiet", "-print_format", "json",
             "-show_format", "-show_streams", video_path
         ]
         try:
@@ -363,10 +365,40 @@ def get_media_metadata(video_path: str) -> Dict[str, Any]:
             )
             probe = json.loads(res.stdout)
         except Exception:
-            return default_meta
+            probe = None
 
     if not probe:
-        return default_meta
+        # Fallback qua PyAV (in-memory, độc lập với ffmpeg binary)
+        try:
+            import av
+            c = av.open(video_path)
+            vs = c.streams.video[0] if c.streams.video else None
+            aus = c.streams.audio[0] if c.streams.audio else None
+            fps = float(vs.average_rate) if vs and vs.average_rate else 30.0
+            dur = float(c.duration / 1000000.0) if c.duration else 0.0
+            w = vs.width if vs else 1920
+            h = vs.height if vs else 1080
+            tc = None
+            for s in c.streams:
+                if 'timecode' in s.metadata:
+                    tc = s.metadata['timecode']
+                    break
+            if not tc and 'timecode' in c.metadata:
+                tc = c.metadata['timecode']
+            c.close()
+            start_sec = parse_timecode_to_seconds(tc, fps) if tc else 0.0
+            return {
+                "fps": fps,
+                "start_timecode": tc or "00:00:00:00",
+                "start_seconds": start_sec,
+                "duration": dur,
+                "width": w,
+                "height": h,
+                "has_audio": aus is not None,
+                "audio_codec": aus.codec_context.name if aus else None
+            }
+        except Exception:
+            return default_meta
 
     video_stream = next((s for s in probe.get('streams', []) if s.get('codec_type') == 'video'), None)
     format_data = probe.get('format', {})

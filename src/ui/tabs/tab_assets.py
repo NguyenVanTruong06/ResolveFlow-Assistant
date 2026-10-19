@@ -8,6 +8,7 @@ Triển khai toàn diện cấu trúc 4 cột theo chuẩn thiết kế từ src
 """
 
 import os
+import re
 import json
 import uuid
 import tempfile
@@ -19,9 +20,9 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QLineEdit, QPushButton, QCheckBox, QGroupBox, QFormLayout,
     QSlider, QFrame, QScrollArea, QGridLayout, QApplication, QMessageBox,
-    QSizePolicy, QFileDialog, QColorDialog
+    QSizePolicy, QFileDialog, QColorDialog, QSplitter
 )
-from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF, QEvent
+from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF, QPoint, QEvent
 from PySide6.QtGui import (
     QDrag, QPixmap, QCursor, QMovie, QPainter, QColor, QPen, QBrush,
     QFont, QPainterPath, QLinearGradient
@@ -33,6 +34,8 @@ from src.core.text_preset import TextStylePreset, BUILTIN_PRESETS, FusionSetting
 from src.core.transition_preset import TransitionStylePreset, BUILTIN_TRANSITIONS, TransitionMacroGenerator
 from src.core.resolve_api import ResolveAutomation
 from src.core.asset_indexer import AssetIndexer
+from src.core.contextual_suggester import ContextualSuggester, SuggestedAsset
+from src.utils.path_utils import PosixPathAdapter
 
 
 # =========================================================================
@@ -329,6 +332,20 @@ class DraggableActionButton(QPushButton):
             if mime_data and mime_data.hasUrls():
                 drag = QDrag(self)
                 drag.setMimeData(mime_data)
+                try:
+                    pixmap = self.grab()
+                    if not pixmap.isNull():
+                        ghost = pixmap.scaledToWidth(180, Qt.SmoothTransformation) if pixmap.width() > 180 else pixmap
+                        transparent_pix = QPixmap(ghost.size())
+                        transparent_pix.fill(Qt.transparent)
+                        painter = QPainter(transparent_pix)
+                        painter.setOpacity(0.85)
+                        painter.drawPixmap(0, 0, ghost)
+                        painter.end()
+                        drag.setPixmap(transparent_pix)
+                        drag.setHotSpot(QPoint(ghost.width() // 2, ghost.height() // 2))
+                except Exception:
+                    pass
                 drag.exec(Qt.DropAction.CopyAction)
 
 
@@ -830,6 +847,12 @@ class AssetCard(QFrame):
     add_requested = pyqtSignal(object)
     quick_play_requested = pyqtSignal(str)
 
+    # Class-level shared player to coordinate instant hover playback without audio overlap
+    _shared_player: Optional[QMediaPlayer] = None
+    _shared_audio_output: Optional[QAudioOutput] = None
+    _active_playing_card: Optional['AssetCard'] = None
+    enable_hover_preview: bool = True
+
     def __init__(self, preset: Any, is_fav: bool = False, sample_text_func=None, parent=None):
         super().__init__(parent)
         self.preset = preset
@@ -868,8 +891,15 @@ class AssetCard(QFrame):
                 self.thumb.setFixedHeight(80)
 
     def _apply_style(self):
-        border_col = ThemeColors.PRIMARY if self.is_selected else ThemeColors.BORDER_DEFAULT
-        bg_col = ThemeColors.BG_CARD_ACTIVE if self.is_selected else ThemeColors.BG_CARD
+        if getattr(self, "_is_playing_audio", False):
+            border_col = "#06b6d4"
+            bg_col = "rgba(6, 182, 212, 0.12)"
+        elif self.is_selected:
+            border_col = ThemeColors.PRIMARY
+            bg_col = ThemeColors.BG_CARD_ACTIVE
+        else:
+            border_col = ThemeColors.BORDER_DEFAULT
+            bg_col = ThemeColors.BG_CARD
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: {bg_col};
@@ -976,6 +1006,29 @@ class AssetCard(QFrame):
         self.btn_fav.setStyleSheet("background: transparent; border: none; font-size: 12px;")
         self.btn_fav.clicked.connect(self._toggle_fav)
         h_info.addWidget(self.btn_fav)
+
+        # Nút Thêm nhanh (CapCut Quick Add)
+        self.btn_quick_add = QPushButton("➕")
+        self.btn_quick_add.setFixedSize(22, 22)
+        self.btn_quick_add.setCursor(Qt.PointingHandCursor)
+        self.btn_quick_add.setToolTip("Chèn vào DaVinci Resolve tại Playhead (hoặc nhấp đúp thẻ)")
+        self.btn_quick_add.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_MAIN};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 4px;
+                color: {ThemeColors.TEXT_PRIMARY};
+                font-size: 11px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.PRIMARY};
+                color: #ffffff;
+                border-color: {ThemeColors.PRIMARY};
+            }}
+        """)
+        self.btn_quick_add.clicked.connect(self._on_quick_add_clicked)
+        h_info.addWidget(self.btn_quick_add)
 
         layout.addLayout(h_info)
 
@@ -1084,6 +1137,136 @@ class AssetCard(QFrame):
             self.lbl_text_preview.setText(
                 "<div style=\"font-family: 'Arial Black', sans-serif; font-weight: 900; font-size: 14px; text-align: center;\">"
                 "<span style=\"color: #fb923c;\">HOÀNG </span><span style=\"color: #f43f5e;\">HÔN </span><span style=\"color: #a855f7;\">SUNSET</span>"
+                "</div>"
+            )
+        elif pid == "mrbeast_impact_yellow":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #0b0f19;
+                    border: 1px solid #eab308;
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: 'Arial Black', Impact, sans-serif; font-weight: 900; font-size: 14px; text-transform: uppercase; color: #ffffff; text-align: center;\">"
+                "1 TRIỆU <span style=\"color: #ffe600; font-size: 16px;\">ĐÔ LA!</span>"
+                "</div>"
+            )
+        elif pid == "apple_keynote_clean":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #0f172a;
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: -apple-system, Arial, sans-serif; font-weight: 600; font-size: 13px; color: #f8fafc; text-align: center;\">"
+                "Think Different<br><span style=\"color: #38bdf8; font-size: 10px;\">Apple Keynote</span>"
+                "</div>"
+            )
+        elif pid == "true_crime_documentary":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #09090b;
+                    border: 1px solid #7f1d1d;
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: Georgia, serif; font-size: 12px; color: #e2e8f0; text-align: center;\">"
+                "HỒ SƠ <span style=\"color: #ef4444; font-weight: bold;\">VỤ ÁN</span><br><span style=\"font-size: 10px; color: #71717a;\">01:23:45</span>"
+                "</div>"
+            )
+        elif pid == "comic_manga_burst":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #18181b;
+                    border: 1px solid #e11d48;
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: 'Arial Black', sans-serif; font-weight: 900; font-size: 14px; text-align: center;\">"
+                "<span style=\"color: #fff176; background-color: #000000; padding: 2px 4px;\">BOOM!</span> <span style=\"color: #ff0055;\">ACTION</span>"
+                "</div>"
+            )
+        elif pid == "luxury_gold_serif":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #1c1308;
+                    border: 1px solid #d97706;
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: Georgia, 'Times New Roman', serif; font-weight: bold; font-size: 13px; color: #fef3c7; text-align: center;\">"
+                "LUXURY <span style=\"color: #fbbf24;\">GOLD</span><br><span style=\"font-size: 9px; letter-spacing: 2px; color: #d97706;\">COLLECTION</span>"
+                "</div>"
+            )
+        elif pid == "minimal_podcast_pill":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {ThemeColors.BG_MAIN};
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: Arial, sans-serif; font-weight: bold; font-size: 11px; text-align: center;\">"
+                "<span style=\"background-color: #0f172a; color: #ffffff; padding: 3px 8px; border-radius: 12px; border: 1px solid #334155;\">The Podcast Talk</span>"
+                "</div>"
+            )
+        elif pid == "schannel_vlog_nhanh":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #18181b;
+                    border: 1px solid #facc15;
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: Arial, sans-serif; font-weight: 900; font-size: 13px; color: #ffffff; text-align: center;\">"
+                "ĐẬP HỘP <span style=\"color: #facc15; font-size: 15px;\">SIÊU PHẨM</span>"
+                "</div>"
+            )
+        elif pid == "khoai_lang_thang_chua_lanh":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #272118;
+                    border: 1px solid #78350f;
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: Arial, sans-serif; font-weight: bold; font-size: 12px; color: #fef3c7; text-align: center;\">"
+                "Hành Trình <span style=\"color: #f59e0b;\">Chữa Lành</span><br><span style=\"font-size: 10px; color: #d4d4d8;\">Bình Yên</span>"
+                "</div>"
+            )
+        elif pid == "phim_truyen_hinh_vtv_retro":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #0a0a0a;
+                    border: 1px solid #eab308;
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: Arial, sans-serif; font-weight: 800; font-size: 13px; color: #ffeb3b; text-align: center;\">"
+                "VTV PHIM TRUYỆN<br><span style=\"font-size: 10px; color: #ffffff;\">HÀ NỘI MÙA THU</span>"
+                "</div>"
+            )
+        elif pid == "giat_gan_showbiz_tiktok":
+            self.thumb.setStyleSheet(f"""
+                QFrame {{
+                    background-color: #2e081d;
+                    border: 1px solid #f43f5e;
+                    border-radius: 8px;
+                }}
+            """)
+            self.lbl_text_preview.setText(
+                "<div style=\"font-family: 'Arial Black', sans-serif; font-weight: 900; font-size: 13px; text-align: center;\">"
+                "<span style=\"color: #ff0055;\">DRAMA</span> <span style=\"color: #00ffff;\">CĂNG ĐÉT!</span>"
                 "</div>"
             )
         else:
@@ -1355,6 +1538,34 @@ class AssetCard(QFrame):
         """)
         th_layout.addWidget(self.lbl_icon_preview)
 
+    def _on_quick_add_clicked(self):
+        pid = getattr(self.preset, "id", "")
+        self.selected_signal.emit(pid)
+        self.add_requested.emit(self.preset)
+
+    @classmethod
+    def stop_all_audio(cls):
+        if cls._active_playing_card is not None:
+            card = cls._active_playing_card
+            cls._active_playing_card = None
+            card._is_playing_audio = False
+            card._apply_style()
+            if hasattr(card, "btn_quick_play"):
+                card.btn_quick_play.setText("▶")
+            if hasattr(card, "waveform_canvas"):
+                card.waveform_canvas.is_playing = False
+                card.waveform_canvas.update()
+        if cls._shared_player is not None:
+            try:
+                cls._shared_player.stop()
+            except Exception:
+                pass
+
+    @classmethod
+    def _on_shared_player_state_changed(cls, state):
+        if state == QMediaPlayer.StoppedState:
+            cls.stop_all_audio()
+
     def _toggle_quick_play(self):
         if self._is_playing_audio:
             self._stop_quick_play()
@@ -1362,7 +1573,12 @@ class AssetCard(QFrame):
             self._start_quick_play()
 
     def _start_quick_play(self):
+        if AssetCard._active_playing_card is not self:
+            AssetCard.stop_all_audio()
+
         self._is_playing_audio = True
+        AssetCard._active_playing_card = self
+        self._apply_style()
         if hasattr(self, "btn_quick_play"):
             self.btn_quick_play.setText("⏸")
         if hasattr(self, "waveform_canvas"):
@@ -1373,8 +1589,8 @@ class AssetCard(QFrame):
         clean_id = pid.replace("sfx_", "").replace("bgm_", "")
         candidate_paths = [
             getattr(self.preset, "file_path", ""),
-            os.path.join("assets", "sfx", f"{clean_id}.wav"),
-            os.path.join("assets", "sfx", f"{pid}.wav"),
+            str(PosixPathAdapter.get_asset_path("sfx", f"{clean_id}.wav")),
+            str(PosixPathAdapter.get_asset_path("sfx", f"{pid}.wav")),
         ]
         sound_path = None
         for p in candidate_paths:
@@ -1384,14 +1600,16 @@ class AssetCard(QFrame):
 
         if sound_path:
             try:
-                if self._player is None:
-                    self._player = QMediaPlayer(self)
-                    self._audio_output = QAudioOutput(self)
-                    self._player.setAudioOutput(self._audio_output)
-                    self._player.playbackStateChanged.connect(self._on_player_state_changed)
-                self._player.setSource(QUrl.fromLocalFile(os.path.abspath(sound_path)))
-                self._audio_output.setVolume(0.8)
-                self._player.play()
+                if AssetCard._shared_player is None:
+                    AssetCard._shared_player = QMediaPlayer()
+                    AssetCard._shared_audio_output = QAudioOutput()
+                    AssetCard._shared_player.setAudioOutput(AssetCard._shared_audio_output)
+                    AssetCard._shared_player.playbackStateChanged.connect(AssetCard._on_shared_player_state_changed)
+                self._player = AssetCard._shared_player
+                self._audio_output = AssetCard._shared_audio_output
+                AssetCard._shared_player.setSource(QUrl.fromLocalFile(os.path.abspath(sound_path)))
+                AssetCard._shared_audio_output.setVolume(0.8)
+                AssetCard._shared_player.play()
             except Exception:
                 QTimer.singleShot(1500, self._stop_quick_play)
         else:
@@ -1400,12 +1618,16 @@ class AssetCard(QFrame):
         self.quick_play_requested.emit(pid)
 
     def _stop_quick_play(self):
-        self._is_playing_audio = False
-        if hasattr(self, "btn_quick_play"):
-            self.btn_quick_play.setText("▶")
-        if hasattr(self, "waveform_canvas"):
-            self.waveform_canvas.is_playing = False
-            self.waveform_canvas.update()
+        if AssetCard._active_playing_card is self:
+            AssetCard.stop_all_audio()
+        else:
+            self._is_playing_audio = False
+            self._apply_style()
+            if hasattr(self, "btn_quick_play"):
+                self.btn_quick_play.setText("▶")
+            if hasattr(self, "waveform_canvas"):
+                self.waveform_canvas.is_playing = False
+                self.waveform_canvas.update()
         if self._player is not None:
             try:
                 self._player.stop()
@@ -1416,6 +1638,18 @@ class AssetCard(QFrame):
         if state == QMediaPlayer.StoppedState:
             self._stop_quick_play()
 
+    def enterEvent(self, event):
+        tab_type = getattr(self.preset, "tab", "")
+        if AssetCard.enable_hover_preview and tab_type in ("sfx", "bgm"):
+            self._start_quick_play()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        tab_type = getattr(self.preset, "tab", "")
+        if tab_type in ("sfx", "bgm") and self._is_playing_audio:
+            self._stop_quick_play()
+        super().leaveEvent(event)
+
     def _toggle_fav(self):
         self.is_fav = not self.is_fav
         self.btn_fav.setText("❤️" if self.is_fav else "🤍")
@@ -1425,6 +1659,15 @@ class AssetCard(QFrame):
     def set_selected(self, selected: bool):
         self.is_selected = selected
         self._apply_style()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            pid = getattr(self.preset, "id", "")
+            self.selected_signal.emit(pid)
+            self.add_requested.emit(self.preset)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1496,8 +1739,8 @@ class AssetCard(QFrame):
         elif tab_type == "sfx":
             clean_id = asset_id.replace("sfx_", "")
             candidate_paths = [
-                os.path.join("assets", "sfx", f"{clean_id}.wav"),
-                os.path.join("assets", "sfx", f"{asset_id}.wav"),
+                str(PosixPathAdapter.get_asset_path("sfx", f"{clean_id}.wav")),
+                str(PosixPathAdapter.get_asset_path("sfx", f"{asset_id}.wav")),
                 file_path
             ]
             sfx_file = None
@@ -1517,8 +1760,8 @@ class AssetCard(QFrame):
         elif tab_type in ("meme", "overlay"):
             dir_name = "memes" if tab_type == "meme" else "overlays"
             candidate_paths = [
-                os.path.join("assets", "broll_memes", dir_name, f"{asset_id}.mp4"),
-                os.path.join("assets", "broll_memes", f"{asset_id}.mp4"),
+                str(PosixPathAdapter.get_asset_path("broll_memes", dir_name, f"{asset_id}.mp4")),
+                str(PosixPathAdapter.get_asset_path("broll_memes", f"{asset_id}.mp4")),
                 file_path
             ]
             vid_file = None
@@ -1533,8 +1776,8 @@ class AssetCard(QFrame):
         # 7. LUT (.cube)
         elif tab_type == "lut":
             candidate_paths = [
-                os.path.join("assets", "luts", f"{asset_id}.cube"),
-                os.path.join("assets", "luts", f"ResolveFlow_{asset_id}.cube"),
+                str(PosixPathAdapter.get_asset_path("luts", f"{asset_id}.cube")),
+                str(PosixPathAdapter.get_asset_path("luts", f"ResolveFlow_{asset_id}.cube")),
                 file_path
             ]
             lut_file = None
@@ -1571,7 +1814,174 @@ class AssetCard(QFrame):
 
         if mime_data.hasUrls():
             drag.setMimeData(mime_data)
+            try:
+                pixmap = self.grab()
+                if not pixmap.isNull():
+                    ghost = pixmap.scaledToWidth(180, Qt.SmoothTransformation) if pixmap.width() > 180 else pixmap
+                    transparent_pix = QPixmap(ghost.size())
+                    transparent_pix.fill(Qt.transparent)
+                    painter = QPainter(transparent_pix)
+                    painter.setOpacity(0.85)
+                    painter.drawPixmap(0, 0, ghost)
+                    painter.end()
+                    drag.setPixmap(transparent_pix)
+                    drag.setHotSpot(QPoint(ghost.width() // 2, ghost.height() // 2))
+            except Exception:
+                pass
             drag.exec(Qt.DropAction.CopyAction)
+
+
+
+class SuggestionChip(QFrame):
+    """
+    Thẻ gợi ý đạo cụ nhanh theo ngữ cảnh (CapCut AI Suggestion Chip).
+    Hiển thị Icon, Tên, Lý do phân tích cảm xúc và nút 1-click chèn nhanh vào DaVinci Resolve.
+    """
+    selected_signal = pyqtSignal(str)   # asset_id
+    add_requested = pyqtSignal(object)  # asset
+
+    def __init__(self, suggested_asset: Any, parent=None):
+        super().__init__(parent)
+        self.suggested = suggested_asset
+        self.asset = getattr(suggested_asset, "asset", suggested_asset)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(46)
+        self.setMinimumWidth(170)
+        self.setMaximumWidth(240)
+        self._init_ui()
+
+    def _init_ui(self):
+        self.setStyleSheet("""
+            QFrame {
+                background-color: #181826;
+                border: 1px solid rgba(139, 92, 246, 0.35);
+                border-radius: 8px;
+            }
+            QFrame:hover {
+                background-color: #232338;
+                border-color: #8b5cf6;
+            }
+        """)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
+
+        # Icon
+        badge = getattr(self.asset, "badge_icon", "✨")
+        lbl_icon = QLabel(badge)
+        lbl_icon.setFixedSize(26, 26)
+        lbl_icon.setAlignment(Qt.AlignCenter)
+        lbl_icon.setStyleSheet("""
+            background: rgba(139, 92, 246, 0.2);
+            border-radius: 6px;
+            font-size: 14px;
+        """)
+        layout.addWidget(lbl_icon)
+
+        # Texts (Name + Reason)
+        vbox = QVBoxLayout()
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(1)
+
+        name = getattr(self.asset, "name", "Đạo cụ")
+        short_name = name if len(name) <= 17 else name[:15] + ".."
+        self.lbl_name = QLabel(short_name)
+        self.lbl_name.setToolTip(name)
+        self.lbl_name.setStyleSheet("""
+            font-size: 11px;
+            font-weight: bold;
+            color: #ffffff;
+        """)
+        vbox.addWidget(self.lbl_name)
+
+        reason = getattr(self.suggested, "reason", "⚡ Đề xuất AI")
+        self.lbl_reason = QLabel(reason)
+        self.lbl_reason.setStyleSheet("""
+            font-size: 9px;
+            color: #38bdf8;
+            font-weight: 500;
+        """)
+        vbox.addWidget(self.lbl_reason)
+        layout.addLayout(vbox, stretch=1)
+
+        # Quick Add Button
+        self.btn_add = QPushButton("➕")
+        self.btn_add.setFixedSize(22, 22)
+        self.btn_add.setCursor(Qt.PointingHandCursor)
+        self.btn_add.setToolTip("Chèn nhanh vào DaVinci Resolve tại Playhead (1-Click)")
+        self.btn_add.setStyleSheet("""
+            QPushButton {
+                background: rgba(6, 182, 212, 0.15);
+                border: 1px solid rgba(6, 182, 212, 0.5);
+                border-radius: 11px;
+                color: #22d3ee;
+                font-size: 10px;
+                font-weight: bold;
+                padding: 0;
+            }
+            QPushButton:hover {
+                background: #06b6d4;
+                color: #082f49;
+                border-color: #22d3ee;
+            }
+        """)
+        self.btn_add.clicked.connect(self._on_add_clicked)
+        layout.addWidget(self.btn_add)
+
+    def _on_add_clicked(self):
+        aid = getattr(self.asset, "id", "")
+        self.selected_signal.emit(aid)
+        self.add_requested.emit(self.asset)
+
+    def mousePressEvent(self, event):
+        if event is not None:
+            super().mousePressEvent(event)
+        aid = getattr(self.asset, "id", "")
+        self.selected_signal.emit(aid)
+
+    def mouseDoubleClickEvent(self, event):
+        if event is not None:
+            super().mouseDoubleClickEvent(event)
+        self._on_add_clicked()
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        if getattr(AssetCard, "enable_hover_preview", True):
+            tab = getattr(self.asset, "tab", "")
+            if tab in ("sfx", "bgm"):
+                self._start_audio_preview()
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        tab = getattr(self.asset, "tab", "")
+        if tab in ("sfx", "bgm"):
+            AssetCard.stop_all_audio()
+
+    def _start_audio_preview(self):
+        AssetCard.stop_all_audio()
+        aid = getattr(self.asset, "id", "")
+        clean_id = aid.replace("sfx_", "").replace("bgm_", "")
+        candidate_paths = [
+            getattr(self.asset, "file_path", ""),
+            str(PosixPathAdapter.get_asset_path("sfx", f"{clean_id}.wav")),
+            str(PosixPathAdapter.get_asset_path("sfx", f"{aid}.wav")),
+        ]
+        sound_path = None
+        for p in candidate_paths:
+            if p and os.path.exists(p):
+                sound_path = p
+                break
+        if sound_path:
+            try:
+                if AssetCard._shared_player is None:
+                    AssetCard._shared_player = QMediaPlayer()
+                    AssetCard._shared_audio_output = QAudioOutput()
+                    AssetCard._shared_player.setAudioOutput(AssetCard._shared_audio_output)
+                    AssetCard._shared_audio_output.setVolume(0.8)
+                AssetCard._shared_player.setSource(QUrl.fromLocalFile(sound_path))
+                AssetCard._shared_player.play()
+            except Exception:
+                pass
 
 
 # =========================================================================
@@ -1588,19 +1998,20 @@ class TabAssets(QWidget):
     apply_lut_requested = pyqtSignal(str)
     insert_sfx_requested = pyqtSignal(str, int, float)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, headless: bool = False):
         super().__init__(parent)
         self._current_preset_callback = None
         self.favorites = FavoritesManager.load()
+        self.headless = headless
 
-        # Dữ liệu nạp sẵn
+        # Dữ liệu nạp sẵn (tận dụng Singleton Cache của AssetIndexer)
         indexer = AssetIndexer()
         
         # Helper to convert dicts to StudioAsset
         def dicts_to_assets(dicts, tab, category, sub, badge):
             return [
                 StudioAsset(
-                    id=d["id"], name=d["name"], tab=tab, category=category,
+                    id=d["id"], name=d["name"], tab=tab, category=d.get("category", category),
                     sub=sub, badge_icon=badge, file_path=d.get("file_path", ""),
                     thumbnail_path=d.get("thumbnail_path", "")
                 ) for d in dicts
@@ -1668,6 +2079,10 @@ class TabAssets(QWidget):
         self.card_widgets: List[AssetCard] = []
         self.selected_asset = self.all_presets[0] if self.all_presets else None
 
+        self.suggester = ContextualSuggester(assets=self.all_assets)
+        self._current_context_role = ""
+        self._transcript_segments: List[Dict[str, Any]] = []
+
         self.setAcceptDrops(True)
         self._init_ui()
         if hasattr(self, "scroll_grid"):
@@ -1679,8 +2094,10 @@ class TabAssets(QWidget):
         self.toast_timer = QTimer(self)
         self.toast_timer.setSingleShot(True)
         self.toast_timer.timeout.connect(lambda: self.lbl_toast.hide() if hasattr(self, "lbl_toast") else None)
-        self._populate_cards()
-        self._filter_by_rail("text")
+        
+        if not self.headless:
+            self._populate_cards()
+            self._filter_by_rail("text")
 
     def set_preset_provider(self, provider_func: Callable[[], Optional[Any]]):
         self._current_preset_callback = provider_func
@@ -1784,10 +2201,10 @@ class TabAssets(QWidget):
         self.rail_btns["text"].setChecked(True)
 
         # =====================================================================
-        # CỘT 2: CATEGORIES PHÂN LOẠI CON (204px)
+        # CỘT 2: CATEGORIES PHÂN LOẠI CON (min 160px)
         # =====================================================================
         self.cats = QFrame()
-        self.cats.setFixedWidth(204)
+        self.cats.setMinimumWidth(160)
         self.cats.setStyleSheet(f"""
             QFrame {{
                 background-color: {ThemeColors.BG_MAIN};
@@ -1818,6 +2235,29 @@ class TabAssets(QWidget):
         scroll_cats.setWidget(self.cats_container)
         cats_layout.addWidget(scroll_cats, stretch=1)
 
+        self.btn_starter_pack = QPushButton("📦 Nạp Gói Starter Pack (Hot Trend)")
+        self.btn_starter_pack.setCursor(Qt.PointingHandCursor)
+        self.btn_starter_pack.setToolTip("Nạp trọn bộ 75+ SFX, Memes, LUTs và Nhạc nền Hot Trend chuẩn CapCut")
+        self.btn_starter_pack.clicked.connect(self._on_starter_pack_clicked)
+        self.btn_starter_pack.setStyleSheet(f"""
+            QPushButton {{
+                margin: 6px 10px 2px 10px;
+                background-color: rgba(6, 182, 212, 0.15);
+                border: 1px solid {ThemeColors.CYAN};
+                color: {ThemeColors.CYAN_HI};
+                font-size: 11px;
+                font-weight: bold;
+                padding: 8px;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.CYAN};
+                color: #05252c;
+                border-color: {ThemeColors.CYAN_HI};
+            }}
+        """)
+        cats_layout.addWidget(self.btn_starter_pack)
+
         self.btn_scan_local = QPushButton("➕ Quét thư mục cá nhân")
         self.btn_scan_local.setCursor(Qt.PointingHandCursor)
         self.btn_scan_local.clicked.connect(self._scan_local_folder)
@@ -1838,10 +2278,10 @@ class TabAssets(QWidget):
         cats_layout.addWidget(self.btn_scan_local)
 
         # =====================================================================
-        # CỘT 3: MAIN SECTION - LƯỚI CARD TRỰC QUAN (flex 1)
+        # CỘT 3: MAIN SECTION - LƯỚI CARD TRỰC QUAN (min 300px)
         # =====================================================================
         self.main_section = QWidget()
-        self.main_section.setMinimumWidth(350)
+        self.main_section.setMinimumWidth(300)
         self.main_section.setStyleSheet(f"background: {ThemeColors.BG_CARD};")
         main_sec_layout = QVBoxLayout(self.main_section)
         main_sec_layout.setContentsMargins(0, 0, 0, 0)
@@ -1858,6 +2298,27 @@ class TabAssets(QWidget):
         mh_layout = QHBoxLayout(main_head)
         mh_layout.setContentsMargins(16, 8, 16, 8)
         mh_layout.setSpacing(10)
+
+        # Nút thu gọn / mở rộng cột Nhóm
+        self.btn_toggle_cats = QPushButton("☰ Nhóm")
+        self.btn_toggle_cats.setToolTip("Ẩn / Hiện cột Phân loại danh mục")
+        self.btn_toggle_cats.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle_cats.clicked.connect(self._toggle_cats_visibility)
+        self.btn_toggle_cats.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 5px 10px;
+                color: {ThemeColors.TEXT_MUTED};
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                border-color: {ThemeColors.BORDER_HOVER};
+                color: {ThemeColors.TEXT_PRIMARY};
+            }}
+        """)
+        mh_layout.addWidget(self.btn_toggle_cats)
 
         self.lbl_main_cat = QLabel("Chữ chuyển động")
         self.lbl_main_cat.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {ThemeColors.TEXT_PRIMARY};")
@@ -1950,6 +2411,27 @@ class TabAssets(QWidget):
         """)
         mh_layout.addWidget(self.txt_search)
 
+        # Nút thu gọn / mở rộng cột Inspector (Chế độ Compact)
+        self.btn_toggle_inspector = QPushButton("◫ Chi tiết")
+        self.btn_toggle_inspector.setToolTip("Ẩn / Hiện cột Chi tiết Inspector (Chế độ Compact)")
+        self.btn_toggle_inspector.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle_inspector.clicked.connect(self._toggle_inspector_visibility)
+        self.btn_toggle_inspector.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 5px 10px;
+                color: {ThemeColors.TEXT_MUTED};
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                border-color: {ThemeColors.PRIMARY};
+                color: {ThemeColors.TEXT_PRIMARY};
+            }}
+        """)
+        mh_layout.addWidget(self.btn_toggle_inspector)
+
         # Thanh công cụ phụ: Bộ lọc nhanh & Slider kích thước thẻ (DVC Pro style)
         filter_bar = QFrame()
         filter_bar.setFixedHeight(40)
@@ -2024,6 +2506,24 @@ class TabAssets(QWidget):
         self.lbl_cols_val.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 11px; font-weight: bold;")
         fb_layout.addWidget(self.lbl_cols_val)
 
+        # Checkbox: Rê chuột nghe thử (Hover Preview - CapCut style)
+        self.chk_hover_preview = QCheckBox("🔊 Rê chuột nghe thử")
+        self.chk_hover_preview.setChecked(True)
+        self.chk_hover_preview.setToolTip("Tự động phát âm thanh khi rê chuột qua card SFX / Nhạc (Chuẩn CapCut)")
+        self.chk_hover_preview.setStyleSheet(f"""
+            QCheckBox {{
+                color: {ThemeColors.TEXT_MUTED};
+                font-size: 11px;
+                margin-left: 12px;
+            }}
+            QCheckBox:checked {{
+                color: {ThemeColors.CYAN_HI};
+                font-weight: bold;
+            }}
+        """)
+        self.chk_hover_preview.toggled.connect(self._on_hover_preview_toggled)
+        fb_layout.addWidget(self.chk_hover_preview)
+
         self.scroll_grid = QScrollArea()
         self.scroll_grid.setWidgetResizable(True)
         self.scroll_grid.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -2038,13 +2538,15 @@ class TabAssets(QWidget):
 
         main_sec_layout.addWidget(main_head)
         main_sec_layout.addWidget(filter_bar)
+        self._setup_suggestion_bar()
+        main_sec_layout.addWidget(self.suggestion_bar)
         main_sec_layout.addWidget(self.scroll_grid, stretch=1)
 
         # =====================================================================
-        # CỘT 4: BẢNG TINH CHỈNH INSPECTOR (336px)
+        # CỘT 4: BẢNG TINH CHỈNH INSPECTOR (min 260px)
         # =====================================================================
         self.inspector = QFrame()
-        self.inspector.setFixedWidth(336)
+        self.inspector.setMinimumWidth(260)
         self.inspector.setStyleSheet(f"""
             QFrame {{
                 background-color: {ThemeColors.BG_MAIN};
@@ -2236,6 +2738,29 @@ class TabAssets(QWidget):
 
         self.icon_meme_widget = IconMemePreviewWidget(self.inspector_icon_viewport)
         icon_v_layout.addWidget(self.icon_meme_widget)
+
+        # Nút Tách nền AI (Smart Cutout)
+        self.btn_smart_cutout = QPushButton("✂️ Tách nền AI (Smart Cutout)", self.inspector_icon_viewport)
+        self.btn_smart_cutout.setCursor(Qt.PointingHandCursor)
+        self.btn_smart_cutout.setToolTip("Tự động bóc nền trắng/đen/phông xanh thành PNG trong suốt chuẩn DaVinci Resolve")
+        self.btn_smart_cutout.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.CYAN};
+                border-radius: 6px;
+                color: {ThemeColors.CYAN_HI};
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.CYAN};
+                color: #05252c;
+            }}
+        """)
+        self.btn_smart_cutout.clicked.connect(self._on_smart_cutout_clicked)
+        icon_v_layout.addWidget(self.btn_smart_cutout)
+
         self.insp_vbox.addWidget(self.inspector_icon_viewport)
 
         # Mặc định ẩn các viewport không phải Text
@@ -2772,11 +3297,87 @@ class TabAssets(QWidget):
         insp_layout.addWidget(insp_acts)
 
 
-        # Ghép 4 cột vào layout chính
+        # Ghép Cột 1 (Rail 78px cố định) và QSplitter chứa Cột 2, 3, 4
+        self.assets_splitter = QSplitter(Qt.Horizontal)
+        self.assets_splitter.addWidget(self.cats)
+        self.assets_splitter.addWidget(self.main_section)
+        self.assets_splitter.addWidget(self.inspector)
+        self.assets_splitter.setStretchFactor(0, 0)
+        self.assets_splitter.setStretchFactor(1, 1)
+        self.assets_splitter.setStretchFactor(2, 0)
+        self.assets_splitter.setSizes([190, 580, 310])
+        self.assets_splitter.setCollapsible(0, True)
+        self.assets_splitter.setCollapsible(1, False)
+        self.assets_splitter.setCollapsible(2, True)
+
         main_layout.addWidget(self.rail)
-        main_layout.addWidget(self.cats)
-        main_layout.addWidget(self.main_section, stretch=1)
-        main_layout.addWidget(self.inspector)
+        main_layout.addWidget(self.assets_splitter, stretch=1)
+
+    def _toggle_cats_visibility(self):
+        visible = not self.cats.isVisible()
+        self.cats.setVisible(visible)
+        if visible:
+            self.btn_toggle_cats.setText("☰ Nhóm")
+            self.btn_toggle_cats.setStyleSheet(f"""
+                QPushButton {{
+                    background: {ThemeColors.BG_CARD};
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 6px;
+                    padding: 5px 10px;
+                    color: {ThemeColors.TEXT_MUTED};
+                    font-size: 11px;
+                }}
+                QPushButton:hover {{
+                    border-color: {ThemeColors.BORDER_HOVER};
+                    color: {ThemeColors.TEXT_PRIMARY};
+                }}
+            """)
+        else:
+            self.btn_toggle_cats.setText("☰ Hiện nhóm")
+            self.btn_toggle_cats.setStyleSheet(f"""
+                QPushButton {{
+                    background: {ThemeColors.BG_CARD_ACTIVE};
+                    border: 1px solid {ThemeColors.PRIMARY};
+                    border-radius: 6px;
+                    padding: 5px 10px;
+                    color: {ThemeColors.PRIMARY};
+                    font-size: 11px;
+                    font-weight: bold;
+                }}
+            """)
+
+    def _toggle_inspector_visibility(self):
+        visible = not self.inspector.isVisible()
+        self.inspector.setVisible(visible)
+        if visible:
+            self.btn_toggle_inspector.setText("◫ Chi tiết")
+            self.btn_toggle_inspector.setStyleSheet(f"""
+                QPushButton {{
+                    background: {ThemeColors.BG_CARD};
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 6px;
+                    padding: 5px 10px;
+                    color: {ThemeColors.TEXT_MUTED};
+                    font-size: 11px;
+                }}
+                QPushButton:hover {{
+                    border-color: {ThemeColors.PRIMARY};
+                    color: {ThemeColors.TEXT_PRIMARY};
+                }}
+            """)
+        else:
+            self.btn_toggle_inspector.setText("◫ Hiện chi tiết")
+            self.btn_toggle_inspector.setStyleSheet(f"""
+                QPushButton {{
+                    background: {ThemeColors.BG_CARD_ACTIVE};
+                    border: 1px solid {ThemeColors.PRIMARY};
+                    border-radius: 6px;
+                    padding: 5px 10px;
+                    color: {ThemeColors.PRIMARY};
+                    font-size: 11px;
+                    font-weight: bold;
+                }}
+            """)
 
     # =========================================================================
     # 7. LOGIC ĐIỀU HƯỚNG VÀ LỌC DANH MỤC
@@ -2845,10 +3446,12 @@ class TabAssets(QWidget):
             ])
         elif tab == "sfx":
             sub_cats.extend([
-                ("trans", "Chuyển cảnh"),
-                ("accent", "Nhấn mạnh"),
-                ("fun", "Hài hước"),
-                ("tech", "Kỹ thuật")
+                ("chuyen_canh", "💨 Chuyển cảnh (Whoosh)"),
+                ("giat_minh", "💥 Giật mình / Cú sốc"),
+                ("hai_huoc", "😂 Hài hước / Troll"),
+                ("diem_nhan", "✨ Điểm nhấn (Pop/Ding)"),
+                ("cong_nghe", "⚡ Kỹ thuật / UI"),
+                ("accent", "🔊 Nhấn mạnh khác")
             ])
         elif tab == "bgm":
             sub_cats.extend([
@@ -2864,8 +3467,11 @@ class TabAssets(QWidget):
             ])
         elif tab == "meme":
             sub_cats.extend([
-                ("reaction", "Reaction"),
-                ("trending", "Trending")
+                ("vietnam_viral", "🇻🇳 Viral Việt Nam"),
+                ("reaction", "🤦 Cảm xúc / Bất lực"),
+                ("cham_hoi", "❓ Ngơ ngác / Chấm hỏi"),
+                ("cay_cu", "🤬 Cay cú / Đập bàn"),
+                ("trending", "🔥 Thịnh hành")
             ])
 
         for cid, cname in sub_cats:
@@ -2937,6 +3543,7 @@ class TabAssets(QWidget):
             card = AssetCard(preset=item, is_fav=is_fav, sample_text_func=lambda: self.txt_single_title.text().strip())
             card.selected_signal.connect(self._on_card_selected)
             card.favorite_toggled.connect(self._on_favorite_toggled)
+            card.add_requested.connect(self._on_card_add_requested)
             self.card_widgets.append(card)
 
     def _refresh_grid(self):
@@ -2977,9 +3584,21 @@ class TabAssets(QWidget):
                 continue
 
             # Lọc theo Phân loại con
-            if cat != "all" and i_cat != cat:
-                card.setVisible(False)
-                continue
+            if cat != "all":
+                cat_aliases = {
+                    "chuyen_canh": ["chuyen_canh", "trans"],
+                    "hai_huoc": ["hai_huoc", "fun"],
+                    "diem_nhan": ["diem_nhan", "accent"],
+                    "cong_nghe": ["cong_nghe", "tech"],
+                    "vietnam_viral": ["vietnam_viral", "trending"],
+                    "reaction": ["reaction"],
+                    "cham_hoi": ["cham_hoi"],
+                    "cay_cu": ["cay_cu"],
+                }
+                allowed = cat_aliases.get(cat, [cat])
+                if i_cat not in allowed and cat not in i_cat:
+                    card.setVisible(False)
+                    continue
 
             # Lọc theo Từ khóa tìm kiếm
             if query and query not in i_name and query not in i_cat:
@@ -2996,6 +3615,71 @@ class TabAssets(QWidget):
         for idx, card in enumerate(visible):
             card.setVisible(True)
             self.grid.addWidget(card, idx // cols, idx % cols)
+
+    def _on_card_add_requested(self, preset: Any):
+        pid = getattr(preset, "id", "")
+        self._on_card_selected(pid)
+        self._insert_at_playhead()
+
+    def _on_hover_preview_toggled(self, checked: bool):
+        AssetCard.enable_hover_preview = checked
+        if not checked:
+            AssetCard.stop_all_audio()
+
+    def _on_starter_pack_clicked(self):
+        from src.core.starter_pack_downloader import StarterPackWorker
+        self.btn_starter_pack.setEnabled(False)
+        self.btn_starter_pack.setText("⏳ Đang nạp gói...")
+        self._show_toast("Đang nạp gói đạo cụ Starter Pack vào hệ thống...")
+
+        self._starter_worker = StarterPackWorker(self)
+        self._starter_worker.progress_updated.connect(lambda pct, msg: self._show_toast(f"[{pct}%] {msg}"))
+        self._starter_worker.download_completed.connect(self._on_starter_pack_completed)
+        self._starter_worker.error_occurred.connect(self._on_starter_pack_error)
+        self._starter_worker.start()
+
+    def _on_starter_pack_completed(self, summary: dict):
+        self.btn_starter_pack.setEnabled(True)
+        self.btn_starter_pack.setText("📦 Nạp Gói Starter Pack (Hot Trend)")
+        self._rescan_assets()
+        total = sum(summary.values())
+        self._show_toast(f"✅ Đã nạp thành công {total} đạo cụ Starter Pack vào Kho!")
+
+    def _on_starter_pack_error(self, err_msg: str):
+        self.btn_starter_pack.setEnabled(True)
+        self.btn_starter_pack.setText("📦 Nạp Gói Starter Pack (Hot Trend)")
+        self._show_toast(f"❌ Lỗi nạp đạo cụ: {err_msg}")
+
+    def _on_smart_cutout_clicked(self):
+        if not self.selected_asset:
+            return
+        from src.core.smart_cutout import SmartCutout
+
+        target_path = getattr(self.selected_asset, "file_path", "")
+        # Nếu chưa có file_path thực tế (ví dụ là Mockup icon SVG/badge), sinh ảnh PNG trước
+        if not target_path or not os.path.exists(target_path):
+            badge = getattr(self.selected_asset, "badge_icon", "✨")
+            color_hex = getattr(self.selected_asset, "color_hex", "#facc15")
+            pid = getattr(self.selected_asset, "id", "sticker")
+            temp_dir = tempfile.gettempdir()
+            target_path = os.path.join(temp_dir, f"raw_sticker_{pid}.png")
+            pixmap = QPixmap(512, 512)
+            pixmap.fill(QColor(255, 255, 255))
+            painter = QPainter(pixmap)
+            painter.setFont(QFont("Segoe UI Emoji", 260))
+            painter.setPen(QColor(color_hex))
+            painter.drawText(QRectF(0, 0, 512, 512), Qt.AlignCenter, badge)
+            painter.end()
+            pixmap.save(target_path, "PNG")
+
+        try:
+            out_transparent = SmartCutout.auto_cutout(target_path)
+            self.selected_asset.file_path = out_transparent
+            self.selected_asset.thumbnail_path = out_transparent
+            self._update_inspector_details()
+            self._show_toast("✅ Đã tách nền AI thành công! Sẵn sàng kéo thả vào DaVinci Resolve.")
+        except Exception as e:
+            self._show_toast(f"❌ Lỗi tách nền: {e}")
 
     def _on_card_selected(self, preset_id: str):
         self._stop_inspector_sfx_play()
@@ -3014,6 +3698,215 @@ class TabAssets(QWidget):
 
         # Cập nhật Inspector
         self._update_inspector_details()
+
+    def _setup_suggestion_bar(self):
+        """Khởi tạo thanh gợi ý AI theo ngữ cảnh lời thoại (CapCut-style Suggestion Bar)."""
+        self.suggestion_bar = QFrame()
+        self.suggestion_bar.setObjectName("suggestion_bar")
+        self.suggestion_bar.setStyleSheet(f"""
+            QFrame#suggestion_bar {{
+                background-color: rgba(139, 92, 246, 0.08);
+                border-bottom: 1px solid rgba(139, 92, 246, 0.25);
+            }}
+        """)
+        sug_layout = QVBoxLayout(self.suggestion_bar)
+        sug_layout.setContentsMargins(16, 6, 16, 6)
+        sug_layout.setSpacing(6)
+
+        # Header Row: Tiêu đề + Input/Combobox + Nút Gợi ý + Nút Thu gọn
+        sug_header = QHBoxLayout()
+        sug_header.setSpacing(8)
+
+        lbl_sug_title = QLabel("💡 Gợi ý AI theo lời thoại:")
+        lbl_sug_title.setStyleSheet("font-weight: bold; font-size: 12px; color: #c4b5fd;")
+        sug_header.addWidget(lbl_sug_title)
+
+        self.combo_context_sentence = QComboBox()
+        self.combo_context_sentence.setEditable(True)
+        self.combo_context_sentence.lineEdit().setPlaceholderText("Nhập hoặc chọn câu thoại (VD: 'Thật không thể tin nổi!')...")
+        self.combo_context_sentence.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.combo_context_sentence.setFixedHeight(28)
+        self.combo_context_sentence.setStyleSheet(f"""
+            QComboBox {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid rgba(139, 92, 246, 0.3);
+                border-radius: 6px;
+                padding: 2px 8px;
+                color: {ThemeColors.TEXT_PRIMARY};
+                font-size: 11px;
+            }}
+            QComboBox:focus {{
+                border-color: {ThemeColors.PRIMARY};
+            }}
+        """)
+        self.combo_context_sentence.lineEdit().returnPressed.connect(self._on_context_sentence_analyzed)
+        self.combo_context_sentence.currentIndexChanged.connect(self._on_context_combo_changed)
+        sug_header.addWidget(self.combo_context_sentence)
+
+        self.btn_analyze_sentence = QPushButton("⚡ Gợi ý")
+        self.btn_analyze_sentence.setCursor(Qt.PointingHandCursor)
+        self.btn_analyze_sentence.setFixedHeight(28)
+        self.btn_analyze_sentence.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.PRIMARY};
+                border: none;
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0 12px;
+            }}
+            QPushButton:hover {{
+                background: {ThemeColors.PRIMARY_HOVER};
+            }}
+        """)
+        self.btn_analyze_sentence.clicked.connect(self._on_context_sentence_analyzed)
+        sug_header.addWidget(self.btn_analyze_sentence)
+
+        self.btn_toggle_sug = QPushButton("▲")
+        self.btn_toggle_sug.setFixedSize(28, 28)
+        self.btn_toggle_sug.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle_sug.setToolTip("Thu gọn / Mở rộng khay gợi ý AI")
+        self.btn_toggle_sug.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: 1px solid rgba(139, 92, 246, 0.3);
+                border-radius: 6px;
+                color: {ThemeColors.TEXT_MUTED};
+                font-size: 10px;
+            }}
+            QPushButton:hover {{
+                color: {ThemeColors.TEXT_PRIMARY};
+                border-color: {ThemeColors.PRIMARY};
+            }}
+        """)
+        self.btn_toggle_sug.clicked.connect(self._toggle_suggestion_tray)
+        sug_header.addWidget(self.btn_toggle_sug)
+
+        sug_layout.addLayout(sug_header)
+
+        # Scroll area for suggestion chips
+        self.scroll_sug = QScrollArea()
+        self.scroll_sug.setFixedHeight(56)
+        self.scroll_sug.setWidgetResizable(True)
+        self.scroll_sug.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_sug.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll_sug.setStyleSheet("background: transparent; border: none;")
+
+        self.sug_chips_container = QWidget()
+        self.sug_chips_container.setStyleSheet("background: transparent;")
+        self.sug_chips_layout = QHBoxLayout(self.sug_chips_container)
+        self.sug_chips_layout.setContentsMargins(0, 2, 0, 2)
+        self.sug_chips_layout.setSpacing(8)
+        self.scroll_sug.setWidget(self.sug_chips_container)
+
+        sug_layout.addWidget(self.scroll_sug)
+        self._render_suggestion_chips([])
+
+    def _render_suggestion_chips(self, suggestions: List[Any]):
+        """Hiển thị các pill gợi ý hoặc danh sách quick samples."""
+        while self.sug_chips_layout.count():
+            item = self.sug_chips_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if suggestions:
+            for sug in suggestions:
+                chip = SuggestionChip(sug)
+                chip.selected_signal.connect(self._on_card_selected)
+                chip.add_requested.connect(self._on_card_add_requested)
+                self.sug_chips_layout.addWidget(chip)
+            self.sug_chips_layout.addStretch(1)
+        else:
+            # Placeholder quick sample pills
+            lbl_hint = QLabel("💡 Gợi ý mẫu:")
+            lbl_hint.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
+            self.sug_chips_layout.addWidget(lbl_hint)
+
+            samples = [
+                ("😂 Hài hước", "Toang thật rồi ông giáo ạ ảo thật đấy haha buồn cười vãi", "hai_huoc"),
+                ("💥 Giật mình", "Thật không thể tin nổi cú sốc này kinh hoàng quá", "giat_minh"),
+                ("🎬 Chuyển cảnh", "Tiếp theo chúng ta sẽ cùng bước sang phần 2 nhé", "chuyen_canh"),
+                ("💻 Công nghệ", "Cài đặt phần mềm AI và lập trình hệ thống máy tính", "cong_nghe"),
+            ]
+            for label, sample_txt, sample_role in samples:
+                btn_sample = QPushButton(label)
+                btn_sample.setCursor(Qt.PointingHandCursor)
+                btn_sample.setFixedHeight(26)
+                btn_sample.setStyleSheet(f"""
+                    QPushButton {{
+                        background: {ThemeColors.BG_CARD};
+                        border: 1px dashed rgba(139, 92, 246, 0.4);
+                        border-radius: 6px;
+                        padding: 0 10px;
+                        color: {ThemeColors.TEXT_MUTED};
+                        font-size: 10px;
+                    }}
+                    QPushButton:hover {{
+                        color: #c4b5fd;
+                        border-color: {ThemeColors.PRIMARY};
+                        background: {ThemeColors.BG_CARD_ACTIVE};
+                    }}
+                """)
+                btn_sample.clicked.connect(lambda _, t=sample_txt, r=sample_role: self.set_context_sentence(t, role=r))
+                self.sug_chips_layout.addWidget(btn_sample)
+            self.sug_chips_layout.addStretch(1)
+
+    def _on_context_sentence_analyzed(self):
+        """Phân tích câu thoại và tải danh sách gợi ý tương ứng."""
+        if not hasattr(self, "combo_context_sentence"):
+            return
+        raw_text = self.combo_context_sentence.currentText().strip()
+        clean_text = re.sub(r"^\[\d+:\d+\]\s*", "", raw_text)
+        if not clean_text:
+            self._render_suggestion_chips([])
+            return
+        suggestions = self.suggester.suggest_for_text(clean_text, role=getattr(self, "_current_context_role", ""))
+        self._render_suggestion_chips(suggestions)
+
+    def _on_context_combo_changed(self, idx: int):
+        """Khi người dùng chọn một câu thoại từ transcript combobox."""
+        if hasattr(self, "_transcript_segments") and 0 <= idx < len(self._transcript_segments):
+            seg = self._transcript_segments[idx]
+            self._current_context_role = seg.get("role", "")
+            self._on_context_sentence_analyzed()
+
+    def set_context_sentence(self, text: str, role: str = ""):
+        """Đặt câu thoại mục tiêu và tự động kích hoạt gợi ý AI."""
+        self._current_context_role = role
+        if hasattr(self, "combo_context_sentence"):
+            self.combo_context_sentence.blockSignals(True)
+            self.combo_context_sentence.setEditText(text)
+            self.combo_context_sentence.blockSignals(False)
+        self._on_context_sentence_analyzed()
+
+    def load_transcript_segments(self, segments: List[Dict[str, Any]]):
+        """Nạp danh sách các phân đoạn thoại từ AutoCut hoặc Shotbook."""
+        self._transcript_segments = segments or []
+        if not hasattr(self, "combo_context_sentence"):
+            return
+        self.combo_context_sentence.blockSignals(True)
+        self.combo_context_sentence.clear()
+        for seg in self._transcript_segments:
+            st = float(seg.get("start", 0.0))
+            mins = int(st // 60)
+            secs = int(st % 60)
+            txt = seg.get("text", "").strip()
+            self.combo_context_sentence.addItem(f"[{mins:02d}:{secs:02d}] {txt}", userData=seg)
+        self.combo_context_sentence.blockSignals(False)
+        if self._transcript_segments:
+            first = self._transcript_segments[0]
+            self.set_context_sentence(first.get("text", ""), role=first.get("role", ""))
+
+    def _toggle_suggestion_tray(self):
+        """Thu gọn hoặc mở rộng thanh cuộn gợi ý."""
+        is_shown = not self.scroll_sug.isHidden()
+        if is_shown:
+            self.scroll_sug.setVisible(False)
+            self.btn_toggle_sug.setText("▼")
+        else:
+            self.scroll_sug.setVisible(True)
+            self.btn_toggle_sug.setText("▲")
 
     def _set_filter_mode(self, mode: str):
         self.filter_mode = mode
@@ -3160,11 +4053,12 @@ class TabAssets(QWidget):
             self._show_toast("Chưa tìm thấy DaVinci Resolve đang mở. Vui lòng mở DaVinci!")
 
     def _rescan_assets(self):
+        AssetIndexer.clear_cache()
         indexer = AssetIndexer()
         def dicts_to_assets(dicts, tab, category, sub, badge):
             return [
                 StudioAsset(
-                    id=d["id"], name=d["name"], tab=tab, category=category,
+                    id=d["id"], name=d["name"], tab=tab, category=d.get("category", category),
                     sub=sub, badge_icon=badge, file_path=d.get("file_path", ""),
                     thumbnail_path=d.get("thumbnail_path", "")
                 ) for d in dicts
@@ -3211,6 +4105,10 @@ class TabAssets(QWidget):
         self.all_assets.extend(self.all_sfx)
         self.all_assets.extend(self.all_bgm)
         
+        if hasattr(self, "suggester"):
+            self.suggester.set_assets(self.all_assets)
+            self._on_context_sentence_analyzed()
+
         self._populate_cards()
         self._refresh_grid()
         self._show_toast("✅ Đã quét và cập nhật lại toàn bộ kho tài nguyên!")
@@ -3849,8 +4747,8 @@ class TabAssets(QWidget):
         elif tab_type == "sfx" or "sfx" in asset_id:
             clean_id = asset_id.replace("sfx_", "")
             candidate_paths = [
-                os.path.join("assets", "sfx", f"{clean_id}.wav"),
-                os.path.join("assets", "sfx", f"{asset_id}.wav"),
+                str(PosixPathAdapter.get_asset_path("sfx", f"{clean_id}.wav")),
+                str(PosixPathAdapter.get_asset_path("sfx", f"{asset_id}.wav")),
                 getattr(target, "file_path", "")
             ]
             sfx_file = None
@@ -3875,8 +4773,8 @@ class TabAssets(QWidget):
 
         elif tab_type == "lut":
             candidate_paths = [
-                os.path.join("assets", "luts", f"ResolveFlow_{asset_id}.cube"),
-                os.path.join("assets", "luts", f"{asset_id}.cube"),
+                str(PosixPathAdapter.get_asset_path("luts", f"ResolveFlow_{asset_id}.cube")),
+                str(PosixPathAdapter.get_asset_path("luts", f"{asset_id}.cube")),
                 getattr(target, "file_path", "")
             ]
             lut_file = None
@@ -3894,8 +4792,8 @@ class TabAssets(QWidget):
         elif tab_type in ("meme", "overlay"):
             dir_name = "memes" if tab_type == "meme" else getattr(target, "category", "cinematic")
             candidate_paths = [
-                os.path.join("assets", "broll_memes", dir_name, f"{asset_id}.mp4"),
-                os.path.join("assets", "broll_memes", f"{asset_id}.mp4"),
+                str(PosixPathAdapter.get_asset_path("broll_memes", dir_name, f"{asset_id}.mp4")),
+                str(PosixPathAdapter.get_asset_path("broll_memes", f"{asset_id}.mp4")),
                 getattr(target, "file_path", "")
             ]
             vid_file = None
@@ -4109,10 +5007,11 @@ class TabAssets(QWidget):
                 sync_dvc_count += 1
 
             elif ext == ".cube":
-                os.makedirs("assets/luts", exist_ok=True)
+                lut_local_dir = PosixPathAdapter.get_asset_path("luts")
+                lut_local_dir.mkdir(parents=True, exist_ok=True)
                 os.makedirs(lut_dvc, exist_ok=True)
 
-                dest_local = os.path.join("assets/luts", fname)
+                dest_local = str(lut_local_dir / fname)
                 shutil.copy2(fp, dest_local)
 
                 dest_dvc = os.path.join(lut_dvc, fname)
@@ -4122,25 +5021,26 @@ class TabAssets(QWidget):
                 sync_dvc_count += 1
 
             elif ext in (".wav", ".mp3"):
-                os.makedirs("assets/sfx", exist_ok=True)
-                dest_local = os.path.join("assets/sfx", fname)
+                sfx_local_dir = PosixPathAdapter.get_asset_path("sfx")
+                sfx_local_dir.mkdir(parents=True, exist_ok=True)
+                dest_local = str(sfx_local_dir / fname)
                 shutil.copy2(fp, dest_local)
                 added_count += 1
 
             elif ext in (".mp4", ".mov"):
                 target_sub = "overlays" if self.current_rail_tab == "overlay" else "memes"
-                target_dir = os.path.join("assets", "broll_memes", target_sub)
-                os.makedirs(target_dir, exist_ok=True)
-                dest_local = os.path.join(target_dir, fname)
+                target_dir = PosixPathAdapter.get_asset_path("broll_memes", target_sub)
+                target_dir.mkdir(parents=True, exist_ok=True)
+                dest_local = str(target_dir / fname)
                 shutil.copy2(fp, dest_local)
                 # Tự động xuất thumbnail khung hình đầu bằng ffmpeg
                 indexer._find_thumbnail(Path(dest_local))
                 added_count += 1
 
             elif ext == ".png":
-                target_dir = os.path.join("assets", "broll_memes", "overlays")
-                os.makedirs(target_dir, exist_ok=True)
-                dest_local = os.path.join(target_dir, fname)
+                target_dir = PosixPathAdapter.get_asset_path("broll_memes", "overlays")
+                target_dir.mkdir(parents=True, exist_ok=True)
+                dest_local = str(target_dir / fname)
                 shutil.copy2(fp, dest_local)
                 added_count += 1
 

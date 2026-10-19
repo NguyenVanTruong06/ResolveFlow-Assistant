@@ -248,6 +248,17 @@ class StoryCopilotDialog(QDialog):
             plan = StoryCopilot.parse_copilot_response(text)
             self.current_plan = plan
 
+            # Đối soát nguồn tài nguyên (Footage, Meme, SFX)
+            from src.core.source_resolver import SourceResolver
+            v_list = getattr(self, "clips_data", []) or []
+            v_paths = [c.get("video_path", c.get("file_path", c.get("clip_name", ""))) for c in v_list] if v_list else []
+            resolver = SourceResolver(available_videos=v_paths)
+            audit = resolver.audit_plan(plan)
+
+            # Tự động map nguồn asset tương đương cho các meme/sfx còn thiếu
+            if audit.missing_memes or audit.missing_sfx:
+                self.current_plan = resolver.auto_resolve_missing_assets(plan)
+
             # Hiển thị tóm tắt
             lines = [
                 f"<b>🎯 Chiến lược:</b> {plan.strategy_summary or 'AIDA Marketing'}",
@@ -255,6 +266,8 @@ class StoryCopilotDialog(QDialog):
                 f"({plan.global_hook.start_sec if plan.global_hook else 0}s - {plan.global_hook.end_sec if plan.global_hook else 0}s) "
                 f"➔ Text: <i>\"{plan.global_hook.hook_title if plan.global_hook else ''}\"</i>",
                 f"<b>🎬 Số phân đoạn trên Timeline:</b> {len(plan.timeline_segments)} cuts",
+                f"<b>🔍 Nguồn Video gốc:</b> {len(audit.found_footage)}/{len(audit.found_footage) + len(audit.missing_footage)} clips ({audit.footage_readiness}%)",
+                f"<b>🎭 B-Roll & SFX:</b> Tự động ghép nối {len(plan.broll_inserts)} meme & {len(plan.sfx_inserts)} SFX từ kho đạo cụ",
                 f"<b>📣 Kêu gọi hành động (CTA):</b> {plan.call_to_action or 'Không'}"
             ]
             if plan.viral_headlines:
@@ -262,7 +275,7 @@ class StoryCopilotDialog(QDialog):
 
             self.lbl_analysis_preview.setText("<br>".join(lines))
             self.btn_apply_plan.setEnabled(True)
-            QMessageBox.information(self, "Bản vẽ hợp lệ", "✔ Bản vẽ JSON hoàn toàn hợp lệ và sẵn sàng dựng lên DaVinci Resolve!")
+            QMessageBox.information(self, "Bản vẽ hợp lệ", "✔ Bản vẽ JSON và nguồn tài nguyên đã được đối soát và sẵn sàng dựng lên DaVinci Resolve!")
 
         except Exception as e:
             self.btn_apply_plan.setEnabled(False)

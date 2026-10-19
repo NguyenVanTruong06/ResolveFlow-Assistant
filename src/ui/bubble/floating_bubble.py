@@ -102,9 +102,12 @@ class BubbleTrayPopup(QWidget):
         self.container.setObjectName("tray_container")
         self.container.setStyleSheet(f"""
             QFrame#tray_container {{
-                background-color: rgba(26, 26, 30, 0.97);
-                border: 1px solid {ThemeColors.BORDER_HOVER};
+                background-color: rgba(24, 24, 27, 0.98);
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-radius: 14px;
+            }}
+            QFrame#tray_container:hover {{
+                border-color: {ThemeColors.BORDER_HOVER};
             }}
         """)
 
@@ -126,7 +129,7 @@ class BubbleTrayPopup(QWidget):
         h_stat.setSpacing(6)
 
         self.lbl_dot = QLabel("●")
-        self.lbl_dot.setStyleSheet(f"color: {ThemeColors.GREEN}; font-size: 11px;")
+        self.lbl_dot.setStyleSheet(f"color: {ThemeColors.SUCCESS}; font-size: 11px;")
 
         self.lbl_tray_status = QLabel("<b>Sẵn sàng</b>")
         self.lbl_tray_status.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 12px;")
@@ -165,8 +168,9 @@ class BubbleTrayPopup(QWidget):
         self.btn_insert_timeline.setCursor(Qt.PointingHandCursor)
         self.btn_insert_timeline.setStyleSheet(f"""
             QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8b5cf6, stop:1 #7c3aed);
-                color: #ffffff;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {ThemeColors.PRIMARY_HOVER}, stop:1 {ThemeColors.PRIMARY});
+                color: {ThemeColors.PRIMARY_TEXT};
+                font-family: {ThemeFonts.FAMILY};
                 font-size: 12px;
                 font-weight: 600;
                 border-radius: 8px;
@@ -174,10 +178,10 @@ class BubbleTrayPopup(QWidget):
                 border: none;
             }}
             QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #a78bfa, stop:1 #8b5cf6);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #a78bfa, stop:1 {ThemeColors.PRIMARY_HOVER});
             }}
             QPushButton:pressed {{
-                background-color: #6d28d9;
+                background-color: {ThemeColors.PRIMARY_PRESSED};
             }}
         """)
         self.btn_insert_timeline.clicked.connect(self.insert_timeline_requested.emit)
@@ -208,11 +212,11 @@ class BubbleTrayPopup(QWidget):
                 text-align: left;
             }}
             QPushButton:hover {{
-                background-color: rgba(39, 39, 42, 0.75);
-                border-color: {ThemeColors.BORDER_HOVER};
+                background-color: rgba(124, 58, 237, 0.10);
+                border-color: {ThemeColors.PRIMARY_HOVER};
             }}
             QPushButton:pressed {{
-                background-color: rgba(39, 39, 42, 0.95);
+                background-color: rgba(124, 58, 237, 0.20);
             }}
         """)
         ai_layout = QHBoxLayout(self.btn_ai)
@@ -224,7 +228,7 @@ class BubbleTrayPopup(QWidget):
         lbl_ai_icon.setAlignment(Qt.AlignCenter)
         lbl_ai_icon.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         lbl_ai_icon.setStyleSheet(f"background: {ThemeColors.VIOLET_LO}; border-radius: 9px;")
-        lbl_ai_icon.setPixmap(create_vector_icon("ai", "#c4b5fd", 20))
+        lbl_ai_icon.setPixmap(create_vector_icon("ai", ThemeColors.TEXT_ACCENT, 20))
 
         ai_text_box = QVBoxLayout()
         ai_text_box.setContentsMargins(0, 0, 0, 0)
@@ -256,11 +260,11 @@ class BubbleTrayPopup(QWidget):
                 text-align: left;
             }}
             QPushButton:hover {{
-                background-color: rgba(39, 39, 42, 0.75);
-                border-color: {ThemeColors.BORDER_HOVER};
+                background-color: rgba(6, 182, 212, 0.10);
+                border-color: {ThemeColors.PRIMARY_HOVER};
             }}
             QPushButton:pressed {{
-                background-color: rgba(39, 39, 42, 0.95);
+                background-color: rgba(6, 182, 212, 0.20);
             }}
         """)
         st_layout = QHBoxLayout(self.btn_studio)
@@ -272,7 +276,7 @@ class BubbleTrayPopup(QWidget):
         lbl_st_icon.setAlignment(Qt.AlignCenter)
         lbl_st_icon.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         lbl_st_icon.setStyleSheet(f"background: {ThemeColors.CYAN_LO}; border-radius: 9px;")
-        lbl_st_icon.setPixmap(create_vector_icon("grid", "#67e8f9", 20))
+        lbl_st_icon.setPixmap(create_vector_icon("grid", ThemeColors.CYAN_HI, 20))
 
         st_text_box = QVBoxLayout()
         st_text_box.setContentsMargins(0, 0, 0, 0)
@@ -338,6 +342,7 @@ class FloatingBubbleWidget(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
         self.drag_position = QPoint()
+        self.drag_start_pos = QPoint()
         self.is_dragging = False
         self.progress_pct = 0
         self.status_text = "Sẵn sàng"
@@ -345,6 +350,11 @@ class FloatingBubbleWidget(QWidget):
         self.is_done = False
         self.last_duration = ""
         self.is_davinci_connected = True
+        self.pipeline_status = "idle"
+        self.status_dot_color = ThemeColors.SUCCESS
+
+        # Con trỏ bàn tay khi rê vào quả cầu nổi
+        self.setCursor(Qt.PointingHandCursor)
 
         # Khởi tạo kích thước vùng vẽ bong bóng: 68x96 px (56px orb + conic ring + 20px % pill)
         self.setFixedSize(QSize(68, 96))
@@ -396,6 +406,28 @@ class FloatingBubbleWidget(QWidget):
         if not self.is_processing and not self.is_done:
             dv_text = "DaVinci đang mở" if self.is_davinci_connected else "DaVinci chưa mở"
             self.tray.lbl_tray_right.setText(dv_text)
+            self.status_dot_color = ThemeColors.SUCCESS if connected else ThemeColors.TEXT_MUTED
+            self.tray.lbl_dot.setStyleSheet(f"color: {self.status_dot_color}; font-size: 11px;")
+            self.update()
+
+    def set_pipeline_status(self, status: str):
+        """
+        Cập nhật trạng thái trực quan trên quả cầu nổi và khay điều hướng.
+        status có thể là: "idle", "connected", "running", "error".
+        """
+        self.pipeline_status = status.lower().strip()
+        if self.pipeline_status == "connected":
+            self.status_dot_color = ThemeColors.SUCCESS
+            self.set_davinci_connected(True)
+        elif self.pipeline_status == "running":
+            self.status_dot_color = ThemeColors.PRIMARY_HOVER
+        elif self.pipeline_status == "error":
+            self.status_dot_color = ThemeColors.ERROR
+        else:  # "idle"
+            self.status_dot_color = ThemeColors.TEXT_MUTED
+
+        self.tray.lbl_dot.setStyleSheet(f"color: {self.status_dot_color}; font-size: 11px;")
+        self.update()
 
     def update_progress(self, pct: int, status_text: str = None, duration: str = None):
         """
@@ -422,7 +454,8 @@ class FloatingBubbleWidget(QWidget):
 
         # Cập nhật nội dung trong khay Tray Popup
         if self.is_done:
-            self.tray.lbl_dot.setStyleSheet(f"color: {ThemeColors.GREEN}; font-size: 11px;")
+            self.status_dot_color = ThemeColors.SUCCESS
+            self.tray.lbl_dot.setStyleSheet(f"color: {ThemeColors.SUCCESS}; font-size: 11px;")
             self.tray.lbl_tray_status.setText("<b>Đã xuất timeline</b>")
             time_display = self.last_duration if self.last_duration else "Xong"
             self.tray.lbl_tray_right.setText(time_display)
@@ -430,6 +463,7 @@ class FloatingBubbleWidget(QWidget):
             self.tray.mini_bar.setVisible(False)
             self.tray.btn_insert_timeline.setVisible(True)
         elif self.is_processing:
+            self.status_dot_color = ThemeColors.PRIMARY_HOVER
             self.tray.lbl_dot.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 11px;")
             short_txt = self.status_text if len(self.status_text) <= 36 else self.status_text[:34] + ".."
             self.tray.lbl_tray_status.setText(f"<b>{short_txt}</b>")
@@ -441,7 +475,8 @@ class FloatingBubbleWidget(QWidget):
             self.tray.mini_bar.setValue(self.progress_pct)
             self.tray.btn_insert_timeline.setVisible(False)
         else:
-            self.tray.lbl_dot.setStyleSheet(f"color: {ThemeColors.GREEN}; font-size: 11px;")
+            self.status_dot_color = ThemeColors.SUCCESS if self.is_davinci_connected else ThemeColors.TEXT_MUTED
+            self.tray.lbl_dot.setStyleSheet(f"color: {self.status_dot_color}; font-size: 11px;")
             self.tray.lbl_tray_status.setText("<b>Sẵn sàng</b>")
             dv_text = "DaVinci đang mở" if self.is_davinci_connected else "DaVinci chưa mở"
             self.tray.lbl_tray_right.setText(dv_text)
@@ -492,8 +527,8 @@ class FloatingBubbleWidget(QWidget):
         orb_path.addEllipse(cx - radius, cy - radius, radius * 2, radius * 2)
 
         grad = QLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius)
-        grad.setColorAt(0.0, QColor("#9466ff"))
-        grad.setColorAt(0.48, QColor("#6d28d9"))
+        grad.setColorAt(0.0, QColor(ThemeColors.PRIMARY_HOVER))
+        grad.setColorAt(0.48, QColor(ThemeColors.PRIMARY_PRESSED))
         grad.setColorAt(1.0, QColor("#0e7490"))
 
         painter.setBrush(QBrush(grad))
@@ -526,12 +561,22 @@ class FloatingBubbleWidget(QWidget):
         painter.restore()
 
         # =========================================================================
-        # 5. Vẽ dấu tick xanh hoàn tất (.b-done)
+        # 5. Vẽ Chấm trạng thái trực quan (Live Status Dot) ở góc trên-phải
+        # =========================================================================
+        status_cx = cx + 18
+        status_cy = cy - 18
+        status_r = 4.5
+        painter.setBrush(QColor(self.status_dot_color))
+        painter.setPen(QPen(QColor(ThemeColors.BG_CANVAS), 1.5))
+        painter.drawEllipse(QRectF(status_cx - status_r, status_cy - status_r, status_r * 2, status_r * 2))
+
+        # =========================================================================
+        # 6. Vẽ dấu tick xanh hoàn tất (.b-done)
         # =========================================================================
         if self.is_done:
             done_cx, done_cy = cx + 18, cy + 18
             done_r = 9.5
-            painter.setBrush(QColor(ThemeColors.GREEN))
+            painter.setBrush(QColor(ThemeColors.SUCCESS))
             painter.setPen(QPen(QColor("#0d0d11"), 2))
             painter.drawEllipse(QRectF(done_cx - done_r, done_cy - done_r, done_r * 2, done_r * 2))
 
@@ -541,7 +586,7 @@ class FloatingBubbleWidget(QWidget):
             painter.drawLine(QPointF(done_cx - 1.0, done_cy + 3.2), QPointF(done_cx + 4.5, done_cy - 3.2))
 
         # =========================================================================
-        # 6. Vẽ Pill hiển thị % tiến độ ở dưới đáy (.b-pct)
+        # 7. Vẽ Pill hiển thị % tiến độ ở dưới đáy (.b-pct)
         # =========================================================================
         if self.is_processing or self.is_done:
             pill_w = 48
@@ -551,36 +596,40 @@ class FloatingBubbleWidget(QWidget):
             pill_rect = QRectF(pill_x, pill_y, pill_w, pill_h)
 
             painter.setBrush(QColor(24, 24, 27, 240))
-            pill_border = ThemeColors.BORDER_HOVER if self.is_processing else QColor("#166534")
+            pill_border = ThemeColors.BORDER_HOVER if self.is_processing else ThemeColors.BORDER_DEFAULT
             painter.setPen(QPen(QColor(pill_border), 1))
             painter.drawRoundedRect(pill_rect, 10, 10)
 
             pct_txt = "Xong" if self.is_done else f"{self.progress_pct}%"
-            txt_color = "#86efac" if self.is_done else ThemeColors.CYAN_HI
+            txt_color = ThemeColors.TEXT_SUCCESS if self.is_done else ThemeColors.CYAN_HI
             painter.setPen(QColor(txt_color))
-            f_mono = QFont("Cascadia Mono", 9)
+            f_mono = QFont("JetBrains Mono", 9)
             f_mono.setBold(True)
             painter.setFont(f_mono)
             painter.drawText(pill_rect, Qt.AlignCenter, pct_txt)
 
     def _show_tray(self):
-        """Hiển thị khay popup cạnh bong bóng, tự phát hiện phía còn trống."""
+        """Hiển thị khay popup cạnh bong bóng, tự phát hiện phía còn trống trên màn hình hiện tại."""
         if self.is_dragging:
             return
 
-        screen = QApplication.primaryScreen().geometry()
+        screen = QApplication.screenAt(self.pos()) or QApplication.primaryScreen()
+        if not screen:
+            return
+        avail = screen.availableGeometry()
         tray_w = self.tray.width()
         tray_h = self.tray.sizeHint().height()
 
         b_pos = self.mapToGlobal(QPoint(0, 0))
 
-        # Nếu bong bóng nằm ở nửa phải màn hình -> bung sang TRÁI (right: calc(100% + 12px))
-        if b_pos.x() > screen.width() / 2:
+        # Nếu bong bóng nằm ở nửa phải màn hình hiện tại -> bung sang TRÁI
+        center_x = avail.left() + avail.width() / 2
+        if b_pos.x() > center_x:
             tx = b_pos.x() - tray_w - 10
-        else:  # Bung sang PHẢI (left: calc(100% + 12px))
+        else:  # Bung sang PHẢI
             tx = b_pos.x() + self.width() + 10
 
-        ty = max(10, min(screen.height() - tray_h - 20, b_pos.y() - 8))
+        ty = max(avail.top() + 10, min(avail.bottom() - tray_h - 10, b_pos.y() - 8))
 
         self.tray.move(tx, ty)
         self.tray.show()
@@ -611,34 +660,64 @@ class FloatingBubbleWidget(QWidget):
         self.hide_timer.start(400)
         super().leaveEvent(event)
 
+    def snap_to_edge(self):
+        """Hút dính mép màn hình (Edge Snapping) đa màn hình, tự né taskbar/dock với availableGeometry."""
+        screen = QApplication.screenAt(self.pos()) or QApplication.primaryScreen()
+        if not screen:
+            return
+        avail = screen.availableGeometry()
+
+        cur_x = self.x()
+        cur_y = max(avail.top() + 16, min(avail.bottom() - self.height() - 16, self.y()))
+
+        # Khoảng cách tới mép trái và mép phải của màn hình hiện tại
+        dist_left = cur_x - avail.left()
+        dist_right = avail.right() - (cur_x + self.width())
+
+        if dist_left < 50:
+            target_x = avail.left() + 16
+        elif dist_right < 50:
+            target_x = avail.right() - self.width() - 16
+        else:
+            target_x = max(avail.left() + 16, min(avail.right() - self.width() - 16, cur_x))
+
+        self.move(target_x, cur_y)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.is_dragging = True
+            self.is_dragging = False
+            self.drag_start_pos = event.globalPosition().toPoint()
             self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            self._hide_tray_immediate()
             event.accept()
 
     def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.LeftButton and self.is_dragging:
-            new_pos = event.globalPosition().toPoint() - self.drag_position
-            self.move(new_pos)
-            event.accept()
+        if event.buttons() == Qt.LeftButton:
+            delta = (event.globalPosition().toPoint() - self.drag_start_pos).manhattanLength()
+            if delta > 5:
+                self.is_dragging = True
+                self._hide_tray_immediate()
+                new_pos = event.globalPosition().toPoint() - self.drag_position
+                screen = QApplication.screenAt(event.globalPosition().toPoint()) or QApplication.primaryScreen()
+                if screen:
+                    avail = screen.availableGeometry()
+                    clamped_x = max(avail.left() - 20, min(avail.right() - self.width() + 20, new_pos.x()))
+                    clamped_y = max(avail.top() - 10, min(avail.bottom() - self.height() + 10, new_pos.y()))
+                    self.move(clamped_x, clamped_y)
+                else:
+                    self.move(new_pos)
+                event.accept()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.is_dragging = False
-            # Edge Snapping: Hút dính mép màn hình nếu kéo gần biên (< 50px)
-            screen = QApplication.primaryScreen().geometry()
-            cur_x = self.x()
-            cur_y = max(16, min(screen.height() - self.height() - 40, self.y()))
-
-            if cur_x < 50:
-                self.move(16, cur_y)
-            elif cur_x > screen.width() - self.width() - 50:
-                self.move(screen.width() - self.width() - 16, cur_y)
+            if not self.is_dragging:
+                # Click chuột trái vào quả cầu: Bật/Tắt khay điều hướng ngay lập tức
+                if self.tray.isVisible():
+                    self._hide_tray_immediate()
+                else:
+                    self._show_tray()
             else:
-                self.move(cur_x, cur_y)
-
+                self.is_dragging = False
+                self.snap_to_edge()
             event.accept()
 
     def contextMenuEvent(self, event):

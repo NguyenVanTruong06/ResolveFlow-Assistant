@@ -31,3 +31,24 @@ def test_to_local_qurl():
     url = PosixPathAdapter.to_local_qurl(path)
     assert url.isLocalFile()
     assert url.toLocalFile() == str(Path(path).expanduser().resolve())
+
+def test_to_fcpxml_uri_windows_drive_colon():
+    win_uri = PosixPathAdapter.to_fcpxml_uri("C:/Users/Editor/Desktop/video clip.mp4")
+    assert win_uri.startswith("file:///C:")
+    assert "%3A" not in win_uri
+    assert "%3a" not in win_uri
+    assert "video%20clip.mp4" in win_uri
+
+def test_project_root_and_get_asset_path():
+    from src.utils.path_utils import PROJECT_ROOT, get_asset_path
+    assert PROJECT_ROOT.is_dir()
+    lut_dir = get_asset_path("luts")
+    assert lut_dir.name == "luts"
+    assert lut_dir.is_absolute()
+    assert PosixPathAdapter.get_asset_path("sfx").name == "sfx"
+
+def test_normalize_for_comparison():
+    p = "/media/user/Videos/Clip_01.MP4"
+    norm = PosixPathAdapter.normalize_for_comparison(p)
+    assert norm.endswith("Clip_01.MP4")
+

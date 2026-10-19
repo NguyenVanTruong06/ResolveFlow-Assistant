@@ -64,17 +64,17 @@ class PreviewDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"Quick Preview: {preset.name} ({aspect_ratio})")
         self.resize(680, 440)
-        self.setStyleSheet("background-color: #16161A; color: #E0E0E6;")
+        self.setStyleSheet(f"background-color: {ThemeColors.BG_CARD}; color: {ThemeColors.TEXT_PRIMARY};")
 
         layout = QVBoxLayout(self)
 
         info_lbl = QLabel(f"<b>Kiểu chữ:</b> {preset.name} | <b>Animation:</b> {preset.animation.upper()} ({preset.timing_curve}) | <b>Tỷ lệ:</b> {aspect_ratio}")
-        info_lbl.setStyleSheet("color: #90CAF9; font-size: 13px;")
+        info_lbl.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 13px;")
         layout.addWidget(info_lbl)
 
         self.img_lbl = QLabel()
         self.img_lbl.setAlignment(Qt.AlignCenter)
-        self.img_lbl.setStyleSheet("background-color: #0E0E10; border: 1px solid #2A2A35; border-radius: 6px;")
+        self.img_lbl.setStyleSheet(f"background-color: {ThemeColors.BG_CONSOLE}; border: 1px solid {ThemeColors.BORDER_DEFAULT}; border-radius: 6px;")
         layout.addWidget(self.img_lbl, stretch=1)
 
         # Render preview image
@@ -93,6 +93,19 @@ class PreviewDialog(QDialog):
             self.img_lbl.setText(f"Không thể tạo ảnh xem trước: {e}")
 
         btn_close = QPushButton("Đóng (Close)")
+        btn_close.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_INPUT};
+                color: {ThemeColors.TEXT_PRIMARY};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 6px 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.BG_CARD_ACTIVE};
+                border-color: {ThemeColors.BORDER_HOVER};
+            }}
+        """)
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
 
@@ -199,7 +212,11 @@ class PipelineWorker(QThread):
         video_type="auto",
         hide_weak_subs=True,
         story_arrangement_override=None,
-        project_structure=None
+        project_structure=None,
+        enable_evidence_hunter=True,
+        enable_shotbook=True,
+        enable_geometry_checker=True,
+        safe_zone_platform="tiktok"
     ):
         super().__init__()
         self.video_paths = video_paths
@@ -244,6 +261,10 @@ class PipelineWorker(QThread):
         self.story_target = story_target
         self.story_arrangement_override = story_arrangement_override
         self.project_structure = project_structure
+        self.enable_evidence_hunter = enable_evidence_hunter
+        self.enable_shotbook = enable_shotbook
+        self.enable_geometry_checker = enable_geometry_checker
+        self.safe_zone_platform = safe_zone_platform
         
         self.proposed_segments = []
         self.clip_data_out_cache = []
@@ -1081,6 +1102,83 @@ class PipelineWorker(QThread):
 
                 subs_to_embed = merged_cut_subtitles if self.enable_subtitles else None
 
+                # --- 📐 DYNAMIC SHOTBOOK ORCHESTRATION & WEB EVIDENCE HUNTER & GEOMETRY CHECKER ---
+                active_shotbook_plan = None
+                evidence_targets = []
+                if self.enable_shotbook and merged_edl_events:
+                    try:
+                        subs_for_evidence = merged_cut_subtitles if merged_cut_subtitles else (subs_to_embed or [])
+
+                        # 1. Web Evidence Hunter
+                        if self.enable_evidence_hunter and subs_for_evidence:
+                            from src.core.evidence_grabber import EvidenceKeywordDetector, WebScreenshotEngine
+                            self.log_signal.emit("\n🌐 [Web Evidence Hunter] Quét transcript tìm URL & thương hiệu công nghệ minh chứng...")
+                            ev_detector = EvidenceKeywordDetector()
+                            evidence_cache_dir = os.path.join(base_dir, "cache", "evidence")
+                            os.makedirs(evidence_cache_dir, exist_ok=True)
+                            screenshot_engine = WebScreenshotEngine(output_dir=evidence_cache_dir, timeout=6.0)
+
+                            for sub in subs_for_evidence:
+                                sub_txt = sub.get("text", "")
+                                st = float(sub.get("start", 0.0))
+                                et = float(sub.get("end", st + 2.0))
+                                targets = ev_detector.detect_targets(sub_txt, start_time=st, end_time=et)
+                                for tgt in targets:
+                                    img_path = screenshot_engine.capture_screenshot(tgt.target_url)
+                                    tgt.evidence_path = img_path
+                                    evidence_targets.append(tgt)
+                                    self.log_signal.emit(f"   🔍 Minh chứng: '{tgt.keyword}' -> {tgt.target_url} (đã lưu: {os.path.basename(img_path)})")
+
+                            if evidence_targets:
+                                self.log_signal.emit(f"   ✅ [Web Evidence Hunter] Đã thu thập {len(evidence_targets)} ảnh B-Roll minh chứng Web.")
+                                # Bổ sung vào all_broll_cues cho FCP7 XML (Windows DaVinci)
+                                try:
+                                    from src.core.broll_sfx import BRollCue
+                                    for ev in evidence_targets:
+                                        if ev.evidence_path:
+                                            dur = max(1.0, ev.end_time - ev.start_time)
+                                            all_broll_cues.append(BRollCue(
+                                                start=ev.start_time,
+                                                end=ev.end_time,
+                                                duration=dur,
+                                                keyword=ev.keyword,
+                                                search_prompt=ev.target_url,
+                                                track_index=2
+                                            ))
+                                except Exception:
+                                    pass
+
+                        # 2. Dynamic Shotbook Orchestrator
+                        from src.core.shotbook_orchestrator import ShotbookOrchestrator
+                        self.log_signal.emit("\n📐 [Dynamic SHOTBOOK] Phân vai ngữ nghĩa (Hook, Punchline, Evidence, Normal) cho DaVinci Resolve...")
+                        orchestrator = ShotbookOrchestrator(punch_in_scale=self.punch_in_scale)
+                        segments_for_plan = subs_for_evidence if subs_for_evidence else [
+                            {"start": ev["rec_in"], "end": ev["rec_out"], "text": ""} for ev in merged_edl_events
+                        ]
+                        active_shotbook_plan = orchestrator.create_shotbook_plan(
+                            segments=segments_for_plan,
+                            evidence_targets=evidence_targets,
+                            aspect_ratio=target_aspect
+                        )
+
+                        # 3. Geometry & Layout Conflict Checker
+                        if self.enable_geometry_checker and active_shotbook_plan:
+                            self.log_signal.emit(f"\n🛡️ [Geometry Checker] Khử xung đột bố cục & bảo vệ Safe Zone ({self.safe_zone_platform.upper()})...")
+                            active_shotbook_plan, conflicts = orchestrator.audit_with_geometry_checker(
+                                plan=active_shotbook_plan,
+                                face_detections=None,
+                                platform=self.safe_zone_platform,
+                                aspect_ratio=target_aspect
+                            )
+                            if conflicts:
+                                self.log_signal.emit(f"   ⚡ Đã giải quyết {len(conflicts)} xung đột bố cục (lật góc PiP / dời vị trí tránh che mặt).")
+                            else:
+                                self.log_signal.emit("   ✨ Bố cục hình ảnh an toàn, không phát hiện xung đột.")
+
+                    except Exception as e:
+                        self.log_signal.emit(f"   ⚠️ [SHOTBOOK / Evidence Warning]: {e}, tiếp tục xuất timeline tiêu chuẩn.")
+                        active_shotbook_plan = None
+
                 FCPXMLGenerator.generate_timeline_fcpxml(
                     events=merged_edl_events,
                     output_xml_path=output_timeline_fcpxml,
@@ -1090,7 +1188,8 @@ class PipelineWorker(QThread):
                     subtitles=subs_to_embed,
                     font_name=self.font_name,
                     font_size=self.font_size,
-                    preset=self.text_preset_id
+                    preset=self.text_preset_id,
+                    shotbook_plan=active_shotbook_plan
                 )
 
                 FCPXMLGenerator.generate_fcp7_xml(
@@ -3041,8 +3140,19 @@ class ChunDVCApp(QMainWindow):
             self.txt_console.appendPlainText(f"🔊 Số hiệu ứng SFX: {len(plan.sfx_inserts)} cues")
         self.txt_console.appendPlainText("="*60 + "\n")
 
+        # Thu thập đầy đủ video từ selected_files, video_paths, project_structure, hoặc lbl_file
+        cur_files = getattr(self, "selected_files", []) or []
+        if not cur_files and hasattr(self, "video_paths") and self.video_paths:
+            cur_files = list(self.video_paths)
+        if not cur_files and hasattr(self, "lbl_file") and self.lbl_file.text().strip():
+            raw_t = self.lbl_file.text().strip()
+            cur_files = [p.strip() for p in raw_t.split(";") if p.strip() and os.path.exists(p.strip())]
+        if not cur_files and self.project_structure and hasattr(self.project_structure, "all_video_paths"):
+            cur_files = list(self.project_structure.all_video_paths)
+        self.selected_files = cur_files
+
         # Xác định thư mục gốc dự án
-        first_v = self.selected_files[0] if hasattr(self, "selected_files") and self.selected_files else ""
+        first_v = self.selected_files[0] if self.selected_files else ""
         if self.project_structure and getattr(self.project_structure, "root_path", None):
             project_root_dir = self.project_structure.root_path
         else:
@@ -3402,7 +3512,13 @@ class ChunDVCApp(QMainWindow):
         
         if msg_box.clickedButton() == btn_open_folder:
             import subprocess
-            subprocess.run(f'explorer /select,"{os.path.abspath(out_fcp7xml)}"', shell=True)
+            target_path = os.path.abspath(out_fcp7xml)
+            if sys.platform.startswith("win"):
+                subprocess.run(f'explorer /select,"{target_path}"', shell=True)
+            elif sys.platform.startswith("darwin"):
+                subprocess.run(["open", "-R", target_path])
+            else:
+                subprocess.run(["xdg-open", os.path.dirname(target_path)])
         elif msg_box.clickedButton() == btn_copy_path:
             QApplication.clipboard().setText(os.path.abspath(out_fcp7xml))
 

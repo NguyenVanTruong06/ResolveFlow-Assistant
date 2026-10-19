@@ -383,6 +383,16 @@ class TabAutoCut(QWidget):
         self.check_sfx.setChecked(True)
         self.check_sfx.setToolTip("Tự động chèn tiếng Whoosh, Pop, Ding khi có chuyển cảnh hoặc điểm nhấn từ khóa lên Track Audio 2.")
         form_v4.addRow(self.check_sfx)
+
+        self.check_evidence = QCheckBox("🌐 Tự động săn ảnh Web minh chứng B-Roll (Evidence Hunter)")
+        self.check_evidence.setChecked(True)
+        self.check_evidence.setToolTip("Quét transcript tìm kiếm link URL và thực thể công nghệ, tự động chụp ảnh màn hình làm B-Roll.")
+        form_v4.addRow(self.check_evidence)
+
+        self.check_geometry = QCheckBox("🛡️ Khử xung đột bố cục & Tránh che mặt người nói (Safe Zone)")
+        self.check_geometry.setChecked(True)
+        self.check_geometry.setToolTip("Tự động lật góc PiP và nâng độ cao phụ đề tránh đè vào mặt người nói và vùng an toàn UI TikTok/Shorts.")
+        form_v4.addRow(self.check_geometry)
         adv_layout.addWidget(self.group_v4)
 
         self.btn_run_autocut = QPushButton("✂ 🚀 XUẤT TIMELINE CẮT THÔ (OFFLINE)")

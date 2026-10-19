@@ -660,6 +660,25 @@ class StoryCopilot:
                         if os.path.exists(p):
                             return p
 
+        # 5. Fallback cuối cùng: Tránh việc AI đặt tên lạ làm rớt sạch clip khỏi Timeline
+        existing_vids = []
+        for p in video_paths_by_index.values():
+            if isinstance(p, str) and os.path.exists(p) and p not in existing_vids:
+                existing_vids.append(p)
+
+        if len(existing_vids) == 1:
+            return existing_vids[0]
+
+        if clip_index is not None and existing_vids:
+            try:
+                digits = re.findall(r'\d+', str(clip_index))
+                if digits:
+                    c_idx = int(digits[0])
+                    if 1 <= c_idx <= len(existing_vids):
+                        return existing_vids[c_idx - 1]
+            except Exception:
+                pass
+
         return None
 
     @classmethod

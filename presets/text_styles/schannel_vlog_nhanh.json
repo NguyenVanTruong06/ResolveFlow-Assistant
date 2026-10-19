@@ -1,0 +1,29 @@
+{
+  "id": "schannel_vlog_nhanh",
+  "name": "Schannel Vlog Nhịp Nhanh",
+  "category": "kinetic",
+  "badge_icon": "🔥",
+  "tags": [
+    "Schannel",
+    "Vlog",
+    "Vietnamese",
+    "TechReview",
+    "Dynamic",
+    "GenZ"
+  ],
+  "description": "Phong cách phụ đề dí dỏm, nhịp nhảy chữ dồn dập bắt tai bắt mắt quen thuộc của kênh Schannel & review đồ chơi công nghệ.",
+  "font": "Arial",
+  "size": 52,
+  "weight": "extra_bold",
+  "standard_color": "#FFFFFF",
+  "highlight_color": "#FFD700",
+  "outline_color": "#18181B",
+  "outline_width": 0.18,
+  "animation": "bounce",
+  "timing_curve": "spring",
+  "position_y_16_9": 0.15,
+  "position_y_9_16": 0.35,
+  "box_color": null,
+  "glow_color": null,
+  "gradient_colors": null
+}
