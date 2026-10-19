@@ -167,9 +167,28 @@ Run_ResolveFlow.bat
 
 ---
 
-## 📦 Đóng Gói Độc Lập (Standalone Build)
+## 📦 Tải Bản Cài Đặt Sẵn (.exe & .deb) Hoặc Tự Đóng Gói
 
-Dự án tích hợp sẵn công cụ đóng gói tối ưu hóa cho phân phối end-user không cần cài đặt Python:
+### 1. Tải trực tiếp từ GitHub Releases (Dành cho Editor / Không cần cài Python)
+Truy cập trang **[GitHub Releases](https://github.com/NguyenVanTruong06/ResolveFlow-Assistant/releases)** để tải bản phát hành đóng gói sẵn:
+
+- **Windows 11 / 10:** Tải tệp **`ResolveFlow-Assistant-v1.0.0-windows-x64.zip`**
+  - Giải nén tệp `.zip` vào ổ đĩa bất kỳ (ví dụ `D:\ResolveFlow-Assistant\`).
+  - Nhấp đúp chuột vào file **`ResolveFlow-Assistant.exe`** hoặc **`Launch_ResolveFlow.bat`** để mở ứng dụng ngay!
+- **Linux (Ubuntu / Debian / Linux Mint):** Tải tệp **`resolveflow-assistant_1.0.0_amd64.deb`**
+  - Cài đặt nhanh bằng lệnh terminal:
+    ```bash
+    sudo dpkg -i resolveflow-assistant_1.0.0_amd64.deb
+    sudo apt-get install -f   # Tự động bù dependencies nếu thiếu
+    ```
+  - Sau khi cài xong, bạn có thể mở ứng dụng trực tiếp từ Application Menu của hệ điều hành hoặc gõ lệnh `resolveflow-assistant`.
+- **Linux (Arch / Fedora / Generic):** Tải tệp **`ResolveFlow-Assistant-v1.0.0-linux-x64.tar.gz`**
+  - Giải nén: `tar -xzf ResolveFlow-Assistant-v1.0.0-linux-x64.tar.gz`
+  - Chạy: `./ResolveFlow-Assistant/launch_resolveflow.sh`
+
+---
+
+### 2. Tự đóng gói Standalone trên máy cục bộ
 
 ```bash
 # 1. Kiểm tra cấu hình và xác nhận các đường dẫn tài nguyên (Dry-run mode):
@@ -177,11 +196,14 @@ python3 build_standalone.py --dry-run
 
 # 2. Thực hiện đóng gói onedir qua PyInstaller:
 python3 build_standalone.py
+
+# 3. (Tùy chọn trên Ubuntu/Debian) Tạo gói cài đặt .deb:
+./package_deb.sh 1.0.0
 ```
 
 Sau khi đóng gói hoàn tất:
-- **Trên Linux:** Bản phân phối nằm tại `dist/ResolveFlow-Assistant/`. Chạy bằng `./launch_resolveflow.sh` hoặc cài đặt file `resolveflow-assistant.desktop`.
-- **Trên Windows:** Bản phân phối nằm tại `dist\ResolveFlow-Assistant\`. Chạy trực tiếp `ResolveFlow-Assistant.exe` hoặc qua `Launch_ResolveFlow.bat`.
+- **Trên Linux:** Bản phân phối nằm tại `dist/ResolveFlow-Assistant/` và gói `.deb` nằm tại thư mục gốc dự án.
+- **Trên Windows:** Bản phân phối nằm tại `dist\ResolveFlow-Assistant\` (chứa sẵn `ResolveFlow-Assistant.exe`).
 
 ---
 

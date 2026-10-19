@@ -16,7 +16,7 @@ env:
 
 jobs:
   release-windows:
-    name: Build & Release Standalone Executable (Windows)
+    name: Build & Release Standalone (Windows .exe)
     runs-on: windows-latest
 
     steps:
@@ -49,10 +49,61 @@ jobs:
         Compress-Archive -Path dist/ResolveFlow-Assistant -DestinationPath "ResolveFlow-Assistant-${{ github.ref_name }}-windows-x64.zip" -Force
         Get-ChildItem -Path "ResolveFlow-Assistant-${{ github.ref_name }}-windows-x64.zip"
 
-    - name: Publish GitHub Release with Assets
+    - name: Publish Windows Release Asset
       uses: softprops/action-gh-release@v2
       with:
         files: ResolveFlow-Assistant-${{ github.ref_name }}-windows-x64.zip
+        name: "ResolveFlow Assistant ${{ github.ref_name }}"
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-linux:
+    name: Build & Release Standalone (Linux .tar.gz & .deb)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+
+    - name: Install System Dependencies & FFmpeg
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg libxcb-cursor0 dpkg-dev
+
+    - name: Install Dependencies & PyInstaller
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build Standalone Executable
+      run: |
+        python3 build_standalone.py
+
+    - name: Package Standalone Tarball
+      run: |
+        tar -czf "ResolveFlow-Assistant-${{ github.ref_name }}-linux-x64.tar.gz" -C dist ResolveFlow-Assistant
+
+    - name: Build Debian (.deb) Package
+      run: |
+        chmod +x package_deb.sh
+        ./package_deb.sh "${{ github.ref_name }}"
+
+    - name: Publish Linux Release Assets
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          ResolveFlow-Assistant-${{ github.ref_name }}-linux-x64.tar.gz
+          *.deb
         name: "ResolveFlow Assistant ${{ github.ref_name }}"
         generate_release_notes: true
         draft: false
