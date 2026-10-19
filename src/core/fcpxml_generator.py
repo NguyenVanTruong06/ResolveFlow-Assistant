@@ -927,7 +927,10 @@ class FCPXMLGenerator:
             return int(round(sec * real_fps))
 
         def clean_path_url(path: str) -> str:
-            return PosixPathAdapter.to_fcpxml_uri(path)
+            uri = PosixPathAdapter.to_fcpxml_uri(path)
+            if uri.startswith("file:///") and not uri.startswith("file://localhost/"):
+                return "file://localhost" + uri[7:]
+            return uri
 
         def clean_str(val: Any) -> str:
             if not val:
