@@ -136,6 +136,15 @@ class DryRunValidator:
                     f"hoặc định dạng ProRes/DNxHR trước khi làm việc, hoặc nâng cấp lên Resolve Studio."
                 )
 
+            # 2.5 Kiểm tra Variable Frame Rate (VFR)
+            try:
+                from src.core.ffmpeg_utils import detect_vfr_status
+                vfr_stat = detect_vfr_status(path)
+                if vfr_stat.get("is_vfr") and vfr_stat.get("warning"):
+                    result.warnings.append(vfr_stat["warning"])
+            except Exception:
+                pass
+
         # 3. Kiểm tra tính đồng nhất của Frame Rate
         if len(fps_list) > 1:
             first_path, first_fps = fps_list[0]

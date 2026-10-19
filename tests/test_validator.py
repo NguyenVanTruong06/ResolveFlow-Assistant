@@ -310,3 +310,44 @@ def test_validate_fcpxml_integrity_resolve_media_pool_check(tmp_path):
     assert any("chưa có trong Media Pool của DaVinci Resolve" in w for w in val_res.warnings)
     assert str(media_file) in val_res.details.get("missing_in_media_pool", [])
 
+
+def test_detect_vfr_status(tmp_path):
+    import json
+    from src.core.ffmpeg_utils import detect_vfr_status
+    dummy_video = tmp_path / "sample_vfr.mp4"
+    dummy_video.write_bytes(b"dummy")
+
+    # Mock subprocess ffprobe output for CFR (r_fps = 30/1, avg_fps = 30/1)
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps({
+                "streams": [{
+                    "r_frame_rate": "30/1",
+                    "avg_frame_rate": "30/1"
+                }]
+            })
+        )
+        res_cfr = detect_vfr_status(str(dummy_video))
+        assert res_cfr["is_vfr"] is False
+        assert res_cfr["fps_diff"] == 0.0
+        assert res_cfr["warning"] is None
+
+    # Clear cache for the same path
+    from src.core.resolve_api import _VIDEO_META_CACHE
+    _VIDEO_META_CACHE.pop(os.path.normpath(str(dummy_video)), None)
+
+    # Mock subprocess ffprobe output for VFR (r_fps = 30/1, avg_fps = 27.8/1 -> diff 2.2 > 0.5)
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps({
+                "streams": [{
+                    "r_frame_rate": "30/1",
+                    "avg_frame_rate": "278/10"
+                }]
+            })
+        )
+        res_vfr = detect_vfr_status(str(dummy_video))
+        assert res_vfr["is_vfr"] is True
+        assert abs(res_vfr["fps_diff"] - 2.2) < 0.01
+        assert "VFR" in res_vfr["warning"]
+
