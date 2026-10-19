@@ -341,6 +341,17 @@ class StoryCopilot:
             raise ValueError("Nội dung phản hồi từ AI trống.")
 
         clean = response_text.strip()
+        # Chuẩn hóa các ký tự Unicode vô hình, dấu cách không ngắt dòng và BOM
+        clean = (
+            clean.replace("\xa0", " ")
+            .replace("\u202f", " ")
+            .replace("\u2007", " ")
+            .replace("\u3000", " ")
+            .replace("\u200b", "")
+            .replace("\ufeff", "")
+            .replace("\u200c", "")
+            .replace("\u200d", "")
+        )
 
         # 1. Trích xuất khối ```json ... ``` nếu có
         json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean, re.DOTALL)
@@ -355,10 +366,40 @@ class StoryCopilot:
             else:
                 json_str = clean
 
+        # Thay thế ngoặc kép và ngoặc đơn thông minh (smart/curly quotes)
+        json_str = re.sub(r'[\u201c\u201d\u201e\u201f\xab\xbb]', '"', json_str)
+        json_str = re.sub(r'[\u2018\u2019\u201a\u201b]', "'", json_str)
+
+        # Loại bỏ các comment thường gặp trong JSON sinh bởi LLM (// hoặc /* */)
+        json_str = re.sub(r'(?<!:)\/\/(?![\/\\])[^\r\n]*', '', json_str)
+        json_str = re.sub(r'\/\*[\s\S]*?\*\/', '', json_str)
+
+        # Loại bỏ trailing comma trước } hoặc ] (lỗi cú pháp phổ biến của AI)
+        json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
+
+        data = None
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
-            raise ValueError(f"Không thể đọc định dạng JSON từ phản hồi của AI: {e}")
+            # Fallback 1: Thử ast.literal_eval nếu AI trả về dict dạng Python
+            try:
+                import ast
+                val = ast.literal_eval(json_str)
+                if isinstance(val, dict):
+                    data = val
+            except Exception:
+                pass
+
+            # Fallback 2: Chuyển đổi keys bọc bằng dấu nháy đơn ' sang "
+            if data is None:
+                try:
+                    fixed = re.sub(r"(?<=[{\s,])\'([a-zA-Z0-9_]+)\'\s*:", r'"\1":', json_str)
+                    data = json.loads(fixed)
+                except Exception:
+                    pass
+
+            if data is None:
+                raise ValueError(f"Không thể đọc định dạng JSON từ phản hồi của AI: {e}")
 
         if not isinstance(data, dict):
             raise ValueError("Dữ liệu JSON không đúng cấu trúc đối tượng (Object).")

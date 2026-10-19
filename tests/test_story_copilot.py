@@ -111,6 +111,45 @@ def test_parse_copilot_response_invalid():
         StoryCopilot.parse_copilot_response("Không có json nào ở đây cả.")
 
 
+def test_parse_copilot_response_resilient_unicode_and_quotes():
+    """Kiểm tra khả năng tự làm sạch NBSP, smart quotes, trailing commas và dict Python."""
+    resilient_raw = """
+    ```json
+    {\xa0\u200b
+      “strategy_summary”: “Đi rừng Cát Tiên”,
+      “target_platform”: “YouTube”,
+      “global_hook”: {
+        “clip_index”: 1,
+        “clip_name”: “clip1.mp4”,
+        “start_sec”: 0.0,
+        “end_sec”: 30.0,
+        “hook_title”: “🔥 [TEASER HOOK] RỪNG CÁT TIÊN”,
+      },
+      “timeline_segments”: [
+        {
+          ‘clip_index’: 1,
+          ‘clip_name’: ‘clip1.mp4’,
+          ‘start_sec’: 0.0,
+          ‘end_sec’: 15.0,
+          ‘action’: ‘keep’,
+          ‘role’: ‘intro’,
+        },
+      ],
+      “viral_headlines”: [
+        “Tiêu đề 1”,
+        “Tiêu đề 2”,
+      ],
+    }
+    ```
+    """
+    plan = StoryCopilot.parse_copilot_response(resilient_raw)
+    assert plan is not None
+    assert plan.strategy_summary == "Đi rừng Cát Tiên"
+    assert plan.global_hook.clip_name == "clip1.mp4"
+    assert len(plan.timeline_segments) == 1
+    assert len(plan.viral_headlines) == 2
+
+
 def test_convert_plan_to_resolve_timeline(tmp_path):
     # Tạo giả lập 2 file
     f1 = tmp_path / "clip1.mp4"
