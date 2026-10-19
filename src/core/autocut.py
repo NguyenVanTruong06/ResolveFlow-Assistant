@@ -21,7 +21,19 @@ class AudioCutConfig(BaseModel):
     )
     padding_seconds: float = Field(
         default=0.30, ge=0.0, le=1.0,
-        description="Thời gian đệm (giây) ở hai đầu điểm cắt để tránh mất chữ thoại đầu/cuối"
+        description="Thời gian đệm đối xứng cũ (giữ tương thích ngược)"
+    )
+    pre_roll: float = Field(
+        default=0.05, ge=0.0, le=1.0,
+        description="Thời gian đệm trước (giây) trước khi mở miệng (50ms)"
+    )
+    post_roll: float = Field(
+        default=0.08, ge=0.0, le=1.0,
+        description="Thời gian đệm sau (giây) sau khi dứt lời để giữ âm gió tiếng Việt (80ms)"
+    )
+    min_gap_merge: float = Field(
+        default=0.15, ge=0.0, le=2.0,
+        description="Khoảng cách tối thiểu (giây) giữa 2 đoạn thoại; nếu nhỏ hơn sẽ tự động gộp tránh giật cục"
     )
     speed_up_silence: bool = Field(
         default=False,
@@ -31,6 +43,15 @@ class AudioCutConfig(BaseModel):
         default=8.0, ge=2.0, le=20.0,
         description="Hệ số tốc độ tua nhanh khoảng lặng (ví dụ 8.0x)"
     )
+
+    def model_post_init(self, __context: Any) -> None:
+        # Nếu caller chủ động truyền padding_seconds (ví dụ padding_seconds=0.0)
+        # mà không truyền pre_roll / post_roll thì áp dụng padding_seconds
+        if "padding_seconds" in self.model_fields_set:
+            if "pre_roll" not in self.model_fields_set:
+                self.pre_roll = self.padding_seconds
+            if "post_roll" not in self.model_fields_set:
+                self.post_roll = self.padding_seconds
 
 class CutSegment(BaseModel):
     """
@@ -163,19 +184,23 @@ class SilenceDetector:
         if current_time < duration:
             keep_intervals.append((current_time, duration))
 
-        # 5. Áp dụng khoảng đệm (Padding) ở hai đầu để tránh cắt cụt câu thoại
+        # 5. Áp dụng khoảng đệm an toàn (Pre-roll & Post-roll) và gộp các đoạn gần nhau (< min_gap_merge)
+        pre_roll = config.pre_roll
+        post_roll = config.post_roll
+        min_gap = config.min_gap_merge
+
         padded_keep_intervals = []
         for start, end in keep_intervals:
-            # Lùi start về trước (đệm đầu) nhưng không được nhỏ hơn 0
-            new_start = max(0.0, start - config.padding_seconds)
-            # Tiến end về sau (đệm đuôi) nhưng không vượt quá tổng thời lượng
-            new_end = min(duration, end + config.padding_seconds)
+            # Lùi start về trước (đệm đầu pre-roll) nhưng không được nhỏ hơn 0
+            new_start = max(0.0, start - pre_roll)
+            # Tiến end về sau (đệm đuôi post-roll) nhưng không vượt quá tổng thời lượng
+            new_end = min(duration, end + post_roll)
             
-            # Nếu mảng đã có phần tử, kiểm tra chồng chập với đoạn trước đó
+            # Nếu mảng đã có phần tử, kiểm tra chồng chập hoặc khoảng cách giữa 2 đoạn < min_gap
             if padded_keep_intervals:
                 prev_start, prev_end = padded_keep_intervals[-1]
-                if new_start < prev_end:
-                    # Gộp hai đoạn bị chồng chập do áp dụng padding
+                if new_start <= prev_end + min_gap:
+                    # Gộp hai đoạn bị chồng chập hoặc quá gần nhau (tránh micro jump-cuts giật cục)
                     padded_keep_intervals[-1] = (prev_start, max(prev_end, new_end))
                 else:
                     padded_keep_intervals.append((new_start, new_end))

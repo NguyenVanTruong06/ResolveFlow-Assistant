@@ -243,3 +243,68 @@ def test_edl_writes_m2_motion_effect_for_speedup(tmp_path):
     lines = open(out, encoding="utf-8").read().splitlines()
     m2 = [ln for ln in lines if ln.startswith("M2")]
     assert len(m2) == 1 and "240.0" in m2[0] and m2[0].split()[-1] == "00:00:00:00"   # 30fps x 8 = 240 fps
+
+
+def test_audio_padding_and_close_segment_merging(tmp_path):
+    import wave
+    import numpy as np
+    from src.core.autocut import AudioCutConfig, SilenceDetector
+
+    # Create synthetic WAV:
+    # Burst 1: 0.5s - 1.5s
+    # Silence gap: 1.5s - 1.8s (gap = 300ms)
+    # Burst 2: 1.8s - 2.5s
+    # Silence: 2.5s - 4.0s (gap = 1.5s, must be cut)
+    sample_rate = 16000
+    duration = 4.0
+    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+    audio = np.zeros_like(t, dtype=np.float32)
+
+    # Burst 1: 0.5 to 1.5
+    idx1 = (t >= 0.5) & (t <= 1.5)
+    audio[idx1] = 0.5 * np.sin(2 * np.pi * 440 * t[idx1])
+
+    # Burst 2: 1.8 to 2.5 (raw gap = 0.30s between bursts)
+    idx2 = (t >= 1.8) & (t <= 2.5)
+    audio[idx2] = 0.5 * np.sin(2 * np.pi * 440 * t[idx2])
+
+    audio_int16 = (audio * 32767).astype(np.int16)
+    wav_path = str(tmp_path / "test_merge.wav")
+    with wave.open(wav_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(audio_int16.tobytes())
+
+    # Case A: pre_roll=0.05, post_roll=0.08, min_gap_merge=0.20
+    # After padding:
+    # Burst 1 end: 1.5 + 0.08 = 1.58
+    # Burst 2 start: 1.8 - 0.05 = 1.75
+    # Effective gap between padded segments: 1.75 - 1.58 = 0.17s
+    # Since 0.17s <= min_gap_merge (0.20s), they MUST be merged into 1 segment!
+    config_merge = AudioCutConfig(
+        min_silent_duration=0.1,
+        silence_threshold_db=-30.0,
+        pre_roll=0.05,
+        post_roll=0.08,
+        min_gap_merge=0.20
+    )
+    segments_merge = SilenceDetector.detect_silence_from_wav(wav_path, config_merge)
+    keep_segs_merge = [s for s in segments_merge if s.action == "keep"]
+    assert len(keep_segs_merge) == 1
+    # Asymmetric padding check: start should be ~0.45s (0.5 - 0.05), NOT 0.20s (from 0.30 padding)
+    assert abs(keep_segs_merge[0].start - 0.45) <= 0.03
+    # Asymmetric padding check: end should be ~2.58s (2.5 + 0.08)
+    assert abs(keep_segs_merge[0].end - 2.58) <= 0.03
+
+    # Case B: min_gap_merge=0.10 (< 0.17s) -> Must NOT be merged, remaining 2 separate keep segments
+    config_no_merge = AudioCutConfig(
+        min_silent_duration=0.1,
+        silence_threshold_db=-30.0,
+        pre_roll=0.05,
+        post_roll=0.08,
+        min_gap_merge=0.10
+    )
+    segments_no_merge = SilenceDetector.detect_silence_from_wav(wav_path, config_no_merge)
+    keep_segs_no_merge = [s for s in segments_no_merge if s.action == "keep"]
+    assert len(keep_segs_no_merge) == 2
