@@ -1208,10 +1208,13 @@ class FCPXMLGenerator:
 
                 b_start_f = sec_to_frame(tl_start_sec)
                 b_dur_f = max(1, sec_to_frame(dur_sec))
+                b_file_dur = b_meta.get("dur_frames", 0)
+                if b_file_dur > 0:
+                    b_dur_f = min(b_dur_f, b_file_dur)
                 b_tc_base = b_meta.get("start_tc_frames", 0)
                 b_in_f = b_tc_base
                 b_out_f = b_in_f + b_dur_f
-                b_clip_dur_f = b_tc_base + b_meta.get("dur_frames", 1)
+                b_clip_dur_f = b_tc_base + max(b_meta.get("dur_frames", 1), b_dur_f)
                 f_broll_id = f"file-broll-{b_idx}"
 
                 b_clip = ET.Element("clipitem", id=f"clipitem-broll-{b_idx}")
@@ -1290,10 +1293,13 @@ class FCPXMLGenerator:
 
                 s_start_f = sec_to_frame(tl_start_sec)
                 s_dur_f = max(1, sec_to_frame(dur_sec))
+                s_file_dur = s_meta.get("dur_frames", 0)
+                if s_file_dur > 0:
+                    s_dur_f = min(s_dur_f, s_file_dur)
                 s_tc_base = s_meta.get("start_tc_frames", 0)
                 s_in_f = s_tc_base
                 s_out_f = s_in_f + s_dur_f
-                s_clip_dur_f = s_tc_base + s_meta.get("dur_frames", 1)
+                s_clip_dur_f = s_tc_base + max(s_meta.get("dur_frames", 1), s_dur_f)
 
                 s_clip = ET.Element("clipitem", id=f"clipitem-sfx-{s_idx}")
                 ET.SubElement(s_clip, "name").text = s_meta["name"]

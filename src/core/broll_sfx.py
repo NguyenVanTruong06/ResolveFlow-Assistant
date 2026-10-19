@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 from typing import List, Dict, Any, Tuple, Optional
 from pydantic import BaseModel, Field
@@ -228,6 +229,14 @@ class GlobalAssetPool:
 
         q = os.path.basename(query).lower()
         q_stem = os.path.splitext(q)[0]
+
+        # Trên Linux, ưu tiên bản MOV PCM để DaVinci Resolve giải mã âm thanh mượt mà (tránh lỗi AAC câm tiếng)
+        if sys.platform.startswith("linux"):
+            mov_key = f"{q_stem}.mov"
+            if mov_key in self.project_memes_index:
+                return self.project_memes_index[mov_key]
+            if mov_key in self.memes_index:
+                return self.memes_index[mov_key]
 
         # 1. Tra cứu trong kho Dự án (Project-specific) trước
         if q in self.project_memes_index:
