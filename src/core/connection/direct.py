@@ -49,13 +49,11 @@ class DirectConnection(IResolveConnection):
         return tl.GetName() if tl else None
 
     def import_edl_to_timeline(self, edl_path: str, log_callback: Optional[Any] = None) -> bool:
-        if not self.is_connected(): return False
-        pm = self.resolve.GetProjectManager()
-        proj = pm.GetCurrentProject()
-        if not proj: return False
-        mp = proj.GetMediaPool()
-        tl = mp.ImportTimelineFromFile(os.path.abspath(edl_path))
-        return tl is not None
+        from src.core.resolve_api import auto_import_timeline_to_resolve
+        success, msg = auto_import_timeline_to_resolve(edl_path)
+        if log_callback:
+            log_callback(msg)
+        return success
 
     def get_current_playhead_seconds(self) -> float:
         if not self.is_connected(): return 0.0

@@ -280,6 +280,8 @@ class PipelineWorker(QThread):
         self.validation_warnings = []
         self.story_blocks_out = []
         self.story_arrangement_out = None
+        self.last_exported_xml = None
+        self.last_timeline_name = None
         
         # Cờ kiểm soát ngắt luồng an toàn
         self.is_interrupted = False
@@ -1230,6 +1232,8 @@ class PipelineWorker(QThread):
                     timeline_name=timeline_name,
                     log_callback=self.log_signal.emit
                 )
+                self.last_exported_xml = output_timeline_fcpxml
+                self.last_timeline_name = timeline_name
 
                 if self.run_cut:
                     audit_reporter.add_output_file("Timeline Cắt Lọc (FCP7 XML - Windows)", output_timeline_fcp7xml, "Timeline chính FCP7 XML Multi-Track (V1, V2 B-Roll, A1/A2, A3 SFX)")
@@ -2818,6 +2822,7 @@ class AutoWindow(QMainWindow):
         self.lbl_pct_big.setStyleSheet(f"font-size: 32px; font-weight: bold; color: {ThemeColors.TEXT_MUTED};")
         self.lbl_eta = QLabel("Sẵn sàng")
         self.lbl_eta.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 12px; margin-top: 10px;")
+        self.lbl_progress_status = self.lbl_eta
         pct_row.addWidget(self.lbl_pct_big)
         pct_row.addStretch()
         pct_row.addWidget(self.lbl_eta)
@@ -2868,6 +2873,26 @@ class AutoWindow(QMainWindow):
         self.btn_stop.clicked.connect(self._stop_pipeline)
         self.btn_stop.setVisible(False)
         r_vbox.addWidget(self.btn_stop)
+
+        # Nút 1-Click DaVinci Resolve nổi bật khi chạy xong mà Resolve chưa bật
+        self.btn_1click_resolve = QPushButton("🚀 Đẩy ngay vào DaVinci Resolve (1-Click)")
+        self.btn_1click_resolve.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0288D1, stop:1 #00E5FF);
+                border: 1px solid #00E5FF;
+                color: #ffffff;
+                border-radius: 6px;
+                padding: 10px 16px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #03A9F4, stop:1 #18FFFF);
+            }
+        """)
+        self.btn_1click_resolve.setVisible(False)
+        self.btn_1click_resolve.clicked.connect(self._on_click_import_to_resolve)
+        r_vbox.addWidget(self.btn_1click_resolve)
 
         # Nhật ký Console
         log_head = QHBoxLayout()
@@ -4906,6 +4931,30 @@ class AutoWindow(QMainWindow):
         else:
             self._run_pipeline()
 
+    def _on_click_import_to_resolve(self):
+        """Bấm nút 1-Click để đẩy ngay Timeline vào DaVinci Resolve mà không cần chạy lại pipeline."""
+        target_xml = getattr(self, "last_exported_xml", None)
+        if not target_xml or not os.path.exists(target_xml):
+            QMessageBox.warning(self, "Thông báo", "Không tìm thấy tệp Timeline XML/FCPXML đã xuất.")
+            return
+
+        self.txt_console.appendPlainText("🚀 [1-Click Import] Đang kết nối DaVinci Resolve và nạp Timeline...")
+        from src.core.resolve_api import auto_import_timeline_to_resolve
+        success, msg = auto_import_timeline_to_resolve(
+            target_xml,
+            getattr(self, "last_timeline_name", None)
+        )
+        if success:
+            self.txt_console.appendPlainText(f"🎉 {msg}")
+            if hasattr(self, "bubble") and self.bubble:
+                self.bubble.set_pipeline_status("connected")
+            if hasattr(self, "btn_1click_resolve"):
+                self.btn_1click_resolve.setVisible(False)
+            QMessageBox.information(self, "Thành công", f"🎉 {msg}\nDaVinci Resolve đã sẵn sàng trên trang Edit Page!")
+        else:
+            self.txt_console.appendPlainText(f"⚠️ {msg}")
+            QMessageBox.warning(self, "Chưa thể kết nối", f"{msg}\nVui lòng bật DaVinci Resolve và thử lại.")
+
     def _stop_pipeline(self):
         if self.worker and self.worker.isRunning():
             self.btn_run.setEnabled(False)
@@ -4964,6 +5013,8 @@ class AutoWindow(QMainWindow):
             self.btn_stop.setVisible(running)
             self.btn_stop.setEnabled(running)
             self.btn_stop.setText("⏹ Dừng tiến trình")
+        if hasattr(self, "btn_1click_resolve") and running:
+            self.btn_1click_resolve.setVisible(False)
 
         if running:
             self.btn_run.setEnabled(True)
@@ -5520,7 +5571,7 @@ class AutoWindow(QMainWindow):
                 # Nạp Story Review Table nếu có kết quả sắp xếp kịch bản
                 story_blocks = getattr(self.worker, "story_blocks_out", [])
                 story_arr = getattr(self.worker, "story_arrangement_out", None)
-                if story_blocks and story_arr and story_arr.items:
+                if hasattr(self, "table_story_review") and story_blocks and story_arr and getattr(story_arr, "items", None):
                     self.story_blocks = story_blocks
                     self.story_arrangement = story_arr
                     try:
@@ -5534,6 +5585,33 @@ class AutoWindow(QMainWindow):
                     self.clip_data_cache = self.worker.clip_data_out_cache
                 self.current_phase = 1
                 self.proposed_segments = []
+
+                # Tự động nạp timeline vào Resolve nếu đang mở, hoặc hiển thị nút 1-Click
+                self.last_exported_xml = getattr(self.worker, "last_exported_xml", None)
+                self.last_timeline_name = getattr(self.worker, "last_timeline_name", None)
+
+                from src.core.resolve_api import auto_import_timeline_to_resolve
+                from src.core.resolve_bridge import load_resolve_api
+
+                resolve_app, _ = load_resolve_api()
+                if resolve_app and self.last_exported_xml:
+                    self.txt_console.appendPlainText("🚀 [1-Click Auto] Phát hiện DaVinci Resolve đang mở, tự động đẩy Timeline vào...")
+                    imp_ok, imp_msg = auto_import_timeline_to_resolve(self.last_exported_xml, self.last_timeline_name)
+                    if imp_ok:
+                        self.txt_console.appendPlainText(f"🎉 {imp_msg}")
+                        if hasattr(self, "bubble") and self.bubble:
+                            self.bubble.set_pipeline_status("connected")
+                        if hasattr(self, "btn_1click_resolve"):
+                            self.btn_1click_resolve.setVisible(False)
+                    else:
+                        self.txt_console.appendPlainText(f"⚠️ {imp_msg}")
+                        if hasattr(self, "btn_1click_resolve"):
+                            self.btn_1click_resolve.setVisible(True)
+                else:
+                    if self.last_exported_xml:
+                        self.txt_console.appendPlainText("💡 DaVinci Resolve chưa bật. Bạn có thể mở Resolve và bấm '🚀 Đẩy ngay vào DaVinci Resolve (1-Click)'.")
+                        if hasattr(self, "btn_1click_resolve"):
+                            self.btn_1click_resolve.setVisible(True)
         else:
             if "dừng" in message.lower() or "cancel" in message.lower():
                 self.lbl_progress_status.setText("🛑 Đã dừng tiến trình theo yêu cầu.")
@@ -5641,9 +5719,11 @@ class AutoWindow(QMainWindow):
         return bar
 
     def _set_review_visible(self, visible: bool):
-        self.table_review.setVisible(visible)
-        self.review_toolbar.setVisible(visible)
-        if visible:
+        if hasattr(self, "table_review"):
+            self.table_review.setVisible(visible)
+        if hasattr(self, "review_toolbar"):
+            self.review_toolbar.setVisible(visible)
+        if visible and hasattr(self, "table_review"):
             self._refresh_review_ui()
 
     def _selected_review_rows(self) -> List[int]:

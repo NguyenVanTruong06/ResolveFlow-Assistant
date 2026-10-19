@@ -542,7 +542,15 @@ class ResolveAutomation:
                     log(f" ℹ {self.last_connect_error}")
                 return False
 
-        media_pool = self.current_project.GetMediaPool()
+        if not self.current_project and self.project_manager:
+            try:
+                self.current_project = self.project_manager.LoadProject("ResolveFlow_AutoProject")
+                if not self.current_project:
+                    self.current_project = self.project_manager.CreateProject("ResolveFlow_AutoProject")
+            except Exception:
+                pass
+
+        media_pool = self.current_project.GetMediaPool() if self.current_project else None
         if not media_pool:
             log(" ❌ Không tìm thấy Media Pool trong dự án DaVinci Resolve hiện tại.")
             return False
@@ -1079,6 +1087,110 @@ class ResolveAutomation:
         except Exception as e:
             log(f" ⚠️ Lỗi khi thêm Render Job: {str(e)}")
             return False
+
+
+def auto_import_timeline_to_resolve(
+    xml_path: Union[str, os.PathLike],
+    timeline_name: Optional[str] = None
+) -> Tuple[bool, str]:
+    """
+    Quy trình True 1-Click tự động nạp Timeline vào DaVinci Resolve:
+    1. Tự động kết nối Resolve qua load_resolve_api().
+    2. Lấy current_project = project_manager.GetCurrentProject(). Nếu chưa mở project nào,
+       tự động tạo/mở project dự phòng 'ResolveFlow_AutoProject'.
+    3. Nạp timeline qua media_pool.ImportTimelineFromFile(..., {"timelineName": ..., "importSourceClips": True}).
+    4. Nếu nạp .fcpxml bị từ chối, tự động fallback nạp file .xml (FCP7 XML) tương ứng ngay lập tức.
+    5. Sau khi import thành công, gọi resolve.OpenPage("edit") để chuyển thẳng sang giao diện Edit Page.
+    """
+    xml_str = str(xml_path)
+    if not os.path.exists(xml_str):
+        base_stem, ext = os.path.splitext(xml_str)
+        alt = base_stem + (".xml" if ext.lower() == ".fcpxml" else ".fcpxml")
+        if os.path.exists(alt):
+            xml_str = alt
+        else:
+            return False, f"Tệp Timeline không tồn tại: {xml_path}"
+
+    from src.core.resolve_bridge import load_resolve_api
+    resolve_app, status_msg = load_resolve_api()
+    if not resolve_app:
+        return False, f"Không thể kết nối DaVinci Resolve: {status_msg}"
+
+    try:
+        project_manager = resolve_app.GetProjectManager()
+    except Exception as e:
+        return False, f"Lỗi lấy ProjectManager từ DaVinci Resolve: {e}"
+
+    if not project_manager:
+        return False, "Không lấy được ProjectManager từ DaVinci Resolve."
+
+    current_project = None
+    try:
+        current_project = project_manager.GetCurrentProject()
+    except Exception:
+        pass
+
+    if not current_project:
+        try:
+            current_project = project_manager.LoadProject("ResolveFlow_AutoProject")
+            if not current_project:
+                current_project = project_manager.CreateProject("ResolveFlow_AutoProject")
+        except Exception as e:
+            return False, f"Lỗi khi mở/tạo project dự phòng trong DaVinci Resolve: {e}"
+
+    if not current_project:
+        return False, "Không thể mở hoặc tạo project trong DaVinci Resolve."
+
+    try:
+        media_pool = current_project.GetMediaPool()
+    except Exception as e:
+        return False, f"Lỗi lấy MediaPool từ project: {e}"
+
+    if not media_pool:
+        return False, "Không lấy được MediaPool từ project hiện tại."
+
+    candidate_paths = [os.path.abspath(xml_str)]
+    base_stem, ext = os.path.splitext(os.path.abspath(xml_str))
+    if ext.lower() == ".fcpxml":
+        alt_xml = base_stem + ".xml"
+        if os.path.exists(alt_xml):
+            candidate_paths.append(alt_xml)
+    elif ext.lower() == ".xml":
+        alt_fcpxml = base_stem + ".fcpxml"
+        if os.path.exists(alt_fcpxml):
+            candidate_paths.append(alt_fcpxml)
+
+    opts = {"importSourceClips": True}
+    if timeline_name:
+        opts["timelineName"] = timeline_name
+
+    imported_path = None
+    for cand in candidate_paths:
+        tl = None
+        try:
+            tl = media_pool.ImportTimelineFromFile(cand, opts)
+        except Exception:
+            pass
+        if not tl:
+            try:
+                tl = media_pool.ImportTimelineFromFile(cand)
+            except Exception:
+                pass
+        if tl:
+            imported_path = cand
+            break
+
+    if imported_path:
+        try:
+            resolve_app.OpenPage("edit")
+        except Exception:
+            pass
+        return True, f"Đã tự động import Timeline thành công từ {os.path.basename(imported_path)}!"
+
+    return False, f"DaVinci Resolve từ chối nạp timeline từ {os.path.basename(xml_str)}."
+
+
+ResolveAutomation.auto_import_timeline_to_resolve = staticmethod(auto_import_timeline_to_resolve)
 
 # Bộ nhớ đệm metadata video (duration, is_vertical, width, height) tránh gọi subprocess ffprobe lặp lại
 _VIDEO_META_CACHE: Dict[str, Dict[str, Any]] = {}

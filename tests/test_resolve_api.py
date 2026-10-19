@@ -306,3 +306,97 @@ def test_connect_reports_readable_error_when_scripting_refused(monkeypatch):
     r = ResolveAutomation()
     assert r.connect() is False
     assert "External scripting" in r.last_connect_error and "Free" in r.last_connect_error
+
+
+def test_auto_import_timeline_to_resolve_success(tmp_path):
+    from unittest.mock import MagicMock, patch
+    from src.core.resolve_api import auto_import_timeline_to_resolve
+
+    sample_fcpxml = tmp_path / "cut_test.fcpxml"
+    sample_fcpxml.write_text("<fcpxml/>", encoding="utf-8")
+
+    mock_resolve = MagicMock()
+    mock_pm = MagicMock()
+    mock_proj = MagicMock()
+    mock_mp = MagicMock()
+    mock_timeline = MagicMock()
+
+    mock_resolve.GetProjectManager.return_value = mock_pm
+    mock_pm.GetCurrentProject.return_value = mock_proj
+    mock_proj.GetMediaPool.return_value = mock_mp
+    mock_mp.ImportTimelineFromFile.return_value = mock_timeline
+
+    with patch("src.core.resolve_bridge.load_resolve_api", return_value=(mock_resolve, "OK")):
+        success, msg = auto_import_timeline_to_resolve(str(sample_fcpxml), "Test Timeline")
+        assert success is True
+        assert "thành công" in msg
+        mock_mp.ImportTimelineFromFile.assert_called_once_with(
+            str(sample_fcpxml),
+            {"timelineName": "Test Timeline", "importSourceClips": True}
+        )
+        mock_resolve.OpenPage.assert_called_once_with("edit")
+
+
+def test_auto_import_timeline_to_resolve_autoproject(tmp_path):
+    from unittest.mock import MagicMock, patch
+    from src.core.resolve_api import auto_import_timeline_to_resolve
+
+    sample_fcpxml = tmp_path / "cut_test.fcpxml"
+    sample_fcpxml.write_text("<fcpxml/>", encoding="utf-8")
+
+    mock_resolve = MagicMock()
+    mock_pm = MagicMock()
+    mock_proj = MagicMock()
+    mock_mp = MagicMock()
+    mock_timeline = MagicMock()
+
+    # GetCurrentProject returns None initially (user at Project Manager)
+    mock_resolve.GetProjectManager.return_value = mock_pm
+    mock_pm.GetCurrentProject.return_value = None
+    mock_pm.LoadProject.return_value = None
+    mock_pm.CreateProject.return_value = mock_proj
+    mock_proj.GetMediaPool.return_value = mock_mp
+    mock_mp.ImportTimelineFromFile.return_value = mock_timeline
+
+    with patch("src.core.resolve_bridge.load_resolve_api", return_value=(mock_resolve, "OK")):
+        success, msg = auto_import_timeline_to_resolve(str(sample_fcpxml))
+        assert success is True
+        mock_pm.CreateProject.assert_called_once_with("ResolveFlow_AutoProject")
+        mock_resolve.OpenPage.assert_called_once_with("edit")
+
+
+def test_auto_import_timeline_fallback_fcpxml_to_xml(tmp_path):
+    from unittest.mock import MagicMock, patch
+    from src.core.resolve_api import auto_import_timeline_to_resolve
+
+    sample_fcpxml = tmp_path / "cut_test.fcpxml"
+    sample_fcpxml.write_text("<fcpxml/>", encoding="utf-8")
+    sample_xml = tmp_path / "cut_test.xml"
+    sample_xml.write_text("<xmeml/>", encoding="utf-8")
+
+    mock_resolve = MagicMock()
+    mock_pm = MagicMock()
+    mock_proj = MagicMock()
+    mock_mp = MagicMock()
+    mock_timeline = MagicMock()
+
+    mock_resolve.GetProjectManager.return_value = mock_pm
+    mock_pm.GetCurrentProject.return_value = mock_proj
+    mock_proj.GetMediaPool.return_value = mock_mp
+
+    # Primary (.fcpxml) fails (returns None), fallback (.xml) succeeds
+    def import_side_effect(path, *args, **kwargs):
+        if str(path) == str(sample_fcpxml):
+            return None
+        if str(path) == str(sample_xml):
+            return mock_timeline
+        return None
+
+    mock_mp.ImportTimelineFromFile.side_effect = import_side_effect
+
+    with patch("src.core.resolve_bridge.load_resolve_api", return_value=(mock_resolve, "OK")):
+        success, msg = auto_import_timeline_to_resolve(str(sample_fcpxml))
+        assert success is True
+        assert "cut_test.xml" in msg
+        mock_resolve.OpenPage.assert_called_once_with("edit")
+

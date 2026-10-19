@@ -1475,4 +1475,37 @@ def test_footer_mini_timeline_and_splitter(qapp):
     qapp.processEvents()
 
 
+def test_auto_window_1click_resolve_button(qapp, tmp_path):
+    """Kiểm tra nút 1-Click DaVinci Resolve và quy trình auto-import trên AutoWindow."""
+    from unittest.mock import MagicMock, patch
+    from src.ui.auto.auto_window import AutoWindow
+    window = AutoWindow()
+
+    assert hasattr(window, "btn_1click_resolve")
+    assert window.btn_1click_resolve.isHidden() is True
+
+    # Giả lập pipeline hoàn thành khi DaVinci chưa bật -> Nút 1-Click hiện ra
+    mock_worker = MagicMock()
+    sample_xml = tmp_path / "test_out.fcpxml"
+    sample_xml.write_text("<fcpxml/>", encoding="utf-8")
+    mock_worker.last_exported_xml = str(sample_xml)
+    mock_worker.last_timeline_name = "Auto Timeline"
+    window.worker = mock_worker
+
+    with patch("src.core.resolve_bridge.load_resolve_api", return_value=(None, "Resolve not running")):
+        window._pipeline_finished(True, "Hoàn thành!")
+        assert not window.btn_1click_resolve.isHidden()
+
+    # Giả lập người dùng bấm nút 1-Click khi Resolve đã bật
+    with patch("src.core.resolve_api.auto_import_timeline_to_resolve", return_value=(True, "Đã nạp thành công")):
+        with patch("PySide6.QtWidgets.QMessageBox.information"):
+            window.btn_1click_resolve.click()
+            assert window.btn_1click_resolve.isHidden() is True
+
+    window.close()
+    window.deleteLater()
+    qapp.processEvents()
+
+
+
 
