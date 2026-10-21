@@ -109,7 +109,9 @@ class CategoryNavWidget(QWidget):
         while self.cat_layout.count():
             item = self.cat_layout.takeAt(0)
             if item.widget():
-                item.widget().deleteLater()
+                w = item.widget()
+                w.setParent(None)
+                w.deleteLater()
         self._cat_buttons.clear()
 
         for cat in self._categories:
@@ -132,7 +134,9 @@ class CategoryNavWidget(QWidget):
         while self.sub_layout.count():
             item = self.sub_layout.takeAt(0)
             if item.widget():
-                item.widget().deleteLater()
+                w = item.widget()
+                w.setParent(None)
+                w.deleteLater()
         self._sub_buttons.clear()
 
         cat_data = next((c for c in self._categories if c["id"] == self._current_cat), None)

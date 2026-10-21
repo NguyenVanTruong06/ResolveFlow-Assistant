@@ -63,6 +63,15 @@ class GlobalHotkeyService(QObject):
 
         try:
             self._display = display.Display()
+
+            # Install custom error handler to catch BadAccess (code 10) when another WM already grabbed the key
+            def _x_error_handler(err, request=None):
+                logger.debug("X11 error caught: %s", err)
+            try:
+                self._display.set_error_handler(_x_error_handler)
+            except Exception:
+                pass
+
             root = self._display.screen().root
             space_sym = XK.string_to_keysym("space")
             keycode = self._display.keysym_to_keycode(space_sym)
@@ -76,10 +85,19 @@ class GlobalHotkeyService(QObject):
             lock_masks = [0, X.Mod2Mask, X.LockMask, X.Mod2Mask | X.LockMask]
 
             for lm in lock_masks:
-                root.grab_key(keycode, ctrl_alt | lm, 1, X.GrabModeAsync, X.GrabModeAsync)
-                root.grab_key(keycode, ctrl_alt_shift | lm, 1, X.GrabModeAsync, X.GrabModeAsync)
+                try:
+                    root.grab_key(keycode, ctrl_alt | lm, 1, X.GrabModeAsync, X.GrabModeAsync)
+                except Exception as exc:
+                    logger.debug("Failed grab_key ctrl_alt with mask %s: %s", lm, exc)
+                try:
+                    root.grab_key(keycode, ctrl_alt_shift | lm, 1, X.GrabModeAsync, X.GrabModeAsync)
+                except Exception as exc:
+                    logger.debug("Failed grab_key ctrl_alt_shift with mask %s: %s", lm, exc)
 
-            self._display.flush()
+            try:
+                self._display.flush()
+            except Exception as exc:
+                logger.debug("X11 display flush error: %s", exc)
             fd = self._display.display.fileno()
             logger.info("Global hotkeys (Ctrl+Alt+Space, Ctrl+Alt+Shift+Space) registered on X11 root.")
 

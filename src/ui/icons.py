@@ -167,6 +167,70 @@ def create_vector_icon(icon_type: str, color_hex: str = ThemeColors.TEXT_PRIMARY
         painter.setBrush(QColor(color_hex))
         painter.drawPath(path)
 
+    elif icon_type == "bolt":
+        # Tia chớp ChunDVC
+        path = QPainterPath()
+        path.moveTo(13, 2.5)
+        path.lineTo(6.5, 12)
+        path.lineTo(11.5, 12)
+        path.lineTo(10.5, 21.5)
+        path.lineTo(17.5, 11)
+        path.lineTo(12.5, 11)
+        path.closeSubpath()
+        painter.setBrush(QColor(color_hex))
+        painter.drawPath(path)
+
+    elif icon_type == "text":
+        # Chữ T tiêu đề NLE
+        painter.drawLine(QPointF(5, 5.5), QPointF(19, 5.5))
+        painter.drawLine(QPointF(12, 5.5), QPointF(12, 18.5))
+        painter.drawLine(QPointF(9, 18.5), QPointF(15, 18.5))
+
+    elif icon_type == "trans":
+        # Hai khung hình chuyển cảnh lồng nhau
+        painter.drawRoundedRect(QRectF(3.5, 5.5, 11, 13), 1.5, 1.5)
+        painter.drawRoundedRect(QRectF(9.5, 5.5, 11, 13), 1.5, 1.5)
+
+    elif icon_type == "meme":
+        # Khung ảnh / B-Roll
+        painter.drawRoundedRect(QRectF(4, 5, 16, 14), 2, 2)
+        painter.drawEllipse(QRectF(7, 7.5, 3, 3))
+        path = QPainterPath()
+        path.moveTo(5, 17)
+        path.lineTo(9.5, 12.5)
+        path.lineTo(13, 15.5)
+        path.lineTo(16, 13)
+        path.lineTo(19, 16)
+        painter.drawPath(path)
+
+    elif icon_type == "overlay":
+        # Hai lớp xếp chồng isometric
+        path1 = QPainterPath()
+        path1.moveTo(12, 4)
+        path1.lineTo(19.5, 8)
+        path1.lineTo(12, 12)
+        path1.lineTo(4.5, 8)
+        path1.closeSubpath()
+        painter.drawPath(path1)
+        path2 = QPainterPath()
+        path2.moveTo(4.5, 12.5)
+        path2.lineTo(12, 16.5)
+        path2.lineTo(19.5, 12.5)
+        painter.drawPath(path2)
+
+    elif icon_type == "sfx":
+        # Nốt nhạc đôi
+        painter.drawEllipse(QRectF(5, 13, 4.5, 3.5))
+        painter.drawEllipse(QRectF(13.5, 11, 4.5, 3.5))
+        painter.drawLine(QPointF(9.5, 14.5), QPointF(9.5, 5.5))
+        painter.drawLine(QPointF(18, 12.5), QPointF(18, 4))
+        painter.drawLine(QPointF(9.5, 5.5), QPointF(18, 4))
+
+    elif icon_type == "palette":
+        # Kính lúp / Command HUD
+        painter.drawEllipse(QRectF(5.5, 5.5, 9.5, 9.5))
+        painter.drawLine(QPointF(12.5, 12.5), QPointF(18.5, 18.5))
+
     else:
         # Fallback: Vòng tròn chấm tâm
         painter.drawEllipse(QRectF(5, 5, 14, 14))

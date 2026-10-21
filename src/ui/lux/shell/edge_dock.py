@@ -11,10 +11,11 @@ import logging
 from typing import Optional, Tuple, Dict, Any, List
 
 from PySide6.QtWidgets import (
-    QWidget, QFrame, QVBoxLayout, QHBoxLayout, QStackedWidget, QApplication
+    QWidget, QFrame, QVBoxLayout, QHBoxLayout, QStackedWidget, QApplication,
+    QSizePolicy
 )
 from PySide6.QtCore import (
-    Qt, QRect, QPoint, Signal as pyqtSignal, QVariantAnimation,
+    Qt, QRect, QPoint, QSize, Signal as pyqtSignal, QVariantAnimation,
     QEasingCurve, QTimer
 )
 from PySide6.QtGui import QKeyEvent, QScreen
@@ -129,6 +130,11 @@ class EdgeDockWindow(QWidget):
         if self._resolve_state:
             self._resolve_state.state_changed.connect(self._on_resolve_state_changed)
 
+        # Resolve Window Anchor (Dynamic tracking)
+        self.window_anchor = ResolveWindowAnchor(poll_interval_ms=1200, parent=self)
+        self.window_anchor.anchor_updated.connect(self.set_anchor_rect)
+        self.window_anchor.start()
+
         # Initial geometry
         initial_w = self.fsm.get_width_for_state(DockState.RAIL)
         self.resize(initial_w, 720)
@@ -149,6 +155,14 @@ class EdgeDockWindow(QWidget):
     @property
     def current_state(self) -> DockState:
         return self.fsm.state
+
+    def minimumSizeHint(self) -> QSize:
+        w = self.fsm.get_width_for_state(self.fsm.state)
+        return QSize(w, 200)
+
+    def sizeHint(self) -> QSize:
+        w = self.fsm.get_width_for_state(self.fsm.state)
+        return QSize(w, 720)
 
     def _init_ui(self):
         outer_layout = QVBoxLayout(self)
@@ -178,6 +192,7 @@ class EdgeDockWindow(QWidget):
 
         # --- Page 0: Collapsed Rail Widget ---
         self.rail = DockRailWidget(self.stack)
+        self.rail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         self.rail.open_dock_requested.connect(self.open_dock)
         self.rail.category_selected.connect(self._on_rail_category_selected)
         self.rail.palette_requested.connect(self.palette_requested.emit)
@@ -186,6 +201,7 @@ class EdgeDockWindow(QWidget):
 
         # --- Page 1: Expanded View Container ---
         self.expanded_container = QWidget(self.stack)
+        self.expanded_container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.expanded_container.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         exp_layout = QVBoxLayout(self.expanded_container)
         exp_layout.setContentsMargins(0, 0, 0, 0)
@@ -424,6 +440,14 @@ class EdgeDockWindow(QWidget):
         self.state_changed.emit(new_state.value)
 
         is_open = self.fsm.is_open
+        if is_open:
+            self.expanded_container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+            self.rail.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        else:
+            self.expanded_container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+            self.rail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        self.updateGeometry()
+
         self.stack.setCurrentIndex(1 if is_open else 0)
         self.header.set_pinned(self.fsm.is_pinned)
         self.header.set_wide(self.fsm.is_wide)
@@ -737,6 +761,11 @@ class EdgeDockWindow(QWidget):
         super().keyPressEvent(event)
 
     def closeEvent(self, event):
+        if hasattr(self, "window_anchor") and self.window_anchor:
+            try:
+                self.window_anchor.stop()
+            except Exception:
+                pass
         if hasattr(self, "hotkey_service") and self.hotkey_service:
             try:
                 self.hotkey_service.stop()

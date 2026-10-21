@@ -18,7 +18,7 @@ def test_create_vector_icons_all_types(qapp):
         "ai", "studio", "grid", "resolve", "download", "folder",
         "video", "cloud", "check", "done", "cross", "error",
         "clock", "pending", "refresh", "running", "play", "stop",
-        "arrow_right", "sparkles", "unknown_type"
+        "arrow_right", "sparkles", "bolt", "text", "trans", "meme", "overlay", "sfx", "palette", "unknown_type"
     ]
     for it in icon_types:
         pix = create_vector_icon(it, "#8b5cf6", 24)

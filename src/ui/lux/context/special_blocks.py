@@ -175,8 +175,8 @@ class CutPadsBlock(QWidget):
                 }
             """)
             btn.clicked.connect(lambda checked=False, p=pid: self.trigger_pad(p))
-            row = i // 6
-            col = i % 6
+            row = i // 4
+            col = i % 4
             grid.addWidget(btn, row, col)
             self._buttons[pid] = btn
 
