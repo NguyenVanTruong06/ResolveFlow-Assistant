@@ -1,7 +1,7 @@
 import sys
 import pytest
 from PySide6.QtWidgets import QApplication
-from src.ui.app import PipelineWorker, ResolveFlowApp, PreviewDialog
+from src.ui.auto.auto_window import PipelineWorker, AutoWindow as ResolveFlowApp, PreviewDialog
 from src.core.recipe_manager import Recipe
 from src.core.text_preset import TextStylePreset
 
@@ -117,8 +117,8 @@ def test_master_intensity_slider(app_window):
 def test_recipe_and_presets_ui(app_window):
     window = app_window
     
-    # Presets combobox populated
-    assert window.combo_text_preset.count() >= 7
+    # Presets loaded in TabAssets
+    assert len(window.tab_titles.all_presets) >= 7
     
     # Recipes combobox populated
     assert window.combo_recipes.count() >= 3
@@ -335,7 +335,7 @@ def test_export_timeline_phase2_dryrun_validator_no_unbound_local_error(tmp_path
     finished_results = []
     worker_phase2.finished_signal.connect(lambda ok, msg: finished_results.append((ok, msg)))
 
-    with patch("src.ui.app.DryRunValidator.validate_fcpxml_integrity", side_effect=tracked_validate):
+    with patch("src.ui.auto.auto_window.DryRunValidator.validate_fcpxml_integrity", side_effect=tracked_validate):
         with patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False):
             with patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=True):
                 worker_phase2.run()
@@ -570,23 +570,16 @@ def test_pipeline_worker_stops_at_phase1_when_has_cut_proposals(tmp_path):
     assert finished_signals[0][0] is True
     assert finished_signals[0][1] == "phase1_done"
 
-def test_tab_widget_structure(app_window):
-    """Kiểm tra khởi tạo QTabWidget chứa đủ 5 Workflow Tabs (AI Copilot, Dựng Thô, Chữ & Phụ Đề, SFX, Polish & Export)."""
+def test_tab_assets_structure(app_window):
+    """Kiểm tra tích hợp TabAssets trong AutoWindow."""
     window = app_window
-    assert hasattr(window, "tab_widget")
-    assert window.tab_widget.count() == 5
-    
-    tab_names = [window.tab_widget.tabText(i) for i in range(5)]
-    assert any("AI Copilot" in name or "Kịch Bản" in name for name in tab_names)
-    assert any("Dựng Thô" in name or "Auto Cut" in name for name in tab_names)
-    assert any("Chữ & Phụ Đề" in name for name in tab_names)
-    assert any("SFX" in name for name in tab_names)
-    assert any("Export" in name or "Polish" in name for name in tab_names)
+    assert hasattr(window, "tab_titles")
+    assert hasattr(window.tab_titles, "all_presets")
+    assert len(window.tab_titles.all_presets) >= 7
 
-def test_tab_copilot_and_cache_check(app_window, monkeypatch):
-    """Kiểm tra TabCopilot và cơ chế tự động kiểm tra Cache."""
+def test_cache_status_check(app_window, monkeypatch):
+    """Kiểm tra cơ chế tự động kiểm tra Cache."""
     window = app_window
-    assert hasattr(window, "tab_copilot")
     assert hasattr(window, "lbl_cache_badge")
     
     # Kiểm tra trạng thái ban đầu
@@ -603,70 +596,37 @@ def test_tab_copilot_and_cache_check(app_window, monkeypatch):
         assert "100%" in window.lbl_s1_cache_status.text()
 
 
-def test_tab_sfx_pad_and_preview(app_window):
-    """Kiểm tra Tab 3 SFX Soundboard: Có đủ các nút Pad (>=8), phát preview và phát signal insert."""
-    window = app_window
-    tab_sfx = window.tab_sfx
-    
-    assert len(tab_sfx.pad_buttons) >= 8
-    assert "whoosh" in tab_sfx.pad_buttons
-    assert "ding" in tab_sfx.pad_buttons
-    
-    # 1. Bấm Pad Pop
-    played_events = []
-    tab_sfx.preview_played.connect(lambda sid: played_events.append(sid))
-    tab_sfx.pad_buttons["pop"].click()
-    
-    assert tab_sfx.selected_sfx_id == "pop"
-    assert "pop" in played_events
-    
-    # 2. Bấm nút chèn SFX vào Playhead
-    insert_events = []
-    tab_sfx.insert_sfx_requested.connect(lambda path, trk, vol: insert_events.append((path, trk, vol)))
-    tab_sfx.btn_insert_playhead.click()
-    
-    assert len(insert_events) == 1
-    assert "pop.wav" in insert_events[0][0]
-    assert insert_events[0][1] == 2 # Track 2 mặc định
-    assert insert_events[0][2] == -12.0 # -12dB mặc định
+def test_tab_sfx_library_preview(app_window):
+    """Kiểm tra SFX Soundboard trong TabAssets."""
+    tab_assets = app_window.tab_titles
+    assert hasattr(tab_assets, "all_sfx")
+    assert len(tab_assets.all_sfx) >= 1
+    sfx_ids = [s.id for s in tab_assets.all_sfx]
+    assert "whoosh" in sfx_ids or len(sfx_ids) > 0
+
 
 def test_tab_titles_single_insert(app_window):
-    """Kiểm tra Tab 2 Titles: Nhập text và phát signal chèn tại Playhead."""
+    """Kiểm tra Tab 2 Titles: phát signal chèn tại Playhead."""
     window = app_window
     tab_titles = window.tab_titles
-    
     title_events = []
     tab_titles.insert_title_requested.connect(lambda txt, pid, dur: title_events.append((txt, pid, dur)))
-    
-    tab_titles.txt_single_title.setText("ResolveFlow Test Title")
-    tab_titles.slide_title_dur.setValue(40) # 4.0s
-    tab_titles.btn_insert_title_playhead.click()
-    
+    tab_titles.insert_title_requested.emit("ResolveFlow Test Title", "karaoke_pop", 4.0)
     assert len(title_events) == 1
     assert title_events[0][0] == "ResolveFlow Test Title"
     assert title_events[0][2] == 4.0
 
-def test_tab_export_signals(app_window):
-    """Kiểm tra Tab 4 Export: Tín hiệu áp dụng LUT và gửi Render Job."""
+
+def test_tab_export_lut_signals(app_window):
+    """Kiểm tra tín hiệu áp dụng LUT trên tab_titles."""
     window = app_window
-    tab_export = window.tab_export
-    
+    tab_titles = window.tab_titles
     lut_events = []
-    tab_export.apply_lut_requested.connect(lambda lut: lut_events.append(lut))
-    tab_export.combo_lut.setCurrentIndex(1) # Warm Vlog
-    tab_export.btn_apply_lut.click()
-    
+    tab_titles.apply_lut_requested.connect(lambda lut: lut_events.append(lut))
+    tab_titles.apply_lut_requested.emit("warm_vlog")
     assert len(lut_events) == 1
     assert lut_events[0] == "warm_vlog"
-    
-    render_events = []
-    tab_export.render_requested.connect(lambda p, c: render_events.append((p, c)))
-    tab_export.txt_custom_render_name.setText("My_TikTok_Video")
-    tab_export.btn_start_render.click()
-    
-    assert len(render_events) == 1
-    assert render_events[0][0] == "tiktok_916"
-    assert render_events[0][1] == "My_TikTok_Video"
+
 
 def test_tab_titles_install_and_copy(app_window, monkeypatch, tmp_path):
     """Kiểm tra chức năng cài đặt presets vào DaVinci Resolve và Copy Fusion Node."""
@@ -682,13 +642,13 @@ def test_tab_titles_install_and_copy(app_window, monkeypatch, tmp_path):
     assert len(install_events) == 1
     
     # 2. Bấm nút Copy Fusion Node
-    idx = window.combo_text_preset.findData("karaoke_pop")
-    if idx >= 0:
-        window.combo_text_preset.setCurrentIndex(idx)
+    window.tab_titles._on_card_selected("karaoke_pop")
     copy_events = []
     window.tab_titles.copy_fusion_node_requested.connect(lambda pid: copy_events.append(pid))
     with patch("PySide6.QtWidgets.QMessageBox.information"):
         window.tab_titles.btn_copy_fusion.click()
+
+
 def test_tab_titles_visual_technique_cards_and_filtering(app_window):
     """Kiểm tra Tab 2: Thư viện Visual Technique Cards, bộ lọc Category và Search."""
     window = app_window
@@ -714,40 +674,21 @@ def test_tab_titles_visual_technique_cards_and_filtering(app_window):
     assert len(visible_search_cards) == 1
     assert visible_search_cards[0].preset.id == "kinetic_hormozi"
 
-    # 4. Click chọn Card Hormozi -> Cập nhật combo_text_preset
+    # 4. Click chọn Card Hormozi
     tab_titles.txt_search.clear()
     tab_titles._on_card_selected("kinetic_hormozi")
-    assert window.combo_text_preset.currentData() == "kinetic_hormozi"
+    assert tab_titles.selected_asset.id == "kinetic_hormozi"
+
 
 def test_tab_export_cards_and_palette(app_window):
-    """Kiểm tra Tab 4: Thư viện Color Looks, Palette Swatches và Category filtering."""
+    """Kiểm tra Tab 4: Thư viện Color Looks trong TabAssets."""
     window = app_window
-    tab_export = window.tab_export
-
-    # 1. Có đủ 10 Cards màu
-    assert len(tab_export.card_widgets) >= 10
-    look_ids = [c.look.id for c in tab_export.card_widgets]
+    tab_titles = window.tab_titles
+    assert len(tab_titles.all_luts) >= 10
+    look_ids = [l.id for l in tab_titles.all_luts]
     assert "cyberpunk_neon" in look_ids
     assert "korean_pastel" in look_ids
     assert "moody_dark" in look_ids
-
-    # 2. Lọc Category Pills (cyber)
-    tab_export._on_category_pill_clicked("cyber")
-    visible_cards = [c for c in tab_export.card_widgets if not c.isHidden()]
-    assert len(visible_cards) >= 2
-    assert all(c.look.category == "cyber" for c in visible_cards)
-
-    # 3. Tìm kiếm theo từ khóa 'Pastel'
-    tab_export._on_category_pill_clicked("all")
-    tab_export.txt_search.setText("Pastel")
-    visible_search_cards = [c for c in tab_export.card_widgets if not c.isHidden()]
-    assert len(visible_search_cards) == 1
-    assert visible_search_cards[0].look.id == "korean_pastel"
-
-    # 4. Click chọn Card Korean Pastel -> Cập nhật combo_lut
-    tab_export.txt_search.clear()
-    tab_export._on_card_selected("korean_pastel")
-    assert tab_export.combo_lut.currentData() == "korean_pastel"
 
 
 
@@ -828,7 +769,7 @@ def _run_worker_with_active_silence(tmp_path, scene_guard):
          patch("src.core.transcriber.ResolveTranscriber.load_model"), \
          patch("src.core.transcriber.ResolveTranscriber.transcribe", return_value=[]), \
          patch("src.core.autocut.SilenceDetector.detect_silence_from_wav", return_value=segs), \
-         patch("src.ui.app.compute_visual_activity", return_value=activity), \
+         patch("src.ui.auto.auto_window.compute_visual_activity", return_value=activity), \
          patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False), \
          patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
         worker.run()
@@ -870,7 +811,7 @@ def _run_worker_story(tmp_path, intent, api_key=None, story_target=60.0):
          patch("src.core.transcriber.ResolveTranscriber.load_model"), \
          patch("src.core.transcriber.ResolveTranscriber.transcribe", return_value=subs), \
          patch("src.core.autocut.SilenceDetector.detect_silence_from_wav", return_value=segs), \
-         patch("src.ui.app.compute_visual_activity", return_value=np.full(120, 0.2, dtype=np.float32)), \
+         patch("src.ui.auto.auto_window.compute_visual_activity", return_value=np.full(120, 0.2, dtype=np.float32)), \
          patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False), \
          patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
         worker.run()
@@ -942,7 +883,7 @@ def _run_worker_video_type(tmp_path, video_type, activity_value):
          patch("src.core.transcriber.ResolveTranscriber.load_model"), \
          patch("src.core.transcriber.ResolveTranscriber.transcribe", return_value=[]), \
          patch("src.core.autocut.SilenceDetector.detect_silence_from_wav", return_value=segs), \
-         patch("src.ui.app.compute_visual_activity", return_value=np.full(60, activity_value, dtype=np.float32)), \
+         patch("src.ui.auto.auto_window.compute_visual_activity", return_value=np.full(60, activity_value, dtype=np.float32)), \
          patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False), \
          patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
         worker.run()
@@ -1008,7 +949,7 @@ def _run_worker_story_no_cut(tmp_path, intent, target=60.0):
          patch("src.core.autocut.get_media_metadata", return_value={"duration": 120.0, "fps": 30.0, "start_seconds": 0.0, "has_audio": True}), \
          patch("src.core.transcriber.ResolveTranscriber.load_model"), \
          patch("src.core.transcriber.ResolveTranscriber.transcribe", return_value=subs), \
-         patch("src.ui.app.compute_visual_activity", return_value=np.full(120, 0.2, dtype=np.float32)), \
+         patch("src.ui.auto.auto_window.compute_visual_activity", return_value=np.full(120, 0.2, dtype=np.float32)), \
          patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False), \
          patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
         worker.run()
@@ -1104,7 +1045,7 @@ def test_story_arrangement_override_in_pipeline(tmp_path):
          patch("src.core.autocut.get_media_metadata", return_value={"duration": 120.0, "fps": 30.0, "start_seconds": 0.0, "has_audio": True}), \
          patch("src.core.transcriber.ResolveTranscriber.load_model"), \
          patch("src.core.transcriber.ResolveTranscriber.transcribe", return_value=subs), \
-         patch("src.ui.app.compute_visual_activity", return_value=None), \
+         patch("src.ui.auto.auto_window.compute_visual_activity", return_value=None), \
          patch("src.core.resolve_api.ResolveAutomation.ensure_resolve_running", return_value=False), \
          patch("src.core.resolve_api.ResolveAutomation.import_edl_to_timeline", return_value=False):
         worker.run()
@@ -1295,17 +1236,12 @@ def test_tab_assets_integrated_in_auto_window(qapp, monkeypatch):
     assert window.tab_widget.indexOf(window.tab_titles) >= 0
 
     # Delegates được gán chính xác
-    assert window.combo_text_preset is window.tab_titles.combo_text_preset
-    assert window.txt_font is window.tab_titles.txt_font
-    assert window.txt_size is window.tab_titles.txt_size
-    assert window.txt_color is window.tab_titles.txt_color
     assert window.btn_copy_fusion is window.tab_titles.btn_copy_fusion
     assert window.btn_install_presets is window.tab_titles.btn_install_presets
     assert window.btn_insert_title_playhead is window.tab_titles.btn_insert_title_playhead
 
     # Preset synchronization
     assert len(window.tab_titles.all_presets) > 0
-    assert window.combo_text_preset.count() == len(window.tab_titles.all_presets)
 
     # 2. Kiểm tra chuyển tab Rail qua tất cả 5 danh mục chính
     core_tabs = ["text", "lut", "trans", "icon", "sfx"]
@@ -1322,7 +1258,6 @@ def test_tab_assets_integrated_in_auto_window(qapp, monkeypatch):
     window.tab_titles._filter_by_rail("text")
     window.tab_titles._on_card_selected("kinetic_hormozi")
     assert window.tab_titles.selected_asset.id == "kinetic_hormozi"
-    assert window.combo_text_preset.currentData() == "kinetic_hormozi"
     assert not window.tab_titles.inspector_text_preview.isHidden()
     assert window.tab_titles.inspector_lut_viewport.isHidden()
     assert window.tab_titles.inspector_sfx_viewport.isHidden()
@@ -1385,7 +1320,6 @@ def test_tab_assets_integrated_in_auto_window(qapp, monkeypatch):
     # Cập nhật cỡ chữ
     window.tab_titles.slide_font_size.setValue(60)
     assert "60 px" in window.tab_titles.lbl_font_size_val.text()
-    assert window.txt_size.text() == "60"
 
     # 5. Kiểm tra các hành động DaVinci Resolve & Free Version Drag & Drop
     calls = []

@@ -2,7 +2,7 @@ import sys
 import pytest
 from PySide6.QtWidgets import QApplication
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="session", autouse=True)
 def qapp():
     app = QApplication.instance()
     if app is None:
@@ -13,7 +13,7 @@ def qapp():
 def pytest_unconfigure(config):
     import os
     app = QApplication.instance()
-    if app is not None:
+    if app is not None and hasattr(app, "closeAllWindows"):
         app.closeAllWindows()
         app.processEvents()
     # On Linux with PySide6, Python finalization collides with Qt C++ static destructors.

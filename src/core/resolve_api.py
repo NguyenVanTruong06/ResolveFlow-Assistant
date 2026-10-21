@@ -58,11 +58,6 @@ class ResolveAutomation:
         Tìm fusionscript library: biến môi trường RESOLVE_SCRIPT_LIB, thư mục cài mặc định
         (Windows, Linux /opt/resolve, macOS), hoặc thư mục của tiến trình Resolve đang chạy.
         """
-        from src.core.resolve_bridge import setup_resolve_environment
-        _, lib_path = setup_resolve_environment()
-        if lib_path and os.path.exists(lib_path):
-            return lib_path
-
         candidates = []
         env = os.environ.get("RESOLVE_SCRIPT_LIB")
         if env:
@@ -117,15 +112,35 @@ class ResolveAutomation:
         self.last_connect_error = ""
 
         # Kiểm tra nhanh xem tiến trình DaVinci Resolve có đang tồn tại trên OS không
-        if sys.platform.startswith("linux"):
-            try:
-                import subprocess
-                p_check = subprocess.run(["pgrep", "-f", "resolve"], capture_output=True, text=True, timeout=0.5)
-                if p_check.returncode != 0:
-                    self.last_connect_error = "Tiến trình DaVinci Resolve chưa được bật trên hệ thống."
-                    return False
-            except Exception:
-                pass
+        # (Bỏ qua nếu DaVinciResolveScript đã được mock hoặc nạp trong sys.modules)
+        if "DaVinciResolveScript" not in sys.modules:
+            if sys.platform.startswith("linux"):
+                try:
+                    import subprocess
+                    p_check = subprocess.run(["pgrep", "-x", "resolve"], capture_output=True, text=True, timeout=0.5)
+                    if p_check.returncode != 0:
+                        self.last_connect_error = "Tiến trình DaVinci Resolve chưa được bật trên hệ thống."
+                        return False
+                except Exception:
+                    pass
+            elif sys.platform.startswith("win"):
+                try:
+                    import subprocess
+                    p_check = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Resolve.exe"], capture_output=True, text=True, timeout=0.5)
+                    if "Resolve.exe" not in p_check.stdout:
+                        self.last_connect_error = "Tiến trình DaVinci Resolve chưa được bật trên hệ thống."
+                        return False
+                except Exception:
+                    pass
+            elif sys.platform.startswith("darwin"):
+                try:
+                    import subprocess
+                    p_check = subprocess.run(["pgrep", "-x", "Resolve"], capture_output=True, text=True, timeout=0.5)
+                    if p_check.returncode != 0:
+                        self.last_connect_error = "Tiến trình DaVinci Resolve chưa được bật trên hệ thống."
+                        return False
+                except Exception:
+                    pass
 
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:

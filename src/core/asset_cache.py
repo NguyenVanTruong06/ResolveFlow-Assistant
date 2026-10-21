@@ -227,17 +227,23 @@ def request_thumbnail_async(
 
 def _dispatch_callback(callback: Callable[[str], None], result: str):
     """Dispatches callback onto Qt Main Thread if PySide6 application is running."""
+    def _safe_call():
+        try:
+            callback(result)
+        except (Exception, RuntimeError, BaseException):
+            pass
+
     try:
         from PySide6.QtWidgets import QApplication
         from PySide6.QtCore import QTimer
         app = QApplication.instance()
         if app is not None and getattr(app, "thread", None):
-            # Safe single-shot invocation on Qt event loop
-            QTimer.singleShot(0, lambda: callback(result))
+            # Safe single-shot invocation on Qt event loop with app context
+            QTimer.singleShot(0, app, _safe_call)
             return
     except Exception:
         pass
-    callback(result)
+    _safe_call()
 
 
 def scan_and_cache_metadata(folder_path: str) -> List[Dict[str, Any]]:

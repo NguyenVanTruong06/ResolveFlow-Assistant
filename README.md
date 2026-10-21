@@ -7,7 +7,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011%20%7C%20Linux%20(Ubuntu%20%7C%20Arch%20%7C%20Fedora)-FCC624.svg?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/NguyenVanTruong06/ChunDVC)
 [![UI Framework](https://img.shields.io/badge/UI-PySide6%20(Qt6)-41CD52.svg?style=for-the-badge&logo=qt&logoColor=white)](https://wiki.qt.io/Qt_for_Python)
 [![AI Engine](https://img.shields.io/badge/AI%20Engine-faster--whisper%20(CUDA)-76B900.svg?style=for-the-badge&logo=nvidia&logoColor=white)](https://github.com/SYSTRAN/faster-whisper)
-[![Tests](https://img.shields.io/badge/Tests-389%20Passed%20(100%25)-brightgreen.svg?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-512%20Passed%20(100%25)-brightgreen.svg?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 
 **Bộ công cụ trợ lý AI dựng thô (Rough-Cut) và quản lý đạo cụ thông minh (Asset Studio) 100% On-Premise cho DaVinci Resolve Studio & Free.**
@@ -50,11 +50,13 @@ Thay vì phải render video trung gian tốn dung lượng và làm giảm ch�
 - **VFR Detection:** Kiểm tra footage quay từ smartphone (iPhone/Android) hoặc OBS bằng cách so sánh `r_frame_rate` và `avg_frame_rate` qua FFprobe. Nếu độ lệch vượt quá `0.5 fps` (dấu hiệu Variable Frame Rate), cảnh báo lập tức hiển thị trên AI Console để cảnh báo trôi tiếng.
 - **Linux Audio Transcode:** DaVinci Resolve trên Linux không hỗ trợ giải mã trực tiếp codec âm thanh AAC trong container MP4; ResolveFlow-Assistant tích hợp pipeline tự động remux âm thanh sang PCM WAV 48kHz 24-bit, triệt tiêu lỗi mất tiếng hoặc timeline câm trên Linux.
 
-### 4. 🎨 Modern Pro-Creator UI (Auto Mode & Studio Mode)
-- **Dark Theme Zinc-900:** Phong cách giao diện hiện đại, tinh giản theo chuẩn Pro-App.
-- **Interactive Mini Timeline (`QPainter`):** Hiển thị trực quan toàn bộ phân đoạn thoại, khoảng lặng bị cắt, tua nhanh (speed-ramp), và playhead tương tác hỗ trợ scrubbing mượt mà.
+### 4. 🎨 Modern Pro-Creator UI & ChunDVC Redesign
+- **EdgeDock thông minh:** Thanh dock tự động hít sát cạnh phải DaVinci Resolve, theo dõi trạng thái trang (Edit/Fusion/Color) thời gian thực và tự co giãn linh hoạt.
+- **Quick Command Palette (`Ctrl+Alt+Space`):** Bảng lệnh tìm kiếm nhanh toàn diện (SFX, BGM, LUTs, Titles, Macros, Actions) ngay trên timeline mà không che khuất vùng làm việc.
+- **Toast Feedback with Undo (`Ctrl+Z`):** Mỗi thao tác chèn tài nguyên hoặc chỉnh sửa đều hiển thị toast xác nhận kèm nút Undo tức thì.
+- **ChunDVC Director (3-Bước tinh gọn):** Wizard trực quan đưa người dùng từ Ý tưởng / Kịch bản -> Rà soát nhịp cắt (Review Cuts) -> Xuất Timeline hoàn chỉnh vào DaVinci Resolve.
+- **Asset Studio Virtualized Grid:** Thư viện SFX, BGM, Meme, LUTs (`.cube`) và Text+ Presets (`.setting`) hỗ trợ ảo hóa danh sách siêu mượt, xem trước hover âm thanh/hình ảnh, và kéo thả trực tiếp vào timeline (**Ghost Pixmap Preview**).
 - **Floating Bubble Widget:** Quả cầu nổi thông minh thu nhỏ xuống góc màn hình, hiển thị tiến độ % và trạng thái kết nối DaVinci Resolve thời gian thực.
-- **Asset Studio Drag-and-Drop:** Thư viện SFX, BGM, Meme, LUTs (`.cube`) và Text+ Presets (`.setting`) hỗ trợ kéo thả trực tiếp vào DaVinci Resolve với hiệu ứng xem trước bán trong suốt (**Ghost Pixmap Preview**).
 
 ---
 
@@ -233,6 +235,12 @@ ResolveFlow-Assistant/
 │   │   ├── audio_beat.py          # Bắt nhịp nhạc nền BGM (Beat Drops)
 │   │   └── connection/            # Bộ chuyển đổi kết nối (Direct / Bridge / Manual)
 │   ├── ui/                        # Giao diện PySide6 (Qt6) Pro-Creator
+│   │   ├── lux/                   # ChunDVC Redesign Suite
+│   │   │   ├── edge_dock.py       # Thanh dock hít cạnh DaVinci Resolve
+│   │   │   ├── director.py        # ChunDVC Director (3-Step Video Wizard)
+│   │   │   ├── command_palette.py # Quick Command Palette (Ctrl+Alt+Space) & Toast Undo
+│   │   │   ├── context_router.py  # Router điều phối theo trang Resolve
+│   │   │   └── library/           # Virtualized AssetGridView & Delegates
 │   │   ├── auto/auto_window.py    # Cửa sổ dựng phim tự động AI Auto-Cut
 │   │   ├── studio/studio_window.py# Cửa sổ Asset Studio & quản lý đạo cụ
 │   │   ├── bubble/floating_bubble.py # Quả cầu nổi điều khiển thông minh
@@ -240,7 +248,7 @@ ResolveFlow-Assistant/
 │   │   └── theme.py               # Dark Theme Zinc-900 Palette
 │   └── utils/
 │       └── path_utils.py          # Xử lý đường dẫn chéo nền tảng (POSIX / Win32)
-└── tests/                         # Bộ 389 bài kiểm thử đơn vị tự động (pytest)
+└── tests/                         # Bộ 512 bài kiểm thử đơn vị tự động (pytest)
 ```
 
 ---
@@ -254,7 +262,7 @@ Dự án áp dụng phương pháp **Test-Driven Development (TDD)** với độ
 source .venv/bin/activate   # Linux
 # .\.venv\Scripts\Activate.ps1  # Windows
 
-# Chạy toàn bộ 389 bài unit tests (chế độ không hiển thị GUI trên Linux)
+# Chạy toàn bộ 512 bài unit tests (chế độ không hiển thị GUI trên Linux)
 QT_QPA_PLATFORM=offscreen python3 -m pytest tests/ -v
 
 # Chạy kiểm tra riêng các module cốt lõi:
@@ -264,7 +272,7 @@ python3 -m pytest tests/test_validator.py -v
 python3 -m pytest tests/test_resolve_api.py -v
 ```
 
-Kết quả kiểm thử bảo chứng đạt **100% PASS (389 passed, 0 failures)** trên mọi nền tảng.
+Kết quả kiểm thử bảo chứng đạt **100% PASS (512 passed, 0 failures)** trên mọi nền tảng.
 
 ---
 

@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 from PySide6.QtWidgets import QApplication
 
 from src.ui.auto.auto_window import PipelineWorker as AutoPipelineWorker, AutoWindow
-from src.ui.app import PipelineWorker as AppPipelineWorker
+from src.ui.auto.auto_window import PipelineWorker as AppPipelineWorker
 from src.core.shotbook_orchestrator import ShotRole, LayoutMode
 
 

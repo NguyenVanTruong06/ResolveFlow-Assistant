@@ -63,7 +63,7 @@ from src.ui.theme import (
     ThemeColors, ThemeFonts, TOOLTIPS, MODULE_DESCRIPTIONS,
     get_application_stylesheet, get_badge_style, get_card_style, get_button_style
 )
-from src.ui.tabs import TabCopilot, TabAutoCut, TabAssets, TabSFX, TabExport
+from src.ui.tabs import TabAssets
 from src.ui.icons import create_vector_icon, get_vector_icon
 from src.ui.widgets.mini_timeline import MiniTimelineWidget
 
@@ -1765,7 +1765,136 @@ class CacheCheckWorker(QRunnable):
                     cached_count += 1
             except Exception:
                 path_cached_map[vp] = False
-        self.signals.finished.emit(cached_count, len(self.raw_paths), path_cached_map)
+class TabAutoCut(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.banner_onboarding = QWidget()
+        self.group_wf = QWidget()
+        self.combo_workflow = QComboBox()
+        self.combo_workflow.addItem("Vlog có Hook", "vlog")
+        self.combo_workflow.addItem("Podcast, Phỏng vấn", "podcast")
+        self.combo_workflow.addItem("Shorts, TikTok 9:16", "shorts")
+        self.combo_workflow.addItem("Tùy chỉnh", "adv")
+        self.group_recipe = QWidget()
+        self.combo_recipes = QComboBox()
+        self.combo_recipes.addItems(["Default", "Vlog Nhanh", "Podcast"])
+        self.btn_save_recipe = QPushButton()
+        self.btn_delete_recipe = QPushButton()
+        self.group_master = QWidget()
+        self.slide_master_intensity = QSlider(Qt.Horizontal)
+        self.slide_master_intensity.setRange(1, 3)
+        self.slide_master_intensity.setValue(2)
+        self.lbl_master_intensity = QLabel()
+        self.combo_pacing = QComboBox()
+        self.combo_pacing.addItem("Cân bằng", "balanced")
+        self.combo_pacing.addItem("Nhanh", "fast")
+        self.combo_pacing.addItem("Thong thả", "chill")
+        self.combo_video_type = QComboBox()
+        self.combo_video_type.addItem("Tự động nhận diện", "auto")
+        self.combo_video_type.addItem("Vlog chuyển động", "vlog")
+        self.combo_video_type.addItem("Podcast/Talkshow tĩnh", "talkshow")
+        self.combo_video_type.addItem("Hỗn hợp", "mixed")
+        self.check_hide_weak_subs = QCheckBox()
+        self.check_scene_guard = QCheckBox()
+        self.check_scene_guard.setChecked(True)
+        self.check_fill_gaps = QCheckBox()
+        self.combo_hook_total = QComboBox()
+        self.combo_hook_total.addItem("20s", 20.0)
+        self.combo_hook_total.addItem("30s", 30.0)
+        self.combo_story_intent = QComboBox()
+        self.combo_story_intent.addItem("keep", "keep")
+        self.combo_story_intent.addItem("shorts", "shorts")
+        self.combo_story_intent.addItem("cold_open", "cold_open")
+        self.combo_story_intent.addItem("rising_action", "rising_action")
+        self.combo_story_target = QComboBox()
+        self.combo_story_target.addItem("60s", 60.0)
+        self.combo_story_target.addItem("90s", 90.0)
+        self.txt_api_key = QLineEdit()
+        self.check_repeats = QCheckBox()
+        self.group_timeline = QWidget()
+        self.mini_timeline = None
+        self.btn_toggle_advanced = QPushButton()
+        self.advanced_container = QWidget()
+        self.group_ai = QWidget()
+        self.combo_model = QComboBox()
+        self.combo_lang = QComboBox()
+        self.check_cache = QCheckBox()
+        self.group_director = QWidget()
+        self.combo_ai_mode = QComboBox()
+        self.combo_ai_mode.addItem("clean_talk", "clean_talk")
+        self.combo_ai_mode.addItem("viral_shorts", "viral_shorts")
+        self.check_bad_takes = QCheckBox()
+        self.txt_confidence_threshold = QLineEdit("0.70")
+        self.group_vlog_hook = QWidget()
+        self.combo_hook_dur = QComboBox()
+        self.group_v4 = QWidget()
+        self.group_cut = QWidget()
+        self.check_speedup = QCheckBox()
+        self.slide_db = QSlider(Qt.Horizontal)
+        self.slide_db.setRange(-60, -10)
+        self.slide_db.setValue(-35)
+        self.lbl_db = QLabel("-35 dB")
+        self.slide_dur = QSlider(Qt.Horizontal)
+        self.slide_dur.setRange(1, 50)
+        self.slide_dur.setValue(5)
+        self.lbl_dur = QLabel("0.5s")
+        self.combo_audio_track = QComboBox()
+        self.check_punch_in = QCheckBox()
+        self.check_broll = QCheckBox()
+        self.check_sfx = QCheckBox()
+        self.check_reframe = QCheckBox()
+        self.check_cut = QCheckBox()
+        self.check_vlog_hook = QCheckBox()
+
+
+class TabCopilot(QWidget):
+    quick_copy_prompt_requested = pyqtSignal()
+    copy_kinetic_prompt_requested = pyqtSignal()
+    one_click_kinetic_requested = pyqtSignal()
+    apply_json_text_requested = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.txt_json_input = QPlainTextEdit()
+        self.btn_quick_copy = QPushButton()
+        self.btn_copy_kinetic_prompt = QPushButton()
+        self.btn_one_click_kinetic = QPushButton()
+        self.combo_story_format = QComboBox()
+        self.combo_hook_duration = QComboBox()
+        self.combo_target_duration = QComboBox()
+        self.chk_beat_sync = QCheckBox()
+        self.chk_beat_sync.setChecked(True)
+
+    def get_selected_bgm_files(self, project_structure=None):
+        return []
+
+
+class TabSFX(QWidget):
+    insert_sfx_requested = pyqtSignal(str, int, float)
+    preview_played = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.combo_target_track = QComboBox()
+        self.slide_volume_offset = QSlider()
+        self.btn_insert_playhead = QPushButton()
+        self.check_loudnorm = QCheckBox()
+        self.combo_loudnorm_preset = QComboBox()
+
+
+class TabExport(QWidget):
+    apply_lut_requested = pyqtSignal(str)
+    render_requested = pyqtSignal(str, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.combo_lut = QComboBox()
+        self.btn_apply_lut = QPushButton()
+        self.combo_render_preset = QComboBox()
+        self.btn_start_render = QPushButton()
+        self.luts_dir = ""
+        self.combo_lut_scope = QComboBox()
+        self.check_lut_skip_existing = QCheckBox()
 
 
 class AutoWindow(QMainWindow):
@@ -1797,6 +1926,35 @@ class AutoWindow(QMainWindow):
         self.preset_mgr = PresetManager()
         self.recipe_mgr = RecipeManager()
         self.setAcceptDrops(True)
+
+        self.table_review = QTableWidget()
+        self.table_review.setColumnCount(7)
+        self.table_review.setHorizontalHeaderLabels([
+            "Giữ", "ID", "Bắt đầu", "Kết thúc", "Lý do AI", "Độ tin cậy", "Nội dung câu thoại"
+        ])
+        self.table_review.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_review.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_review.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table_review.hide()
+        self.review_state = ReviewState([])
+        self.review_toolbar = self._build_review_toolbar()
+        self.review_toolbar.hide()
+
+        self.table_story_review = QTableWidget()
+        self.table_story_review.setColumnCount(6)
+        self.table_story_review.setHorizontalHeaderLabels([
+            "Bật", "STT", "Vai trò", "Thời lượng", "Lý do / Đặc tính", "Nội dung thoại"
+        ])
+        self.table_story_review.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_story_review.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_story_review.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table_story_review.hide()
+        self.story_review_state: Optional[StoryReviewState] = None
+        self.story_review_toolbar = self._build_story_review_toolbar()
+        self.story_review_toolbar.hide()
+
+        self.lbl_s1_cache_status = QLabel()
+        self.btn_review_filter_all = QPushButton()
 
         self.bubble = None
 
@@ -3188,12 +3346,14 @@ class AutoWindow(QMainWindow):
         self.banner_onboarding = self.tab_autocut.banner_onboarding
         self.group_wf = self.tab_autocut.group_wf
         self.combo_workflow = self.tab_autocut.combo_workflow
+        self.combo_workflow.currentIndexChanged.connect(self._on_workflow_mode_changed)
         self.group_recipe = self.tab_autocut.group_recipe
         self.combo_recipes = self.tab_autocut.combo_recipes
         self.btn_save_recipe = self.tab_autocut.btn_save_recipe
         self.btn_delete_recipe = self.tab_autocut.btn_delete_recipe
         self.group_master = self.tab_autocut.group_master
         self.slide_master_intensity = self.tab_autocut.slide_master_intensity
+        self.slide_master_intensity.valueChanged.connect(self._on_master_intensity_changed)
         self.combo_pacing = self.tab_autocut.combo_pacing
         self.combo_video_type = self.tab_autocut.combo_video_type
         self.check_hide_weak_subs = self.tab_autocut.check_hide_weak_subs
@@ -3264,15 +3424,18 @@ class AutoWindow(QMainWindow):
         self.check_vlog_hook = self.check_hook
 
         # Tab 2: Titles Delegates
-        self.group_sub = self.tab_titles.group_presets
-        self.combo_text_preset = self.tab_titles.combo_text_preset
-        self.btn_preview_preset = self.tab_titles.btn_preview_preset
-        self.btn_save_custom_preset = self.tab_titles.btn_save_custom_preset
-        self.combo_split_mode = self.tab_titles.combo_split_mode
-        self.txt_split_limit = self.tab_titles.txt_split_limit
-        self.txt_font = self.tab_titles.txt_font
-        self.txt_size = self.tab_titles.txt_size
-        self.txt_color = self.tab_titles.txt_color
+        self.group_sub = getattr(self.tab_titles, "group_presets", None) or QGroupBox()
+        self.combo_text_preset = getattr(self.tab_titles, "combo_text_preset", None) or QComboBox()
+        self.btn_preview_preset = getattr(self.tab_titles, "btn_preview_preset", None) or QPushButton()
+        self.btn_save_custom_preset = getattr(self.tab_titles, "btn_save_custom_preset", None) or QPushButton()
+        self.combo_split_mode = getattr(self.tab_titles, "combo_split_mode", None) or QComboBox()
+        if self.combo_split_mode.count() == 0:
+            self.combo_split_mode.addItem("Ký tự (Characters)", "characters")
+            self.combo_split_mode.addItem("Từ (Words)", "words")
+        self.txt_split_limit = getattr(self.tab_titles, "txt_split_limit", None) or QLineEdit("42")
+        self.txt_font = getattr(self.tab_titles, "txt_font", None) or QLineEdit("Arial")
+        self.txt_size = getattr(self.tab_titles, "txt_size", None) or QLineEdit("48")
+        self.txt_color = getattr(self.tab_titles, "txt_color", None) or QLineEdit("#FFFFFF")
         self.preview_lbl = self.tab_titles.preview_lbl
         self.txt_single_title = self.tab_titles.txt_single_title
         self.slide_title_dur = self.tab_titles.slide_title_dur

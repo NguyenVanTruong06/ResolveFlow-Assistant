@@ -3216,7 +3216,7 @@ class TabAssets(QWidget):
         )
 
         scanned_luts = indexer.scan_luts()
-        self.all_luts = dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else MOCKUP_LUTS.copy()
+        self.all_luts = MOCKUP_LUTS.copy() + (dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else [])
         
         scanned_memes = indexer.scan_memes()
         self.all_memes = dicts_to_assets(scanned_memes, "meme", "trending", "Meme", "🎭") if scanned_memes else MOCKUP_MEMES.copy()
@@ -3263,7 +3263,7 @@ class TabAssets(QWidget):
         self.current_rail_tab = "text"
         self.current_sub_cat = "all"
         self.current_aspect_ratio = "16:9"
-        self.card_widgets: List[AssetCard] = []
+        self._card_widgets_cache: Optional[List[AssetCard]] = None
         self.selected_asset = self.all_presets[0] if self.all_presets else None
 
         self.suggester = ContextualSuggester(assets=self.all_assets)
@@ -3297,35 +3297,6 @@ class TabAssets(QWidget):
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-
-        # =====================================================================
-        # WIDGETS TƯƠNG THÍCH NGƯỢC (Bắt buộc cho app.py & test_ui.py)
-        # =====================================================================
-        self.group_presets = QGroupBox("Legacy")
-        self.check_subtitle = QCheckBox()
-        self.check_subtitle.setChecked(True)
-        self.combo_text_preset = QComboBox()
-        self.btn_preview_preset = QPushButton()
-        self.btn_save_custom_preset = QPushButton()
-        self.combo_split_mode = QComboBox()
-        self.combo_split_mode.addItem('Ký tự', 'characters')
-        self.combo_split_mode.addItem('Từ', 'words')
-        self.combo_split_mode.addItem('Câu', 'sentences')
-        self.txt_split_limit = QLineEdit("42")
-        self.txt_font = QLineEdit("Arial")
-        self.txt_size = QLineEdit("48")
-        self.txt_color = QLineEdit("#FFFFFF")
-
-        self.group_presets.hide()
-        self.check_subtitle.hide()
-        self.combo_text_preset.hide()
-        self.btn_preview_preset.hide()
-        self.btn_save_custom_preset.hide()
-        self.combo_split_mode.hide()
-        self.txt_split_limit.hide()
-        self.txt_font.hide()
-        self.txt_size.hide()
-        self.txt_color.hide()
 
         # =====================================================================
         # CỘT 1: RAIL ĐIỀU HƯỚNG CHÍNH (78px)
@@ -3711,23 +3682,37 @@ class TabAssets(QWidget):
         self.chk_hover_preview.toggled.connect(self._on_hover_preview_toggled)
         fb_layout.addWidget(self.chk_hover_preview)
 
-        self.scroll_grid = QScrollArea()
-        self.scroll_grid.setWidgetResizable(True)
-        self.scroll_grid.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll_grid.setStyleSheet("background: transparent; border: none;")
-        self.scroll_grid.viewport().installEventFilter(self)
+        # =====================================================================
+        # CỘT 3: LƯỚI ĐẠO CỤ ẢO HÓA (AssetGridView Model/View Akitt Pro UX)
+        # =====================================================================
+        from src.ui.lux.library import (
+            AssetListModel, AssetFilterProxyModel, AssetGridView
+        )
+        from src.services.search_index import SearchIndex
+
+        self.asset_grid = AssetGridView()
+        self.asset_model = AssetListModel(self.all_assets, favs=self.favorites)
+        self.search_index = SearchIndex(self.all_assets)
+        self.asset_filter = AssetFilterProxyModel(self.search_index)
+        self.asset_filter.setSourceModel(self.asset_model)
+        self.asset_grid.setModel(self.asset_filter)
+        self.asset_grid.set_sample_text_getter(lambda: self.txt_single_title.text().strip() if hasattr(self, "txt_single_title") else "")
+
+        self.asset_grid.asset_selected.connect(self._on_lux_card_selected)
+        self.asset_grid.asset_activated.connect(self._on_lux_card_activated)
+        self.asset_grid.favorite_toggled.connect(self._on_favorite_toggled)
+        self.asset_grid.fusion_paste_requested.connect(self._on_lux_fusion_paste)
+
+        # Legacy backward-compatibility wrappers
+        self.scroll_grid = self.asset_grid
         self.grid_container = QWidget()
-        self.grid_container.setStyleSheet("background: transparent;")
         self.grid = QGridLayout(self.grid_container)
-        self.grid.setContentsMargins(16, 16, 16, 16)
-        self.grid.setSpacing(12)
-        self.scroll_grid.setWidget(self.grid_container)
 
         main_sec_layout.addWidget(main_head)
         main_sec_layout.addWidget(filter_bar)
         self._setup_suggestion_bar()
         main_sec_layout.addWidget(self.suggestion_bar)
-        main_sec_layout.addWidget(self.scroll_grid, stretch=1)
+        main_sec_layout.addWidget(self.asset_grid, stretch=1)
 
         # =====================================================================
         # CỘT 4: BẢNG TINH CHỈNH INSPECTOR (min 260px)
@@ -4766,31 +4751,70 @@ class TabAssets(QWidget):
     # =========================================================================
     # 8. QUẢN LÝ LƯỚI CARD & TÌM KIẾM
     # =========================================================================
-    def _populate_cards(self):
-        for c in self.card_widgets:
-            c.deleteLater()
-        self.card_widgets.clear()
+    # =========================================================================
+    # 8. QUẢN LÝ LƯỚI CARD & TÌM KIẾM (Model/View Architecture)
+    # =========================================================================
+    @property
+    def card_widgets(self) -> List[AssetCard]:
+        """Lazy on-demand card widget access for backward-compatible unit tests."""
+        if getattr(self, "_card_widgets_cache", None) is None:
+            self._card_widgets_cache = self._create_legacy_card_widgets()
+            self._filter_legacy_cards()
+        return self._card_widgets_cache
 
-        # Nạp combo_text_preset để tương thích test
-        self.combo_text_preset.clear()
-        for p in self.all_presets:
-            if isinstance(p, TextStylePreset):
-                self.combo_text_preset.addItem(p.name, p.id)
+    @card_widgets.setter
+    def card_widgets(self, val: List[AssetCard]):
+        self._card_widgets_cache = val
 
+    def _create_legacy_card_widgets(self) -> List[AssetCard]:
+        cards = []
         for item in self.all_assets:
             pid = getattr(item, "id", "")
             is_fav = pid in self.favorites
-            card = AssetCard(preset=item, is_fav=is_fav, sample_text_func=lambda: self.txt_single_title.text().strip())
+            sample_fn = lambda: self.txt_single_title.text().strip() if hasattr(self, "txt_single_title") else ""
+            card = AssetCard(preset=item, is_fav=is_fav, sample_text_func=sample_fn)
             card.selected_signal.connect(self._on_card_selected)
             card.favorite_toggled.connect(self._on_favorite_toggled)
             card.add_requested.connect(self._on_card_add_requested)
             card.quick_play_requested.connect(self._on_asset_quick_play_requested)
-            self.card_widgets.append(card)
+            cards.append(card)
+        return cards
+
+    def _populate_cards(self):
+        # Cập nhật Model & SearchIndex ảo hóa
+        if hasattr(self, "asset_model"):
+            self.asset_model.set_assets(self.all_assets)
+            from src.services.search_index import SearchIndex
+            self.search_index = SearchIndex(self.all_assets)
+            self.asset_filter.set_search_index(self.search_index)
+
+        self._card_widgets_cache = None
 
     def _refresh_grid(self):
-        # Dọn sạch các ô trên grid
-        while self.grid.count():
-            self.grid.takeAt(0)
+        tab = self.current_rail_tab
+        cat = self.current_sub_cat
+        query = self.txt_search.text().strip()
+        filter_mode = getattr(self, "filter_mode", "all")
+
+        # 1. Cập nhật AssetFilterProxyModel (< 1ms, không tạo QWidget)
+        if hasattr(self, "asset_filter"):
+            self.asset_filter.set_category(tab)
+            self.asset_filter.set_sub_category(cat)
+            self.asset_filter.set_filter_mode(filter_mode)
+            if filter_mode == "recent":
+                self.asset_filter.set_recent_ids(RecentManager.load())
+            self.asset_filter.set_search_query(query)
+
+            count = self.asset_filter.rowCount()
+            self.lbl_count_badge.setText(f"{count} mẫu")
+
+        # 2. Đồng bộ hóa card_widgets cũ nếu test đang truy cập
+        if getattr(self, "_card_widgets_cache", None) is not None:
+            self._filter_legacy_cards()
+
+    def _filter_legacy_cards(self):
+        if not getattr(self, "_card_widgets_cache", None):
+            return
 
         tab = self.current_rail_tab
         cat = self.current_sub_cat
@@ -4798,8 +4822,7 @@ class TabAssets(QWidget):
         filter_mode = getattr(self, "filter_mode", "all")
         recent_items = set(RecentManager.load()) if filter_mode == "recent" else set()
 
-        visible = []
-        for card in self.card_widgets:
+        for card in self._card_widgets_cache:
             item = card.preset
             i_tab = "text" if isinstance(item, TextStylePreset) else "trans" if isinstance(item, TransitionStylePreset) else getattr(item, "tab", "")
             i_cat = getattr(item, "category", "")
@@ -4807,7 +4830,6 @@ class TabAssets(QWidget):
             i_name = getattr(item, "name", "").lower()
             i_fav = i_id in self.favorites
 
-            # Lọc theo Filter mode (Tất cả / Yêu thích / Gần đây)
             if filter_mode == "fav" and not i_fav:
                 card.setVisible(False)
                 continue
@@ -4815,7 +4837,6 @@ class TabAssets(QWidget):
                 card.setVisible(False)
                 continue
 
-            # Lọc theo Tab
             if tab == "fav":
                 if not i_fav:
                     card.setVisible(False)
@@ -4824,7 +4845,6 @@ class TabAssets(QWidget):
                 card.setVisible(False)
                 continue
 
-            # Lọc theo Phân loại con
             if cat != "all":
                 cat_aliases = {
                     "chuyen_canh": ["chuyen_canh", "trans"],
@@ -4841,7 +4861,6 @@ class TabAssets(QWidget):
                     card.setVisible(False)
                     continue
 
-            # Lọc theo Từ khóa tìm kiếm (Hỗ trợ Smart Motion tags & Tiếng Việt không dấu)
             if query:
                 from src.core.motion_analyzer import matches_query
                 search_targets = [i_name, i_cat, i_id, getattr(item, "sub", "")]
@@ -4855,16 +4874,22 @@ class TabAssets(QWidget):
                     card.setVisible(False)
                     continue
 
-            visible.append(card)
-
-        # Cập nhật số lượng đếm
-        self.lbl_count_badge.setText(f"{len(visible)} mẫu")
-
-        # Đặt vào lưới (số cột động theo slider)
-        cols = getattr(self, "grid_columns", 3)
-        for idx, card in enumerate(visible):
             card.setVisible(True)
-            self.grid.addWidget(card, idx // cols, idx % cols)
+
+    def _on_lux_card_selected(self, asset: Any):
+        pid = getattr(asset, "id", "") if not isinstance(asset, dict) else asset.get("id", "")
+        self._on_card_selected(pid)
+
+    def _on_lux_card_activated(self, asset: Any):
+        pid = getattr(asset, "id", "") if not isinstance(asset, dict) else asset.get("id", "")
+        self._on_card_selected(pid)
+        self._insert_at_playhead()
+
+    def _on_lux_fusion_paste(self, asset: Any):
+        pid = getattr(asset, "id", "") if not isinstance(asset, dict) else asset.get("id", "")
+        self._on_card_selected(pid)
+        if hasattr(self, "btn_copy_fusion") and self.btn_copy_fusion:
+            self.btn_copy_fusion.click()
 
     def _on_card_add_requested(self, preset: Any):
         pid = getattr(preset, "id", "")
@@ -4934,10 +4959,6 @@ class TabAssets(QWidget):
     def _on_card_selected(self, preset_id: str):
         self._stop_inspector_sfx_play()
         RecentManager.add(preset_id)
-        # Cập nhật combo_text_preset cho unit tests
-        idx = self.combo_text_preset.findData(preset_id)
-        if idx >= 0:
-            self.combo_text_preset.setCurrentIndex(idx)
 
         # Highlight card
         tab = getattr(self, "current_rail_tab", "")
@@ -5329,7 +5350,7 @@ class TabAssets(QWidget):
         scanned_transitions = indexer.scan_transitions()
         self.all_transitions = BUILTIN_TRANSITIONS.copy() + dicts_to_assets(scanned_transitions, "trans", "custom", "Tùy chỉnh", "🎬")
         scanned_luts = indexer.scan_luts()
-        self.all_luts = dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else MOCKUP_LUTS.copy()
+        self.all_luts = MOCKUP_LUTS.copy() + (dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else [])
         scanned_memes = indexer.scan_memes()
         self.all_memes = dicts_to_assets(scanned_memes, "meme", "trending", "Meme", "🎭") if scanned_memes else MOCKUP_MEMES.copy()
         scanned_sfx = indexer.scan_sfx()
@@ -5777,12 +5798,12 @@ class TabAssets(QWidget):
                 self.icon_meme_widget._start_playback()
 
     def _on_font_changed(self, font_name: str):
-        self.txt_font.setText(font_name)
+        self.current_font = font_name
         self._update_text_preview_from_params()
 
     def _on_font_size_changed(self, value: int):
         self.lbl_font_size_val.setText(f"{value} px")
-        self.txt_size.setText(str(value))
+        self.current_font_size = value
         self._update_text_preview_from_params()
 
     def _on_stroke_width_changed(self, value: int):
@@ -6620,7 +6641,7 @@ class TabAssets(QWidget):
     def _on_copy_fusion_clicked(self):
         macro_code = self._get_current_fusion_macro_code()
         QApplication.clipboard().setText(macro_code)
-        preset_id = self.combo_text_preset.currentData() or getattr(self.selected_asset, "id", "karaoke_pop")
+        preset_id = getattr(self.selected_asset, "id", "karaoke_pop")
         self.copy_fusion_node_requested.emit(preset_id)
         self._show_toast("Đã copy Fusion node! Dán vào trang Fusion bằng Ctrl+V")
 

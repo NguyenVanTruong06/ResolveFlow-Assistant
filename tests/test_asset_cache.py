@@ -7,6 +7,7 @@ import tempfile
 import threading
 import pytest
 from PIL import Image
+from PySide6.QtWidgets import QApplication
 
 from src.core.asset_cache import (
     get_file_hash_key,
@@ -82,7 +83,13 @@ def test_request_thumbnail_async():
 
     try:
         request_thumbnail_async(img_path, _callback, target_w=160, target_h=90)
-        assert done_event.wait(timeout=5.0)
+        start_t = time.time()
+        while not done_event.is_set() and time.time() - start_t < 5.0:
+            app = QApplication.instance()
+            if app:
+                app.processEvents()
+            time.sleep(0.02)
+        assert done_event.is_set()
         assert len(thumb_result) == 1
         assert os.path.isfile(thumb_result[0])
     finally:

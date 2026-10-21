@@ -105,7 +105,9 @@ def matches_query(query: str, tags_or_text: List[str] | str) -> bool:
 
     for item in target_list:
         clean_item = strip_accents(str(item).lower())
-        if clean_q in clean_item or clean_item in clean_q:
+        if not clean_item:
+            continue
+        if clean_q in clean_item or (len(clean_item) >= 3 and clean_item in clean_q):
             return True
     return False
 
