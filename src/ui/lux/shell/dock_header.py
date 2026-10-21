@@ -39,6 +39,8 @@ class DockHeaderWidget(QWidget):
     search_submitted = pyqtSignal()
     escape_requested = pyqtSignal()
     page_clicked = pyqtSignal()
+    pending_chip_clicked = pyqtSignal()
+    profile_lock_selected = pyqtSignal(str)
     wide_toggled = pyqtSignal()
     pin_toggled = pyqtSignal()
     collapse_clicked = pyqtSignal()
@@ -47,6 +49,8 @@ class DockHeaderWidget(QWidget):
         super().__init__(parent)
         self.setFixedHeight(44)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._current_page = "edit"
+        self._is_locked = False
         self._init_ui()
 
     def _init_ui(self):
@@ -75,8 +79,33 @@ class DockHeaderWidget(QWidget):
                 border-color: #7c3aed;
             }
         """)
-        self.btn_page_chip.clicked.connect(self.page_clicked.emit)
+        self.btn_page_chip.clicked.connect(self._on_page_chip_clicked)
         layout.addWidget(self.btn_page_chip)
+
+        # 1.1 Pending Page Chip (Hidden by default, shown when page change is deferred)
+        self.btn_pending_chip = QPushButton("Fusion ›")
+        self.btn_pending_chip.setFixedHeight(28)
+        self.btn_pending_chip.setToolTip("DaVinci đã đổi trang. Bấm để chuyển đổi ngay lập tức.")
+        self.btn_pending_chip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_pending_chip.setCursor(Qt.PointingHandCursor)
+        self.btn_pending_chip.setStyleSheet("""
+            QPushButton {
+                background: rgba(245, 158, 11, 0.18);
+                color: #fde68a;
+                border: 1px solid #f59e0b;
+                border-radius: 6px;
+                padding: 0 8px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #f59e0b;
+                color: #000000;
+            }
+        """)
+        self.btn_pending_chip.clicked.connect(self.pending_chip_clicked.emit)
+        self.btn_pending_chip.hide()
+        layout.addWidget(self.btn_pending_chip)
 
         # 2. Search box
         self.txt_search = SearchLineEdit()
@@ -207,3 +236,61 @@ class DockHeaderWidget(QWidget):
     @property
     def search_text(self) -> str:
         return self.txt_search.text()
+
+    def set_pending_page(self, pending_profile):
+        """Shows or hides the pending chip (e.g. 'Fusion ›')."""
+        if pending_profile:
+            label = getattr(pending_profile, "label", str(pending_profile))
+            self.btn_pending_chip.setText(f"{label} ›")
+            self.btn_pending_chip.show()
+        else:
+            self.btn_pending_chip.hide()
+
+    def _on_page_chip_clicked(self):
+        self.page_clicked.emit()
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background: #18181b;
+                color: #f4f4f5;
+                border: 1px solid #27272a;
+                border-radius: 8px;
+                padding: 4px;
+                font-size: 11.5px;
+            }
+            QMenu::item {
+                padding: 6px 14px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background: #27272a;
+                color: #ffffff;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #27272a;
+                margin: 4px 6px;
+            }
+        """)
+
+        act_auto = menu.addAction("● Theo DaVinci (tự động)")
+        act_auto.triggered.connect(lambda: self.profile_lock_selected.emit("auto"))
+        menu.addSeparator()
+
+        pages = [
+            ("edit", "Edit"),
+            ("fusion", "Fusion"),
+            ("color", "Color"),
+            ("fairlight", "Fairlight"),
+            ("cut", "Cut"),
+            ("deliver", "Deliver"),
+            ("media", "Media"),
+        ]
+        for pid, plabel in pages:
+            act = menu.addAction(f"Khóa: {plabel}")
+            act.triggered.connect(lambda checked=False, p=pid: self.profile_lock_selected.emit(p))
+
+        pos = self.btn_page_chip.mapToGlobal(self.btn_page_chip.rect().bottomLeft())
+        menu.exec(pos)
+

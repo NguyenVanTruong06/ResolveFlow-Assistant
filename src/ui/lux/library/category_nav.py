@@ -2,7 +2,7 @@
 Horizontal Scrollable Category Navigation for ChunDVC Library.
 Replaces the old cramped 78px vertical rail with truncated text.
 """
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QScrollArea, QFrame
 )
@@ -15,7 +15,9 @@ DEFAULT_CATEGORIES = [
     {"id": "meme", "label": "Meme", "subs": ["Tất cả"]},
     {"id": "overlay", "label": "Lớp phủ", "subs": ["Tất cả", "Grain", "Light Leak", "VHS", "Dust"]},
     {"id": "sfx", "label": "Âm thanh", "subs": ["Tất cả", "Whoosh", "UI", "Glitch", "Impact"]},
+    {"id": "bgm", "label": "Nhạc", "subs": ["Tất cả", "Vlog", "Cinematic", "Lofi"]},
     {"id": "lut", "label": "Màu (LUT)", "subs": ["Tất cả", "Điện ảnh", "Vintage", "Cyber", "Vlog"]},
+    {"id": "mine", "label": "Của tôi", "subs": ["Tất cả", "Đã lưu", "Macro"]},
 ]
 
 
@@ -80,11 +82,27 @@ class CategoryNavWidget(QWidget):
 
         self.render_categories()
 
-    def set_categories(self, categories: List[Dict]):
-        self._categories = categories
+    def set_categories(self, categories: List[Any]):
+        if not categories:
+            self._categories = []
+        elif isinstance(categories[0], str):
+            cat_map = {c["id"]: c for c in DEFAULT_CATEGORIES}
+            self._categories = []
+            for cid in categories:
+                if cid in cat_map:
+                    self._categories.append(cat_map[cid])
+                else:
+                    self._categories.append({"id": cid, "label": cid.capitalize(), "subs": ["Tất cả"]})
+        else:
+            self._categories = categories
+
         if self._categories and self._current_cat not in [c["id"] for c in self._categories]:
             self._current_cat = self._categories[0]["id"]
+            self._current_sub = "Tất cả"
         self.render_categories()
+
+    def select_sub_category(self, sub: str):
+        self.select_subcategory(sub)
 
     def render_categories(self):
         # Clear existing buttons

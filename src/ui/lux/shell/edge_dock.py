@@ -37,6 +37,12 @@ from .dock_status import DockStatusBar
 from ..library.category_nav import CategoryNavWidget
 from ..library.action_bar import DockActionBar
 from ..inspector.inspector_host import SheetInspector
+from ..context.context_profiles import ContextProfile, PROFILES
+from ..context.context_router import ContextRouter
+from ..context.special_blocks import (
+    EditSuggestBlock, CutPadsBlock, FusionCaptureBlock,
+    ColorSpecialBlock, FairlightBlock, DeliverBlock, MediaBlock
+)
 
 logger = logging.getLogger("ResolveFlow.EdgeDock")
 
@@ -76,6 +82,14 @@ class EdgeDockWindow(QWidget):
         self._anchor_rect: Optional[Tuple[int, int, int, int]] = None
         self._selected_asset: Optional[Dict[str, Any]] = None
 
+        # Context Router
+        self.router = ContextRouter(initial_page="edit", parent=self)
+        self.router.profile_changed.connect(self._on_profile_changed)
+        self.router.pending_changed.connect(self._on_pending_changed)
+        self.router.profile_locked_changed.connect(self._on_profile_locked_changed)
+        self.router.search_boost_requested.connect(self._on_search_boost_requested)
+        self._current_profile: Optional[ContextProfile] = None
+
         # State machine
         self.fsm = DockStateMachine(self)
         self.fsm.state_changed.connect(self._on_fsm_state_changed)
@@ -88,6 +102,9 @@ class EdgeDockWindow(QWidget):
 
         self._init_ui()
         self.setStyleSheet(get_luxury_dark_stylesheet())
+
+        # Initialize context profile appearance
+        self._on_profile_changed(self.router.active_profile)
 
         # Connect Resolve state signals if provided
         if self._resolve_state:
@@ -125,14 +142,20 @@ class EdgeDockWindow(QWidget):
         self.frame.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         outer_layout.addWidget(self.frame)
 
-        frame_layout = QVBoxLayout(self.frame)
+        frame_layout = QHBoxLayout(self.frame)
         frame_layout.setContentsMargins(0, 0, 0, 0)
         frame_layout.setSpacing(0)
+
+        # 2px Accent Line along left edge
+        self.accent_line = QFrame(self.frame)
+        self.accent_line.setFixedWidth(2)
+        self.accent_line.setStyleSheet("background: #7c3aed;")
+        frame_layout.addWidget(self.accent_line)
 
         # Mode Stack: Page 0 = Rail/Peek (44px), Page 1 = Full Expanded Dock View
         self.stack = QStackedWidget(self.frame)
         self.stack.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        frame_layout.addWidget(self.stack)
+        frame_layout.addWidget(self.stack, stretch=1)
 
         # --- Page 0: Collapsed Rail Widget ---
         self.rail = DockRailWidget(self.stack)
@@ -157,6 +180,8 @@ class EdgeDockWindow(QWidget):
         self.header.wide_toggled.connect(self._on_toggle_wide)
         self.header.pin_toggled.connect(self._on_toggle_pin)
         self.header.collapse_clicked.connect(self.collapse_dock)
+        self.header.pending_chip_clicked.connect(self.router.apply_pending)
+        self.header.profile_lock_selected.connect(self.router.lock_profile)
         exp_layout.addWidget(self.header)
 
         # 2. Horizontal Category Navigation
@@ -165,7 +190,45 @@ class EdgeDockWindow(QWidget):
         self.category_nav.sub_category_changed.connect(self._on_sub_category_changed)
         exp_layout.addWidget(self.category_nav)
 
-        # 3. Virtualized Asset Grid View
+        # 3. Special Context Blocks Stack (Edit, Cut, Fusion, Color, Fairlight, Deliver, Media)
+        self.special_container = QStackedWidget(self.expanded_container)
+        self.special_container.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        self.block_edit = EditSuggestBlock(self.special_container)
+        self.block_edit.asset_suggested.connect(self._on_suggested_asset)
+
+        self.block_cut = CutPadsBlock(self.special_container)
+        self.block_cut.pad_triggered.connect(self._on_pad_triggered)
+
+        self.block_fusion = FusionCaptureBlock(self.special_container)
+        self.block_fusion.capture_requested.connect(self._on_fusion_captured)
+
+        self.block_color = ColorSpecialBlock(self.special_container)
+
+        self.block_fairlight = FairlightBlock(self.special_container)
+        self.block_fairlight.pad_triggered.connect(self._on_pad_triggered)
+
+        self.block_deliver = DeliverBlock(self.special_container)
+        self.block_deliver.start_render_requested.connect(self._on_start_render)
+
+        self.block_media = MediaBlock(self.special_container)
+        self.block_media.open_director_requested.connect(self.director_requested.emit)
+
+        self._special_blocks_map = {
+            "edit": self.block_edit,
+            "cut": self.block_cut,
+            "fusion": self.block_fusion,
+            "color": self.block_color,
+            "fairlight": self.block_fairlight,
+            "deliver": self.block_deliver,
+            "media": self.block_media,
+        }
+        for block in self._special_blocks_map.values():
+            self.special_container.addWidget(block)
+
+        exp_layout.addWidget(self.special_container)
+
+        # 4. Virtualized Asset Grid View
         self.asset_model = AssetListModel(parent=self.expanded_container)
         self.proxy_model = AssetFilterProxyModel(parent=self.expanded_container)
         self.proxy_model.setSourceModel(self.asset_model)
@@ -177,7 +240,7 @@ class EdgeDockWindow(QWidget):
         self.grid.asset_activated.connect(self._on_asset_double_clicked)
         exp_layout.addWidget(self.grid, stretch=1)
 
-        # 4. Sticky Action Bar 56px
+        # 5. Sticky Action Bar 56px
         self.action_bar = DockActionBar(self.expanded_container)
         self.action_bar.primary_triggered.connect(self._on_primary_action)
         self.action_bar.tune_triggered.connect(self._on_tune_action)
@@ -189,16 +252,16 @@ class EdgeDockWindow(QWidget):
         self.action_bar.menu_visibility_changed.connect(self.fsm.set_menu_open)
         exp_layout.addWidget(self.action_bar)
 
-        # 5. Status Bar 22px
+        # 6. Status Bar 22px
         self.status_bar = DockStatusBar(self.expanded_container)
         exp_layout.addWidget(self.status_bar)
 
         self.stack.addWidget(self.expanded_container)
         self.stack.setCurrentIndex(0)
 
-        # 6. Sheet Inspector Overlay
+        # 7. Sheet Inspector Overlay
         self.sheet = SheetInspector(self)
-        self.sheet.closed.connect(lambda: self.fsm.set_sheet_open(False))
+        self.sheet.closed.connect(self._on_sheet_closed)
         self.sheet.insert_requested.connect(self._on_sheet_insert_requested)
 
     # -------------------------------------------------------------------------
@@ -327,6 +390,7 @@ class EdgeDockWindow(QWidget):
     # -------------------------------------------------------------------------
     def enterEvent(self, event):
         super().enterEvent(event)
+        self.router.is_in_dock = True
         if not self.fsm.is_open:
             self.fsm.on_mouse_enter_rail()
         else:
@@ -335,10 +399,13 @@ class EdgeDockWindow(QWidget):
     def leaveEvent(self, event):
         super().leaveEvent(event)
         self.fsm.on_mouse_leave_dock()
+        self.router.is_in_dock = False
+        self.router.on_user_left_dock()
 
     def _on_search_changed(self, text: str):
         self.fsm.on_search_text_changed(text)
         self.proxy_model.set_search_query(text)
+        self.router.has_search_text = bool(text.strip())
 
     def _on_search_submitted(self):
         # Insert first matched item if exists
@@ -352,6 +419,7 @@ class EdgeDockWindow(QWidget):
 
     def _on_search_escape(self):
         self.header.clear_search()
+        self.router.has_search_text = False
         self.fsm.collapse_dock()
         focus_davinci_resolve()
 
@@ -362,6 +430,103 @@ class EdgeDockWindow(QWidget):
         self.fsm.toggle_pin()
 
     # -------------------------------------------------------------------------
+    # Context Profile Slots
+    # -------------------------------------------------------------------------
+    def _on_profile_changed(self, profile: ContextProfile):
+        # 1. Save state of previous profile if applicable
+        if self._current_profile and self._current_profile.categories:
+            cat = self.category_nav.current_category
+            sub = self.category_nav.current_subcategory
+            scroll_y = self.grid.verticalScrollBar().value()
+            self.router.save_page_state(cat, sub, scroll_y)
+        self._current_profile = profile
+
+        # 2. Update Accent Line color
+        self.accent_line.setStyleSheet(f"background: {profile.color};")
+
+        # 3. Update Header Page Chip
+        self.header.set_page_label(profile.label, locked=self.router.is_locked, color=profile.color)
+
+        # 4. Update Action Bar Primary Button Label
+        self.action_bar.btn_primary.setText(f"{profile.primary_action}  ⏎")
+
+        # 5. Show/Hide Category Nav and Grid vs Special Container
+        exp_layout = self.expanded_container.layout()
+        if profile.categories:
+            self.category_nav.show()
+            self.category_nav.set_categories(profile.categories)
+            self.grid.show()
+            if exp_layout:
+                exp_layout.setStretchFactor(self.special_container, 0)
+                exp_layout.setStretchFactor(self.grid, 1)
+        else:
+            self.category_nav.hide()
+            self.grid.hide()
+            if exp_layout:
+                exp_layout.setStretchFactor(self.special_container, 1)
+                exp_layout.setStretchFactor(self.grid, 0)
+
+        # 6. Switch Special Block
+        block = self._special_blocks_map.get(profile.page)
+        if block:
+            self.special_container.setCurrentWidget(block)
+            self.special_container.show()
+        else:
+            self.special_container.hide()
+
+        # 7. Restore saved state from memory
+        saved = self.router.get_saved_page_state(profile.page)
+        if saved and profile.categories:
+            cat = saved.get("category")
+            if cat and cat in profile.categories:
+                self.category_nav.select_category(cat)
+            elif profile.categories:
+                self.category_nav.select_category(profile.categories[0])
+            sub = saved.get("subcategory")
+            if sub:
+                self.category_nav.select_sub_category(sub)
+            scroll_y = saved.get("scroll_y", 0)
+            QTimer.singleShot(15, lambda: self.grid.verticalScrollBar().setValue(scroll_y))
+        elif profile.categories:
+            self.category_nav.select_category(profile.categories[0])
+
+    def _on_pending_changed(self, pending_profile: Optional[ContextProfile]):
+        self.header.set_pending_page(pending_profile)
+
+    def _on_profile_locked_changed(self, locked: bool, page_id: str):
+        profile = self.router.active_profile
+        self.header.set_page_label(profile.label, locked=locked, color=profile.color)
+
+    def _on_search_boost_requested(self, categories: List[str]):
+        logger.debug("Context profile categories for search boost: %s", categories)
+
+    def _on_suggested_asset(self, asset_id: str):
+        logger.info("Suggested asset selected: %s", asset_id)
+        # Find asset in proxy model and insert
+        for i in range(self.proxy_model.rowCount()):
+            idx = self.proxy_model.index(i, 0)
+            asset = idx.data(Qt.ItemDataRole.UserRole)
+            if asset and (asset.get("id") == asset_id or asset.get("name") == asset_id):
+                self._selected_asset = asset
+                self._do_insert(asset, {})
+                break
+
+    def _on_pad_triggered(self, pad_id: str):
+        logger.info("Sound pad triggered: %s", pad_id)
+        pad_asset = {"id": pad_id, "name": pad_id, "category": "sfx", "type": "sfx"}
+        self._do_insert(pad_asset, {})
+
+    def _on_start_render(self, preset_id: str):
+        logger.info("Deliver render triggered for preset: %s", preset_id)
+
+    def _on_fusion_captured(self):
+        logger.info("Fusion node captured into preset")
+
+    def _on_sheet_closed(self):
+        self.fsm.set_sheet_open(False)
+        self.router.is_sheet_open = False
+
+    # -------------------------------------------------------------------------
     # Library Interaction Slots
     # -------------------------------------------------------------------------
     def _on_rail_category_selected(self, cat: str):
@@ -369,9 +534,17 @@ class EdgeDockWindow(QWidget):
 
     def _on_category_changed(self, cat: str):
         self.proxy_model.set_category(cat)
+        if self._current_profile:
+            sub = self.category_nav.current_subcategory
+            scroll_y = self.grid.verticalScrollBar().value()
+            self.router.save_page_state(cat, sub, scroll_y)
 
     def _on_sub_category_changed(self, sub: str):
         self.proxy_model.set_sub_category(sub)
+        if self._current_profile:
+            cat = self.category_nav.current_category
+            scroll_y = self.grid.verticalScrollBar().value()
+            self.router.save_page_state(cat, sub, scroll_y)
 
     def _on_asset_clicked(self, asset: Dict[str, Any]):
         self._selected_asset = asset
@@ -383,11 +556,21 @@ class EdgeDockWindow(QWidget):
 
     def _on_asset_double_clicked(self, asset: Dict[str, Any]):
         self._selected_asset = asset
-        self._do_insert(asset, {})
+        if self.router.active_profile.page == "fusion":
+            self._on_paste_fusion()
+        else:
+            self._do_insert(asset, {})
         focus_davinci_resolve()
 
     def _on_primary_action(self):
-        if self._selected_asset:
+        curr_page = self.router.active_profile.page
+        if curr_page == "fusion":
+            self._on_paste_fusion()
+        elif curr_page == "deliver":
+            self.block_deliver._on_render_clicked()
+        elif curr_page == "media":
+            self.director_requested.emit()
+        elif self._selected_asset:
             self._do_insert(self._selected_asset, {})
         focus_davinci_resolve()
 
@@ -397,13 +580,16 @@ class EdgeDockWindow(QWidget):
         if self.sheet.is_open:
             self.sheet.close_sheet()
             self.fsm.set_sheet_open(False)
+            self.router.is_sheet_open = False
         else:
             self.fsm.set_sheet_open(True)
+            self.router.is_sheet_open = True
             self.sheet.open_sheet(self._selected_asset)
 
     def _on_sheet_insert_requested(self, asset: Dict[str, Any], params: Dict[str, Any]):
         self._do_insert(asset, params)
         self.fsm.set_sheet_open(False)
+        self.router.is_sheet_open = False
         focus_davinci_resolve()
 
     def _on_paste_fusion(self):
@@ -451,13 +637,34 @@ class EdgeDockWindow(QWidget):
         self.status_bar.set_connected(connected)
         self.status_bar.set_timeline(timeline)
         self.status_bar.set_timecode(playhead_tc)
-        self.header.set_page_label(page.capitalize())
+        if connected:
+            self.router.on_resolve_page_changed(page)
+        else:
+            self.status_bar.set_connected(False)
+            self.header.set_page_label("Mất kết nối", color="#71717a")
+            self.action_bar.btn_primary.setText("Kết nối lại  ⏎")
 
     # -------------------------------------------------------------------------
     # Keyboard Handling (When Dock is open and search input is not active)
     # -------------------------------------------------------------------------
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
+
+        # Cut and Fairlight sound pad trigger keys: 1-9, 0, -, =
+        if (
+            self.router.active_profile.page in ("cut", "fairlight")
+            and not self.header.txt_search.hasFocus()
+        ):
+            text = event.text()
+            if text in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "="]:
+                triggered = False
+                if self.router.active_profile.page == "cut":
+                    triggered = self.block_cut.trigger_by_key(text)
+                else:
+                    triggered = self.block_fairlight.trigger_by_key(text)
+                if triggered:
+                    event.accept()
+                    return
 
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self._on_primary_action()
@@ -471,6 +678,7 @@ class EdgeDockWindow(QWidget):
             if self.sheet.is_open:
                 self.sheet.close_sheet()
                 self.fsm.set_sheet_open(False)
+                self.router.is_sheet_open = False
             else:
                 self.fsm.collapse_dock()
             focus_davinci_resolve()
