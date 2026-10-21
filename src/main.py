@@ -1,6 +1,10 @@
 import os
 import sys
 
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 # Cấu hình chuẩn cho Qt6 trên Linux (XCB display server & FFmpeg media engine)
 if sys.platform.startswith("linux"):
     os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
