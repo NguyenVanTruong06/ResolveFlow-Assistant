@@ -95,12 +95,7 @@ class MockResolveApp:
         return "edit"
 
 
-@pytest.fixture
-def qapp():
-    app = QCoreApplication.instance()
-    if not app:
-        app = QCoreApplication([])
-    return app
+
 
 
 def test_insert_service_undo_after_31s_rejected(qapp):

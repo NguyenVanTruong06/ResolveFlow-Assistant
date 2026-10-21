@@ -173,9 +173,36 @@ class SearchIndex:
         """Pre-processes assets for ultra-fast indexing."""
         self._assets = []
         for a in assets:
-            item = dict(a)
+            if isinstance(a, dict):
+                item = dict(a)
+            else:
+                type_name = type(a).__name__
+                if type_name == "TextStylePreset":
+                    a_cat = "text"
+                    a_sub = getattr(a, "category", "") or "Kinetic"
+                elif type_name == "TransitionStylePreset":
+                    a_cat = "trans"
+                    a_sub = getattr(a, "category", "") or "Transition"
+                elif getattr(a, "tab", ""):
+                    a_cat = getattr(a, "tab", "")
+                    a_sub = getattr(a, "category", "") or getattr(a, "sub", "")
+                else:
+                    a_cat = getattr(a, "category", "")
+                    a_sub = getattr(a, "sub", "") or getattr(a, "sub_category", "")
+
+                item = {
+                    "id": getattr(a, "id", "") or getattr(a, "name", ""),
+                    "name": getattr(a, "name", ""),
+                    "category": a_cat,
+                    "sub": a_sub,
+                    "duration": getattr(a, "duration", 0.0) or getattr(a, "dur", 0.0),
+                    "tags": getattr(a, "tags", []) or [],
+                    "motion": getattr(a, "motion", "") or getattr(a, "animation", ""),
+                    "file_path": getattr(a, "file_path", ""),
+                    "obj": a,
+                }
             name = str(item.get("name") or item.get("id") or "")
-            cat = str(item.get("category") or item.get("cat") or "").lower()
+            cat = str(item.get("category") or item.get("cat") or item.get("tab") or "").lower()
             tags = item.get("tags") or []
             if isinstance(tags, str):
                 tags = [tags]

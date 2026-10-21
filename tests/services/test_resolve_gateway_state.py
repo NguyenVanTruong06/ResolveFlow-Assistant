@@ -53,12 +53,7 @@ class StubResolve:
         return self.pm
 
 
-@pytest.fixture
-def qapp():
-    app = QCoreApplication.instance()
-    if not app:
-        app = QCoreApplication([])
-    return app
+
 
 
 def test_gateway_sequential_execution(qapp):

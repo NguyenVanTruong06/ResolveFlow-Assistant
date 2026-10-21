@@ -1,0 +1,262 @@
+"""
+tests/ui/test_asset_library_model_view.py
+Comprehensive unit tests for BƯỚC 2: Model/View Asset Library Architecture.
+
+Verifies:
+- AssetListModel roles, data access, and async thumbnail updates
+- AssetFilterProxyModel category, subcategory, favorite, and SearchIndex ranking
+- AssetCardDelegate rendering 16:9 cards and audio waveforms
+- AssetGridView responsive column calculations, drag & drop mime generation
+- TabAssets virtualization integration (no massive AssetCard widget creation)
+"""
+import os
+import pytest
+from PySide6.QtCore import Qt, QSize, QModelIndex, QRect
+from PySide6.QtWidgets import QApplication, QStyleOptionViewItem
+from PySide6.QtGui import QPixmap, QImage, QPainter
+
+from src.ui.lux.library.asset_model import (
+    AssetListModel, IdRole, NameRole, KindRole, DurationRole,
+    ThumbnailRole, IsFavRole, CategoryRole, SubCategoryRole, AssetObjRole
+)
+from src.ui.lux.library.asset_filter import AssetFilterProxyModel
+from src.ui.lux.library.asset_delegate import AssetCardDelegate
+from src.ui.lux.library.asset_grid import AssetGridView, create_asset_mime_data
+from src.services.search_index import SearchIndex
+
+
+
+
+
+@pytest.fixture
+def sample_raw_assets():
+    return [
+        {
+            "id": "t_hormozi",
+            "name": "Alex Hormozi Pop Title",
+            "category": "text",
+            "sub": "Kinetic",
+            "duration": 4.0,
+            "motion": "bounce",
+            "tags": ["pop", "bounce", "chu", "noi bat"]
+        },
+        {
+            "id": "tr_shake",
+            "name": "Camera Shake Transition",
+            "category": "trans",
+            "sub": "Glitch",
+            "duration": 1.2,
+            "motion": "shake",
+            "tags": ["shake", "rung giat", "chuyen canh"]
+        },
+        {
+            "id": "s_whoosh",
+            "name": "Fast Whoosh SFX",
+            "category": "sfx",
+            "sub": "Whoosh",
+            "duration": 0.8,
+            "motion": "",
+            "tags": ["whoosh", "vut", "am thanh"]
+        },
+        {
+            "id": "b_lofi",
+            "name": "Chill Lofi Beat",
+            "category": "bgm",
+            "sub": "Chill Vlog",
+            "duration": 65.0,
+            "motion": "",
+            "tags": ["lofi", "chill", "nhac nen"]
+        },
+        {
+            "id": "l_teal",
+            "name": "Teal & Orange Cinematic",
+            "category": "lut",
+            "sub": "Điện ảnh",
+            "duration": 0.0,
+            "motion": "",
+            "tags": ["teal", "orange", "dien anh", "mau"]
+        }
+    ]
+
+
+def test_asset_model_roles_and_data(qapp, sample_raw_assets):
+    model = AssetListModel(sample_raw_assets, favs={"t_hormozi"})
+    assert model.rowCount() == len(sample_raw_assets)
+
+    idx_0 = model.index(0, 0)
+    assert model.data(idx_0, IdRole) == "t_hormozi"
+    assert model.data(idx_0, NameRole) == "Alex Hormozi Pop Title"
+    assert model.data(idx_0, KindRole) == "Chữ"
+    assert model.data(idx_0, DurationRole) == 4.0
+    assert model.data(idx_0, CategoryRole) == "text"
+    assert model.data(idx_0, IsFavRole) is True
+
+    # Test toggling favorite
+    is_now_fav = model.toggle_favorite("t_hormozi")
+    assert is_now_fav is False
+    assert model.data(idx_0, IsFavRole) is False
+
+    is_now_fav = model.toggle_favorite("t_hormozi")
+    assert is_now_fav is True
+    assert model.data(idx_0, IsFavRole) is True
+
+
+def test_asset_model_async_thumbnail_update(qapp, sample_raw_assets):
+    model = AssetListModel(sample_raw_assets)
+    idx_0 = model.index(0, 0)
+    assert model.data(idx_0, ThumbnailRole) is None
+
+    # Create dummy pixmap and deliver it via update_thumbnail
+    dummy_pix = QPixmap(100, 100)
+    dummy_pix.fill(Qt.GlobalColor.magenta)
+
+    data_changed_emitted = []
+    model.dataChanged.connect(lambda top_left, bottom_right, roles: data_changed_emitted.append((top_left.row(), roles)))
+
+    model.update_thumbnail("t_hormozi", dummy_pix)
+
+    assert len(data_changed_emitted) == 1
+    assert data_changed_emitted[0][0] == 0
+    assert ThumbnailRole in data_changed_emitted[0][1]
+    assert model.data(idx_0, ThumbnailRole) is not None
+
+
+def test_asset_filter_category_and_search(qapp, sample_raw_assets):
+    model = AssetListModel(sample_raw_assets)
+    search_idx = SearchIndex(sample_raw_assets)
+    proxy = AssetFilterProxyModel(search_idx)
+    proxy.setSourceModel(model)
+
+    assert proxy.rowCount() == 5
+
+    # Filter by category text
+    proxy.set_category("text")
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, 0), IdRole) == "t_hormozi"
+
+    # Filter by category sfx
+    proxy.set_category("sfx")
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, 0), IdRole) == "s_whoosh"
+
+    # Reset category
+    proxy.set_category("all")
+    assert proxy.rowCount() == 5
+
+    # Search with SearchIndex: "shake" -> tr_shake should be top
+    proxy.set_search_query("shake")
+    assert proxy.rowCount() >= 1
+    assert proxy.data(proxy.index(0, 0), IdRole) == "tr_shake"
+
+    # Clear search
+    proxy.set_search_query("")
+    assert proxy.rowCount() == 5
+
+
+def test_asset_filter_modes(qapp, sample_raw_assets):
+    model = AssetListModel(sample_raw_assets, favs={"tr_shake"})
+    proxy = AssetFilterProxyModel()
+    proxy.setSourceModel(model)
+
+    # Favorite filter mode
+    proxy.set_filter_mode("fav")
+    assert proxy.rowCount() == 1
+    assert proxy.data(proxy.index(0, 0), IdRole) == "tr_shake"
+
+    # Recent filter mode
+    proxy.set_filter_mode("recent")
+    proxy.set_recent_ids(["b_lofi", "s_whoosh"])
+    assert proxy.rowCount() == 2
+    matched_ids = {proxy.data(proxy.index(i, 0), IdRole) for i in range(proxy.rowCount())}
+    assert matched_ids == {"b_lofi", "s_whoosh"}
+
+
+def test_asset_delegate_paint_no_crash(qapp, sample_raw_assets):
+    model = AssetListModel(sample_raw_assets, favs={"t_hormozi"})
+    delegate = AssetCardDelegate()
+
+    opt = QStyleOptionViewItem()
+    opt.rect = QRect(0, 0, 194, 136)
+
+    # Verify sizeHint
+    sh = delegate.sizeHint(opt, model.index(0, 0))
+    assert sh.width() == 194
+    assert sh.height() > 100
+
+    # Test paint on QImage buffer
+    img = QImage(200, 150, QImage.Format.Format_ARGB32)
+    img.fill(Qt.GlobalColor.black)
+    painter = QPainter(img)
+
+    try:
+        # Paint title card
+        delegate.paint(painter, opt, model.index(0, 0))
+
+        # Paint audio card (procedural waveform)
+        delegate.paint(painter, opt, model.index(2, 0))
+
+        # Paint selected card
+        from PySide6.QtWidgets import QStyle
+        opt.state |= QStyle.StateFlag.State_Selected
+        delegate.paint(painter, opt, model.index(1, 0))
+    finally:
+        painter.end()
+
+
+def test_asset_grid_column_calculation_and_drag_mime(qapp, sample_raw_assets):
+    grid = AssetGridView()
+    model = AssetListModel(sample_raw_assets)
+    proxy = AssetFilterProxyModel()
+    proxy.setSourceModel(model)
+    grid.setModel(proxy)
+
+    # Simulate wide window (600px width -> cols = (600+8)/(180+8) = 3 cols)
+    grid.resize(600, 400)
+    grid._recalculate_grid_geometry()
+    gs = grid.gridSize()
+    assert gs.width() > 0
+    assert gs.height() > 0
+
+    # Test drag mime data generation
+    raw_title = sample_raw_assets[0]
+    mime = create_asset_mime_data(raw_title, sample_text="ChunDVC Test")
+    assert mime is not None
+    assert mime.hasText() or mime.hasUrls()
+
+
+def test_tab_assets_virtualization_integration(qapp):
+    """
+    Verifies that TabAssets embeds AssetGridView, connects signals,
+    and no longer instantiates hundreds of AssetCard widgets on startup.
+    """
+    from src.ui.tabs.tab_assets import TabAssets
+
+    tab = TabAssets()
+
+    # AssetGridView must be active and present
+    assert hasattr(tab, "asset_grid")
+    assert hasattr(tab, "asset_model")
+    assert hasattr(tab, "asset_filter")
+    assert isinstance(tab.asset_grid, AssetGridView)
+
+    # Verify widget overhead reduction: initial card cache is None!
+    assert tab._card_widgets_cache is None, "AssetCard widgets must NOT be created initially on startup!"
+
+    # Rail navigation updates AssetFilterProxyModel
+    tab._filter_by_rail("lut")
+    assert tab.current_rail_tab == "lut"
+    assert tab.asset_filter._category == "lut"
+
+    tab._filter_by_rail("text")
+    assert tab.current_rail_tab == "text"
+    assert tab.asset_filter._category == "text"
+
+    # Searching updates filter immediately
+    tab.txt_search.setText("hormozi")
+    tab._refresh_grid()
+    assert tab.asset_filter._search_query == "hormozi"
+    assert tab.asset_filter.rowCount() >= 1
+
+    # Inspector selection updates cleanly
+    tab.asset_grid.asset_selected.emit(tab.all_presets[0])
+    assert tab.selected_asset is not None
