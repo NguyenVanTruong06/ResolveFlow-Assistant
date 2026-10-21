@@ -22,6 +22,8 @@ from src.ui.lux.library.asset_filter import AssetFilterProxyModel
 from src.ui.lux.library.asset_delegate import AssetCardDelegate
 from src.ui.lux.library.asset_grid import AssetGridView, create_asset_mime_data
 from src.ui.lux.library.hover_preview import SharedHoverPreview
+from src.ui.lux.library.category_nav import CategoryNavWidget
+from src.ui.lux.library.action_bar import DockActionBar
 
 __all__ = [
     "AssetListModel",
@@ -29,6 +31,8 @@ __all__ = [
     "AssetCardDelegate",
     "AssetGridView",
     "SharedHoverPreview",
+    "CategoryNavWidget",
+    "DockActionBar",
     "create_asset_mime_data",
     "IdRole",
     "NameRole",
