@@ -11,6 +11,7 @@ from .shell import EdgeDockWindow, DockState, DockStateMachine, ChunDVCTrayIcon
 from .shell.tray import USE_NEW_EDGE_DOCK, SHOW_FLOATING_BUBBLE
 from .palette import CommandPaletteWindow, CommandRegistry, PaletteSearchProvider
 from .feedback import ChunDVCToast
+from src.ui.director import DirectorWindow, DirectorController, DirectorConfig
 
 __all__ = [
     "RippleOverlay",
@@ -32,5 +33,8 @@ __all__ = [
     "CommandRegistry",
     "PaletteSearchProvider",
     "ChunDVCToast",
+    "DirectorWindow",
+    "DirectorController",
+    "DirectorConfig",
 ]
 

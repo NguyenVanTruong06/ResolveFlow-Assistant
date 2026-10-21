@@ -104,7 +104,10 @@ class EdgeDockWindow(QWidget):
         )
         self.palette.asset_inserted.connect(self.asset_inserted.emit)
         self.palette.customize_requested.connect(self._on_palette_customize_requested)
+        self.palette.command_executed.connect(self._on_palette_command_executed)
         self.palette_requested.connect(lambda: self.open_palette(command_mode=False))
+        self.director_requested.connect(self.open_director)
+        self._director_window = None
 
         # Global Hotkey Service
         self.hotkey_service = GlobalHotkeyService(self)
@@ -319,6 +322,21 @@ class EdgeDockWindow(QWidget):
 
     def toggle(self, animated: bool = True):
         self.fsm.toggle_dock(animated=animated)
+
+    def open_director(self):
+        """Opens ChunDVC Director window."""
+        if not hasattr(self, "_director_window") or self._director_window is None:
+            from src.ui.director import DirectorWindow
+            self._director_window = DirectorWindow()
+        self._director_window.show()
+        self._director_window.raise_()
+        self._director_window.activateWindow()
+
+    def _on_palette_command_executed(self, cmd_id: str):
+        if cmd_id in ("cmd_director", "cmd_autocut"):
+            self.open_director()
+        elif cmd_id == "cmd_pin_dock":
+            self.header.btn_pin.click()
 
     # -------------------------------------------------------------------------
     # Geometry & Boundary Clamping
