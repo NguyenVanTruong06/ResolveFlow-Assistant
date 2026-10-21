@@ -43,6 +43,8 @@ from ..context.special_blocks import (
     EditSuggestBlock, CutPadsBlock, FusionCaptureBlock,
     ColorSpecialBlock, FairlightBlock, DeliverBlock, MediaBlock
 )
+from ..palette.command_palette import CommandPaletteWindow
+from src.services.global_hotkey import GlobalHotkeyService
 
 logger = logging.getLogger("ResolveFlow.EdgeDock")
 
@@ -94,6 +96,20 @@ class EdgeDockWindow(QWidget):
         self.fsm = DockStateMachine(self)
         self.fsm.state_changed.connect(self._on_fsm_state_changed)
         self.fsm.width_requested.connect(self._on_width_requested)
+
+        # Quick Command Palette HUD
+        self.palette = CommandPaletteWindow(
+            insert_service=self._insert_service,
+            parent=None,
+        )
+        self.palette.asset_inserted.connect(self.asset_inserted.emit)
+        self.palette.customize_requested.connect(self._on_palette_customize_requested)
+        self.palette_requested.connect(lambda: self.open_palette(command_mode=False))
+
+        # Global Hotkey Service
+        self.hotkey_service = GlobalHotkeyService(self)
+        self.hotkey_service.palette_requested.connect(lambda: self.open_palette(command_mode=False))
+        self.hotkey_service.command_mode_requested.connect(lambda: self.open_palette(command_mode=True))
 
         # Non-blocking geometry animation
         self._anim = QVariantAnimation(self)
@@ -268,18 +284,32 @@ class EdgeDockWindow(QWidget):
     # Public API & Data Binding
     # -------------------------------------------------------------------------
     def set_assets(self, assets: List[Any]):
-        """Sets library assets in the list model."""
+        """Sets library assets in the list model and palette."""
         self.asset_model.set_assets(assets)
+        self.palette.set_assets(assets)
 
     def set_search_index(self, indexer):
-        """Sets SearchIndex for ranked search in proxy model."""
+        """Sets SearchIndex for ranked search in proxy model and palette."""
         self.proxy_model.set_search_index(indexer)
+        self.palette.set_search_index(indexer)
 
     def set_anchor_rect(self, rect: Optional[Tuple[int, int, int, int]]):
         self._anchor_rect = rect
         if rect:
             self.fsm.set_resolve_width(rect[2])
+        self.palette.set_anchor_rect(rect)
         self._update_dock_position(target_w=self.width(), animated=False)
+
+    def open_palette(self, command_mode: bool = False):
+        """Opens Quick Command Palette HUD."""
+        self.palette.open_palette(command_mode=command_mode)
+
+    def _on_palette_customize_requested(self, asset: Dict[str, Any]):
+        """Triggered when Tab is pressed in Palette: opens Dock Sheet Inspector."""
+        self.open_dock(animated=True)
+        self._selected_asset = asset
+        self.fsm.set_sheet_open(True)
+        self.sheet.open_sheet(asset)
 
     def open_dock(self, animated: bool = True):
         self.fsm.open_dock(animated=animated)
@@ -637,6 +667,7 @@ class EdgeDockWindow(QWidget):
         self.status_bar.set_connected(connected)
         self.status_bar.set_timeline(timeline)
         self.status_bar.set_timecode(playhead_tc)
+        self.palette.set_resolve_context(page, playhead_tc)
         if connected:
             self.router.on_resolve_page_changed(page)
         else:

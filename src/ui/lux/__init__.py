@@ -9,6 +9,8 @@ from .window_anchor import ResolveWindowAnchor, get_resolve_window_rect, calcula
 from .panel_edge_rail import EdgeDrawerWindow
 from .shell import EdgeDockWindow, DockState, DockStateMachine, ChunDVCTrayIcon
 from .shell.tray import USE_NEW_EDGE_DOCK, SHOW_FLOATING_BUBBLE
+from .palette import CommandPaletteWindow, CommandRegistry, PaletteSearchProvider
+from .feedback import ChunDVCToast
 
 __all__ = [
     "RippleOverlay",
@@ -26,5 +28,9 @@ __all__ = [
     "ChunDVCTrayIcon",
     "USE_NEW_EDGE_DOCK",
     "SHOW_FLOATING_BUBBLE",
+    "CommandPaletteWindow",
+    "CommandRegistry",
+    "PaletteSearchProvider",
+    "ChunDVCToast",
 ]
 
