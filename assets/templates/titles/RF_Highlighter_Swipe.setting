@@ -1,0 +1,432 @@
+{
+	Tools = ordered() {
+		RF_Highlighter_Swipe = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Highlighter Marker Swipe",
+			},
+			Inputs = ordered() {
+				Text = InstanceInput {
+					SourceOp = "Text1",
+					Source = "StyledText",
+					Name = "Text",
+					Page = "Controls",
+				},
+				Font = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Font",
+					Name = "Text Font",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Style = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Style",
+					Name = "Text Style",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Size = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Size",
+					Name = "Text Size",
+					Page = "Controls",
+				},
+				Red = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Red1",
+					Name = "Text Color",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Green = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Green1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Blue = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Blue1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				MarkerRed = InstanceInput {
+					SourceOp = "Marker",
+					Source = "TopLeftRed",
+					Name = "Marker Color",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				MarkerGreen = InstanceInput {
+					SourceOp = "Marker",
+					Source = "TopLeftGreen",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				MarkerBlue = InstanceInput {
+					SourceOp = "Marker",
+					Source = "TopLeftBlue",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				MarkerWidth = InstanceInput {
+					SourceOp = "Swipe",
+					Source = "BoxWidth",
+					Name = "Marker Width",
+					Page = "Controls",
+				},
+				MarkerHeight = InstanceInput {
+					SourceOp = "Swipe",
+					Source = "Height",
+					Name = "Marker Height",
+					Page = "Controls",
+				},
+				MarkerY = InstanceInput {
+					SourceOp = "Swipe",
+					Source = "YOffset",
+					Name = "Marker Y Offset",
+					Page = "Controls",
+				},
+				MarkerTilt = InstanceInput {
+					SourceOp = "Swipe",
+					Source = "Angle",
+					Name = "Marker Tilt",
+					Page = "Controls",
+				},
+				Delay = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Delay",
+					Name = "Delay (frames)",
+					Page = "Animation",
+				},
+				Speed = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Speed",
+					Name = "Animation Speed",
+					Page = "Animation",
+				},
+				Position = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "Center",
+					Name = "Position",
+					Page = "Controls",
+				},
+				FadeIn = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "InFrames",
+					Name = "Fade In (frames)",
+					Page = "Animation",
+				},
+				FadeOut = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "OutFrames",
+					Name = "Fade Out (frames)",
+					Page = "Animation",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "OutFade",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				SwipeReveal = BezierSpline {
+					SplineColor = {
+						Red = 255,
+						Green = 200,
+						Blue = 0,
+					},
+					NameSet = true,
+					KeyFrames = {
+						[0] = {
+							0,
+							RH = { 4, 0 },
+							Flags = {
+								Linear = false,
+							},
+						},
+						[12] = {
+							1,
+							LH = { 7, 1 },
+							Flags = {
+								Linear = false,
+							},
+						},
+					},
+				},
+				Swipe = RectangleMask {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 0,
+							Expression = "Swipe.BoxWidth * Swipe.Reveal",
+						},
+						Height = Input {
+							Value = 0.12,
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 - Swipe.BoxWidth / 2 + Swipe.Width / 2, 0.5 + Swipe.YOffset)",
+						},
+						CornerRadius = Input {
+							Value = 0.08,
+						},
+						SoftEdge = Input {
+							Value = 0.002,
+						},
+						Angle = Input {
+							Value = -1.5,
+						},
+						Reveal = Input {
+							SourceOp = "SwipeReveal",
+							Source = "Value",
+						},
+						BoxWidth = Input {
+							Value = 0.62,
+						},
+						YOffset = Input {
+							Value = -0.005,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -66 },
+					},
+					UserControls = ordered() {
+						BoxWidth = {
+							LINKS_Name = "Marker Width",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0.62,
+							INP_MinScale = 0.05,
+							INP_MaxScale = 1.2,
+						},
+						YOffset = {
+							LINKS_Name = "Marker Y Offset",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = -0.005,
+							INP_MinScale = -0.1,
+							INP_MaxScale = 0.1,
+						},
+						Reveal = {
+							LINKS_Name = "Reveal",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 1,
+						},
+					},
+				},
+				Marker = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 1,
+						},
+						TopLeftGreen = Input {
+							Value = 0.8313725490196079,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 0.92,
+						},
+						EffectMask = Input {
+							SourceOp = "Swipe",
+							Source = "Mask",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, -66 },
+					},
+				},
+				Text1 = TextPlus {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						StyledText = Input {
+							Value = "RESOLVEFLOW",
+						},
+						Font = Input {
+							Value = "Open Sans",
+						},
+						Style = Input {
+							Value = "Bold",
+						},
+						Size = Input {
+							Value = 0.08,
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Red1 = Input {
+							Value = 1,
+						},
+						Green1 = Input {
+							Value = 1,
+						},
+						Blue1 = Input {
+							Value = 1,
+						},
+						Alpha1 = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+				MarkerText = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Marker",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Text1",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, 0 },
+					},
+				},
+				Canvas = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, -66 },
+					},
+				},
+				Timing = TimeSpeed {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "MarkerText",
+							Source = "Output",
+						},
+						Speed = Input {
+							Value = 1,
+						},
+						Delay = Input {
+							Value = 0,
+						},
+						InterpolateBetweenFrames = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, 0 },
+					},
+				},
+				OutFade = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Canvas",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Timing",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Blend = Input {
+							Value = 1,
+							Expression = "min(iif(OutFade.InFrames > 0, min(1, max(0, (time - comp.RenderStart - Timing.Delay) / max(1, OutFade.InFrames))), 1), iif(OutFade.OutFrames > 0, min(1, max(0, (comp.RenderEnd - time) / max(1, OutFade.OutFrames))), 1))",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						InFrames = Input {
+							Value = 0,
+						},
+						OutFrames = Input {
+							Value = 8,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 440, 0 },
+					},
+					UserControls = ordered() {
+						InFrames = {
+							LINKS_Name = "Fade In (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+						OutFrames = {
+							LINKS_Name = "Fade Out (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 8,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Highlighter_Swipe",
+}

@@ -1,0 +1,425 @@
+Composition {
+	CurrentTime = 0,
+	RenderRange = { 0, 45 },
+	GlobalRange = { 0, 45 },
+	HiQ = true,
+	PlaybackUpdateMode = 0,
+	Version = "DaVinci Resolve Fusion",
+	SavedOutputs = 0,
+	HeldTools = 0,
+	DisabledTools = 0,
+	LockedTools = 0,
+	AudioOffset = 0,
+	AutoRenderRange = true,
+	Resumable = true,
+	OutputClips = { },
+	Tools = ordered() {
+		BG = Background {
+			Inputs = {
+				GlobalOut = Input { Value = 45, },
+				Width = Input { Value = 1080, },
+				Height = Input { Value = 1920, },
+				UseFrameFormatSettings = Input { Value = 0, },
+				TopLeftRed = Input { Value = 0, },
+				TopLeftGreen = Input { Value = 0, },
+				TopLeftBlue = Input { Value = 0, },
+				TopLeftAlpha = Input { Value = 0, },
+			},
+			ViewInfo = OperatorInfo { Pos = { 0, 0 } },
+		},
+		W0R = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W0G = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W0B = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W0_Text = TextPlus {
+			Inputs = {
+				GlobalOut = Input { Value = 45, },
+				Width = Input { Value = 1080, },
+				Height = Input { Value = 1920, },
+				UseFrameFormatSettings = Input { Value = 0, },
+				StyledText = Input { Value = "1.000", },
+				Font = Input { Value = "Montserrat", },
+				Style = Input { Value = "Black", },
+				Size = Input { Value = 0.085, },
+				Center = Input { Value = { 0.28410, 0.30000 }, },
+				Red1 = Input { SourceOp = "W0R", Source = "Value", },
+				Green1 = Input { SourceOp = "W0G", Source = "Value", },
+				Blue1 = Input { SourceOp = "W0B", Source = "Value", },
+				Enabled2 = Input { Value = 1, },
+				Thickness2 = Input { Value = 0.08, },
+				Red2 = Input { Value = 0.0, },
+				Green2 = Input { Value = 0.0, },
+				Blue2 = Input { Value = 0.0, },
+			},
+			ViewInfo = OperatorInfo { Pos = { 110, 66 } },
+		},
+		W0_RCX = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 0.12685, Flags = { Linear = true } },
+			[2] = { 0.12685, Flags = { Linear = true } },
+			[5] = { 0.28410, Flags = { Linear = true } },
+			[16] = { 0.28410, Flags = { Linear = true } },
+			[19] = { 0.12685, Flags = { Linear = true } }
+			}
+		},
+		W0_RCY = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 0.30000, Flags = { Linear = true } }
+			}
+		},
+		W0_RC = XYPath {
+			ShowKeyPoints = false,
+			DrawMode = "ModifyOnly",
+			Inputs = {
+				X = Input { SourceOp = "W0_RCX", Source = "Value", },
+				Y = Input { SourceOp = "W0_RCY", Source = "Value", },
+			},
+		},
+		W0_RW = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 0.00000, Flags = { Linear = true } },
+			[2] = { 0.00000, Flags = { Linear = true } },
+			[5] = { 0.31450, Flags = { Linear = true } },
+			[16] = { 0.31450, Flags = { Linear = true } },
+			[19] = { 0.00000, Flags = { Linear = true } }
+			}
+		},
+		W0_Rect = RectangleMask {
+			Inputs = {
+				MaskWidth = Input { Value = 1080, },
+				MaskHeight = Input { Value = 1920, },
+				PixelAspect = Input { Value = { 1.00000, 1.00000 }, },
+				Center = Input { SourceOp = "W0_RC", Source = "Value", },
+				Width = Input { SourceOp = "W0_RW", Source = "Value", },
+				Height = Input { Value = 0.10625, },
+				CornerRadius = Input { Value = 0.25, },
+			},
+			ViewInfo = OperatorInfo { Pos = { 220, 66 } },
+		},
+		W0_Box = Background {
+			Inputs = {
+				GlobalOut = Input { Value = 45, },
+				Width = Input { Value = 1080, },
+				Height = Input { Value = 1920, },
+				UseFrameFormatSettings = Input { Value = 0, },
+				TopLeftRed = Input { Value = 1.0, },
+				TopLeftGreen = Input { Value = 0.8313725490196079, },
+				TopLeftBlue = Input { Value = 0.0, },
+				TopLeftAlpha = Input { Value = 1, },
+				EffectMask = Input { SourceOp = "W0_Rect", Source = "Mask", },
+			},
+			ViewInfo = OperatorInfo { Pos = { 330, 66 } },
+		},
+		W0_BoxMrg = Merge {
+			Inputs = {
+				Background = Input { SourceOp = "W0_Box", Source = "Output", },
+				Foreground = Input { SourceOp = "W0_Text", Source = "Output", },
+			},
+			ViewInfo = OperatorInfo { Pos = { 440, 66 } },
+		},
+		W0S = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } },
+			[2] = { 1.00000, Flags = { Linear = true } },
+			[3] = { 1.14007, Flags = { Linear = true } },
+			[4] = { 1.14212, Flags = { Linear = true } },
+			[5] = { 1.08912, Flags = { Linear = true } },
+			[6] = { 1.03454, Flags = { Linear = true } },
+			[7] = { 1.00000, Flags = { Linear = true } },
+			[8] = { 0.98642, Flags = { Linear = true } },
+			[9] = { 0.98622, Flags = { Linear = true } },
+			[10] = { 0.99136, Flags = { Linear = true } },
+			[11] = { 0.99665, Flags = { Linear = true } },
+			[12] = { 1.00000, Flags = { Linear = true } },
+			[13] = { 1.00132, Flags = { Linear = true } },
+			[14] = { 1.00134, Flags = { Linear = true } },
+			[15] = { 1.00084, Flags = { Linear = true } },
+			[16] = { 1.00032, Flags = { Linear = true } },
+			[17] = { 1.00000, Flags = { Linear = true } },
+			[18] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W0_Xf = Transform {
+			Inputs = {
+				Pivot = Input { Value = { 0.28410, 0.30000 }, },
+				Input = Input { SourceOp = "W0_BoxMrg", Source = "Output", },
+				Size = Input { SourceOp = "W0S", Source = "Value", },
+			},
+			ViewInfo = OperatorInfo { Pos = { 550, 66 } },
+		},
+		Merge0 = Merge {
+			Inputs = {
+				Background = Input { SourceOp = "BG", Source = "Output", },
+				Foreground = Input { SourceOp = "W0_Xf", Source = "Output", },
+			},
+			ViewInfo = OperatorInfo { Pos = { 660, 66 } },
+		},
+		W1R = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } },
+			[15] = { 1.00000, Flags = { Linear = true } },
+			[16] = { 1.00000, Flags = { Linear = true } },
+			[23] = { 1.00000, Flags = { Linear = true } },
+			[24] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W1G = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } },
+			[15] = { 1.00000, Flags = { Linear = true } },
+			[16] = { 0.83137, Flags = { Linear = true } },
+			[23] = { 0.83137, Flags = { Linear = true } },
+			[24] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W1B = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } },
+			[15] = { 1.00000, Flags = { Linear = true } },
+			[16] = { 0.00000, Flags = { Linear = true } },
+			[23] = { 0.00000, Flags = { Linear = true } },
+			[24] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W1_Text = TextPlus {
+			Inputs = {
+				GlobalOut = Input { Value = 45, },
+				Width = Input { Value = 1080, },
+				Height = Input { Value = 1920, },
+				UseFrameFormatSettings = Input { Value = 0, },
+				StyledText = Input { Value = "LẦN", },
+				Font = Input { Value = "Montserrat", },
+				Style = Input { Value = "Black", },
+				Size = Input { Value = 0.085, },
+				Center = Input { Value = { 0.52720, 0.30000 }, },
+				Red1 = Input { SourceOp = "W1R", Source = "Value", },
+				Green1 = Input { SourceOp = "W1G", Source = "Value", },
+				Blue1 = Input { SourceOp = "W1B", Source = "Value", },
+				Enabled2 = Input { Value = 1, },
+				Thickness2 = Input { Value = 0.08, },
+				Red2 = Input { Value = 0.0, },
+				Green2 = Input { Value = 0.0, },
+				Blue2 = Input { Value = 0.0, },
+			},
+			ViewInfo = OperatorInfo { Pos = { 110, 132 } },
+		},
+		W1S = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } },
+			[16] = { 1.00000, Flags = { Linear = true } },
+			[17] = { 1.04423, Flags = { Linear = true } },
+			[18] = { 1.04488, Flags = { Linear = true } },
+			[19] = { 1.02814, Flags = { Linear = true } },
+			[20] = { 1.01091, Flags = { Linear = true } },
+			[21] = { 1.00000, Flags = { Linear = true } },
+			[22] = { 0.99571, Flags = { Linear = true } },
+			[23] = { 0.99565, Flags = { Linear = true } },
+			[24] = { 0.99727, Flags = { Linear = true } },
+			[25] = { 0.99894, Flags = { Linear = true } },
+			[26] = { 1.00000, Flags = { Linear = true } },
+			[27] = { 1.00042, Flags = { Linear = true } },
+			[28] = { 1.00042, Flags = { Linear = true } },
+			[29] = { 1.00026, Flags = { Linear = true } },
+			[30] = { 1.00010, Flags = { Linear = true } },
+			[31] = { 1.00000, Flags = { Linear = true } },
+			[32] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W1_Xf = Transform {
+			Inputs = {
+				Pivot = Input { Value = { 0.52720, 0.30000 }, },
+				Input = Input { SourceOp = "W1_Text", Source = "Output", },
+				Size = Input { SourceOp = "W1S", Source = "Value", },
+			},
+			ViewInfo = OperatorInfo { Pos = { 550, 132 } },
+		},
+		Merge1 = Merge {
+			Inputs = {
+				Background = Input { SourceOp = "Merge0", Source = "Output", },
+				Foreground = Input { SourceOp = "W1_Xf", Source = "Output", },
+			},
+			ViewInfo = OperatorInfo { Pos = { 660, 132 } },
+		},
+		W2R = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } },
+			[23] = { 1.00000, Flags = { Linear = true } },
+			[24] = { 0.22353, Flags = { Linear = true } },
+			[39] = { 0.22353, Flags = { Linear = true } },
+			[40] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W2G = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } },
+			[23] = { 1.00000, Flags = { Linear = true } },
+			[24] = { 1.00000, Flags = { Linear = true } },
+			[39] = { 1.00000, Flags = { Linear = true } },
+			[40] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W2B = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } },
+			[23] = { 1.00000, Flags = { Linear = true } },
+			[24] = { 0.07843, Flags = { Linear = true } },
+			[39] = { 0.07843, Flags = { Linear = true } },
+			[40] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W2_Text = TextPlus {
+			Inputs = {
+				GlobalOut = Input { Value = 45, },
+				Width = Input { Value = 1080, },
+				Height = Input { Value = 1920, },
+				UseFrameFormatSettings = Input { Value = 0, },
+				StyledText = Input { Value = "THỬ.", },
+				Font = Input { Value = "Montserrat", },
+				Style = Input { Value = "Black", },
+				Size = Input { Value = 0.085, },
+				Center = Input { Value = { 0.74310, 0.30000 }, },
+				Red1 = Input { SourceOp = "W2R", Source = "Value", },
+				Green1 = Input { SourceOp = "W2G", Source = "Value", },
+				Blue1 = Input { SourceOp = "W2B", Source = "Value", },
+				Enabled2 = Input { Value = 1, },
+				Thickness2 = Input { Value = 0.08, },
+				Red2 = Input { Value = 0.0, },
+				Green2 = Input { Value = 0.0, },
+				Blue2 = Input { Value = 0.0, },
+			},
+			ViewInfo = OperatorInfo { Pos = { 110, 198 } },
+		},
+		W2Gain = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 0.00000, Flags = { Linear = true } },
+			[24] = { 0.00000, Flags = { Linear = true } },
+			[27] = { 2.50000, Flags = { Linear = true } },
+			[40] = { 2.00000, Flags = { Linear = true } },
+			[45] = { 0.00000, Flags = { Linear = true } }
+			}
+		},
+		W2_Glow = SoftGlow {
+			Inputs = {
+				Gain = Input { SourceOp = "W2Gain", Source = "Value", },
+				Threshold = Input { Value = 0.0, },
+				XGlowSize = Input { Value = 14.0, },
+				Input = Input { SourceOp = "W2_Text", Source = "Output", },
+			},
+			ViewInfo = OperatorInfo { Pos = { 220, 198 } },
+		},
+		W2S = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 1.00000, Flags = { Linear = true } },
+			[24] = { 1.00000, Flags = { Linear = true } },
+			[25] = { 1.08109, Flags = { Linear = true } },
+			[26] = { 1.08228, Flags = { Linear = true } },
+			[27] = { 1.05160, Flags = { Linear = true } },
+			[28] = { 1.02000, Flags = { Linear = true } },
+			[29] = { 1.00000, Flags = { Linear = true } },
+			[30] = { 0.99214, Flags = { Linear = true } },
+			[31] = { 0.99202, Flags = { Linear = true } },
+			[32] = { 0.99500, Flags = { Linear = true } },
+			[33] = { 0.99806, Flags = { Linear = true } },
+			[34] = { 1.00000, Flags = { Linear = true } },
+			[35] = { 1.00076, Flags = { Linear = true } },
+			[36] = { 1.00077, Flags = { Linear = true } },
+			[37] = { 1.00049, Flags = { Linear = true } },
+			[38] = { 1.00019, Flags = { Linear = true } },
+			[39] = { 1.00000, Flags = { Linear = true } },
+			[40] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		W2_Xf = Transform {
+			Inputs = {
+				Pivot = Input { Value = { 0.74310, 0.30000 }, },
+				Input = Input { SourceOp = "W2_Glow", Source = "Output", },
+				Size = Input { SourceOp = "W2S", Source = "Value", },
+			},
+			ViewInfo = OperatorInfo { Pos = { 550, 198 } },
+		},
+		Merge2 = Merge {
+			Inputs = {
+				Background = Input { SourceOp = "Merge1", Source = "Output", },
+				Foreground = Input { SourceOp = "W2_Xf", Source = "Output", },
+			},
+			ViewInfo = OperatorInfo { Pos = { 660, 198 } },
+		},
+		PageS = BezierSpline {
+			SplineColor = { Red = 240, Green = 120, Blue = 30 },
+			NameSet = true,
+			KeyFrames = {
+			[0] = { 0.72000, Flags = { Linear = true } },
+			[1] = { 0.81656, Flags = { Linear = true } },
+			[2] = { 0.92390, Flags = { Linear = true } },
+			[3] = { 1.00790, Flags = { Linear = true } },
+			[4] = { 1.05500, Flags = { Linear = true } },
+			[5] = { 1.06743, Flags = { Linear = true } },
+			[6] = { 1.05609, Flags = { Linear = true } },
+			[7] = { 1.03393, Flags = { Linear = true } },
+			[8] = { 1.01156, Flags = { Linear = true } },
+			[9] = { 0.99524, Flags = { Linear = true } },
+			[10] = { 0.98698, Flags = { Linear = true } },
+			[11] = { 0.98573, Flags = { Linear = true } },
+			[12] = { 1.00000, Flags = { Linear = true } }
+			}
+		},
+		PageXf = Transform {
+			Inputs = {
+				Pivot = Input { Value = { 0.50000, 0.30000 }, },
+				Input = Input { SourceOp = "Merge2", Source = "Output", },
+				Size = Input { SourceOp = "PageS", Source = "Value", },
+			},
+			ViewInfo = OperatorInfo { Pos = { 770, 264 } },
+		},
+		MediaOut1 = MediaOut {
+			Inputs = {
+				Index = Input { Value = "0", },
+				Input = Input { SourceOp = "PageXf", Source = "Output", },
+			},
+			ViewInfo = OperatorInfo { Pos = { 880, 264 } },
+		},
+	},
+}

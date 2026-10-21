@@ -1,0 +1,285 @@
+{
+	Tools = ordered() {
+		RF_REC_Frame = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Camcorder REC frame",
+				Kind = "Generator",
+				CompositeHint = "Normal",
+			},
+			Inputs = ordered() {
+				FPS = InstanceInput {
+					SourceOp = "Clock",
+					Source = "FPS",
+					Name = "Frame Rate",
+					Page = "Controls",
+				},
+				Label = InstanceInput {
+					SourceOp = "Rec",
+					Source = "StyledText",
+					Name = "Label",
+					Page = "Controls",
+				},
+				FrameOpacity = InstanceInput {
+					SourceOp = "Frame",
+					Source = "TopLeftAlpha",
+					Name = "Frame Opacity",
+					Page = "Controls",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "WithClock",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				FrameMask = RectangleMask {
+					CtrlWZoom = false,
+					Inputs = {
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Width = Input {
+							Value = 0.92,
+						},
+						Height = Input {
+							Value = 0.88,
+						},
+						Solid = Input {
+							Value = 0,
+						},
+						BorderWidth = Input {
+							Value = 0.0015,
+						},
+						SoftEdge = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 0 },
+					},
+				},
+				Frame = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 1,
+						},
+						TopLeftGreen = Input {
+							Value = 1,
+						},
+						TopLeftBlue = Input {
+							Value = 1,
+						},
+						TopLeftAlpha = Input {
+							Value = 0.85,
+						},
+						EffectMask = Input {
+							SourceOp = "FrameMask",
+							Source = "Mask",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+				Dot = TextPlus {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						Font = Input {
+							Value = "Open Sans",
+						},
+						Style = Input {
+							Value = "Bold",
+						},
+						StyledText = Input {
+							Value = "●",
+						},
+						Size = Input {
+							Value = 0.05,
+						},
+						Center = Input {
+							Value = { 0.075, 0.9 },
+						},
+						Red1 = Input {
+							Value = 1,
+						},
+						Green1 = Input {
+							Value = 0.1,
+						},
+						Blue1 = Input {
+							Value = 0.1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -66 },
+					},
+				},
+				Rec = TextPlus {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						Font = Input {
+							Value = "Open Sans",
+						},
+						Style = Input {
+							Value = "Bold",
+						},
+						StyledText = Input {
+							Value = "REC",
+						},
+						Size = Input {
+							Value = 0.04,
+						},
+						Center = Input {
+							Value = { 0.125, 0.9 },
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -132 },
+					},
+				},
+				Clock = TextPlus {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						Font = Input {
+							Value = "Courier New",
+						},
+						Style = Input {
+							Value = "Bold",
+						},
+						Size = Input {
+							Value = 0.032,
+						},
+						Center = Input {
+							Value = { 0.86, 0.9 },
+						},
+						StyledText = Input {
+							Value = "00:00:00:00",
+							Expression = "Text(string.format(\"%02d:%02d:%02d:%02d\", floor(time / Clock.FPS / 3600), floor(time / Clock.FPS / 60) % 60, floor(time / Clock.FPS) % 60, floor(time % Clock.FPS)))",
+						},
+						FPS = Input {
+							Value = 30,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 66 },
+					},
+					UserControls = ordered() {
+						FPS = {
+							LINKS_Name = "Frame Rate",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 30,
+							INP_MinScale = 1,
+							INP_MaxScale = 120,
+						},
+					},
+				},
+				BlinkDot = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Frame",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Dot",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						Blend = Input {
+							Value = 1,
+							Expression = "iif(floor(time / max(1, Clock.FPS / 2)) % 2 == 0, 1, 0)",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, -66 },
+					},
+				},
+				WithRec = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "BlinkDot",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Rec",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, -66 },
+					},
+				},
+				WithClock = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "WithRec",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Clock",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 440, 0 },
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_REC_Frame",
+}

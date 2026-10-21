@@ -122,10 +122,10 @@ class LLMDirectorWorker(QThread):
         self,
         engine_mode: str,  # "ollama" or "cloud"
         prompt: str,
-        model: str = "qwen2.5:7b-instruct",
+        model: Optional[str] = None,
         endpoint: str = "http://localhost:11434",
         api_key: str = "",
-        provider: str = "deepseek",
+        provider: str = "gemini",
         parent=None
     ):
         super().__init__(parent)
@@ -139,14 +139,16 @@ class LLMDirectorWorker(QThread):
     def run(self):
         try:
             if self.engine_mode == "ollama":
-                self.log_signal.emit(f"🤖 [Local AI] Đang gửi dữ liệu sang Ollama ({self.model}) tại {self.endpoint}...")
+                target_model = self.model or "qwen2.5:7b-instruct"
+                self.log_signal.emit(f"🤖 [Local AI] Đang gửi dữ liệu sang Ollama ({target_model}) tại {self.endpoint}...")
                 plan, raw_json = StoryCopilot.run_ollama_inference(
                     prompt=self.prompt,
-                    model=self.model,
+                    model=target_model,
                     endpoint=self.endpoint
                 )
             else:
-                self.log_signal.emit(f"⚡ [Cloud AI] Đang gửi dữ liệu sang {self.provider.upper()} API ({self.model})...")
+                target_desc = self.model or "Default"
+                self.log_signal.emit(f"⚡ [Cloud AI] Đang gửi dữ liệu sang {self.provider.upper()} API ({target_desc})...")
                 plan, raw_json = StoryCopilot.run_cloud_api_inference(
                     prompt=self.prompt,
                     api_key=self.api_key,
@@ -1515,6 +1517,8 @@ class ChunDVCApp(QMainWindow):
         self.bubble = FloatingBubbleWidget()
         self.bubble.restore_requested.connect(self._restore_from_bubble)
         self.bubble.stop_requested.connect(self._stop_pipeline)
+        self.drawer = None
+        self.window_anchor = None
 
         self.workflow_stage = 1
         self._init_ui()
@@ -1573,6 +1577,28 @@ class ChunDVCApp(QMainWindow):
         """)
         self.btn_minimize_bubble.clicked.connect(self._minimize_to_bubble)
         top_header_layout.addWidget(self.btn_minimize_bubble)
+
+        self.btn_toggle_drawer = QPushButton("📌 Dock Mép (Drawer)")
+        self.btn_toggle_drawer.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle_drawer.setToolTip("Chuyển sang chế độ Thanh Dock trượt nép mép DaVinci Resolve")
+        self.btn_toggle_drawer.setStyleSheet("""
+            QPushButton {
+                background-color: #0d2825;
+                color: #3C9A8C;
+                border: 1px solid #1a4d46;
+                border-radius: 6px;
+                padding: 7px 14px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1a4d46;
+                border-color: #3dcee1;
+                color: #84ebfc;
+            }
+        """)
+        self.btn_toggle_drawer.clicked.connect(self._toggle_drawer_mode)
+        top_header_layout.addWidget(self.btn_toggle_drawer)
 
         window_layout.addWidget(top_header_widget)
 
@@ -3515,7 +3541,7 @@ class ChunDVCApp(QMainWindow):
             import subprocess
             target_path = os.path.abspath(out_fcp7xml)
             if sys.platform.startswith("win"):
-                subprocess.run(f'explorer /select,"{target_path}"', shell=True)
+                subprocess.run(["explorer", f"/select,{target_path}"])
             elif sys.platform.startswith("darwin"):
                 subprocess.run(["open", "-R", target_path])
             else:
@@ -3618,9 +3644,91 @@ class ChunDVCApp(QMainWindow):
         self.activateWindow()
         self.raise_()
 
+    def _toggle_drawer_mode(self):
+        """Chuyển đổi giao diện sang chế độ Edge Drawer trượt mép DaVinci Resolve."""
+        if self.drawer is None:
+            from src.ui.lux.panel_edge_rail import EdgeDrawerWindow
+            from src.ui.lux.window_anchor import ResolveWindowAnchor
+            from src.ui.lux.macro_card import MacroGridWidget
+
+            self.drawer = EdgeDrawerWindow(parent=None)
+            self.drawer.restore_standard_window_requested.connect(self._restore_from_drawer)
+
+            # Build and attach MacroGridWidget
+            self.drawer_grid = MacroGridWidget(parent=self.drawer)
+            items = []
+            if hasattr(self, "preset_mgr") and self.preset_mgr:
+                for p in self.preset_mgr.list_presets():
+                    items.append({
+                        "id": p.id,
+                        "name": p.name,
+                        "category": "Text+",
+                        "duration": "1.5s",
+                        "style_dna": getattr(p, "animation", "pop") or "pop"
+                    })
+            items.extend([
+                {"id": "RF_Impact_Zoom", "name": "Impact Zoom", "category": "Transition", "duration": "0.5s", "style_dna": "pop"},
+                {"id": "RF_RGB_Glitch", "name": "RGB Glitch", "category": "Transition", "duration": "0.4s", "style_dna": "glitch"},
+                {"id": "RF_Flash_White_Glow", "name": "Flash White Glow", "category": "Transition", "duration": "0.3s", "style_dna": "glow"},
+                {"id": "sfx_whoosh", "name": "Whoosh Swish", "category": "SFX", "duration": "0.8s", "style_dna": "pop"},
+                {"id": "meme_meo_khoc", "name": "Mèo Khóc Banana", "category": "Meme", "duration": "2.0s", "style_dna": "pop"},
+            ])
+            self.drawer_grid.load_items(items)
+            self.drawer_grid.preset_inserted.connect(self._on_drawer_preset_inserted)
+            self.drawer_grid.preset_dropped_on_resolve.connect(self._on_drawer_preset_inserted)
+            self.drawer_grid.preset_fast_paste_requested.connect(self._on_drawer_fast_paste_requested)
+            self.drawer.set_central_widget(self.drawer_grid)
+
+            # Start window anchor tracking DaVinci Resolve
+            self.window_anchor = ResolveWindowAnchor(parent=self)
+            self.window_anchor.anchor_updated.connect(self.drawer.set_anchor_rect)
+            self.window_anchor.start()
+
+        self.hide()
+        self.drawer.show()
+        self.drawer.expand()
+
+    def _restore_from_drawer(self):
+        """Khôi phục lại giao diện cửa sổ tiêu chuẩn từ chế độ Drawer."""
+        if self.drawer:
+            self.drawer.hide()
+        self.show()
+        self.setWindowState(self.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)
+        self.activateWindow()
+        self.raise_()
+
+    def _on_drawer_preset_inserted(self, preset_id: str):
+        if hasattr(self, "txt_console") and self.txt_console:
+            self.txt_console.appendPlainText(f"⚡ [Drawer] Yêu cầu chèn preset '{preset_id}' xuống Timeline...")
+        if hasattr(self, "_on_insert_title_at_playhead"):
+            self._on_insert_title_at_playhead(preset_id)
+
+    def _on_drawer_fast_paste_requested(self, preset_id: str):
+        if hasattr(self, "txt_console") and self.txt_console:
+            self.txt_console.appendPlainText(f"⚡ [FAST-FUSION] Bắt đầu dán nhanh preset '{preset_id}' vào Fusion...")
+
+        macro_code = ""
+        if hasattr(self, "preset_mgr") and self.preset_mgr:
+            preset = self.preset_mgr.get_preset(preset_id)
+            if preset and hasattr(preset, "to_fusion_macro"):
+                macro_code = preset.to_fusion_macro()
+
+        if not macro_code and hasattr(self, "tab_titles"):
+            macro_code = self.tab_titles._get_current_fusion_macro_code()
+
+        from src.core.fast_paste import fast_paste_to_fusion
+        log_cb = self.txt_console.appendPlainText if hasattr(self, "txt_console") and self.txt_console else None
+        res = fast_paste_to_fusion(macro_code, log_callback=log_cb)
+        if hasattr(self, "txt_console") and self.txt_console:
+            self.txt_console.appendPlainText(f"✔ [FAST-FUSION] {res.get('message', '')}")
+
     def closeEvent(self, event):
         if hasattr(self, "bubble") and self.bubble:
             self.bubble.close()
+        if hasattr(self, "drawer") and self.drawer:
+            self.drawer.close()
+        if hasattr(self, "window_anchor") and self.window_anchor:
+            self.window_anchor.stop()
         super().closeEvent(event)
 
     def _update_run_button_state(self, running: bool):

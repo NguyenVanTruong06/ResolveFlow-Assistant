@@ -20,14 +20,15 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QLineEdit, QPushButton, QCheckBox, QGroupBox, QFormLayout,
     QSlider, QFrame, QScrollArea, QGridLayout, QApplication, QMessageBox,
-    QSizePolicy, QFileDialog, QColorDialog, QSplitter
+    QSizePolicy, QFileDialog, QColorDialog, QSplitter, QStackedWidget
 )
 from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF, QPoint, QEvent
 from PySide6.QtGui import (
     QDrag, QPixmap, QCursor, QMovie, QPainter, QColor, QPen, QBrush,
-    QFont, QPainterPath, QLinearGradient
+    QFont, QPainterPath, QLinearGradient, QFontMetrics, QDesktopServices
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from src.ui.theme import ThemeColors, ThemeFonts, TOOLTIPS
 from src.core.text_preset import TextStylePreset, BUILTIN_PRESETS, FusionSettingGenerator
@@ -187,16 +188,37 @@ MOCKUP_OVERLAYS: List[StudioAsset] = [
 
 # Danh sách Meme reaction
 MOCKUP_MEMES: List[StudioAsset] = [
+    StudioAsset(
+        "meme_meo_khoc_banana",
+        "Mèo chuối khóc",
+        "meme",
+        "reaction",
+        sub="Reaction",
+        badge_icon="😿",
+        file_path="assets/broll_memes/memes/meme_meo_khoc_banana.mp4",
+        thumbnail_path="assets/broll_memes/memes/meme_meo_khoc_banana.png"
+    ),
+    StudioAsset(
+        "meme_blue_screen",
+        "Màn hình xanh lỗi",
+        "meme",
+        "reaction",
+        sub="Reaction",
+        badge_icon="💻",
+        file_path="assets/broll_memes/memes/meme_blue_screen.mp4",
+        thumbnail_path="assets/broll_memes/memes/meme_blue_screen.png"
+    ),
     StudioAsset("meme_wow", "Wow bất ngờ", "meme", "reaction", sub="Reaction", badge_icon="😮"),
     StudioAsset("meme_facepalm", "Facepalm toang", "meme", "reaction", sub="Reaction", badge_icon="🤦"),
     StudioAsset("meme_question", "Chấm hỏi ngơ ngác", "meme", "reaction", sub="Reaction", badge_icon="❓"),
     StudioAsset("meme_cat_vibe", "Mèo gật gù", "meme", "trending", sub="Trending", badge_icon="🐱"),
     StudioAsset("meme_cai_nit", "Còn đúng cái nịt", "meme", "trending", sub="Trending", badge_icon="💸"),
     StudioAsset("meme_ao_that_day", "Ảo thật đấy", "meme", "trending", sub="Trending", badge_icon="🤯"),
-    StudioAsset("meme_cat_cry", "Mèo chuối khóc", "meme", "reaction", sub="Reaction", badge_icon="😿"),
+    StudioAsset("meme_cat_cry", "Mèo chuối khóc (Audio)", "meme", "reaction", sub="Reaction", badge_icon="😿", file_path="assets/broll_memes/memes/meme_meo_khoc_banana.mp4"),
     StudioAsset("meme_khaby", "Nhún vai bất lực", "meme", "reaction", sub="Reaction", badge_icon="🤷"),
     StudioAsset("meme_xach_balo", "Xách balo lên và đi", "meme", "trending", sub="Trending", badge_icon="🎒")
 ]
+
 
 # Danh sách SFX âm thanh
 MOCKUP_SFX: List[StudioAsset] = [
@@ -543,6 +565,633 @@ class LutSplitWidget(QWidget):
         painter.drawText(QRectF(w - 50, 8, 42, 18), Qt.AlignCenter, "SAU")
 
 
+PRESET_SIGNATURE_SAMPLES: Dict[str, str] = {
+    "kinetic_hormozi": "TIỀN ĐẾN TỪ ĐÂU?",
+    "karaoke_pop": "dính mưa rồi",
+    "box_highlight": "100% sức khỏe",
+    "highlighter_swipe": "BÚT DẠ QUANG HIGHLIGHT",
+    "glow_neon": "NEON GLOW",
+    "neon_pulse": "NEON NIGHT",
+    "vhs_retro": "HÈ 1999 VINTAGE",
+    "paper_cutout": "V L O G XÉ GIẤY",
+    "rgb_glitch": "CYBERPUNK GLITCH",
+    "gradient_fill": "HOÀNG HÔN SUNSET",
+    "mrbeast_impact_yellow": "1 TRIỆU ĐÔ LA!",
+    "apple_keynote_clean": "Think Different",
+    "true_crime_documentary": "HỒ SƠ VỤ ÁN",
+    "comic_manga_burst": "BOOM! ACTION",
+    "luxury_gold_serif": "LUXURY GOLD",
+    "minimal_podcast_pill": "The Podcast Talk",
+    "schannel_vlog_nhanh": "ĐẬP HỘP SIÊU PHẨM",
+    "khoai_lang_thang_chua_lanh": "Hành Trình Chữa Lành",
+    "phim_truyen_hinh_vtv_retro": "VTV PHIM TRUYỆN",
+    "giat_gan_showbiz_tiktok": "DRAMA CĂNG ĐÉT!",
+    "clean_minimal": "Clean Minimal Podcast",
+    "clean_outline": "Clean Outline Talk",
+    "bounce_word": "Nhảy Chữ Spring",
+    "slide_in": "Trượt Mượt Mà"
+}
+
+
+class TextLivePreviewWidget(QWidget):
+    """
+    Widget xem trước hiệu ứng chữ động (Text Live Preview) tốc độ cao ~30 FPS.
+    Mô phỏng chân thực chuyển động từ Fusion Text+:
+    - Spring Pop / Kinetic Bounce (Hormozi / TikTok Shorts): Chữ nảy lò xo kèm góc nghiêng nhẹ
+    - Typewriter / VHS 90s: Hiệu ứng gõ máy từng ký tự kèm con trỏ nhấp nháy '|' và mốc thời gian retro
+    - Neon Glow: Xung nhịp ánh sáng neon tỏa vầng quang mềm mại
+    - Box Highlight / Marker Wipe: Dải highlight quét sau từ khóa chính
+    - RGB Split Glitch: Tách quang sai đỏ-xanh kèm sọc quét số hóa
+    - Paper Cutout: Nhãn dán xé giấy thủ công Scrapbook
+    - Smooth Slide: Chữ trượt mượt mà từ dưới lên
+    - Static: Chữ hiển thị tĩnh sắc nét, tương phản chuẩn truyền hình
+    Hỗ trợ đổi tỷ lệ khung hình 16:9 / 9:16 và nhấp chuột để chạy lại (Replay).
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.text = "ResolveFlow Studio"
+        self.preset_id = "kinetic_hormozi"
+        self.font_family = "Montserrat"
+        self.font_size = 48
+        self.weight = "bold"
+        self.standard_color = "#FFFFFF"
+        self.highlight_color = "#FACC15"
+        self.stroke_color = "#000000"
+        self.stroke_width = 0.15
+        self.box_color = None
+        self.glow_color = None
+        self.animation = "pop"
+        self.timing_curve = "spring"
+        self.aspect_ratio = "16:9"
+
+        self.progress = 0.0
+        self.setFixedHeight(130)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Nhấp chuột để phát lại hiệu ứng hoạt họa")
+
+        self.anim_timer = QTimer(self)
+        self.anim_timer.setInterval(33)  # ~30 FPS
+        self.anim_timer.timeout.connect(self._on_tick)
+        self.anim_timer.start()
+
+    def set_params(
+        self,
+        text: str = "",
+        preset_id: str = "",
+        font_family: str = "Arial",
+        font_size: int = 48,
+        weight: str = "bold",
+        standard_color: str = "#FFFFFF",
+        highlight_color: str = "#FACC15",
+        stroke_color: str = "#000000",
+        stroke_width: float = 0.15,
+        box_color: Optional[str] = None,
+        glow_color: Optional[str] = None,
+        animation: str = "pop",
+        timing_curve: str = "spring"
+    ):
+        if text is not None and text.strip():
+            self.text = text.strip()
+        if preset_id:
+            self.preset_id = preset_id
+        if font_family:
+            self.font_family = font_family
+        if font_size:
+            self.font_size = font_size
+        if weight:
+            self.weight = weight
+        if standard_color:
+            self.standard_color = standard_color
+        if highlight_color:
+            self.highlight_color = highlight_color
+        if stroke_color:
+            self.stroke_color = stroke_color
+        if stroke_width is not None:
+            self.stroke_width = stroke_width
+        self.box_color = box_color
+        self.glow_color = glow_color
+        if animation:
+            self.animation = animation
+        if timing_curve:
+            self.timing_curve = timing_curve
+        self.update()
+
+    def set_aspect_ratio(self, aspect: str):
+        self.aspect_ratio = aspect
+        if aspect == "9:16":
+            self.setFixedHeight(180)
+        else:
+            self.setFixedHeight(130)
+        self.update()
+
+    def replay(self):
+        self.progress = 0.0
+        self.update()
+
+    def mousePressEvent(self, event):
+        self.replay()
+        super().mousePressEvent(event)
+
+    def _on_tick(self):
+        self.progress += 0.025
+        if self.progress > 1.35:
+            self.progress = 0.0
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        if not painter.isActive():
+            return
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.TextAntialiasing)
+
+        w = self.width()
+        h = self.height()
+
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(0, 0, w, h, 10, 10)
+        painter.setClipPath(clip_path)
+
+        # 1. Nền canvas tối chuẩn monitor
+        painter.fillRect(0, 0, w, h, QColor("#09090b"))
+
+        # Xác định khung vùng hiển thị 16:9 hoặc 9:16
+        if self.aspect_ratio == "9:16":
+            frame_w = int(h * 9.0 / 16.0)
+            fx = (w - frame_w) // 2
+            # Vùng viền mờ 2 bên ngoài khung dọc 9:16
+            painter.fillRect(0, 0, fx, h, QColor(0, 0, 0, 180))
+            painter.fillRect(fx + frame_w, 0, w - (fx + frame_w), h, QColor(0, 0, 0, 180))
+            # Đường guide màu cyan cho khung điện thoại 9:16
+            painter.setPen(QPen(QColor("#06b6d4"), 1, Qt.DashLine))
+            painter.drawRect(fx, 0, frame_w, h - 1)
+            cx = w / 2.0
+            cy = h / 2.0
+            avail_w = frame_w - 24
+        else:
+            cx = w / 2.0
+            cy = h / 2.0
+            avail_w = w - 40
+            # Safe area guide box 16:9
+            painter.setPen(QPen(QColor(255, 255, 255, 20), 1, Qt.DotLine))
+            painter.drawRoundedRect(QRectF(12, 12, w - 24, h - 24), 6, 6)
+
+        # 2. Xử lý kiểu hoạt họa & Visual Style (Animation & Preset Mode)
+        anim = (self.animation or "pop").lower()
+        pid = (self.preset_id or "").lower()
+
+        # Nhận diện bản sắc nghệ thuật riêng của từng Preset trước (Artistic Visual Identity)
+        if "paper" in pid:
+            mode = "paper"
+        elif "glitch" in pid or "showbiz" in pid or "rgb" in pid:
+            mode = "glitch"
+        elif "comic" in pid or "manga" in pid:
+            mode = "comic"
+        elif "luxury" in pid or "gold" in pid:
+            mode = "luxury"
+        elif "crime" in pid:
+            mode = "crime"
+        elif "vhs" in pid:
+            mode = "vhs"
+        elif "gradient" in pid or "sunset" in pid:
+            mode = "gradient"
+        elif "apple" in pid or "keynote" in pid or "khoai_lang" in pid:
+            mode = "keynote"
+        elif "highlight" in pid or "pill" in pid or "box" in pid:
+            mode = "box"
+        elif "neon" in pid or "glow" in pid:
+            mode = "glow"
+        elif anim == "typewriter":
+            mode = "typewriter"
+        elif anim == "glow":
+            mode = "glow"
+        elif anim == "glitch":
+            mode = "glitch"
+        elif anim == "paper":
+            mode = "paper"
+        elif anim in ("box", "box_highlight"):
+            mode = "box"
+        elif anim == "slide" or "slide" in pid:
+            mode = "slide"
+        elif anim == "static" or "retro" in pid or "minimal" in pid:
+            mode = "static"
+        elif anim in ("pop", "bounce") or "hormozi" in pid or "mrbeast" in pid or "schannel" in pid or "bounce" in pid:
+            mode = "bounce"
+        else:
+            mode = "bounce"
+
+
+        # 3. Typography & Size setup
+        q_weight = QFont.Bold
+        if self.weight in ("black", "extra_bold", "heavy"):
+            q_weight = QFont.Black
+        elif self.weight in ("normal", "regular", "light"):
+            q_weight = QFont.Normal
+
+        target_pt = max(11, min(24, int(self.font_size * 0.26)))
+        if self.aspect_ratio == "9:16":
+            target_pt = max(10, min(18, int(self.font_size * 0.20)))
+
+        font = QFont(self.font_family, target_pt, q_weight)
+        fm = QFontMetrics(font)
+
+        raw_text = self.text.strip() if self.text.strip() else "ResolveFlow Studio"
+        # Auto-scale font nếu text dài vượt chiều rộng khả dụng
+        tw = fm.horizontalAdvance(raw_text)
+        if tw > avail_w and avail_w > 40:
+            scale_fac = max(0.5, avail_w / float(tw))
+            target_pt = max(9, int(target_pt * scale_fac))
+            font = QFont(self.font_family, target_pt, q_weight)
+            fm = QFontMetrics(font)
+            tw = fm.horizontalAdvance(raw_text)
+
+        words = raw_text.split()
+        if not words:
+            words = ["ResolveFlow"]
+
+        # Độ dày stroke (viền chữ)
+        sw = max(1.0, min(6.0, self.stroke_width * 20.0)) if self.stroke_width > 0.02 else 0.0
+        stroke_pen = QPen(QColor(self.stroke_color), sw, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+
+        # 4. Vẽ hoạt họa theo từng Mode
+        p = min(1.0, max(0.0, self.progress))
+
+        if mode == "bounce":
+            t = min(1.0, self.progress * 2.0)
+            if t < 0.6:
+                s = (t / 0.6) * 1.24
+            elif t < 0.85:
+                s = 1.24 - ((t - 0.6) / 0.25) * 0.28
+            else:
+                s = 0.96 + ((t - 0.85) / 0.15) * 0.04
+
+            # MrBeast extra impact scale
+            if "mrbeast" in pid:
+                s = s * 1.08
+
+            space_w = fm.horizontalAdvance(" ")
+            advances = [fm.horizontalAdvance(w) for w in words]
+            tot_w = sum(advances) + space_w * (len(words) - 1)
+            start_x = cx - tot_w / 2.0
+            cur_x = start_x
+            text_baseline = cy + fm.height() / 4.0
+
+            hl_idx = len(words) - 1
+            for i, word in enumerate(words):
+                ww = advances[i]
+                wh = fm.height()
+                if i == hl_idx:
+                    painter.save()
+                    painter.translate(cur_x + ww / 2.0, text_baseline - wh / 4.0)
+                    painter.scale(s, s)
+                    rot = -3.0 if ("hormozi" in pid or "schannel" in pid) else 0.0
+                    if rot != 0.0:
+                        painter.rotate(rot)
+                    path = QPainterPath()
+                    path.addText(QPointF(-ww / 2.0, wh / 4.0), font, word)
+                    if sw > 0:
+                        painter.strokePath(path, stroke_pen)
+                    painter.fillPath(path, QBrush(QColor(self.highlight_color)))
+                    painter.restore()
+                else:
+                    path = QPainterPath()
+                    path.addText(QPointF(cur_x, text_baseline), font, word)
+                    if sw > 0:
+                        painter.strokePath(path, stroke_pen)
+                    painter.fillPath(path, QBrush(QColor(self.standard_color)))
+                cur_x += ww + space_w
+
+        elif mode == "paper":
+            space_w = fm.horizontalAdvance(" ") + 6
+            advances = [fm.horizontalAdvance(w) for w in words]
+            tot_w = sum(advances) + space_w * (len(words) - 1)
+            start_x = cx - tot_w / 2.0
+            cur_x = start_x
+            text_baseline = cy + fm.height() / 4.0
+
+            hl_idx = len(words) - 1
+            for i, word in enumerate(words):
+                ww = advances[i]
+                wh = fm.height()
+                painter.save()
+                rot = -2.5 if (i % 2 == 0) else 2.5
+                painter.translate(cur_x + ww / 2.0, cy)
+                painter.rotate(rot)
+
+                card_rect = QRectF(-ww / 2.0 - 6, -wh / 2.0 - 2, ww + 12, wh + 6)
+                # Đổ bóng nhãn giấy scrapbook
+                painter.fillRect(card_rect.translated(2.0, 2.5), QColor(0, 0, 0, 110))
+
+                # Nền giấy ngà vintage hoặc highlight đỏ
+                if i == hl_idx and self.highlight_color.upper() not in ("#FFFFFF", "#FFF"):
+                    paper_bg = QColor(self.highlight_color)
+                    text_ink = QColor("#FFFFFF")
+                else:
+                    paper_bg = QColor(self.box_color or "#FBF9F1")
+                    text_ink = QColor(self.standard_color if self.standard_color.upper() != "#FFFFFF" else "#18181B")
+
+                painter.fillRect(card_rect, paper_bg)
+                painter.setPen(QPen(QColor("#333333"), 1))
+                painter.drawRect(card_rect)
+
+                path = QPainterPath()
+                path.addText(QPointF(-ww / 2.0, wh / 4.0), font, word)
+                painter.fillPath(path, QBrush(text_ink))
+                painter.restore()
+                cur_x += ww + space_w
+
+        elif mode == "glitch":
+            text_baseline = cy + fm.height() / 4.0
+            is_glitch_frame = (int(self.progress * 24) % 5) in (0, 1)
+
+            if is_glitch_frame:
+                # Kênh màu Cyan lệch phải
+                path_cyan = QPainterPath()
+                path_cyan.addText(QPointF(cx - tw / 2.0 + 3.5, text_baseline), font, raw_text)
+                painter.fillPath(path_cyan, QBrush(QColor(0, 229, 255, 200)))
+
+                # Kênh màu Magenta/Red lệch trái
+                path_red = QPainterPath()
+                path_red.addText(QPointF(cx - tw / 2.0 - 3.5, text_baseline), font, raw_text)
+                painter.fillPath(path_red, QBrush(QColor(255, 0, 85, 200)))
+
+                # Vạch nhiễu sọc quét ngang
+                slice_y = int(cy - 8 + (int(self.progress * 48) % 18))
+                painter.fillRect(int(cx - tw / 2.0 - 8), slice_y, tw + 16, 2, QColor(0, 229, 255, 180))
+
+            path_center = QPainterPath()
+            path_center.addText(QPointF(cx - tw / 2.0, text_baseline), font, raw_text)
+            if sw > 0:
+                painter.strokePath(path_center, stroke_pen)
+            painter.fillPath(path_center, QBrush(QColor(self.standard_color)))
+
+        elif mode == "comic":
+            t = min(1.0, self.progress * 2.0)
+            s = 1.05 + 0.08 * math.sin(t * math.pi)
+
+            painter.save()
+            painter.translate(cx, cy)
+            painter.scale(s, s)
+            painter.rotate(-3.5)
+
+            burst_rect = QRectF(-tw / 2.0 - 18, -fm.height() / 2.0 - 8, tw + 36, fm.height() + 16)
+            painter.setBrush(QBrush(QColor(255, 235, 59, 140)))
+            painter.setPen(QPen(QColor("#000000"), 2))
+            painter.drawRoundedRect(burst_rect, 6, 6)
+
+            text_baseline = fm.height() / 4.0
+            space_w = fm.horizontalAdvance(" ")
+            advances = [fm.horizontalAdvance(w) for w in words]
+            tot_w = sum(advances) + space_w * (len(words) - 1)
+            cur_x = -tot_w / 2.0
+            hl_idx = len(words) - 1
+
+            comic_stroke = QPen(QColor("#000000"), max(3.5, sw * 1.5), Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+            for i, word in enumerate(words):
+                ww = advances[i]
+                path = QPainterPath()
+                path.addText(QPointF(cur_x, text_baseline), font, word)
+                painter.strokePath(path, comic_stroke)
+                fill_c = self.highlight_color if i == hl_idx else self.standard_color
+                painter.fillPath(path, QBrush(QColor(fill_c)))
+                cur_x += ww + space_w
+
+            painter.restore()
+
+        elif mode == "luxury":
+            text_baseline = cy + fm.height() / 4.0
+            path = QPainterPath()
+            path.addText(QPointF(cx - tw / 2.0, text_baseline), font, raw_text)
+
+            gold_grad = QLinearGradient(0, cy - fm.height() / 2.0, 0, cy + fm.height() / 2.0)
+            gold_grad.setColorAt(0.0, QColor("#FFF8E1"))
+            gold_grad.setColorAt(0.35, QColor("#FBBF24"))
+            gold_grad.setColorAt(0.7, QColor("#D97706"))
+            gold_grad.setColorAt(1.0, QColor("#78350F"))
+
+            line_w = tw * 0.7
+            painter.setPen(QPen(QColor(245, 158, 11, 160), 1))
+            painter.drawLine(int(cx - line_w / 2.0), int(cy - fm.height() / 2.0 - 5), int(cx + line_w / 2.0), int(cy - fm.height() / 2.0 - 5))
+            painter.drawLine(int(cx - line_w / 2.0), int(cy + fm.height() / 2.0 + 5), int(cx + line_w / 2.0), int(cy + fm.height() / 2.0 + 5))
+
+            if sw > 0:
+                painter.strokePath(path, QPen(QColor("#451A03"), sw))
+            painter.fillPath(path, QBrush(gold_grad))
+
+        elif mode == "gradient":
+            text_baseline = cy + fm.height() / 4.0
+            path = QPainterPath()
+            path.addText(QPointF(cx - tw / 2.0, text_baseline), font, raw_text)
+
+            grad = QLinearGradient(cx - tw / 2.0, 0, cx + tw / 2.0, 0)
+            grad.setColorAt(0.0, QColor("#FFA07A"))
+            grad.setColorAt(0.5, QColor("#FF4500"))
+            grad.setColorAt(1.0, QColor("#FF1493"))
+
+            if sw > 0:
+                painter.strokePath(path, stroke_pen)
+            painter.fillPath(path, QBrush(grad))
+
+        elif mode == "crime":
+            painter.setFont(QFont("Georgia", 8, QFont.Bold))
+            painter.setPen(QColor("#EF4444"))
+            painter.drawText(QRectF(16, 12, 160, 16), Qt.AlignLeft, "● HỒ SƠ VỤ ÁN")
+
+            n_chars = max(1, int(min(1.0, self.progress * 1.5) * len(raw_text)))
+            sub_str = raw_text[:n_chars]
+            cursor = "|" if (int(self.progress * 8) % 2 == 0) else " "
+            render_str = sub_str + cursor
+
+            tw_sub = fm.horizontalAdvance(render_str)
+            text_baseline = cy + fm.height() / 4.0
+            path = QPainterPath()
+            path.addText(QPointF(cx - tw_sub / 2.0, text_baseline), font, render_str)
+            if sw > 0:
+                painter.strokePath(path, stroke_pen)
+            painter.fillPath(path, QBrush(QColor(self.highlight_color if n_chars >= len(raw_text) else self.standard_color)))
+
+        elif mode == "vhs":
+            painter.setFont(QFont("Consolas", 8, QFont.Bold))
+            painter.setPen(QColor("#22C55E"))
+            painter.drawText(QRectF(16, 12, 140, 16), Qt.AlignLeft, "▶ PLAY SP 00:12")
+            painter.drawText(QRectF(w - 70, 12, 60, 16), Qt.AlignRight, "CH 03")
+
+            n_chars = max(1, int(min(1.0, self.progress * 1.6) * len(raw_text)))
+            sub_str = raw_text[:n_chars]
+            cursor = "_" if (int(self.progress * 8) % 2 == 0) else " "
+            render_str = sub_str + cursor
+
+            tw_sub = fm.horizontalAdvance(render_str)
+            text_baseline = cy + fm.height() / 4.0
+            path = QPainterPath()
+            path.addText(QPointF(cx - tw_sub / 2.0, text_baseline), font, render_str)
+            if sw > 0:
+                painter.strokePath(path, stroke_pen)
+            painter.fillPath(path, QBrush(QColor(self.standard_color)))
+
+        elif mode == "keynote":
+            t = min(1.0, self.progress * 1.8)
+            ease = 1.0 - (1.0 - t) ** 3
+            offset_y = (1.0 - ease) * 16.0
+
+            text_baseline = cy + fm.height() / 4.0 + offset_y
+            path = QPainterPath()
+            path.addText(QPointF(cx - tw / 2.0, text_baseline), font, raw_text)
+
+            painter.setOpacity(t)
+            path_shadow = QPainterPath()
+            path_shadow.addText(QPointF(cx - tw / 2.0 + 1.5, text_baseline + 1.5), font, raw_text)
+            painter.fillPath(path_shadow, QBrush(QColor(0, 0, 0, 80)))
+
+            if sw > 0:
+                painter.strokePath(path, stroke_pen)
+            painter.fillPath(path, QBrush(QColor(self.standard_color)))
+            painter.setOpacity(1.0)
+
+        elif mode == "box":
+            t = min(1.0, self.progress * 2.0)
+            ease = 1.0 - (1.0 - t) ** 3
+
+            space_w = fm.horizontalAdvance(" ")
+            advances = [fm.horizontalAdvance(w) for w in words]
+            tot_w = sum(advances) + space_w * (len(words) - 1)
+            start_x = cx - tot_w / 2.0
+            cur_x = start_x
+            text_baseline = cy + fm.height() / 4.0
+
+            if "pill" in pid:
+                pill_rect = QRectF(cx - tot_w / 2.0 - 12, cy - fm.height() / 2.0 - 4, tot_w + 24, fm.height() + 8)
+                painter.setBrush(QBrush(QColor(self.box_color or "#0F172A")))
+                painter.setPen(QPen(QColor(255, 255, 255, 40), 1))
+                painter.drawRoundedRect(pill_rect, 14, 14)
+
+                hl_idx = len(words) - 1
+                for i, word in enumerate(words):
+                    ww = advances[i]
+                    path = QPainterPath()
+                    path.addText(QPointF(cur_x, text_baseline), font, word)
+                    fill_c = self.highlight_color if i == hl_idx else self.standard_color
+                    painter.fillPath(path, QBrush(QColor(fill_c)))
+                    cur_x += ww + space_w
+
+            elif "highlight" in pid or "highlighter" in pid:
+                hl_idx = len(words) - 1
+                box_c = QColor(self.box_color or "#FFE600")
+                for i, word in enumerate(words):
+                    ww = advances[i]
+                    wh = fm.height()
+                    if i == hl_idx:
+                        mark_w = (ww + 10) * ease
+                        marker_rect = QRectF(cur_x - 5, cy - wh / 2.0 + 2, mark_w, wh - 2)
+                        painter.fillRect(marker_rect, QColor(box_c.red(), box_c.green(), box_c.blue(), 200))
+                    path = QPainterPath()
+                    path.addText(QPointF(cur_x, text_baseline), font, word)
+                    painter.fillPath(path, QBrush(QColor(self.standard_color if i != hl_idx else self.highlight_color)))
+                    cur_x += ww + space_w
+            else:
+                hl_idx = len(words) - 1
+                box_c = QColor(self.box_color or self.highlight_color or "#EF4444")
+                for i, word in enumerate(words):
+                    ww = advances[i]
+                    wh = fm.height()
+                    if i == hl_idx:
+                        box_w = (ww + 12) * ease
+                        box_rect = QRectF(cur_x - 6, cy - wh / 2.0, box_w, wh + 2)
+                        painter.setBrush(QBrush(box_c))
+                        painter.setPen(Qt.NoPen)
+                        painter.drawRoundedRect(box_rect, 4, 4)
+                        path = QPainterPath()
+                        path.addText(QPointF(cur_x, text_baseline), font, word)
+                        painter.fillPath(path, QBrush(QColor("#FFFFFF")))
+                    else:
+                        path = QPainterPath()
+                        path.addText(QPointF(cur_x, text_baseline), font, word)
+                        if sw > 0:
+                            painter.strokePath(path, stroke_pen)
+                        painter.fillPath(path, QBrush(QColor(self.standard_color)))
+                    cur_x += ww + space_w
+
+        elif mode == "glow":
+            sine_val = 0.5 + 0.5 * math.sin(self.progress * 2.0 * math.pi)
+            glow_c_hex = self.glow_color or self.highlight_color or "#06B6D4"
+            g_col = QColor(glow_c_hex)
+            alpha_base = int(120 + 130 * sine_val)
+
+            text_baseline = cy + fm.height() / 4.0
+            path = QPainterPath()
+            path.addText(QPointF(cx - tw / 2.0, text_baseline), font, raw_text)
+
+            for radius in (12, 8, 4):
+                g_pen = QPen(QColor(g_col.red(), g_col.green(), g_col.blue(), int(alpha_base / (radius / 3.0))), radius)
+                painter.strokePath(path, g_pen)
+
+            painter.fillPath(path, QBrush(QColor("#FFFFFF")))
+
+        elif mode == "slide":
+            t = min(1.0, self.progress * 1.8)
+            ease = 1.0 - (1.0 - t) ** 3
+            offset_y = (1.0 - ease) * 28.0
+
+            text_baseline = cy + fm.height() / 4.0 + offset_y
+            path = QPainterPath()
+            path.addText(QPointF(cx - tw / 2.0, text_baseline), font, raw_text)
+
+            painter.setOpacity(t)
+            if sw > 0:
+                painter.strokePath(path, stroke_pen)
+            painter.fillPath(path, QBrush(QColor(self.standard_color)))
+            painter.setOpacity(1.0)
+
+        elif mode == "typewriter":
+            n_chars = max(1, int(min(1.0, self.progress * 1.6) * len(raw_text)))
+            sub_str = raw_text[:n_chars]
+            cursor = "|" if (int(self.progress * 9) % 2 == 0) else " "
+            render_str = sub_str + cursor
+
+            tw_sub = fm.horizontalAdvance(render_str)
+            text_baseline = cy + fm.height() / 4.0
+            path = QPainterPath()
+            path.addText(QPointF(cx - tw_sub / 2.0, text_baseline), font, render_str)
+            if sw > 0:
+                painter.strokePath(path, stroke_pen)
+            painter.fillPath(path, QBrush(QColor(self.standard_color)))
+
+        else:
+            text_baseline = cy + fm.height() / 4.0
+            path = QPainterPath()
+            path.addText(QPointF(cx - tw / 2.0, text_baseline), font, raw_text)
+
+            if "vtv" in pid or "retro" in pid:
+                path_shadow = QPainterPath()
+                path_shadow.addText(QPointF(cx - tw / 2.0 + 2, text_baseline + 2), font, raw_text)
+                painter.fillPath(path_shadow, QBrush(QColor("#000000")))
+                painter.fillPath(path, QBrush(QColor(self.standard_color or "#FFEB3B")))
+            else:
+                if sw > 0:
+                    painter.strokePath(path, stroke_pen)
+                painter.fillPath(path, QBrush(QColor(self.standard_color)))
+
+        # 5. Badge góc: Hiển thị thông tin Live 30fps và Tỷ lệ khung hình
+        painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+        # Top-left LIVE badge
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 160)))
+        painter.drawRoundedRect(QRectF(8, 8, 62, 18), 4, 4)
+        painter.setPen(QPen(QColor("#10b981")))
+        painter.drawText(QRectF(8, 8, 62, 18), Qt.AlignCenter, "● LIVE")
+
+        # Top-right Aspect & Anim badge
+        anim_label = mode.capitalize()
+        badge_text = f"{anim_label} • {self.aspect_ratio}"
+        bw = max(70, int(len(badge_text) * 6.5) + 12)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(0, 0, 0, 160)))
+        painter.drawRoundedRect(QRectF(w - bw - 8, 8, bw, 18), 4, 4)
+        painter.setPen(QPen(QColor(ThemeColors.CYAN_HI)))
+        painter.drawText(QRectF(w - bw - 8, 8, bw, 18), Qt.AlignCenter, badge_text)
+
+
 class TransitionLoopWidget(QWidget):
     """Widget xem trước chuyển cảnh dạng lặp (Transition Visual Loop Preview)."""
     def __init__(self, parent=None):
@@ -635,7 +1284,7 @@ class TransitionLoopWidget(QWidget):
 
 
 class IconMemePreviewWidget(QWidget):
-    """Widget xem trước Icon vector hoặc Meme video reaction cỡ lớn."""
+    """Widget xem trước Icon vector hoặc Meme video reaction có trình phát video thực tế & chế độ mô phỏng sống động."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.item_name = ""
@@ -645,13 +1294,209 @@ class IconMemePreviewWidget(QWidget):
         self.sub_text = ""
         self.thumbnail_path = ""
         self.file_path = ""
+        self.resolved_file_path = ""
         self._pixmap = None
-        self.setFixedHeight(140)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("Click để mở xem trước video")
+        self._duration_ms = 0
+        self._position_ms = 0
 
-    def set_item(self, name: str, item_type: str, badge: str, color_hex: str, sub: str, thumbnail_path: str = "", file_path: str = ""):
+        # Vòng lặp mô phỏng xem trước khi chưa có video local
+        self._sim_timer = QTimer(self)
+        self._sim_timer.setInterval(33)
+        self._sim_timer.timeout.connect(self._on_sim_tick)
+        self._sim_progress = 0.0
+        self._is_simulating = False
+
+        self.setFixedHeight(175)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        self._init_ui()
+
+    def _init_ui(self):
+        main_vbox = QVBoxLayout(self)
+        main_vbox.setContentsMargins(0, 0, 0, 0)
+        main_vbox.setSpacing(4)
+
+        # 1. Stacked container: Sticker/Poster Canvas vs Real Video Output
+        self.display_container = QStackedWidget(self)
+        self.display_container.setFixedHeight(132)
+        self.display_container.setStyleSheet("background-color: #09090b; border-radius: 8px;")
+
+        # Page 0: Canvas (used for Sticker & Poster preview)
+        self.canvas_widget = QWidget(self.display_container)
+        self.canvas_widget.paintEvent = self._paint_canvas
+        self.canvas_widget.setCursor(Qt.PointingHandCursor)
+        self.canvas_widget.mousePressEvent = self._on_canvas_clicked
+        self.display_container.addWidget(self.canvas_widget)
+
+        # Page 1: Video widget (active playback)
+        self.video_container = QWidget(self.display_container)
+        v_layout = QVBoxLayout(self.video_container)
+        v_layout.setContentsMargins(0, 0, 0, 0)
+        self.video_widget = QVideoWidget(self.video_container)
+        self.video_widget.setStyleSheet("background-color: #000000; border-radius: 8px;")
+        v_layout.addWidget(self.video_widget)
+        self.display_container.addWidget(self.video_container)
+
+        main_vbox.addWidget(self.display_container)
+
+        # 2. Control bar for Meme / Video
+        self.control_bar = QWidget(self)
+        ctrl_layout = QHBoxLayout(self.control_bar)
+        ctrl_layout.setContentsMargins(4, 2, 4, 2)
+        ctrl_layout.setSpacing(6)
+
+        self.btn_play = QPushButton("▶ Xem thử", self.control_bar)
+        self.btn_play.setFixedHeight(26)
+        self.btn_play.setCursor(Qt.PointingHandCursor)
+        self.btn_play.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.CYAN};
+                border-radius: 4px;
+                color: {ThemeColors.CYAN_HI};
+                font-size: 11px;
+                font-weight: bold;
+                padding: 2px 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.CYAN};
+                color: #05252c;
+            }}
+        """)
+        self.btn_play.clicked.connect(self._toggle_playback)
+
+        self.btn_replay = QPushButton("↺", self.control_bar)
+        self.btn_replay.setFixedSize(26, 26)
+        self.btn_replay.setCursor(Qt.PointingHandCursor)
+        self.btn_replay.setToolTip("Phát lại từ đầu")
+        self.btn_replay.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 4px;
+                color: {ThemeColors.TEXT_PRIMARY};
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                border-color: {ThemeColors.PRIMARY};
+                color: {ThemeColors.PRIMARY};
+            }}
+        """)
+        self.btn_replay.clicked.connect(self._replay)
+
+        self.lbl_time = QLabel("00:00 / 00:04", self.control_bar)
+        self.lbl_time.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
+
+        self.btn_browse = QPushButton("📂", self.control_bar)
+        self.btn_browse.setFixedSize(26, 26)
+        self.btn_browse.setCursor(Qt.PointingHandCursor)
+        self.btn_browse.setToolTip("Liên kết tệp video MP4/MOV từ máy tính")
+        self.btn_browse.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 4px;
+                color: {ThemeColors.TEXT_MUTED};
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                color: #FFFFFF;
+                border-color: {ThemeColors.CYAN_HI};
+            }}
+        """)
+        self.btn_browse.clicked.connect(self._browse_file)
+
+        self.btn_open_external = QPushButton("↗ Mở ngoài", self.control_bar)
+        self.btn_open_external.setFixedHeight(26)
+        self.btn_open_external.setCursor(Qt.PointingHandCursor)
+        self.btn_open_external.setToolTip("Mở video bằng trình phát mặc định của hệ điều hành")
+        self.btn_open_external.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 4px;
+                color: {ThemeColors.TEXT_MUTED};
+                font-size: 11px;
+                padding: 2px 6px;
+            }}
+            QPushButton:hover {{
+                color: #FFFFFF;
+                border-color: {ThemeColors.BORDER_HOVER};
+            }}
+        """)
+        self.btn_open_external.clicked.connect(self._open_external)
+
+        ctrl_layout.addWidget(self.btn_play)
+        ctrl_layout.addWidget(self.btn_replay)
+        ctrl_layout.addWidget(self.lbl_time)
+        ctrl_layout.addStretch()
+        ctrl_layout.addWidget(self.btn_browse)
+        ctrl_layout.addWidget(self.btn_open_external)
+
+        main_vbox.addWidget(self.control_bar)
+
+        # Player setup
+        self._player = QMediaPlayer(self)
+        self._audio_output = QAudioOutput(self)
+        self._audio_output.setVolume(0.9)
+        self._player.setAudioOutput(self._audio_output)
+        self._player.setVideoOutput(self.video_widget)
+
+        self._player.playbackStateChanged.connect(self._on_playback_state_changed)
+        self._player.positionChanged.connect(self._on_position_changed)
+        self._player.durationChanged.connect(self._on_duration_changed)
+        if hasattr(self._player, "errorOccurred"):
+            self._player.errorOccurred.connect(self._on_player_error)
+
+    def _on_player_error(self, error, error_string=""):
+        """Fallback to interactive simulation if local video decoder/codec is unavailable."""
+        self.display_container.setCurrentWidget(self.canvas_widget)
+        self._is_simulating = True
+        self._sim_progress = 0.0
+        self._sim_timer.start()
+        self.btn_play.setText("⏸ Dừng xem thử")
+        self.canvas_widget.update()
+
+    def _resolve_file_path(self, fpath: str, name: str, item_type: str, asset_id: str = "") -> str:
+        candidates = []
+        if fpath:
+            candidates.append(fpath)
+            candidates.append(os.path.abspath(fpath))
+        clean_name = name.split("(")[0].strip()
+        candidates.extend([
+            str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{name}.mp4")),
+            str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{clean_name}.mp4")),
+            str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{name}.mov")),
+            str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{clean_name}.mov")),
+            str(PosixPathAdapter.get_asset_path("broll_memes", "overlays", f"{name}.mp4")),
+            str(PosixPathAdapter.get_asset_path("broll_memes", "overlays", f"{clean_name}.mp4")),
+            str(PosixPathAdapter.get_asset_path("broll_memes", f"{name}.mp4")),
+            str(PosixPathAdapter.get_asset_path("broll_memes", f"{clean_name}.mp4")),
+        ])
+        if asset_id:
+            candidates.extend([
+                str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{asset_id}.mp4")),
+                str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{asset_id}.mov")),
+                str(PosixPathAdapter.get_asset_path("broll_memes", "overlays", f"{asset_id}.mp4")),
+                str(PosixPathAdapter.get_asset_path("broll_memes", f"{asset_id}.mp4")),
+                str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{asset_id.replace('meme_', '')}.mp4")),
+            ])
+            alias_map = {
+                "meme_cat_cry": ["meme_meo_khoc_banana.mp4", "meme_meo_khoc_banana.mov"],
+                "meme_meo_khoc_banana": ["meme_meo_khoc_banana.mp4", "meme_meo_khoc_banana.mov"],
+                "meme_blue_screen": ["meme_blue_screen.mp4", "meme_blue_screen.mov"],
+            }
+            if asset_id in alias_map:
+                for a in alias_map[asset_id]:
+                    candidates.append(str(PosixPathAdapter.get_asset_path("broll_memes", "memes", a)))
+
+        for c in candidates:
+            if c and os.path.isfile(c):
+                return os.path.abspath(c)
+        return ""
+
+    def set_item(self, name: str, item_type: str, badge: str, color_hex: str, sub: str, thumbnail_path: str = "", file_path: str = "", asset_id: str = ""):
+        self.stop_playback()
         self.item_name = name
         self.item_type = item_type
         self.badge_icon = badge or "✨"
@@ -659,27 +1504,176 @@ class IconMemePreviewWidget(QWidget):
         self.sub_text = sub
         self.thumbnail_path = thumbnail_path
         self.file_path = file_path
+        self.resolved_file_path = self._resolve_file_path(file_path, name, item_type, asset_id=asset_id)
+
+        if not self.thumbnail_path and asset_id:
+            # Check for candidate png thumbnails
+            thumb_cands = [
+                str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{asset_id}.png")),
+                str(PosixPathAdapter.get_asset_path("broll_memes", "memes", "meme_meo_khoc_banana.png" if "cat" in asset_id else "")),
+            ]
+            for tc in thumb_cands:
+                if tc and os.path.isfile(tc):
+                    self.thumbnail_path = os.path.abspath(tc)
+                    break
+
         if self.thumbnail_path and os.path.isfile(self.thumbnail_path):
             self._pixmap = QPixmap(self.thumbnail_path)
         else:
             self._pixmap = None
+
+        if self.item_type == "icon":
+            self.display_container.setCurrentWidget(self.canvas_widget)
+            self.control_bar.hide()
+            self.setFixedHeight(136)
+        else:
+            self.control_bar.show()
+            self.setFixedHeight(175)
+            self.display_container.setCurrentWidget(self.canvas_widget)
+            if self.resolved_file_path:
+                self._player.setSource(QUrl.fromLocalFile(self.resolved_file_path))
+                self.btn_play.setEnabled(True)
+                self.btn_replay.setEnabled(True)
+                self.btn_open_external.setEnabled(True)
+                self.btn_play.setText("▶ Phát video")
+            else:
+                self.btn_play.setEnabled(True)
+                self.btn_replay.setEnabled(True)
+                self.btn_open_external.setEnabled(False)
+                self.btn_play.setText("▶ Xem thử")
+                self.lbl_time.setText("00:00 / 00:04")
+        self.canvas_widget.update()
         self.update()
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and self.file_path and os.path.isfile(self.file_path):
+    def _browse_file(self):
+        fpath, _ = QFileDialog.getOpenFileName(self, "Chọn video meme/overlay", "", "Video Files (*.mp4 *.mov *.avi *.mkv *.webm)")
+        if fpath and os.path.isfile(fpath):
+            self.file_path = fpath
+            self.resolved_file_path = os.path.abspath(fpath)
+            self._player.setSource(QUrl.fromLocalFile(self.resolved_file_path))
+            self.btn_play.setEnabled(True)
+            self.btn_replay.setEnabled(True)
+            self.btn_open_external.setEnabled(True)
+            self.btn_play.setText("▶ Phát video")
+            self._toggle_playback()
+
+    def _toggle_playback(self):
+        if self.resolved_file_path:
+            if self._player.playbackState() == QMediaPlayer.PlayingState:
+                self._player.pause()
+                self.btn_play.setText("▶ Phát video")
+            else:
+                self.display_container.setCurrentWidget(self.video_container)
+                self._player.play()
+                self.btn_play.setText("⏸ Dừng phát")
+        else:
+            if self._is_simulating:
+                self.stop_playback()
+            else:
+                self._is_simulating = True
+                self._sim_progress = 0.0
+                self._sim_timer.start()
+                self.btn_play.setText("⏸ Dừng xem thử")
+                self.canvas_widget.update()
+
+    def _start_playback(self):
+        if self.resolved_file_path:
+            self.display_container.setCurrentWidget(self.video_container)
+            self._player.play()
+            self.btn_play.setText("⏸ Dừng phát")
+        else:
+            self._is_simulating = True
+            self._sim_progress = 0.0
+            self._sim_timer.start()
+            self.btn_play.setText("⏸ Dừng xem thử")
+            self.canvas_widget.update()
+
+    def _replay(self):
+        if self.resolved_file_path:
+            self._player.setPosition(0)
+            self.display_container.setCurrentWidget(self.video_container)
+            self._player.play()
+            self.btn_play.setText("⏸ Dừng phát")
+
+        else:
+            self._is_simulating = True
+            self._sim_progress = 0.0
+            self._sim_timer.start()
+            self.btn_play.setText("⏸ Dừng xem thử")
+            self.canvas_widget.update()
+
+    def stop_playback(self):
+        try:
+            if self._player.playbackState() != QMediaPlayer.StoppedState:
+                self._player.stop()
+        except Exception:
+            pass
+        if hasattr(self, "_sim_timer"):
+            self._sim_timer.stop()
+        self._is_simulating = False
+        self.display_container.setCurrentWidget(self.canvas_widget)
+        self.btn_play.setText("▶ Phát video" if self.resolved_file_path else "▶ Xem thử")
+        self.canvas_widget.update()
+
+    def _on_sim_tick(self):
+        self._sim_progress += 0.02
+        if self._sim_progress > 1.0:
+            self._sim_progress = 0.0
+        p_sec = int(self._sim_progress * 4.0)
+        self.lbl_time.setText(f"00:{p_sec:02d} / 00:04")
+        self.canvas_widget.update()
+
+    def _open_external(self):
+        if self.resolved_file_path and os.path.exists(self.resolved_file_path):
+            abs_p = os.path.abspath(self.resolved_file_path)
             try:
-                os.startfile(os.path.abspath(self.file_path))
+                if sys.platform == "win32":
+                    os.startfile(abs_p)
+                else:
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(abs_p))
             except Exception:
-                pass
+                QDesktopServices.openUrl(QUrl.fromLocalFile(abs_p))
+
+    def _on_canvas_clicked(self, event):
+        if event.button() == Qt.LeftButton:
+            if self.item_type != "icon":
+                self._toggle_playback()
+            elif self.resolved_file_path:
+                self._open_external()
+
+    def mousePressEvent(self, event):
+        self._on_canvas_clicked(event)
         super().mousePressEvent(event)
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
+    def _on_playback_state_changed(self, state):
+        if state == QMediaPlayer.PlayingState:
+            self.btn_play.setText("⏸ Tạm dừng")
+        elif state == QMediaPlayer.PausedState:
+            self.btn_play.setText("▶ Tiếp tục")
+        else:
+            self.btn_play.setText("▶ Phát lại")
+            self.display_container.setCurrentWidget(self.canvas_widget)
+
+    def _on_position_changed(self, pos_ms: int):
+        self._position_ms = pos_ms
+        self._update_time_label()
+
+    def _on_duration_changed(self, dur_ms: int):
+        self._duration_ms = dur_ms
+        self._update_time_label()
+
+    def _update_time_label(self):
+        p_sec = int(self._position_ms // 1000)
+        d_sec = int(self._duration_ms // 1000)
+        self.lbl_time.setText(f"{p_sec//60:02d}:{p_sec%60:02d} / {d_sec//60:02d}:{d_sec%60:02d}")
+
+    def _paint_canvas(self, event):
+        painter = QPainter(self.canvas_widget)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
-        w = self.width()
-        h = self.height()
+        w = self.canvas_widget.width()
+        h = self.canvas_widget.height()
 
         clip_path = QPainterPath()
         clip_path.addRoundedRect(0, 0, w, h, 8, 8)
@@ -707,14 +1701,48 @@ class IconMemePreviewWidget(QWidget):
             painter.drawText(QRectF(8, 8, 48, 18), Qt.AlignCenter, "STICKER")
         else:
             # Video Meme hoặc Overlay
-            if self._pixmap and not self._pixmap.isNull():
+            if self._is_simulating:
+                grad = QLinearGradient(0, 0, w, h)
+                grad.setColorAt(0.0, QColor("#13112c"))
+                grad.setColorAt(1.0, QColor("#09090b"))
+                painter.fillRect(0, 0, w, h, grad)
+
+                # Animated reaction wave rings
+                r1 = int(24 + (self._sim_progress * 50))
+                alpha1 = max(0, int((1.0 - self._sim_progress) * 160))
+                painter.setBrush(Qt.NoBrush)
+                painter.setPen(QPen(QColor(6, 182, 212, alpha1), 1.5))
+                painter.drawEllipse(QPointF(w / 2.0, h / 2.0 - 10), r1, r1)
+
+                # Bouncy reaction scale
+                scale = 1.0 + 0.16 * math.sin(self._sim_progress * math.pi * 3.0)
+                painter.save()
+                painter.translate(w / 2.0, h / 2.0 - 10)
+                painter.scale(scale, scale)
+
+                if self._pixmap and not self._pixmap.isNull():
+                    scaled_pix = self._pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    painter.drawPixmap(-scaled_pix.width() // 2, -scaled_pix.height() // 2, scaled_pix)
+                else:
+                    painter.setFont(QFont("Segoe UI Emoji", 36))
+                    painter.setPen(QColor("#ffffff"))
+                    painter.drawText(QRectF(-40, -40, 80, 80), Qt.AlignCenter, self.badge_icon)
+                painter.restore()
+
+                # Top-left LIVE PREVIEW badge
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(QColor(0, 0, 0, 190)))
+                painter.drawRoundedRect(QRectF(8, 8, 76, 18), 4, 4)
+                painter.setPen(QPen(QColor("#ef4444")))
+                painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+                painter.drawText(QRectF(8, 8, 76, 18), Qt.AlignCenter, "🔴 LIVE")
+
+            elif self._pixmap and not self._pixmap.isNull():
                 scaled_pix = self._pixmap.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
                 px = (w - scaled_pix.width()) // 2
                 py = (h - scaled_pix.height()) // 2
                 painter.drawPixmap(px, py, scaled_pix)
-
-                # Lớp phủ tối nhẹ để nổi bật chữ & nút phát
-                painter.fillRect(0, 0, w, h, QColor(0, 0, 0, 60))
+                painter.fillRect(0, 0, w, h, QColor(0, 0, 0, 70))
 
                 # Nút Play ở giữa
                 painter.setBrush(QBrush(QColor(0, 0, 0, 160)))
@@ -724,7 +1752,8 @@ class IconMemePreviewWidget(QWidget):
 
                 painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
                 painter.setPen(QColor("#ffffff"))
-                painter.drawText(play_btn_rect, Qt.AlignCenter, "▶ Xem video")
+                btn_txt = "▶ Xem video" if self.resolved_file_path else "▶ Xem thử"
+                painter.drawText(play_btn_rect, Qt.AlignCenter, btn_txt)
             else:
                 grad = QLinearGradient(0, 0, w, h)
                 grad.setColorAt(0.0, QColor("#1e1b4b"))
@@ -734,6 +1763,16 @@ class IconMemePreviewWidget(QWidget):
                 painter.setFont(QFont("Segoe UI Emoji", 34))
                 painter.setPen(QColor("#ffffff"))
                 painter.drawText(QRectF(0, 6, w, h - 34), Qt.AlignCenter, self.badge_icon)
+
+                # Nút Play ở giữa
+                painter.setBrush(QBrush(QColor(0, 0, 0, 160)))
+                painter.setPen(QPen(QColor(ThemeColors.CYAN_HI), 1.5))
+                play_btn_rect = QRectF((w - 100) / 2, (h - 26) / 2 + 10, 100, 26)
+                painter.drawRoundedRect(play_btn_rect, 13, 13)
+
+                painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
+                painter.setPen(QColor("#ffffff"))
+                painter.drawText(play_btn_rect, Qt.AlignCenter, "▶ Xem thử")
 
             # Badge định dạng video
             tag = "OVERLAY" if self.item_type == "overlay" else "▶ MP4"
@@ -753,24 +1792,46 @@ class IconMemePreviewWidget(QWidget):
         painter.drawText(QRectF(14, h - 26, w - 28, 20), Qt.AlignVCenter | Qt.AlignLeft, self.item_name)
 
 
-def format_text_preset_html(preset_id: str, preset_name: str = "Title", sample_text: str = "", standard_color: str = "#FFFFFF", is_large: bool = False) -> str:
-    """Format rich HTML cho mẫu chữ trong card và inspector."""
+def format_text_preset_html(
+    preset_id: str,
+    preset_name: str = "Title",
+    sample_text: str = "",
+    standard_color: str = "#FFFFFF",
+    is_large: bool = False,
+    font_family: str = "Arial",
+    font_size_pt: int = 18,
+    highlight_color: str = "#FACC15",
+    stroke_color: str = "#000000",
+    stroke_width: float = 0.15,
+    box_color: Optional[str] = None,
+    glow_color: Optional[str] = None,
+    weight: str = "bold",
+    animation: Optional[str] = None
+) -> str:
+    """Format rich HTML cho mẫu chữ trong card và inspector với tham số động."""
     pid = (preset_id or "").lower()
     text = sample_text.strip() if sample_text.strip() else ""
 
-    font_base = "18px" if is_large else "13px"
-    font_hl = "22px" if is_large else "15px"
+    font_base = f"{font_size_pt}px" if is_large else "13px"
+    font_hl = f"{int(font_size_pt * 1.2)}px" if is_large else "15px"
+    css_weight = "900" if weight in ("black", "extra_bold") else ("bold" if weight == "bold" else "normal")
+    f_family = f"'{font_family}', Arial, sans-serif"
 
-    if pid == "kinetic_hormozi":
+    hl_col = highlight_color if highlight_color else "#facc15"
+    std_col = standard_color if standard_color else "#ffffff"
+    b_col = box_color if box_color else "#ef4444"
+    g_col = glow_color if glow_color else "#06b6d4"
+
+    if pid in ("kinetic_hormozi", "bounce_word") or "hormozi" in pid:
         display = text if text else "TIỀN ĐẾN<br>TỪ <span style=\"color: #facc15;\">ĐÂU?</span>"
         if text and "<span" not in text:
             words = text.split()
             if len(words) > 1:
-                display = " ".join(words[:-1]) + f" <span style=\"color: #facc15; font-size: {font_hl};\">{words[-1]}</span>"
+                display = " ".join(words[:-1]) + f" <span style=\"color: {hl_col}; font-size: {font_hl};\">{words[-1]}</span>"
             else:
-                display = f"<span style=\"color: #facc15;\">{text}</span>"
+                display = f"<span style=\"color: {hl_col};\">{text}</span>"
         return (
-            f"<div style=\"font-family: 'Arial Black', Impact, sans-serif; font-weight: 900; font-size: {font_base}; text-transform: uppercase; color: #ffffff; text-align: center;\">"
+            f"<div style=\"font-family: {f_family}; font-weight: {css_weight}; font-size: {font_base}; text-transform: uppercase; color: {std_col}; text-align: center;\">"
             f"{display}"
             "</div>"
         )
@@ -778,37 +1839,38 @@ def format_text_preset_html(preset_id: str, preset_name: str = "Title", sample_t
         display = text if text else "dính <span style=\"color: #a3e635;\">mưa</span> rồi"
         if text and "<span" not in text:
             words = text.split()
+            k_col = highlight_color if (highlight_color and highlight_color != "#FACC15") else "#a3e635"
             if len(words) > 1:
                 mid = len(words) // 2
-                display = " ".join(words[:mid]) + f" <span style=\"color: #a3e635; font-size: {font_hl}; font-weight: 900;\">{words[mid]}</span> " + " ".join(words[mid+1:])
+                display = " ".join(words[:mid]) + f" <span style=\"color: {k_col}; font-size: {font_hl}; font-weight: 900;\">{words[mid]}</span> " + " ".join(words[mid+1:])
             else:
-                display = f"<span style=\"color: #a3e635;\">{text}</span>"
+                display = f"<span style=\"color: {k_col};\">{text}</span>"
         return (
-            f"<div style=\"font-family: Arial, sans-serif; font-weight: 800; font-size: {font_base}; color: #ffffff; text-align: center;\">"
+            f"<div style=\"font-family: {f_family}; font-weight: {css_weight}; font-size: {font_base}; color: {std_col}; text-align: center;\">"
             f"{display}"
             "</div>"
         )
-    elif pid == "box_highlight":
-        display = text if text else "100% <span style=\"background-color: #ef4444; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: 900;\">sức khỏe</span>"
+    elif pid in ("box_highlight", "highlighter_swipe") or "highlighter" in pid:
+        display = text if text else f"100% <span style=\"background-color: {b_col}; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: 900;\">sức khỏe</span>"
         if text and "<span" not in text:
             words = text.split()
             if len(words) > 1:
-                display = " ".join(words[:-1]) + f" <span style=\"background-color: #ef4444; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: 900;\">{words[-1]}</span>"
+                display = " ".join(words[:-1]) + f" <span style=\"background-color: {b_col}; color: #ffffff; padding: 2px 6px; border-radius: 4px; font-weight: 900;\">{words[-1]}</span>"
             else:
-                display = f"<span style=\"background-color: #ef4444; color: #ffffff; padding: 2px 6px; border-radius: 4px;\">{text}</span>"
+                display = f"<span style=\"background-color: {b_col}; color: #ffffff; padding: 2px 6px; border-radius: 4px;\">{text}</span>"
         return (
-            f"<div style=\"font-family: Arial, sans-serif; font-weight: 800; font-size: {font_base}; color: #ffffff; text-align: center;\">"
+            f"<div style=\"font-family: {f_family}; font-weight: {css_weight}; font-size: {font_base}; color: {std_col}; text-align: center;\">"
             f"{display}"
             "</div>"
         )
-    elif pid == "glow_neon":
+    elif pid in ("glow_neon", "neon_pulse") or "neon" in pid:
         display = text if text else "NEON"
         return (
-            f"<div style=\"font-family: Arial, sans-serif; font-weight: 800; font-size: {font_base}; text-align: center;\">"
-            f"<span style=\"color: #ecfeff; border: 1px solid #06b6d4; background-color: rgba(6, 182, 212, 0.2); padding: 4px 12px; border-radius: 6px;\">{display}</span>"
+            f"<div style=\"font-family: {f_family}; font-weight: {css_weight}; font-size: {font_base}; text-align: center;\">"
+            f"<span style=\"color: #ecfeff; border: 1px solid {g_col}; background-color: rgba(6, 182, 212, 0.2); padding: 4px 12px; border-radius: 6px; text-shadow: 0 0 10px {g_col};\">{display}</span>"
             "</div>"
         )
-    elif pid == "vhs_retro":
+    elif pid in ("vhs_retro", "typewriter") or "typewriter" in pid:
         display = text if text else "HÈ 1999"
         sub_play = "▶ PLAY SP 0:12"
         return (
@@ -817,25 +1879,48 @@ def format_text_preset_html(preset_id: str, preset_name: str = "Title", sample_t
             f"<div style=\"font-size: {font_base}; font-weight: bold; letter-spacing: 2px; color: #fff59d;\">{display}</div>"
             "</div>"
         )
-    elif pid == "paper_cutout":
+    elif pid in ("paper_cutout",) or "paper" in pid:
         display = text if text else "VLOG"
-        spans = "".join(f"<span style=\"background-color: #ffffff; color: #111111; padding: 2px 5px; margin: 1px; border-radius: 2px;\">{c}</span>" for c in display[:8])
+        spans = "".join(f"<span style=\"background-color: #ffffff; color: #111111; padding: 2px 5px; margin: 1px; border-radius: 2px; box-shadow: 1px 1px 2px rgba(0,0,0,0.5);\">{c}</span>" for c in display[:8])
         return (
             f"<div style=\"font-family: Georgia, serif; font-weight: bold; font-size: {font_base}; color: #111111; text-align: center;\">"
             f"{spans}"
             "</div>"
         )
-    elif pid == "gradient_fill":
+    elif pid in ("gradient_fill",):
         display = text if text else "HOÀNG HÔN SUNSET"
         return (
             f"<div style=\"font-family: 'Arial Black', sans-serif; font-weight: 900; font-size: {font_base}; text-align: center;\">"
             f"<span style=\"color: #fb923c;\">{display}</span>"
             "</div>"
         )
+    elif pid in ("rgb_glitch",) or "glitch" in pid:
+        display = text if text else "GLITCH CYBER"
+        return (
+            f"<div style=\"font-family: {f_family}; font-weight: 900; font-size: {font_base}; color: {std_col}; text-align: center; text-shadow: -2px 0 #ff0055, 2px 0 #00e5ff;\">"
+            f"{display}"
+            "</div>"
+        )
     else:
         display = text if text else preset_name.split("(")[0].strip()
+        anim = (animation or "").lower()
+        if anim in ("pop", "bounce") or "spring" in pid:
+            words = display.split()
+            if len(words) > 1:
+                display = " ".join(words[:-1]) + f" <span style=\"color: {hl_col}; font-size: {font_hl};\">{words[-1]}</span>"
+            else:
+                display = f"<span style=\"color: {hl_col};\">{display}</span>"
+        elif anim == "glow" or "glow" in pid:
+            display = f"<span style=\"color: #ecfeff; text-shadow: 0 0 10px {g_col};\">{display}</span>"
+        elif anim in ("box", "box_highlight") or "highlight" in pid:
+            words = display.split()
+            if len(words) > 1:
+                display = " ".join(words[:-1]) + f" <span style=\"background-color: {b_col}; color: #ffffff; padding: 2px 6px; border-radius: 4px;\">{words[-1]}</span>"
+            else:
+                display = f"<span style=\"background-color: {b_col}; color: #ffffff; padding: 2px 6px; border-radius: 4px;\">{display}</span>"
+
         return (
-            f"<div style=\"font-family: Arial, sans-serif; font-weight: bold; font-size: {font_base}; color: {standard_color}; text-align: center;\">"
+            f"<div style=\"font-family: {f_family}; font-weight: {css_weight}; font-size: {font_base}; color: {std_col}; text-align: center;\">"
             f"{display}"
             "</div>"
         )
@@ -930,36 +2015,15 @@ class AssetCard(QFrame):
         # Điều phối tới bộ render chuyên biệt theo từng loại đạo cụ
         thumb_path = getattr(self.preset, "thumbnail_path", "")
         if thumb_path and os.path.isfile(thumb_path):
-            th_layout = QVBoxLayout(self.thumb)
-            th_layout.setContentsMargins(0, 0, 0, 0)
-            lbl = QLabel()
-            
-            src_pixmap = QPixmap(thumb_path)
-            target_w, target_h = 160, 80
-            
-            target_pixmap = QPixmap(target_w, target_h)
-            target_pixmap.fill(Qt.transparent)
-            
-            painter = QPainter(target_pixmap)
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.setRenderHint(QPainter.SmoothPixmapTransform)
-            
-            path = QPainterPath()
-            path.addRoundedRect(0, 0, target_w, target_h, 8, 8)
-            painter.setClipPath(path)
-            
-            scaled_src = src_pixmap.scaled(target_w, target_h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-            
-            x = (target_w - scaled_src.width()) // 2
-            y = (target_h - scaled_src.height()) // 2
-            
-            painter.drawPixmap(x, y, scaled_src)
-            painter.end()
-            
-            lbl.setPixmap(target_pixmap)
-            lbl.setAlignment(Qt.AlignCenter)
-            th_layout.addWidget(lbl)
+            self._render_image_thumbnail(thumb_path)
         else:
+            file_path = getattr(self.preset, "file_path", "")
+            if file_path and os.path.isfile(file_path):
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext in ('.mp4', '.mov', '.webm', '.mkv', '.avi', '.gif', '.png', '.jpg', '.jpeg', '.webp'):
+                    from src.core.asset_cache import request_thumbnail_async
+                    request_thumbnail_async(file_path, self._on_async_thumb_ready)
+
             if isinstance(self.preset, TextStylePreset) or getattr(self.preset, "tab", "") == "text":
                 self._render_text_thumbnail()
             elif getattr(self.preset, "tab", "") == "bgm":
@@ -1031,6 +2095,87 @@ class AssetCard(QFrame):
         h_info.addWidget(self.btn_quick_add)
 
         layout.addLayout(h_info)
+
+    def _on_async_thumb_ready(self, cached_path: str):
+        if not cached_path or not os.path.isfile(cached_path):
+            return
+        setattr(self.preset, "thumbnail_path", cached_path)
+        self._render_image_thumbnail(cached_path)
+
+    def _render_image_thumbnail(self, thumb_path: str):
+        if not hasattr(self, "thumb") or self.thumb is None:
+            return
+        layout = self.thumb.layout()
+        if layout is not None:
+            while layout.count():
+                child = layout.takeAt(0)
+                w = child.widget()
+                if w:
+                    w.deleteLater()
+        else:
+            layout = QVBoxLayout(self.thumb)
+            layout.setContentsMargins(0, 0, 0, 0)
+
+        lbl = QLabel()
+        src_pixmap = QPixmap(thumb_path)
+        target_w, target_h = 160, 80
+
+        target_pixmap = QPixmap(target_w, target_h)
+        target_pixmap.fill(Qt.transparent)
+
+        painter = QPainter(target_pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+
+        path = QPainterPath()
+        path.addRoundedRect(0, 0, target_w, target_h, 8, 8)
+        painter.setClipPath(path)
+
+        scaled_src = src_pixmap.scaled(target_w, target_h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        x = (target_w - scaled_src.width()) // 2
+        y = (target_h - scaled_src.height()) // 2
+
+        painter.drawPixmap(x, y, scaled_src)
+        painter.end()
+
+        lbl.setPixmap(target_pixmap)
+        lbl.setAlignment(Qt.AlignCenter)
+        layout.addWidget(lbl)
+
+        tab_type = getattr(self.preset, "tab", "")
+        if tab_type in ("meme", "overlay"):
+            overlay_container = QWidget(lbl)
+            overlay_container.setGeometry(4, 4, 152, 26)
+            h_over = QHBoxLayout(overlay_container)
+            h_over.setContentsMargins(0, 0, 0, 0)
+            h_over.setSpacing(4)
+            self.btn_quick_play = QPushButton("▶", overlay_container)
+            self.btn_quick_play.setFixedSize(22, 22)
+            self.btn_quick_play.setCursor(Qt.PointingHandCursor)
+            self.btn_quick_play.setToolTip("Xem live preview")
+            self.btn_quick_play.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: rgba(9, 9, 11, 0.75);
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 11px;
+                    color: {ThemeColors.CYAN_HI};
+                    font-size: 10px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {ThemeColors.CYAN};
+                    color: #05252c;
+                    border-color: {ThemeColors.CYAN_HI};
+                }}
+            """)
+            self.btn_quick_play.clicked.connect(self._on_quick_play_meme_clicked)
+            h_over.addWidget(self.btn_quick_play)
+            lbl_tag = QLabel("🎬 MEME" if tab_type == "meme" else "✨ OVERLAY", overlay_container)
+            lbl_tag.setStyleSheet("color: #FFFFFF; background-color: rgba(0,0,0,0.6); border-radius: 4px; padding: 2px 4px; font-size: 9px; font-weight: bold;")
+            h_over.addWidget(lbl_tag)
+            h_over.addStretch()
+
+        self.thumb.update()
 
     def _render_text_thumbnail(self):
         """Render xem trước phong cách chữ nghệ thuật (Alex Hormozi, Karaoke, Box, Neon, VHS, Paper, Gradient)."""
@@ -1512,7 +2657,7 @@ class AssetCard(QFrame):
         th_layout.addWidget(self.scanline_accent)
 
     def _render_icon_thumbnail(self):
-        """Render icon SVG hoặc reaction emoji badge cỡ lớn."""
+        """Render icon SVG hoặc reaction emoji badge cỡ lớn kèm nút xem thử nhanh."""
         self.thumb.setStyleSheet(f"""
             QFrame {{
                 background-color: {ThemeColors.BG_MAIN};
@@ -1522,7 +2667,39 @@ class AssetCard(QFrame):
         """)
         th_layout = QVBoxLayout(self.thumb)
         th_layout.setContentsMargins(6, 6, 6, 6)
-        th_layout.setAlignment(Qt.AlignCenter)
+        th_layout.setSpacing(4)
+
+        tab_type = getattr(self.preset, "tab", "")
+        if tab_type in ("meme", "overlay"):
+            h_top = QHBoxLayout()
+            h_top.setContentsMargins(0, 0, 0, 0)
+            self.btn_quick_play = QPushButton("▶", self.thumb)
+            self.btn_quick_play.setFixedSize(22, 22)
+            self.btn_quick_play.setCursor(Qt.PointingHandCursor)
+            self.btn_quick_play.setToolTip("Xem live preview")
+            self.btn_quick_play.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {ThemeColors.BG_CARD};
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 11px;
+                    color: {ThemeColors.CYAN_HI};
+                    font-size: 10px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {ThemeColors.CYAN};
+                    color: #05252c;
+                    border-color: {ThemeColors.CYAN_HI};
+                }}
+            """)
+            self.btn_quick_play.clicked.connect(self._on_quick_play_meme_clicked)
+            h_top.addWidget(self.btn_quick_play)
+
+            lbl_tag = QLabel("🎬 MEME" if tab_type == "meme" else "✨ OVERLAY")
+            lbl_tag.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 9px; font-weight: bold;")
+            h_top.addWidget(lbl_tag)
+            h_top.addStretch()
+            th_layout.addLayout(h_top)
 
         badge = getattr(self.preset, "badge_icon", "") or getattr(self.preset, "emo", "✨")
         color = getattr(self.preset, "color_hex", "#facc15")
@@ -1530,13 +2707,18 @@ class AssetCard(QFrame):
         self.lbl_icon_preview.setAlignment(Qt.AlignCenter)
         self.lbl_icon_preview.setStyleSheet(f"""
             QLabel {{
-                font-size: 32px;
+                font-size: 30px;
                 color: {color};
                 background: transparent;
                 border: none;
             }}
         """)
         th_layout.addWidget(self.lbl_icon_preview)
+
+    def _on_quick_play_meme_clicked(self):
+        pid = getattr(self.preset, "id", "")
+        self.selected_signal.emit(pid)
+        self.quick_play_requested.emit(pid)
 
     def _on_quick_add_clicked(self):
         pid = getattr(self.preset, "id", "")
@@ -1825,10 +3007,15 @@ class AssetCard(QFrame):
                     painter.drawPixmap(0, 0, ghost)
                     painter.end()
                     drag.setPixmap(transparent_pix)
-                    drag.setHotSpot(QPoint(ghost.width() // 2, ghost.height() // 2))
             except Exception:
                 pass
             drag.exec(Qt.DropAction.CopyAction)
+            try:
+                from src.ui.lux.drag_drop_tracker import is_mouse_over_resolve
+                if is_mouse_over_resolve():
+                    self.insert_title_requested.emit(asset_id)
+            except Exception:
+                pass
 
 
 
@@ -2019,7 +3206,7 @@ class TabAssets(QWidget):
         
         # Combine builtins with scanned settings
         scanned_titles = indexer.scan_titles()
-        self.all_presets = BUILTIN_PRESETS.copy() + dicts_to_assets(
+        self.all_presets = [p.model_copy(deep=True) for p in BUILTIN_PRESETS] + dicts_to_assets(
             scanned_titles, "text", "custom", "Tùy chỉnh", "🔤"
         )
         
@@ -2598,7 +3785,7 @@ class TabAssets(QWidget):
         h_insp_header.addWidget(self.inspector_aspect_btn)
         self.insp_vbox.addLayout(h_insp_header)
 
-        # 2. Viewport 1: Text Live Preview
+        # 2. Viewport 1: Text Live Preview (Animated Canvas ~30 FPS)
         self.inspector_text_preview = QFrame()
         self.inspector_text_preview.setFixedHeight(130)
         self.inspector_text_preview.setStyleSheet(f"""
@@ -2609,14 +3796,19 @@ class TabAssets(QWidget):
             }}
         """)
         t_prev_layout = QVBoxLayout(self.inspector_text_preview)
-        t_prev_layout.setContentsMargins(8, 8, 8, 8)
-        t_prev_layout.setAlignment(Qt.AlignCenter)
+        t_prev_layout.setContentsMargins(0, 0, 0, 0)
+        t_prev_layout.setSpacing(0)
 
+        self.text_live_preview = TextLivePreviewWidget(self.inspector_text_preview)
+        t_prev_layout.addWidget(self.text_live_preview)
+
+        # Giữ lbl_insp_preview ẩn để đảm bảo tương thích ngược 100% với các test suite
         self.lbl_insp_preview = QLabel("PREVIEW", self.inspector_text_preview)
         self.lbl_insp_preview.setTextFormat(Qt.RichText)
         self.lbl_insp_preview.setAlignment(Qt.AlignCenter)
         self.lbl_insp_preview.setWordWrap(True)
         self.lbl_insp_preview.setStyleSheet("background: transparent; border: none; font-size: 16px; color: #FFFFFF;")
+        self.lbl_insp_preview.hide()
         t_prev_layout.addWidget(self.lbl_insp_preview)
         self.insp_vbox.addWidget(self.inspector_text_preview)
 
@@ -2804,8 +3996,10 @@ class TabAssets(QWidget):
         sample_vbox.setContentsMargins(0, 0, 0, 0)
         sample_vbox.setSpacing(4)
         sample_vbox.addWidget(QLabel("Chữ mẫu hiển thị:"))
+        self._user_has_custom_title = False
         self.txt_single_title = QLineEdit("ResolveFlow Studio")
         self.txt_single_title.textChanged.connect(self._on_sample_text_changed)
+        self.txt_single_title.textEdited.connect(self._on_sample_text_edited)
         self.txt_single_title.setStyleSheet(f"""
             background: {ThemeColors.BG_CARD};
             border: 1px solid {ThemeColors.BORDER_DEFAULT};
@@ -3020,7 +4214,7 @@ class TabAssets(QWidget):
         sw_vbox.addLayout(sw_grid)
 
         for k, c in self.swatch_colors.items():
-            self._set_swatch_color(k, c)
+            self._set_swatch_color(k, c, refresh=False)
 
         p_layout.addWidget(self.grp_swatches)
 
@@ -3047,6 +4241,8 @@ class TabAssets(QWidget):
             "slide": QPushButton("Trượt"),
             "box_highlight": QPushButton("Hộp nền"),
             "glow": QPushButton("Phát sáng"),
+            "glitch": QPushButton("Nhiễu RGB"),
+            "paper": QPushButton("Xé giấy"),
             "static": QPushButton("Đứng yên")
         }
         r_i, c_i = 0, 0
@@ -3288,12 +4484,56 @@ class TabAssets(QWidget):
             }}
         """)
 
+        self.btn_capture_playhead = QPushButton("📥 Hút Preset")
+        self.btn_capture_playhead.setCursor(Qt.PointingHandCursor)
+        self.btn_capture_playhead.setToolTip("Hút style Text+/Fusion trực tiếp từ clip tại Playhead thành Preset vĩnh viễn")
+        self.btn_capture_playhead.clicked.connect(self._capture_preset_from_playhead)
+        self.btn_capture_playhead.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.CYAN};
+                color: {ThemeColors.CYAN_HI};
+                padding: 6px 8px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: {ThemeColors.CYAN};
+                color: #05252c;
+            }}
+        """)
+
+        self.btn_fast_paste_fusion = QPushButton("⚡ Dán Fusion")
+        self.btn_fast_paste_fusion.setCursor(Qt.PointingHandCursor)
+        self.btn_fast_paste_fusion.setToolTip("Dán nhanh chùm node thẳng vào trang Fusion qua Ctrl+V tự động (FAST-FUSION)")
+        self.btn_fast_paste_fusion.clicked.connect(self._on_fast_paste_fusion_clicked)
+        self.btn_fast_paste_fusion.setStyleSheet("""
+            QPushButton {
+                background: #0d2825;
+                border: 1px solid #1a4d46;
+                color: #3dcee1;
+                padding: 6px 8px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #1a4d46;
+                border-color: #3dcee1;
+                color: #ffffff;
+            }
+        """)
+
         h_acts_sub.addWidget(self.btn_drag_davinci)
+        h_acts_sub.addWidget(self.btn_fast_paste_fusion)
         h_acts_sub.addWidget(self.btn_copy_fusion)
         h_acts_sub.addWidget(self.btn_install_presets)
+        h_acts_sub.addWidget(self.btn_capture_playhead)
         acts_vbox.addLayout(h_acts_sub)
 
         insp_layout.addWidget(scroll_insp, stretch=1)
+
         insp_layout.addWidget(insp_acts)
 
 
@@ -3544,6 +4784,7 @@ class TabAssets(QWidget):
             card.selected_signal.connect(self._on_card_selected)
             card.favorite_toggled.connect(self._on_favorite_toggled)
             card.add_requested.connect(self._on_card_add_requested)
+            card.quick_play_requested.connect(self._on_asset_quick_play_requested)
             self.card_widgets.append(card)
 
     def _refresh_grid(self):
@@ -3600,10 +4841,19 @@ class TabAssets(QWidget):
                     card.setVisible(False)
                     continue
 
-            # Lọc theo Từ khóa tìm kiếm
-            if query and query not in i_name and query not in i_cat:
-                card.setVisible(False)
-                continue
+            # Lọc theo Từ khóa tìm kiếm (Hỗ trợ Smart Motion tags & Tiếng Việt không dấu)
+            if query:
+                from src.core.motion_analyzer import matches_query
+                search_targets = [i_name, i_cat, i_id, getattr(item, "sub", "")]
+                if hasattr(item, "tags") and item.tags:
+                    search_targets.extend(item.tags)
+                if hasattr(item, "animation") and item.animation:
+                    search_targets.append(item.animation)
+                if hasattr(item, "motion_tags") and item.motion_tags:
+                    search_targets.extend(item.motion_tags)
+                if not matches_query(query, search_targets):
+                    card.setVisible(False)
+                    continue
 
             visible.append(card)
 
@@ -3690,11 +4940,22 @@ class TabAssets(QWidget):
             self.combo_text_preset.setCurrentIndex(idx)
 
         # Highlight card
+        tab = getattr(self, "current_rail_tab", "")
+        matched_card = None
         for c in self.card_widgets:
-            is_match = (getattr(c.preset, "id", "") == preset_id)
-            c.set_selected(is_match)
+            item = c.preset
+            i_tab = "text" if isinstance(item, TextStylePreset) else "trans" if isinstance(item, TransitionStylePreset) else getattr(item, "tab", "")
+            is_match = (getattr(item, "id", "") == preset_id)
             if is_match:
-                self.selected_asset = c.preset
+                if matched_card is None:
+                    matched_card = c
+                elif (tab and tab != "fav" and i_tab == tab) or c.isVisible():
+                    matched_card = c
+            c.set_selected(False)
+
+        if matched_card:
+            matched_card.set_selected(True)
+            self.selected_asset = matched_card.preset
 
         # Cập nhật Inspector
         self._update_inspector_details()
@@ -4064,7 +5325,7 @@ class TabAssets(QWidget):
                 ) for d in dicts
             ]
         scanned_titles = indexer.scan_titles()
-        self.all_presets = BUILTIN_PRESETS.copy() + dicts_to_assets(scanned_titles, "text", "custom", "Tùy chỉnh", "🔤")
+        self.all_presets = [p.model_copy(deep=True) for p in BUILTIN_PRESETS] + dicts_to_assets(scanned_titles, "text", "custom", "Tùy chỉnh", "🔤")
         scanned_transitions = indexer.scan_transitions()
         self.all_transitions = BUILTIN_TRANSITIONS.copy() + dicts_to_assets(scanned_transitions, "trans", "custom", "Tùy chỉnh", "🎬")
         scanned_luts = indexer.scan_luts()
@@ -4177,6 +5438,8 @@ class TabAssets(QWidget):
                     margin: 0px;
                 }}
             """)
+        if hasattr(self, "text_live_preview"):
+            self.text_live_preview.set_aspect_ratio(self.current_aspect_ratio)
 
     def _on_lut_split_slider_changed(self, value: int):
         if hasattr(self, "lut_split_widget"):
@@ -4256,26 +5519,93 @@ class TabAssets(QWidget):
             self.combo_target_track.addItems(["Video Track 2 (V2)", "Video Track 3 (V3)", "Video Track 1 (V1)"])
             self.lbl_track_hint.setText("Đề xuất: Chèn lên V2/V3 để tránh đè video chính V1.")
 
-            font_val = getattr(self.selected_asset, "font", "Montserrat")
-            f_idx = self.combo_font.findText(font_val)
-            if f_idx >= 0:
-                self.combo_font.setCurrentIndex(f_idx)
-            sz_val = getattr(self.selected_asset, "size", 72)
-            self.slide_font_size.setValue(int(sz_val))
+            controls_to_block = [
+                self.txt_single_title,
+                self.combo_font,
+                self.slide_font_size,
+                getattr(self, "slide_stroke_width", None)
+            ]
+            for ctrl in controls_to_block:
+                if ctrl:
+                    ctrl.blockSignals(True)
 
-            std_col = getattr(self.selected_asset, "standard_color", None) or "#FFFFFF"
-            hl_col = getattr(self.selected_asset, "highlight_color", None) or "#FACC15"
-            out_col = getattr(self.selected_asset, "outline_color", None) or "#000000"
-            box_col = getattr(self.selected_asset, "box_color", None) or getattr(self.selected_asset, "glow_color", None) or "#EF4444"
-            self._set_swatch_color("text", std_col)
-            self._set_swatch_color("highlight", hl_col)
-            self._set_swatch_color("stroke", out_col)
-            self._set_swatch_color("box_glow", box_col)
+            try:
+                pid = getattr(self.selected_asset, "id", "")
+                if not getattr(self, "_user_has_custom_title", False):
+                    sig_text = PRESET_SIGNATURE_SAMPLES.get(pid, getattr(self.selected_asset, "name", "ResolveFlow Studio"))
+                    self.txt_single_title.setText(sig_text)
 
-            sample = self.txt_single_title.text().strip() or "ResolveFlow Studio"
-            pid = getattr(self.selected_asset, "id", "")
-            html = format_text_preset_html(pid, name, sample, std_col, is_large=True)
-            self.lbl_insp_preview.setText(html)
+                font_val = getattr(self.selected_asset, "font", "Montserrat")
+                f_idx = self.combo_font.findText(font_val)
+                if f_idx >= 0:
+                    self.combo_font.setCurrentIndex(f_idx)
+                else:
+                    self.combo_font.addItem(font_val)
+                    self.combo_font.setCurrentIndex(self.combo_font.count() - 1)
+                sz_val = getattr(self.selected_asset, "size", 72)
+                self.slide_font_size.setValue(int(sz_val))
+
+                out_w = getattr(self.selected_asset, "outline_width", 0.15)
+                if hasattr(self, "slide_stroke_width"):
+                    self.slide_stroke_width.setValue(int(out_w * 100.0))
+
+                w_val = getattr(self.selected_asset, "weight", "bold")
+                if hasattr(self, "weight_buttons"):
+                    target_w = "extrabold" if w_val in ("extra_bold", "extrabold", "black") else ("regular" if w_val in ("normal", "regular", "light") else "bold")
+                    for k, b in self.weight_buttons.items():
+                        b.setChecked(k == target_w)
+                    self._update_weight_button_styles()
+
+                anim_val = getattr(self.selected_asset, "animation", "pop")
+                if hasattr(self, "anim_chips"):
+                    if "glitch" in pid or anim_val == "glitch" or "showbiz" in pid:
+                        target_anim = "glitch"
+                    elif "paper" in pid or anim_val == "paper":
+                        target_anim = "paper"
+                    elif anim_val in ("box", "box_highlight") or "highlight" in pid or "pill" in pid or "box" in pid:
+                        target_anim = "box_highlight"
+                    elif anim_val == "glow" or "neon" in pid or "glow" in pid:
+                        target_anim = "glow"
+                    elif anim_val in ("typewriter", "vhs") or "typewriter" in pid or "vhs" in pid or "crime" in pid:
+                        target_anim = "typewriter"
+                    elif anim_val in ("slide", "fade_up", "fade") or "slide" in pid or "apple" in pid or "khoai_lang" in pid or "luxury" in pid:
+                        target_anim = "slide"
+                    elif anim_val == "bounce" or "bounce" in pid:
+                        target_anim = "bounce"
+                    elif anim_val == "static" or "retro" in pid or "minimal" in pid:
+                        target_anim = "static"
+                    else:
+                        target_anim = "pop"
+
+                    if target_anim not in self.anim_chips:
+                        target_anim = "pop"
+
+                    for k, b in self.anim_chips.items():
+                        b.setChecked(k == target_anim)
+                    self._update_anim_chip_styles()
+
+                curve_val = getattr(self.selected_asset, "timing_curve", "spring")
+                if hasattr(self, "curve_chips"):
+                    target_curve = curve_val if curve_val in self.curve_chips else "spring"
+                    for k, b in self.curve_chips.items():
+                        b.setChecked(k == target_curve)
+                    self._update_curve_chip_styles()
+
+                std_col = getattr(self.selected_asset, "standard_color", None) or "#FFFFFF"
+                hl_col = getattr(self.selected_asset, "highlight_color", None) or "#FACC15"
+                out_col = getattr(self.selected_asset, "outline_color", None) or "#000000"
+                box_col = getattr(self.selected_asset, "box_color", None) or getattr(self.selected_asset, "glow_color", None) or "#EF4444"
+                self._set_swatch_color("text", std_col, refresh=False)
+                self._set_swatch_color("highlight", hl_col, refresh=False)
+                self._set_swatch_color("stroke", out_col, refresh=False)
+                self._set_swatch_color("box_glow", box_col, refresh=False)
+
+            finally:
+                for ctrl in controls_to_block:
+                    if ctrl:
+                        ctrl.blockSignals(False)
+
+            self._update_text_preview_from_params()
             self.btn_insert_title_playhead.setText("🚀 Chèn tại Playhead (V2)")
 
         elif is_lut:
@@ -4418,7 +5748,8 @@ class TabAssets(QWidget):
             color_hex = getattr(self.selected_asset, "color_hex", "#facc15")
             thumb_path = getattr(self.selected_asset, "thumbnail_path", "")
             fpath = getattr(self.selected_asset, "file_path", "")
-            self.icon_meme_widget.set_item(name, tab_type, badge, color_hex, sub, thumb_path, fpath)
+            asset_id = getattr(self.selected_asset, "id", "")
+            self.icon_meme_widget.set_item(name, tab_type, badge, color_hex, sub, thumb_path, fpath, asset_id=asset_id)
 
             if tab_type == "meme":
                 self.lbl_track_hint.setText("🎬 Đề xuất: Kéo thả trực tiếp card vào DaVinci Timeline để chèn meme.")
@@ -4432,6 +5763,18 @@ class TabAssets(QWidget):
 
     def _on_sample_text_changed(self, text: str):
         self._update_text_preview_from_params()
+
+    def _on_sample_text_edited(self, text: str):
+        self._user_has_custom_title = True
+
+    def _on_asset_quick_play_requested(self, asset_id: str):
+        self._on_card_selected(asset_id)
+        if not self.selected_asset:
+            return
+        tab_type = getattr(self.selected_asset, "tab", "")
+        if tab_type in ("meme", "overlay"):
+            if hasattr(self, "icon_meme_widget"):
+                self.icon_meme_widget._start_playback()
 
     def _on_font_changed(self, font_name: str):
         self.txt_font.setText(font_name)
@@ -4534,7 +5877,7 @@ class TabAssets(QWidget):
         if col.isValid():
             self._set_swatch_color(key, col.name().upper())
 
-    def _set_swatch_color(self, key: str, hex_color: str):
+    def _set_swatch_color(self, key: str, hex_color: str, refresh: bool = True):
         if not hex_color:
             defaults = {"text": "#FFFFFF", "highlight": "#FACC15", "stroke": "#000000", "box_glow": "#EF4444"}
             hex_color = defaults.get(key, "#FFFFFF")
@@ -4564,7 +5907,8 @@ class TabAssets(QWidget):
                     border-color: {ThemeColors.CYAN_HI};
                 }}
             """)
-        self._update_text_preview_from_params()
+        if refresh:
+            self._update_text_preview_from_params()
 
     def _update_text_preview_from_params(self):
         if not self.selected_asset:
@@ -4576,8 +5920,90 @@ class TabAssets(QWidget):
         name = getattr(self.selected_asset, "name", "")
         pid = getattr(self.selected_asset, "id", "")
         sample = self.txt_single_title.text().strip() or "ResolveFlow Studio"
-        std_col = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else "#FFFFFF"
-        html = format_text_preset_html(pid, name, sample, std_col, is_large=True)
+
+        font_name = self.combo_font.currentText() if hasattr(self, "combo_font") else getattr(self.selected_asset, "font", "Arial")
+        font_size = self.slide_font_size.value() if hasattr(self, "slide_font_size") else getattr(self.selected_asset, "size", 48)
+        stroke_val = self.slide_stroke_width.value() if hasattr(self, "slide_stroke_width") else int(getattr(self.selected_asset, "outline_width", 0.15) * 100.0)
+        stroke_width = stroke_val / 100.0
+
+        weight_key = "bold"
+        if hasattr(self, "weight_buttons"):
+            for k, b in self.weight_buttons.items():
+                if b.isChecked():
+                    weight_key = k
+                    break
+
+        anim_key = "pop"
+        if hasattr(self, "anim_chips"):
+            for k, b in self.anim_chips.items():
+                if b.isChecked():
+                    anim_key = k
+                    break
+
+        curve_key = "spring"
+        if hasattr(self, "curve_chips"):
+            for k, b in self.curve_chips.items():
+                if b.isChecked():
+                    curve_key = k
+                    break
+
+        std_col = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else getattr(self.selected_asset, "standard_color", "#FFFFFF")
+        hl_col = self.swatch_colors.get("highlight", "#FACC15") if hasattr(self, "swatch_colors") else getattr(self.selected_asset, "highlight_color", "#FACC15")
+        out_col = self.swatch_colors.get("stroke", "#000000") if hasattr(self, "swatch_colors") else getattr(self.selected_asset, "outline_color", "#000000")
+        box_col = self.swatch_colors.get("box_glow", "#EF4444") if hasattr(self, "swatch_colors") else getattr(self.selected_asset, "box_color", "#EF4444")
+
+        # 1. Cập nhật selected_asset để chèn hoặc kéo thả nhận đầy đủ style tùy chỉnh
+        try:
+            self.selected_asset.font = font_name
+            self.selected_asset.size = font_size
+            self.selected_asset.outline_width = stroke_width
+            self.selected_asset.standard_color = std_col
+            self.selected_asset.highlight_color = hl_col
+            self.selected_asset.outline_color = out_col
+            self.selected_asset.box_color = box_col
+            self.selected_asset.glow_color = box_col
+            self.selected_asset.weight = "extra_bold" if weight_key in ("extrabold", "black", "extra_bold") else ("normal" if weight_key in ("regular", "normal") else "bold")
+            self.selected_asset.animation = "box_highlight" if anim_key == "box" else anim_key
+            self.selected_asset.timing_curve = curve_key
+        except Exception:
+            pass
+
+        # 2. Cập nhật Text Live Preview Canvas (~30 FPS)
+        if hasattr(self, "text_live_preview"):
+            self.text_live_preview.set_params(
+                text=sample,
+                preset_id=pid,
+                font_family=font_name,
+                font_size=font_size,
+                weight=weight_key,
+                standard_color=std_col,
+                highlight_color=hl_col,
+                stroke_color=out_col,
+                stroke_width=stroke_width,
+                box_color=box_col,
+                glow_color=box_col,
+                animation="box_highlight" if anim_key == "box" else anim_key,
+                timing_curve=curve_key
+            )
+
+        # 3. Cập nhật lbl_insp_preview định dạng HTML phong phú (cho test suite & tooltip)
+        pt_size = min(28, max(14, int(font_size * 0.3)))
+        html = format_text_preset_html(
+            preset_id=pid,
+            preset_name=name,
+            sample_text=sample,
+            standard_color=std_col,
+            is_large=True,
+            font_family=font_name,
+            font_size_pt=pt_size,
+            highlight_color=hl_col,
+            stroke_color=out_col,
+            stroke_width=stroke_width,
+            box_color=box_col,
+            glow_color=box_col,
+            weight=weight_key,
+            animation=anim_key
+        )
         self.lbl_insp_preview.setText(html)
 
     def _show_toast(self, message: str):
@@ -4605,9 +6031,35 @@ class TabAssets(QWidget):
             text = self.txt_single_title.text().strip() or "ResolveFlow Title"
             preset_id = getattr(self.selected_asset, "id", "karaoke_pop")
             dur = float(self.slide_title_dur.value()) / 10.0 if hasattr(self, 'slide_title_dur') and self.slide_title_dur.value() > 0 else 4.0
-            font_name = self.combo_font.currentText() if hasattr(self, 'combo_font') else "Arial"
-            font_size = self.slide_font_size.value() if hasattr(self, 'slide_font_size') else 48
-            color_hex = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, 'swatch_colors') else "#FFFFFF"
+            font_name = self.combo_font.currentText() if hasattr(self, 'combo_font') else getattr(self.selected_asset, "font", "Arial")
+            font_size = self.slide_font_size.value() if hasattr(self, 'slide_font_size') else getattr(self.selected_asset, "size", 48)
+            stroke_width = (float(self.slide_stroke_width.value()) / 100.0) if hasattr(self, 'slide_stroke_width') else getattr(self.selected_asset, "outline_width", 0.15)
+            
+            weight = "bold"
+            if hasattr(self, "weight_buttons"):
+                for k, b in self.weight_buttons.items():
+                    if b.isChecked():
+                        weight = k
+                        break
+
+            animation = "pop"
+            if hasattr(self, "anim_chips"):
+                for k, b in self.anim_chips.items():
+                    if b.isChecked():
+                        animation = k
+                        break
+
+            timing_curve = "spring"
+            if hasattr(self, "curve_chips"):
+                for k, b in self.curve_chips.items():
+                    if b.isChecked():
+                        timing_curve = k
+                        break
+
+            color_hex = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, 'swatch_colors') else getattr(self.selected_asset, "standard_color", "#FFFFFF")
+            highlight_hex = self.swatch_colors.get("highlight", "#FACC15") if hasattr(self, 'swatch_colors') else getattr(self.selected_asset, "highlight_color", "#FACC15")
+            stroke_hex = self.swatch_colors.get("stroke", "#000000") if hasattr(self, 'swatch_colors') else getattr(self.selected_asset, "outline_color", "#000000")
+            box_glow_hex = self.swatch_colors.get("box_glow", "#EF4444") if hasattr(self, 'swatch_colors') else getattr(self.selected_asset, "box_color", "#EF4444")
 
             if resolve_auto and hasattr(resolve_auto, "insert_title_at_playhead"):
                 try:
@@ -4617,7 +6069,14 @@ class TabAssets(QWidget):
                         duration_sec=dur,
                         font_name=font_name,
                         font_size=font_size,
-                        color_hex=color_hex
+                        color_hex=color_hex,
+                        highlight_hex=highlight_hex,
+                        stroke_hex=stroke_hex,
+                        stroke_width=stroke_width,
+                        box_glow_hex=box_glow_hex,
+                        weight=weight,
+                        animation=animation,
+                        timing_curve=timing_curve
                     )
                 except Exception:
                     pass
@@ -4708,22 +6167,53 @@ class TabAssets(QWidget):
 
         if isinstance(target, TextStylePreset) or tab_type == "text":
             temp_setting = os.path.join(temp_dir, f"ResolveFlow_{asset_id}_{uuid.uuid4().hex[:6]}.setting")
-            if isinstance(target, TextStylePreset):
-                FusionSettingGenerator.export_setting_file(target, temp_setting, sample_text=sample_txt)
-            else:
-                preset_obj = next((p for p in self.all_presets if getattr(p, "id", "") == asset_id), None)
-                if isinstance(preset_obj, TextStylePreset):
-                    FusionSettingGenerator.export_setting_file(preset_obj, temp_setting, sample_text=sample_txt)
-                else:
-                    tmp_p = TextStylePreset(
-                        id=asset_id,
-                        name=getattr(target, "name", "Text Title"),
-                        font=self.combo_font.currentText() if hasattr(self, "combo_font") else "Arial",
-                        size=self.slide_font_size.value() if hasattr(self, "slide_font_size") else 48,
-                        weight="bold",
-                        standard_color=self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else "#FFFFFF"
-                    )
-                    FusionSettingGenerator.export_setting_file(tmp_p, temp_setting, sample_text=sample_txt)
+            
+            font_name = self.combo_font.currentText() if hasattr(self, "combo_font") else getattr(target, "font", "Arial")
+            font_size = self.slide_font_size.value() if hasattr(self, "slide_font_size") else getattr(target, "size", 48)
+            stroke_width = (float(self.slide_stroke_width.value()) / 100.0) if hasattr(self, "slide_stroke_width") else getattr(target, "outline_width", 0.15)
+            
+            weight = "bold"
+            if hasattr(self, "weight_buttons"):
+                for k, b in self.weight_buttons.items():
+                    if b.isChecked():
+                        weight = "extra_bold" if k == "black" else ("normal" if k == "regular" else "bold")
+                        break
+
+            animation = "pop"
+            if hasattr(self, "anim_chips"):
+                for k, b in self.anim_chips.items():
+                    if b.isChecked():
+                        animation = "box_highlight" if k == "box" else k
+                        break
+
+            timing_curve = "spring"
+            if hasattr(self, "curve_chips"):
+                for k, b in self.curve_chips.items():
+                    if b.isChecked():
+                        timing_curve = k
+                        break
+
+            text_col = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else getattr(target, "standard_color", "#FFFFFF")
+            hl_col = self.swatch_colors.get("highlight", "#FACC15") if hasattr(self, "swatch_colors") else getattr(target, "highlight_color", "#FACC15")
+            out_col = self.swatch_colors.get("stroke", "#000000") if hasattr(self, "swatch_colors") else getattr(target, "outline_color", "#000000")
+            box_glow_col = self.swatch_colors.get("box_glow", "#EF4444") if hasattr(self, "swatch_colors") else getattr(target, "box_color", "#EF4444")
+
+            customized_preset = TextStylePreset(
+                id=asset_id,
+                name=getattr(target, "name", "Text Title"),
+                font=font_name,
+                size=font_size,
+                weight=weight,
+                standard_color=text_col,
+                highlight_color=hl_col,
+                outline_color=out_col,
+                outline_width=stroke_width,
+                box_color=box_glow_col,
+                glow_color=box_glow_col,
+                animation=animation,
+                timing_curve=timing_curve
+            )
+            FusionSettingGenerator.export_setting_file(customized_preset, temp_setting, sample_text=sample_txt)
             mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(temp_setting))])
 
         elif isinstance(target, TransitionStylePreset) or tab_type == "trans":
@@ -4847,21 +6337,53 @@ class TabAssets(QWidget):
         asset_id = getattr(target, "id", "asset")
         tab_type = getattr(target, "tab", "")
 
-        if isinstance(target, TextStylePreset):
-            return FusionSettingGenerator.generate_setting_content(target, sample_text=sample_txt)
-        elif tab_type == "text":
-            preset_obj = next((p for p in self.all_presets if getattr(p, "id", "") == asset_id), None)
-            if isinstance(preset_obj, TextStylePreset):
-                return FusionSettingGenerator.generate_setting_content(preset_obj, sample_text=sample_txt)
-            tmp_p = TextStylePreset(
+        if isinstance(target, TextStylePreset) or tab_type == "text":
+            font_name = self.combo_font.currentText() if hasattr(self, "combo_font") else getattr(target, "font", "Arial")
+            font_size = self.slide_font_size.value() if hasattr(self, "slide_font_size") else getattr(target, "size", 48)
+            stroke_width = (float(self.slide_stroke_width.value()) / 100.0) if hasattr(self, "slide_stroke_width") else getattr(target, "outline_width", 0.15)
+            
+            weight = "bold"
+            if hasattr(self, "weight_buttons"):
+                for k, b in self.weight_buttons.items():
+                    if b.isChecked():
+                        weight = "extra_bold" if k == "black" else ("normal" if k == "regular" else "bold")
+                        break
+
+            animation = "pop"
+            if hasattr(self, "anim_chips"):
+                for k, b in self.anim_chips.items():
+                    if b.isChecked():
+                        animation = "box_highlight" if k == "box" else k
+                        break
+
+            timing_curve = "spring"
+            if hasattr(self, "curve_chips"):
+                for k, b in self.curve_chips.items():
+                    if b.isChecked():
+                        timing_curve = k
+                        break
+
+            text_col = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else getattr(target, "standard_color", "#FFFFFF")
+            hl_col = self.swatch_colors.get("highlight", "#FACC15") if hasattr(self, "swatch_colors") else getattr(target, "highlight_color", "#FACC15")
+            out_col = self.swatch_colors.get("stroke", "#000000") if hasattr(self, "swatch_colors") else getattr(target, "outline_color", "#000000")
+            box_glow_col = self.swatch_colors.get("box_glow", "#EF4444") if hasattr(self, "swatch_colors") else getattr(target, "box_color", "#EF4444")
+
+            customized_preset = TextStylePreset(
                 id=asset_id,
                 name=getattr(target, "name", "Title"),
-                font=self.combo_font.currentText() if hasattr(self, "combo_font") else "Arial",
-                size=self.slide_font_size.value() if hasattr(self, "slide_font_size") else 48,
-                weight="bold",
-                standard_color=self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else "#FFFFFF"
+                font=font_name,
+                size=font_size,
+                weight=weight,
+                standard_color=text_col,
+                highlight_color=hl_col,
+                outline_color=out_col,
+                outline_width=stroke_width,
+                box_color=box_glow_col,
+                glow_color=box_glow_col,
+                animation=animation,
+                timing_curve=timing_curve
             )
-            return FusionSettingGenerator.generate_setting_content(tmp_p, sample_text=sample_txt)
+            return FusionSettingGenerator.generate_setting_content(customized_preset, sample_text=sample_txt)
         elif isinstance(target, TransitionStylePreset):
             return TransitionMacroGenerator.generate_setting_content(target)
         elif tab_type == "trans":
@@ -4944,7 +6466,48 @@ class TabAssets(QWidget):
         self._show_toast(msg)
         return count, target_dir
 
+    def _capture_preset_from_playhead(self):
+        """Hút TextPlus / Fusion comp tại Playhead thành Preset vĩnh viễn."""
+        from src.core.preset_capture import capture_playhead_text_preset, safe_preset_name
+        from PyQt6.QtWidgets import QInputDialog
+
+        default_name = f"ChunDVC_Style_{len(self.all_presets) + 1}"
+        name, ok = QInputDialog.getText(
+            self,
+            "Hút Preset từ DaVinci Resolve",
+            "Nhập tên preset mới cần lưu:",
+            text=default_name
+        )
+        if not ok or not name.strip():
+            return
+
+        name = name.strip()
+        self._show_toast(f"⏳ Đang hút style '{name}' từ Playhead...")
+        try:
+            res = capture_playhead_text_preset(
+                preset_name=name,
+                resolve_app=getattr(self, "resolve_app", None),
+                log_callback=lambda m: print(m),
+            )
+            if res.get("ok"):
+                self._show_toast(f"✅ Đã hút thành công preset '{name}'!")
+                new_preset = TextStylePreset(
+                    id=safe_preset_name(name).lower(),
+                    name=name,
+                    category="kinetic",
+                    badge_icon="📥",
+                    description=f"Preset được hút trực tiếp từ Timeline Resolve ({res.get('item_name', '')})",
+                )
+                self.all_presets.append(new_preset)
+                self.all_assets.append(new_preset)
+                self._filter_by_rail("text")
+            else:
+                self._show_toast(f"❌ {res.get('message', 'Không thể hút preset')}")
+        except Exception as e:
+            self._show_toast(f"❌ Lỗi: {str(e)}")
+
     def _import_files_or_folders(self, paths: Optional[List[str]] = None):
+
         if not paths:
             files, _ = QFileDialog.getOpenFileNames(
                 self,
@@ -5060,6 +6623,15 @@ class TabAssets(QWidget):
         preset_id = self.combo_text_preset.currentData() or getattr(self.selected_asset, "id", "karaoke_pop")
         self.copy_fusion_node_requested.emit(preset_id)
         self._show_toast("Đã copy Fusion node! Dán vào trang Fusion bằng Ctrl+V")
+
+    def _on_fast_paste_fusion_clicked(self):
+        macro_code = self._get_current_fusion_macro_code()
+        from src.core.fast_paste import fast_paste_to_fusion
+        res = fast_paste_to_fusion(macro_code)
+        if res.get("ok"):
+            self._show_toast("⚡ Đã tự động dán cây node vào trang Fusion!")
+        else:
+            self._show_toast(f"⚠️ {res.get('message', 'Không thể dán tự động')}")
 
     def _on_favorite_toggled(self, preset_id: str, is_fav: bool):
         if is_fav:

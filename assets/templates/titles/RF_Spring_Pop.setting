@@ -1,0 +1,410 @@
+{
+	Tools = ordered() {
+		RF_Spring_Pop = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Alex Hormozi Spring Pop",
+			},
+			Inputs = ordered() {
+				Text = InstanceInput {
+					SourceOp = "Text1",
+					Source = "StyledText",
+					Name = "Text",
+					Page = "Controls",
+				},
+				Font = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Font",
+					Name = "Text Font",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Style = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Style",
+					Name = "Text Style",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Size = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Size",
+					Name = "Text Size",
+					Page = "Controls",
+				},
+				Red = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Red1",
+					Name = "Text Color",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Green = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Green1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Blue = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Blue1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Outline = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Thickness2",
+					Name = "Outline Thickness",
+					Page = "Controls",
+				},
+				OutlineRed = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Red2",
+					Name = "Outline Color",
+					ControlGroup = 20,
+					Page = "Controls",
+				},
+				OutlineGreen = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Green2",
+					ControlGroup = 20,
+					Page = "Controls",
+				},
+				OutlineBlue = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Blue2",
+					ControlGroup = 20,
+					Page = "Controls",
+				},
+				MotionBlur = InstanceInput {
+					SourceOp = "Pop",
+					Source = "MotionBlur",
+					Name = "Motion Blur",
+					Page = "Animation",
+				},
+				Delay = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Delay",
+					Name = "Delay (frames)",
+					Page = "Animation",
+				},
+				Speed = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Speed",
+					Name = "Animation Speed",
+					Page = "Animation",
+				},
+				Position = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "Center",
+					Name = "Position",
+					Page = "Controls",
+				},
+				FadeIn = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "InFrames",
+					Name = "Fade In (frames)",
+					Page = "Animation",
+				},
+				FadeOut = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "OutFrames",
+					Name = "Fade Out (frames)",
+					Page = "Animation",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "OutFade",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				Text1 = TextPlus {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						StyledText = Input {
+							Value = "RESOLVEFLOW",
+						},
+						Font = Input {
+							Value = "Open Sans",
+						},
+						Style = Input {
+							Value = "Bold",
+						},
+						Size = Input {
+							Value = 0.08,
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Red1 = Input {
+							Value = 1,
+						},
+						Green1 = Input {
+							Value = 1,
+						},
+						Blue1 = Input {
+							Value = 1,
+						},
+						Alpha1 = Input {
+							Value = 1,
+						},
+						Enabled2 = Input {
+							Value = 1,
+						},
+						Thickness2 = Input {
+							Value = 0.06,
+						},
+						Red2 = Input {
+							Value = 0,
+						},
+						Green2 = Input {
+							Value = 0,
+						},
+						Blue2 = Input {
+							Value = 0,
+						},
+						Alpha2 = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 0 },
+					},
+				},
+				PopSize = BezierSpline {
+					SplineColor = {
+						Red = 225,
+						Green = 0,
+						Blue = 225,
+					},
+					NameSet = true,
+					KeyFrames = {
+						[0] = {
+							0,
+							RH = { 2, 0 },
+							Flags = {
+								Linear = false,
+							},
+						},
+						[6] = {
+							1.25,
+							LH = { 4, 1.25 },
+							RH = { 7.333333333333333, 1.25 },
+							Flags = {
+								Linear = false,
+							},
+						},
+						[10] = {
+							0.95,
+							LH = { 8.666666666666666, 0.95 },
+							RH = { 11.333333333333334, 0.95 },
+							Flags = {
+								Linear = false,
+							},
+						},
+						[14] = {
+							1,
+							LH = { 12.666666666666666, 1 },
+							Flags = {
+								Linear = false,
+							},
+						},
+					},
+				},
+				PopAngle = BezierSpline {
+					SplineColor = {
+						Red = 0,
+						Green = 200,
+						Blue = 255,
+					},
+					NameSet = true,
+					KeyFrames = {
+						[0] = {
+							-8,
+							RH = { 2, -8 },
+							Flags = {
+								Linear = false,
+							},
+						},
+						[6] = {
+							3,
+							LH = { 4, 3 },
+							RH = { 7.333333333333333, 3 },
+							Flags = {
+								Linear = false,
+							},
+						},
+						[10] = {
+							-1,
+							LH = { 8.666666666666666, -1 },
+							RH = { 11.333333333333334, -1 },
+							Flags = {
+								Linear = false,
+							},
+						},
+						[14] = {
+							0,
+							LH = { 12.666666666666666, 0 },
+							Flags = {
+								Linear = false,
+							},
+						},
+					},
+				},
+				Pop = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Text1",
+							Source = "Output",
+						},
+						Size = Input {
+							SourceOp = "PopSize",
+							Source = "Value",
+						},
+						Angle = Input {
+							SourceOp = "PopAngle",
+							Source = "Value",
+						},
+						MotionBlur = Input {
+							Value = 1,
+						},
+						Quality = Input {
+							Value = 8,
+						},
+						ShutterAngle = Input {
+							Value = 180,
+						},
+						CenterBias = Input {
+							Value = 0,
+						},
+						SampleSpread = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+				Canvas = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, -66 },
+					},
+				},
+				Timing = TimeSpeed {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Pop",
+							Source = "Output",
+						},
+						Speed = Input {
+							Value = 1,
+						},
+						Delay = Input {
+							Value = 0,
+						},
+						InterpolateBetweenFrames = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, 0 },
+					},
+				},
+				OutFade = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Canvas",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Timing",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Blend = Input {
+							Value = 1,
+							Expression = "min(iif(OutFade.InFrames > 0, min(1, max(0, (time - comp.RenderStart - Timing.Delay) / max(1, OutFade.InFrames))), 1), iif(OutFade.OutFrames > 0, min(1, max(0, (comp.RenderEnd - time) / max(1, OutFade.OutFrames))), 1))",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						InFrames = Input {
+							Value = 0,
+						},
+						OutFrames = Input {
+							Value = 8,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, 0 },
+					},
+					UserControls = ordered() {
+						InFrames = {
+							LINKS_Name = "Fade In (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+						OutFrames = {
+							LINKS_Name = "Fade Out (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 8,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Spring_Pop",
+}

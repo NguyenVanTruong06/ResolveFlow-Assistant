@@ -9,6 +9,9 @@ import sys
 import shutil
 import hashlib
 import subprocess
+import socket
+import ipaddress
+import urllib.parse
 from typing import List, Dict, Optional, Tuple
 from pydantic import BaseModel, Field
 from PIL import Image, ImageDraw, ImageFont
@@ -170,25 +173,61 @@ class WebScreenshotEngine:
 
         img.save(out_path)
 
+    @staticmethod
+    def is_safe_public_url(url: str) -> bool:
+        """
+        Kiểm tra xem URL có an toàn để chụp màn hình hay không:
+        - Chỉ cho phép scheme http và https.
+        - Không cho phép localhost, IP loopback (127.0.0.0/8), RFC 1918 private IPs,
+          cloud metadata (169.254.169.254), hoặc multicast/broadcast.
+        """
+        if not url or not isinstance(url, str):
+            return False
+        try:
+            parsed = urllib.parse.urlparse(url.strip())
+            if parsed.scheme.lower() not in ("http", "https"):
+                return False
+            hostname = parsed.hostname
+            if not hostname:
+                return False
+            hostname_lower = hostname.lower()
+            if hostname_lower in ("localhost", "127.0.0.1", "::1", "0.0.0.0") or hostname_lower.endswith(".local") or hostname_lower.endswith(".internal"):
+                return False
+
+            try:
+                addr_info = socket.getaddrinfo(hostname, None)
+                for item in addr_info:
+                    ip_str = item[4][0]
+                    ip = ipaddress.ip_address(ip_str)
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                        return False
+            except Exception:
+                return False
+            return True
+        except Exception:
+            return False
+
     def capture_screenshot(self, url: str, out_path: Optional[str] = None, mock: bool = False) -> str:
         """
         Chụp ảnh màn hình web full HD 1920x1080.
         Có cơ chế cache theo hash URL để không phải chụp lại cùng 1 link.
+        Tự động bảo vệ chống SSRF và flag injection.
         """
+        clean_url = str(url).strip()
         if not out_path:
-            url_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+            url_hash = hashlib.sha256(clean_url.encode("utf-8")).hexdigest()[:16]
             out_path = os.path.join(self.output_dir, f"evidence_{url_hash}.png")
 
         # 1. Kiểm tra cache
         if os.path.exists(out_path) and os.path.getsize(out_path) > 1024:
             return out_path
 
-        # 2. Nếu ở chế độ mock hoặc không có trình duyệt
-        if mock or not self.browser_exe:
-            self._generate_mock_screenshot(url, out_path)
+        # 2. Nếu ở chế độ mock, không có trình duyệt hoặc URL là mạng nội bộ / không an toàn
+        if mock or not self.browser_exe or not self.is_safe_public_url(clean_url):
+            self._generate_mock_screenshot(clean_url, out_path)
             return out_path
 
-        # 3. Gọi trình duyệt headless trực tiếp
+        # 3. Gọi trình duyệt headless trực tiếp với cờ kết thúc '--'
         cmd = [
             self.browser_exe,
             "--headless",
@@ -196,7 +235,8 @@ class WebScreenshotEngine:
             "--hide-scrollbars",
             "--window-size=1920,1080",
             f"--screenshot={out_path}",
-            url
+            "--",
+            clean_url
         ]
 
         try:
@@ -213,6 +253,6 @@ class WebScreenshotEngine:
 
         # Fallback tạo ảnh đồ họa nếu chụp web thật bị lỗi/timeout
         if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
-            self._generate_mock_screenshot(url, out_path)
+            self._generate_mock_screenshot(clean_url, out_path)
 
         return out_path

@@ -76,10 +76,11 @@ class ThemeFonts:
     FAMILY_MONO = "'JetBrains Mono', 'Cascadia Mono', 'Fira Code', 'Consolas', 'DejaVu Sans Mono', monospace"
 
     SIZE_TITLE = 16
-    SIZE_SUBTITLE = 11
+    SIZE_SUBTITLE = 12
     SIZE_SECTION = 13
-    SIZE_BODY = 12
-    SIZE_SMALL = 11
+    SIZE_BODY = 12.5
+    SIZE_SMALL = 11.5
+    SIZE_FLOOR = 11.5
     SIZE_BTN_RUN = 14
 
 
@@ -516,6 +517,33 @@ def get_application_stylesheet() -> str:
     }}
     QPushButton[role="nav-switch"]:pressed {{
         background-color: rgba(124, 58, 237, 0.28);
+    }}
+
+    /* --- HIGH-END CARDS & ISLAND BUTTONS --- */
+    QFrame[role="card_nested"] {{
+        background-color: {ThemeColors.BG_CARD};
+        border: 1px solid {ThemeColors.BORDER_DEFAULT};
+        border-radius: 12px;
+    }}
+    QFrame[role="card_nested"]:hover {{
+        border-color: {ThemeColors.BORDER_HOVER};
+    }}
+
+    QPushButton[role="btn_island"] {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {ThemeColors.PRIMARY}, stop:1 #0891b2);
+        border: 1px solid {ThemeColors.PRIMARY_HOVER};
+        color: #ffffff;
+        border-radius: 8px;
+        padding: 9px 18px;
+        font-weight: 600;
+        font-size: 13px;
+    }}
+    QPushButton[role="btn_island"]:hover {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {ThemeColors.PRIMARY_HOVER}, stop:1 {ThemeColors.CYAN});
+        border-color: {ThemeColors.CYAN_HI};
+    }}
+    QPushButton[role="btn_island"]:pressed {{
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {ThemeColors.PRIMARY_PRESSED}, stop:1 #0e7490);
     }}
 
     /* --- TOOLTIPS --- */

@@ -1,0 +1,469 @@
+{
+	Tools = ordered() {
+		RF_Cyberpunk_RGB_Glitch = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Cyberpunk RGB Split Glitch",
+			},
+			Inputs = ordered() {
+				Text = InstanceInput {
+					SourceOp = "Text1",
+					Source = "StyledText",
+					Name = "Text",
+					Page = "Controls",
+				},
+				Font = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Font",
+					Name = "Text Font",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Style = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Style",
+					Name = "Text Style",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Size = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Size",
+					Name = "Text Size",
+					Page = "Controls",
+				},
+				Red = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Red1",
+					Name = "Text Color",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Green = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Green1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Blue = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Blue1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Frames = InstanceInput {
+					SourceOp = "Glitch",
+					Source = "Frames",
+					Name = "Glitch Frames",
+					Page = "Animation",
+				},
+				Amount = InstanceInput {
+					SourceOp = "Glitch",
+					Source = "Amount",
+					Name = "Glitch Amount",
+					Page = "Animation",
+				},
+				Delay = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Delay",
+					Name = "Delay (frames)",
+					Page = "Animation",
+				},
+				Speed = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Speed",
+					Name = "Animation Speed",
+					Page = "Animation",
+				},
+				Position = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "Center",
+					Name = "Position",
+					Page = "Controls",
+				},
+				FadeIn = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "InFrames",
+					Name = "Fade In (frames)",
+					Page = "Animation",
+				},
+				FadeOut = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "OutFrames",
+					Name = "Fade Out (frames)",
+					Page = "Animation",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "OutFade",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				Text1 = TextPlus {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						StyledText = Input {
+							Value = "RESOLVEFLOW",
+						},
+						Font = Input {
+							Value = "Open Sans",
+						},
+						Style = Input {
+							Value = "Bold",
+						},
+						Size = Input {
+							Value = 0.08,
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Red1 = Input {
+							Value = 1,
+						},
+						Green1 = Input {
+							Value = 1,
+						},
+						Blue1 = Input {
+							Value = 1,
+						},
+						Alpha1 = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 0 },
+					},
+				},
+				TextR = TextPlus {
+					SourceOp = "Text1",
+					CtrlWZoom = false,
+					Inputs = {
+						Red1 = Input {
+							Value = 1,
+						},
+						Green1 = Input {
+							Value = 0,
+						},
+						Blue1 = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, -66 },
+					},
+				},
+				XfR = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "TextR",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 + iif(time < Glitch.Frames, 1, 0) * Glitch.Amount * (((sin(floor(time / max(1, 1)) * 12.9898 + 1.7) * 43758.5453) % 1) - 0.5), 0.5 + iif(time < Glitch.Frames, 1, 0) * Glitch.Amount * 0.25 * (((sin(floor(time / max(1, 1)) * 12.9898 + 12.7) * 43758.5453) % 1) - 0.5))",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, -66 },
+					},
+				},
+				TextG = TextPlus {
+					SourceOp = "Text1",
+					CtrlWZoom = false,
+					Inputs = {
+						Red1 = Input {
+							Value = 0,
+						},
+						Green1 = Input {
+							Value = 1,
+						},
+						Blue1 = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, -198 },
+					},
+				},
+				XfG = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "TextG",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 + iif(time < Glitch.Frames, 1, 0) * Glitch.Amount * (((sin(floor(time / max(1, 1)) * 12.9898 + 3.1) * 43758.5453) % 1) - 0.5), 0.5 + iif(time < Glitch.Frames, 1, 0) * Glitch.Amount * 0.25 * (((sin(floor(time / max(1, 1)) * 12.9898 + 14.1) * 43758.5453) % 1) - 0.5))",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, -198 },
+					},
+				},
+				AddG = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "XfR",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "XfG",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						ApplyMode = Input {
+							Value = "Screen",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, -330 },
+					},
+				},
+				TextB = TextPlus {
+					SourceOp = "Text1",
+					CtrlWZoom = false,
+					Inputs = {
+						Red1 = Input {
+							Value = 0,
+						},
+						Green1 = Input {
+							Value = 0,
+						},
+						Blue1 = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, -396 },
+					},
+				},
+				XfB = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "TextB",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 + iif(time < Glitch.Frames, 1, 0) * Glitch.Amount * (((sin(floor(time / max(1, 1)) * 12.9898 + 5.3) * 43758.5453) % 1) - 0.5), 0.5 + iif(time < Glitch.Frames, 1, 0) * Glitch.Amount * 0.25 * (((sin(floor(time / max(1, 1)) * 12.9898 + 16.3) * 43758.5453) % 1) - 0.5))",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, -396 },
+					},
+				},
+				AddB = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "AddG",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "XfB",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						ApplyMode = Input {
+							Value = "Screen",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, -528 },
+					},
+				},
+				Glitch = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Text1",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 + iif(time < Glitch.Frames, 1, 0) * Glitch.Amount * 0.4 * (((sin(floor(time / max(1, 1)) * 12.9898 + 9.7) * 43758.5453) % 1) - 0.5), 0.5)",
+						},
+						Frames = Input {
+							Value = 8,
+						},
+						Amount = Input {
+							Value = 0.08,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, 0 },
+					},
+					UserControls = ordered() {
+						Frames = {
+							LINKS_Name = "Glitch Frames",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 8,
+							INP_MinScale = 0,
+							INP_MaxScale = 48,
+						},
+						Amount = {
+							LINKS_Name = "Glitch Amount",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0.08,
+							INP_MinScale = 0,
+							INP_MaxScale = 0.4,
+						},
+					},
+				},
+				Split = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "AddB",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Glitch",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						Blend = Input {
+							Value = 1,
+							Expression = "iif(time < Glitch.Frames, iif(((sin(floor(time / max(1, 1)) * 12.9898 + 4.2) * 43758.5453) % 1) > 0.5, 1, 0), 1)",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 440, 0 },
+					},
+				},
+				Canvas = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 550, -66 },
+					},
+				},
+				Timing = TimeSpeed {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Split",
+							Source = "Output",
+						},
+						Speed = Input {
+							Value = 1,
+						},
+						Delay = Input {
+							Value = 0,
+						},
+						InterpolateBetweenFrames = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 550, 0 },
+					},
+				},
+				OutFade = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Canvas",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Timing",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Blend = Input {
+							Value = 1,
+							Expression = "min(iif(OutFade.InFrames > 0, min(1, max(0, (time - comp.RenderStart - Timing.Delay) / max(1, OutFade.InFrames))), 1), iif(OutFade.OutFrames > 0, min(1, max(0, (comp.RenderEnd - time) / max(1, OutFade.OutFrames))), 1))",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						InFrames = Input {
+							Value = 0,
+						},
+						OutFrames = Input {
+							Value = 8,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 660, 0 },
+					},
+					UserControls = ordered() {
+						InFrames = {
+							LINKS_Name = "Fade In (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+						OutFrames = {
+							LINKS_Name = "Fade Out (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 8,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Cyberpunk_RGB_Glitch",
+}

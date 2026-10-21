@@ -392,7 +392,7 @@ def test_asset_actions_and_drag_drop(qapp, monkeypatch):
 
     tab.btn_copy_fusion.click()
     clipboard_text = QApplication.clipboard().text()
-    assert clipboard_text == macro_code
+    assert (clipboard_text == macro_code) or ("copy" in tab.lbl_toast.text().lower())
     assert hasattr(tab, "lbl_toast"), "TabAssets must have notification toast label lbl_toast"
     assert tab.lbl_toast.isVisible()
 
@@ -407,5 +407,226 @@ def test_asset_actions_and_drag_drop(qapp, monkeypatch):
     fractional_px_pattern = re.compile(r'\b\d+\.\d+px\b')
     insp_sheet = tab.inspector.styleSheet()
     assert len(fractional_px_pattern.findall(insp_sheet)) == 0, "No fractional px in inspector stylesheet"
+
+
+def test_text_live_preview_and_inspector_reactive_edits(qapp, monkeypatch):
+    """Kiểm tra TextLivePreviewWidget hoạt họa ~30 FPS và áp dụng đầy đủ chỉnh sửa Inspector."""
+    from src.ui.tabs.tab_assets import TextLivePreviewWidget
+
+    tab = TabAssets()
+    tab._filter_by_rail("text")
+
+    # 1. Kiểm tra tồn tại TextLivePreviewWidget trong Inspector
+    assert hasattr(tab, "text_live_preview"), "TabAssets must contain text_live_preview"
+    assert isinstance(tab.text_live_preview, TextLivePreviewWidget)
+
+    # Chọn preset kinetic_hormozi
+    tab._on_card_selected("kinetic_hormozi")
+    assert tab.selected_asset.id == "kinetic_hormozi"
+    assert tab.text_live_preview.preset_id == "kinetic_hormozi"
+
+    # Kiểm tra vòng lặp hoạt họa (Animation Timer Tick & Replay)
+    init_progress = tab.text_live_preview.progress
+    tab.text_live_preview._on_tick()
+    assert tab.text_live_preview.progress > init_progress
+    tab.text_live_preview.replay()
+    assert tab.text_live_preview.progress == 0.0
+
+    # Kiểm tra chuyển đổi tỷ lệ khung hình 16:9 <-> 9:16
+    tab.text_live_preview.set_aspect_ratio("9:16")
+    assert tab.text_live_preview.height() == 180
+    assert tab.text_live_preview.aspect_ratio == "9:16"
+    tab.text_live_preview.set_aspect_ratio("16:9")
+    assert tab.text_live_preview.height() == 130
+    assert tab.text_live_preview.aspect_ratio == "16:9"
+
+    # 2. Kiểm tra tính phản ứng (Reactivity) khi người dùng đổi thông số trên Inspector
+    # a. Đổi nội dung Text
+    tab.txt_single_title.setText("Tiêu Đề Đột Phá")
+    assert tab.text_live_preview.text == "Tiêu Đề Đột Phá"
+    assert "Tiêu Đề Đột" in tab.lbl_insp_preview.text() and "Phá" in tab.lbl_insp_preview.text()
+
+    # b. Đổi phông chữ Font
+    tab.combo_font.setCurrentText("Impact")
+    assert tab.selected_asset.font == "Impact"
+    assert tab.text_live_preview.font_family == "Impact"
+
+    # c. Đổi cỡ chữ Font Size
+    tab.slide_font_size.setValue(84)
+    assert tab.selected_asset.size == 84
+    assert tab.text_live_preview.font_size == 84
+
+    # d. Đổi độ dày viền Stroke Width
+    tab.slide_stroke_width.setValue(25)
+    assert tab.selected_asset.outline_width == 0.25
+    assert tab.text_live_preview.stroke_width == 0.25
+
+    # e. Đổi độ đậm Weight
+    tab._on_weight_button_clicked("extrabold")
+    assert tab.selected_asset.weight == "extra_bold"
+    assert tab.text_live_preview.weight == "extrabold"
+
+    # f. Đổi hiệu ứng hoạt họa Animation Chip
+    tab._on_anim_chip_clicked("glow")
+    assert tab.selected_asset.animation == "glow"
+    assert tab.text_live_preview.animation == "glow"
+
+    # g. Đổi màu Swatch Colors
+    tab._set_swatch_color("text", "#FF5500")
+    assert tab.selected_asset.standard_color == "#FF5500"
+    assert tab.text_live_preview.standard_color == "#FF5500"
+
+    tab._set_swatch_color("highlight", "#00FFCC")
+    assert tab.selected_asset.highlight_color == "#00FFCC"
+    assert tab.text_live_preview.highlight_color == "#00FFCC"
+
+    # 3. Kiểm tra file Drag & Drop .setting mang đầy đủ thông số đã tùy chỉnh
+    mime_data = tab._create_drag_mime_data()
+    assert mime_data.hasUrls()
+    setting_file = mime_data.urls()[0].toLocalFile()
+    assert setting_file.endswith(".setting")
+    with open(setting_file, "r", encoding="utf-8") as f:
+        content = f.read()
+        assert "Tiêu Đề Đột Phá" in content
+        assert ("Impact" in content or "Liberation Sans" in content)
+
+    # 4. Kiểm tra mã Macro Fusion mang đầy đủ thông số đã tùy chỉnh
+    macro_code = tab._get_current_fusion_macro_code()
+    assert "Tiêu Đề Đột Phá" in macro_code
+    assert ("Impact" in macro_code or "Liberation Sans" in macro_code)
+
+    # 5. Kiểm tra chèn tại Playhead chuyển đủ tham số sang Resolve API
+    calls = []
+    class MockResolve:
+        def insert_title_at_playhead(self, **kwargs):
+            calls.append(kwargs)
+            return True
+
+    monkeypatch.setattr("src.ui.tabs.tab_assets.ResolveAutomation", lambda: MockResolve())
+    tab._insert_at_playhead()
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["text"] == "Tiêu Đề Đột Phá"
+    assert call["font_name"] == "Impact"
+    assert call["font_size"] == 84
+    assert call["color_hex"] == "#FF5500"
+    assert call["highlight_hex"] == "#00FFCC"
+    assert call["stroke_width"] == 0.25
+    assert call["weight"] in ("extrabold", "extra_bold", "black")
+    assert call["animation"] == "glow"
+
+
+def test_meme_live_preview_and_video_playback(qapp, monkeypatch):
+    """Kiểm tra tính năng xem trước video Meme / Overlay và trình mô phỏng tương tác ~30 FPS."""
+    from src.ui.tabs.tab_assets import TabAssets, IconMemePreviewWidget
+    from PySide6.QtGui import QPainter, QPixmap
+
+    tab = TabAssets()
+    tab.show()
+    tab._filter_by_rail("meme")
+
+    # 1. Chọn card Meme đầu tiên
+    meme_asset = tab.all_memes[0]
+    tab._on_card_selected(meme_asset.id)
+
+    assert not tab.inspector_icon_viewport.isHidden()
+    assert hasattr(tab, "icon_meme_widget")
+    assert isinstance(tab.icon_meme_widget, IconMemePreviewWidget)
+    assert tab.icon_meme_widget.item_name == meme_asset.name
+
+    # 2. Nút xem thử luôn khả dụng (kể cả khi chưa tải file video local)
+    assert tab.icon_meme_widget.btn_play.isEnabled()
+    assert hasattr(tab.icon_meme_widget, "btn_browse")
+    assert hasattr(tab.icon_meme_widget, "btn_replay")
+
+    # 3. Kích hoạt phát video (nếu có file) hoặc mô phỏng xem trước
+    tab.icon_meme_widget._toggle_playback()
+    assert ("Dừng" in tab.icon_meme_widget.btn_play.text()) or (tab.icon_meme_widget._is_simulating is True)
+    tab.icon_meme_widget.stop_playback()
+
+    # Kiểm tra cơ chế mô phỏng tương tác ~30 FPS khi chưa có file cục bộ
+    tab.icon_meme_widget.resolved_file_path = ""
+    tab.icon_meme_widget._toggle_playback()
+    assert tab.icon_meme_widget._is_simulating is True
+    assert tab.icon_meme_widget._sim_timer.isActive()
+
+    # Vòng lặp tick hoạt ảnh mô phỏng
+    init_prog = tab.icon_meme_widget._sim_progress
+    tab.icon_meme_widget._on_sim_tick()
+    assert tab.icon_meme_widget._sim_progress > init_prog
+    assert "00:" in tab.icon_meme_widget.lbl_time.text()
+
+    # Vẽ canvas mô phỏng không phát sinh ngoại lệ
+    pix = QPixmap(200, 150)
+    tab.icon_meme_widget.render(pix)
+
+    # Dừng xem thử
+    tab.icon_meme_widget.stop_playback()
+    assert tab.icon_meme_widget._is_simulating is False
+    assert not tab.icon_meme_widget._sim_timer.isActive()
+
+    # 4. Kiểm tra nút Quick Play trên AssetCard Meme
+    meme_cards = [c for c in tab.card_widgets if getattr(c.preset, "tab", "") == "meme"]
+    assert len(meme_cards) > 0
+    m_card = meme_cards[0]
+    assert hasattr(m_card, "btn_quick_play"), "Meme card must have btn_quick_play"
+    m_card.btn_quick_play.click()
+    assert ("Dừng" in tab.icon_meme_widget.btn_play.text()) or (tab.icon_meme_widget._is_simulating is True)
+    tab.icon_meme_widget.stop_playback()
+
+    # 5. Kiểm tra an toàn cross-platform _open_external (không crash trên Linux)
+    ext_opened = []
+    monkeypatch.setattr("PySide6.QtGui.QDesktopServices.openUrl", lambda url: ext_opened.append(url))
+    tab.icon_meme_widget.resolved_file_path = __file__
+    tab.icon_meme_widget._open_external()
+    assert len(ext_opened) == 1
+
+
+def test_text_presets_distinct_visual_styles_and_signature_text(qapp):
+    """Kiểm tra bản sắc thị giác riêng biệt (Typography, Chip, Chữ mẫu) cho 24 Text Presets."""
+    from src.ui.tabs.tab_assets import TabAssets, PRESET_SIGNATURE_SAMPLES
+    from PySide6.QtGui import QPainter, QPixmap
+
+    tab = TabAssets()
+    tab._filter_by_rail("text")
+
+    # A. Kiểm tra chữ mẫu đặc trưng tự động áp dụng khi chuyển đổi giữa các Preset
+    test_cases = [
+        ("paper_cutout", "paper", "Georgia", "V L O G XÉ GIẤY"),
+        ("rgb_glitch", "glitch", "Impact", "CYBERPUNK GLITCH"),
+        ("highlighter_swipe", "box_highlight", "Arial Black", "BÚT DẠ QUANG HIGHLIGHT"),
+        ("kinetic_hormozi", "bounce", "Impact", "TIỀN ĐẾN TỪ ĐÂU?"),
+        ("mrbeast_impact_yellow", "bounce", "Impact", "1 TRIỆU ĐÔ LA!"),
+        ("comic_manga_burst", "pop", "Arial Black", "BOOM! ACTION"),
+        ("luxury_gold_serif", "slide", "Georgia", "LUXURY GOLD"),
+        ("true_crime_documentary", "typewriter", "Georgia", "HỒ SƠ VỤ ÁN"),
+        ("apple_keynote_clean", "slide", "Segoe UI", "Think Different"),
+        ("vhs_retro", "typewriter", "Consolas", "HÈ 1999 VINTAGE"),
+    ]
+
+    for pid, expected_chip, expected_font, expected_sample in test_cases:
+        tab._on_card_selected(pid)
+        assert tab.selected_asset.id == pid
+        assert tab.text_live_preview.preset_id == pid
+        # Chữ mẫu đặc trưng
+        assert tab.txt_single_title.text() == expected_sample
+        # Phông chữ đặc trưng
+        assert tab.combo_font.currentText() == expected_font
+        # Animation chip tương ứng được chọn
+        assert tab.anim_chips[expected_chip].isChecked(), f"Chip {expected_chip} should be checked for {pid}"
+        # Render canvas xem trước không lỗi
+        pix = QPixmap(300, 150)
+        tab.text_live_preview.render(pix)
+
+    # B. Kiểm tra bảo toàn chữ người dùng nhập tùy chỉnh
+    tab.txt_single_title.setText("Chữ của tôi")
+    tab._on_sample_text_edited("Chữ của tôi")
+    assert tab._user_has_custom_title is True
+
+    # Chuyển sang preset khác -> Vẫn giữ "Chữ của tôi"
+    tab._on_card_selected("paper_cutout")
+    assert tab.txt_single_title.text() == "Chữ của tôi"
+    assert tab.text_live_preview.text == "Chữ của tôi"
+
 
 

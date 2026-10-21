@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://resolveflow.local/schemas/director-text-plan.v1.json",
+  "title": "Director Text & Subtitle Plan v1",
+  "description": "AI chỉ quyết định PHONG CÁCH (nhóm từ, nhấn mạnh, animation, màu, vị trí). AI KHÔNG trả về timestamp và KHÔNG gõ lại transcript: mọi từ được tham chiếu bằng chỉ số (index) trong mảng Whisper, nên thời gian luôn lấy từ Whisper và không thể bị 'bịa'.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "canvas", "presets", "pages"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["aspect"],
+      "properties": {
+        "aspect": { "enum": ["9:16", "16:9", "1:1", "4:5"] }
+      }
+    },
+    "presets": {
+      "description": "Bộ style dùng lại. Editor đổi style toàn video bằng cách sửa preset rồi chạy lại pipeline.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 6,
+      "additionalProperties": { "$ref": "#/$defs/preset" }
+    },
+    "pages": {
+      "description": "Mỗi page = một cụm 1-4 từ hiển thị cùng lúc. word_range phải liên tục, không chồng lấn, theo thứ tự tăng dần.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/page" }
+    }
+  },
+  "$defs": {
+    "hexColor": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+    "animation": {
+      "enum": ["none", "scale_pop", "kinetic_bounce", "neon_glow", "box_swipe", "glitch"]
+    },
+    "emphasis": {
+      "description": "none = từ thường; medium = nhấn nhẹ; high = từ khóa 'đinh' (số liệu, động từ mạnh, kết quả, cảm xúc).",
+      "enum": ["none", "medium", "high"]
+    },
+    "preset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["font", "size", "text_color", "highlight_color", "default_animation"],
+      "properties": {
+        "font": { "type": "string", "description": "Tên font như Fusion thấy, vd 'Montserrat'. Phải hỗ trợ tiếng Việt." },
+        "style": { "type": "string", "default": "Black" },
+        "font_file": { "type": "string", "description": "Đường dẫn .ttf để đo độ rộng chữ (layout). Tùy chọn." },
+        "size": { "type": "number", "minimum": 0.03, "maximum": 0.2 },
+        "uppercase": { "type": "boolean", "default": true },
+        "text_color": { "$ref": "#/$defs/hexColor" },
+        "highlight_color": { "$ref": "#/$defs/hexColor" },
+        "outline_color": { "$ref": "#/$defs/hexColor" },
+        "outline_width": { "type": "number", "minimum": 0, "maximum": 0.3, "default": 0.08 },
+        "default_animation": { "$ref": "#/$defs/animation" }
+      }
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["word_range", "preset"],
+      "properties": {
+        "word_range": {
+          "description": "[first, last] chỉ số từ Whisper, bao gồm cả hai đầu. Tối đa 4 từ.",
+          "type": "array",
+          "prefixItems": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "integer", "minimum": 0 }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "preset": { "type": "string" },
+        "position": { "enum": ["top", "center", "bottom"], "default": "bottom" },
+        "intro": { "enum": ["pop", "none"], "default": "pop" },
+        "words": {
+          "description": "Chỉ liệt kê từ cần khác mặc định. Từ không liệt kê dùng preset.default_animation và emphasis='none'.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/wordFx" }
+        }
+      }
+    },
+    "wordFx": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["i"],
+      "properties": {
+        "i": { "type": "integer", "minimum": 0, "description": "Chỉ số tuyệt đối trong mảng Whisper; phải nằm trong word_range của page." },
+        "emphasis": { "$ref": "#/$defs/emphasis" },
+        "animation": { "$ref": "#/$defs/animation" },
+        "highlight_color": { "$ref": "#/$defs/hexColor" },
+        "hold_highlight": { "type": "boolean", "default": false, "description": "Giữ màu highlight đến hết page thay vì tắt khi đọc xong từ." },
+        "text_override": { "type": "string", "maxLength": 40, "description": "Sửa chính tả / viết '1.000.000' thay cho 'một triệu'. Không đổi timing." }
+      }
+    }
+  }
+}

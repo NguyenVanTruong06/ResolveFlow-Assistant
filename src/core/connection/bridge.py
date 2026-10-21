@@ -1,25 +1,50 @@
 import json
 import socket
 import os
+import secrets
 import traceback
 from typing import List, Dict, Any, Optional
 from .base import IResolveConnection
+
+TOKEN_FILE = os.path.expanduser("~/.resolveflow_bridge_token")
+
+def get_bridge_token() -> str:
+    env_token = os.environ.get("RESOLVEFLOW_BRIDGE_TOKEN")
+    if env_token:
+        return env_token.strip()
+    try:
+        if os.path.exists(TOKEN_FILE):
+            with open(TOKEN_FILE, "r", encoding="utf-8") as f:
+                t = f.read().strip()
+                if t:
+                    return t
+        t = secrets.token_hex(16)
+        with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+            f.write(t)
+        try:
+            os.chmod(TOKEN_FILE, 0o600)
+        except Exception:
+            pass
+        return t
+    except Exception:
+        return "resolveflow_default_bridge_token"
 
 class BridgeConnection(IResolveConnection):
     """
     Kết nối qua socket tới script ChunDVC_Bridge đang chạy ngầm trong DaVinci Resolve.
     Dùng cho bản Free không hỗ trợ import dvr_script.
     """
-    def __init__(self, host="127.0.0.1", port=17005):
+    def __init__(self, host="127.0.0.1", port=17005, token: Optional[str] = None):
         self.host = host
         self.port = port
+        self.token = token or get_bridge_token()
         
     def mode_name(self) -> str:
         return "BRIDGE (Resolve Free)"
         
     def _send_request(self, command: str, payload: dict = None) -> dict:
         try:
-            req = {"command": command}
+            req = {"command": command, "token": self.token}
             if payload:
                 req["payload"] = payload
                 
@@ -28,7 +53,7 @@ class BridgeConnection(IResolveConnection):
             client.connect((self.host, self.port))
             client.sendall(json.dumps(req).encode('utf-8'))
             
-            data = client.recv(4096)
+            data = client.recv(65536)
             client.close()
             
             if data:

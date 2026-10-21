@@ -1,0 +1,422 @@
+{
+	Tools = ordered() {
+		RF_Neon_Glow_Pulse = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Neon Glow Pulse",
+			},
+			Inputs = ordered() {
+				Text = InstanceInput {
+					SourceOp = "Text1",
+					Source = "StyledText",
+					Name = "Text",
+					Page = "Controls",
+				},
+				Font = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Font",
+					Name = "Text Font",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Style = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Style",
+					Name = "Text Style",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Size = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Size",
+					Name = "Text Size",
+					Page = "Controls",
+				},
+				Red = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Red1",
+					Name = "Text Color",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Green = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Green1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Blue = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Blue1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Gain = InstanceInput {
+					SourceOp = "Glow1",
+					Source = "BaseGain",
+					Name = "Glow Gain",
+					Page = "Glow",
+				},
+				Pulse = InstanceInput {
+					SourceOp = "Glow1",
+					Source = "PulseAmount",
+					Name = "Pulse Amount",
+					Page = "Glow",
+				},
+				GlowSize = InstanceInput {
+					SourceOp = "Glow1",
+					Source = "BaseSize",
+					Name = "Glow Size",
+					Page = "Glow",
+				},
+				Period = InstanceInput {
+					SourceOp = "Glow1",
+					Source = "Period",
+					Name = "Pulse Period (frames)",
+					Page = "Glow",
+				},
+				Halo = InstanceInput {
+					SourceOp = "Glow2",
+					Source = "Gain",
+					Name = "Outer Halo",
+					Page = "Glow",
+				},
+				Delay = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Delay",
+					Name = "Delay (frames)",
+					Page = "Animation",
+				},
+				Speed = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Speed",
+					Name = "Animation Speed",
+					Page = "Animation",
+				},
+				Position = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "Center",
+					Name = "Position",
+					Page = "Controls",
+				},
+				FadeIn = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "InFrames",
+					Name = "Fade In (frames)",
+					Page = "Animation",
+				},
+				FadeOut = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "OutFrames",
+					Name = "Fade Out (frames)",
+					Page = "Animation",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "OutFade",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				Text1 = TextPlus {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						StyledText = Input {
+							Value = "RESOLVEFLOW",
+						},
+						Font = Input {
+							Value = "Open Sans",
+						},
+						Style = Input {
+							Value = "Bold",
+						},
+						Size = Input {
+							Value = 0.08,
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Red1 = Input {
+							Value = 1,
+						},
+						Green1 = Input {
+							Value = 0.8313725490196079,
+						},
+						Blue1 = Input {
+							Value = 0,
+						},
+						Alpha1 = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 0 },
+					},
+				},
+				Glow1 = SoftGlow {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Text1",
+							Source = "Output",
+						},
+						Threshold = Input {
+							Value = 0,
+						},
+						Gain = Input {
+							Value = 2,
+							Expression = "Glow1.BaseGain + Glow1.PulseAmount * (0.5 + 0.5 * sin(2 * pi * time / max(1, Glow1.Period)))",
+						},
+						XGlowSize = Input {
+							Value = 12,
+							Expression = "Glow1.BaseSize * (0.7 + 0.6 * (0.5 + 0.5 * sin(2 * pi * time / max(1, Glow1.Period))))",
+						},
+						BaseGain = Input {
+							Value = 1.6,
+						},
+						PulseAmount = Input {
+							Value = 1.4,
+						},
+						BaseSize = Input {
+							Value = 14,
+						},
+						Period = Input {
+							Value = 30,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+					UserControls = ordered() {
+						BaseGain = {
+							LINKS_Name = "Glow Gain",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 1.6,
+							INP_MinScale = 0,
+							INP_MaxScale = 6,
+						},
+						PulseAmount = {
+							LINKS_Name = "Pulse Amount",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 1.4,
+							INP_MinScale = 0,
+							INP_MaxScale = 6,
+						},
+						BaseSize = {
+							LINKS_Name = "Glow Size",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 14,
+							INP_MinScale = 1,
+							INP_MaxScale = 60,
+						},
+						Period = {
+							LINKS_Name = "Pulse Period (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 30,
+							INP_MinScale = 4,
+							INP_MaxScale = 120,
+						},
+					},
+				},
+				Glow2 = SoftGlow {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Glow1",
+							Source = "Output",
+						},
+						Threshold = Input {
+							Value = 0,
+						},
+						Gain = Input {
+							Value = 0.8,
+						},
+						XGlowSize = Input {
+							Value = 45,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, 0 },
+					},
+				},
+				Dark = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, -66 },
+					},
+				},
+				Ignite = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Dark",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Glow2",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						Blend = Input {
+							Value = 1,
+							Expression = "iif(time < 14, iif(((sin(floor(time / max(1, 1)) * 12.9898 + 7.13) * 43758.5453) % 1) > 0.45, 1, 0.12), 1)",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, 0 },
+					},
+				},
+				Canvas = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 440, -66 },
+					},
+				},
+				Timing = TimeSpeed {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Ignite",
+							Source = "Output",
+						},
+						Speed = Input {
+							Value = 1,
+						},
+						Delay = Input {
+							Value = 0,
+						},
+						InterpolateBetweenFrames = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 440, 0 },
+					},
+				},
+				OutFade = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Canvas",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Timing",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Blend = Input {
+							Value = 1,
+							Expression = "min(iif(OutFade.InFrames > 0, min(1, max(0, (time - comp.RenderStart - Timing.Delay) / max(1, OutFade.InFrames))), 1), iif(OutFade.OutFrames > 0, min(1, max(0, (comp.RenderEnd - time) / max(1, OutFade.OutFrames))), 1))",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						InFrames = Input {
+							Value = 0,
+						},
+						OutFrames = Input {
+							Value = 8,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 550, 0 },
+					},
+					UserControls = ordered() {
+						InFrames = {
+							LINKS_Name = "Fade In (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+						OutFrames = {
+							LINKS_Name = "Fade Out (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 8,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Neon_Glow_Pulse",
+}

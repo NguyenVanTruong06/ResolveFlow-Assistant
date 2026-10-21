@@ -1,5 +1,10 @@
+import json
 import os
+import re
+import subprocess
 import sys
+import time
+import uuid
 from typing import Optional, Dict, Any, List, Tuple, Literal, Union
 from pydantic import BaseModel, Field
 
@@ -953,6 +958,21 @@ class ResolveAutomation:
         log(f" ✔ SFX '{os.path.basename(sfx_path)}' đã sẵn sàng trong Media Pool.")
         return True
 
+    def capture_playhead_preset(
+        self,
+        preset_name: str = "ChunDVC_Preset",
+        log_callback: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Hút kiểu chữ / Fusion Comp của clip tại vị trí Playhead thành Preset .setting vĩnh viễn.
+        """
+        from src.core.preset_capture import capture_playhead_text_preset
+        return capture_playhead_text_preset(
+            preset_name=preset_name,
+            resolve_app=self.resolve,
+            log_callback=log_callback
+        )
+
     def insert_title_at_playhead(
         self,
         text: str,
@@ -961,10 +981,20 @@ class ResolveAutomation:
         color_hex: str = "#FFFFFF",
         duration_sec: float = 3.0,
         preset_id: str = "karaoke_pop",
-        log_callback: Optional[Any] = None
+        log_callback: Optional[Any] = None,
+        highlight_hex: Optional[str] = None,
+        stroke_hex: Optional[str] = None,
+        stroke_width: Optional[float] = None,
+        box_glow_hex: Optional[str] = None,
+        weight: str = "bold",
+        animation: Optional[str] = None,
+        timing_curve: Optional[str] = None,
+        preferred_track: int = 2,
+        **kwargs
     ) -> bool:
         """
-        Chèn tiêu đề / Text+ preset tại vị trí Playhead trên Video Track 2.
+        Chèn tiêu đề / Text+ preset tại vị trí Playhead lên Track V2 (hoặc track trống tiếp theo)
+        sử dụng thuật toán NEW-NESTED-NO-RIPPLE-V2 (Zero Ripple, không cắt/đè timeline).
         """
         def log(msg: str):
             if log_callback:
@@ -976,24 +1006,114 @@ class ResolveAutomation:
             log(" ⚠️ Nội dung chữ (Title Text) không được để trống.")
             return False
 
-        import tempfile
-        import uuid
-        from src.core.fcpxml_generator import FCPXMLGenerator
-
         playhead_sec = self.get_current_playhead_seconds()
-        log(f" 📝 Đang tạo Text+ Title '{text}' tại mốc {playhead_sec:.2f}s (Preset: {preset_id})...")
+        log(f" 📝 Đang chèn Text+ Title '{text}' tại mốc {playhead_sec:.2f}s (Preset: {preset_id})...")
 
-        temp_title_fcpxml = os.path.join(tempfile.gettempdir(), f"rf_title_{uuid.uuid4().hex[:8]}.fcpxml")
-        words_list = text.split()
-        num_w = max(1, len(words_list))
-        single_sub = [{
-            "start": playhead_sec,
-            "end": playhead_sec + duration_sec,
-            "text": text,
-            "words": [{"word": w, "start": playhead_sec + i * (duration_sec / num_w), "end": playhead_sec + (i + 1) * (duration_sec / num_w)} for i, w in enumerate(words_list)]
-        }]
-        
+        # 1. Thử chèn qua thuật toán NEW-NESTED-NO-RIPPLE-V2 (cô lập tiến trình hoặc in-process an toàn)
         try:
+            # Map preset_id sang tên Fusion template tương ứng
+            template_name = kwargs.get("template_name", "")
+            if not template_name:
+                style_map = {
+                    "kinetic_hormozi": "RF_SpringPop",
+                    "bounce_word": "RF_SpringPop",
+                    "highlighter_swipe": "RF_Highlighter",
+                    "box_highlight": "RF_Highlighter",
+                    "typewriter": "RF_Typewriter",
+                    "vhs_retro": "RF_Typewriter",
+                    "neon_pulse": "RF_NeonPulse",
+                    "glow_neon": "RF_NeonPulse",
+                    "rgb_glitch": "RF_RGBGlitch",
+                    "paper_cutout": "RF_PaperCutout",
+                    "clean_minimal": "RF_LowerThird",
+                    "quote_box": "RF_QuoteBox",
+                }
+                template_name = style_map.get(preset_id, preset_id)
+
+            res = run_title_insert_worker_isolated(
+                title_name=template_name,
+                display_name=text,
+                preferred_track=preferred_track,
+                duration_sec=duration_sec,
+            )
+            if res.get("ok"):
+                log(f" ✔ Đã chèn thành công Title '{template_name}' lên Track V{res.get('track', preferred_track)} (Zero Ripple)!")
+                return True
+        except Exception as e:
+            log(f" ℹ Không chèn qua Nested Importer V2 được ({e}), đang dùng phương thức Fusion Bridge...")
+
+        # 2. Thử qua Fusion Bridge (cập nhật macro trực tiếp)
+        try:
+            from src.core.resolve_bridge import insert_title_at_playhead as bridge_insert_title
+            style_map = {
+                "kinetic_hormozi": "spring_pop",
+                "bounce_word": "spring_pop",
+                "highlighter_swipe": "highlighter",
+                "box_highlight": "highlighter",
+                "typewriter": "typewriter",
+                "vhs_retro": "typewriter",
+                "neon_pulse": "neon_pulse",
+                "glow_neon": "neon_pulse",
+                "rgb_glitch": "rgb_glitch",
+                "paper_cutout": "paper_cutout",
+                "clean_minimal": "lower_third",
+                "quote_box": "quote_box",
+            }
+            anim_to_style = {
+                "pop": "spring_pop",
+                "bounce": "spring_pop",
+                "typewriter": "typewriter",
+                "glow": "neon_pulse",
+                "box": "highlighter",
+                "box_highlight": "highlighter",
+                "glitch": "rgb_glitch",
+                "paper": "paper_cutout",
+                "slide": "lower_third",
+                "static": "lower_third",
+            }
+            if animation and animation in anim_to_style:
+                style = anim_to_style[animation]
+            else:
+                style = style_map.get(preset_id, "spring_pop")
+
+            dur_frames = max(24, int(duration_sec * 30))
+            fusion_size = round(max(0.04, min(0.25, font_size / 600.0)), 4)
+            accent_col = highlight_hex or box_glow_hex or "#FFD400"
+            font_style = "Black" if weight in ("black", "extra_bold") else ("Regular" if weight in ("regular", "normal") else "Bold")
+
+            bridge_insert_title(
+                style=style,
+                params={
+                    "text": text,
+                    "font": font_name,
+                    "style": font_style,
+                    "size": fusion_size,
+                    "color": color_hex,
+                    "accent": accent_col,
+                    "duration_frames": dur_frames,
+                },
+                track_index=preferred_track,
+            )
+            log(f" ✔ Đã chèn thành công Title hoạt họa '{style}' lên Track V{preferred_track} qua Fusion Bridge!")
+            return True
+        except Exception as e:
+            log(f" ℹ Không chèn trực tiếp được qua Fusion Bridge ({e}), đang dùng phương thức FCPXML...")
+
+        # 3. Phương thức dự phòng qua FCPXML
+        try:
+            import tempfile
+            from src.core.fcpxml_generator import FCPXMLGenerator
+
+            temp_title_fcpxml = os.path.join(tempfile.gettempdir(), f"rf_title_{uuid.uuid4().hex[:8]}.fcpxml")
+            words_list = text.split()
+            num_w = max(1, len(words_list))
+            single_sub = [{
+                "start": playhead_sec,
+                "end": playhead_sec + duration_sec,
+                "text": text,
+                "words": [{"word": w, "start": playhead_sec + i * (duration_sec / num_w), "end": playhead_sec + (i + 1) * (duration_sec / num_w)} for i, w in enumerate(words_list)]
+            }]
+
             FCPXMLGenerator.generate_karaoke_fcpxml(
                 subtitles=single_sub,
                 output_path=temp_title_fcpxml,
@@ -1007,6 +1127,7 @@ class ResolveAutomation:
         except Exception as e:
             log(f" ❌ Lỗi khi tạo Title: {str(e)}")
             return False
+
 
     def set_render_preset_and_queue(
         self,
@@ -1515,3 +1636,422 @@ def map_subtitles_to_timeline(
             })
 
     return mapped_subs
+
+
+# =============================================================================
+# NEW-NESTED-NO-RIPPLE-V2 Engine (Akitt Pro Architecture Port)
+# =============================================================================
+INTERNAL_BIN_NAME = "_ChunDVC Preset Sources"
+SOURCE_TIMELINE_PREFIX = "_CDVC_"
+
+
+def _safe_name(text: str, limit: int = 36) -> str:
+    cleaned = re.sub(r'[^0-9A-Za-zÀ-ỹ.-]+', '_', str(text or 'Preset'))
+    cleaned = re.sub(r'_+', '_', cleaned).strip(' ._')
+    return cleaned[:max(8, int(limit))] if cleaned else "Preset"
+
+
+
+def _nominal_fps(project: Any) -> Tuple[int, float]:
+    try:
+        raw = project.GetSetting("timelineFrameRate")
+        fps = float(raw) if raw not in (None, "") else 24.0
+    except Exception:
+        fps = 24.0
+
+    if abs(fps - 23.976) < 0.02:
+        return 24, fps
+    if abs(fps - 29.97) < 0.02:
+        return 30, fps
+    if abs(fps - 59.94) < 0.02:
+        return 60, fps
+    return max(1, int(round(fps))), fps
+
+
+def _timecode_to_frames(tc: str, nominal_fps: int) -> int:
+    raw = str(tc or "00:00:00:00").strip()
+    is_drop = ";" in raw
+    parts = raw.replace(";", ":").split(":")
+    if len(parts) != 4:
+        return 0
+    try:
+        h, m, s, f = [int(x) for x in parts]
+    except ValueError:
+        return 0
+
+    nominal = max(1, int(nominal_fps))
+    total = (h * 3600 + m * 60 + s) * nominal + f
+    if is_drop and nominal in (30, 60):
+        drop = 2 if nominal == 30 else 4
+        total_minutes = h * 60 + m
+        total -= drop * (total_minutes - total_minutes // 10)
+    return int(total)
+
+
+def current_record_frame(timeline: Any, project: Any) -> Tuple[int, str]:
+    nominal, _ = _nominal_fps(project)
+    current_tc = str(timeline.GetCurrentTimecode() or "")
+    start_tc = ""
+    try:
+        start_tc = str(timeline.GetStartTimecode() or "")
+    except Exception:
+        pass
+    start_frame = 0
+    try:
+        start_frame = int(timeline.GetStartFrame() or 0)
+    except Exception:
+        pass
+
+    cur_abs = _timecode_to_frames(current_tc, nominal)
+    if start_tc:
+        start_abs = _timecode_to_frames(start_tc, nominal)
+        return int(start_frame + (cur_abs - start_abs)), current_tc
+    return cur_abs, current_tc
+
+
+def _track_locked(timeline: Any, track_idx: int) -> bool:
+    try:
+        return bool(timeline.GetIsTrackLocked("video", track_idx))
+    except Exception:
+        return False
+
+
+def _track_enabled(timeline: Any, track_idx: int) -> bool:
+    try:
+        val = timeline.GetIsTrackEnabled("video", track_idx)
+        return True if val is None else bool(val)
+    except Exception:
+        return True
+
+
+def _track_is_free(timeline: Any, track_idx: int, start_frame: int, duration: int) -> bool:
+    end_frame = start_frame + duration
+    try:
+        items = timeline.GetItemListInTrack("video", track_idx) or []
+    except Exception:
+        items = []
+
+    for it in items:
+        try:
+            s = int(it.GetStart())
+            e = int(it.GetEnd())
+            if s < end_frame and e > start_frame:
+                return False
+        except Exception:
+            continue
+    return True
+
+
+def find_or_create_free_video_track(
+    timeline: Any, start_frame: int, duration: int, preferred_track: int = 2
+) -> Tuple[int, bool]:
+    total_tracks = int(timeline.GetTrackCount("video") or 1)
+
+    # 1. Try preferred track first (e.g. V2)
+    if preferred_track <= total_tracks:
+        if not _track_locked(timeline, preferred_track) and _track_enabled(timeline, preferred_track):
+            if _track_is_free(timeline, preferred_track, start_frame, duration):
+                return preferred_track, False
+
+    # 2. Try higher tracks from preferred_track + 1 .. total_tracks
+    for t in range(preferred_track + 1, total_tracks + 1):
+        if not _track_locked(timeline, t) and _track_enabled(timeline, t):
+            if _track_is_free(timeline, t, start_frame, duration):
+                return t, False
+
+    # 3. Try lower tracks 1 .. preferred_track - 1 (except V1 if preferred > 1 unless empty)
+    for t in range(1, preferred_track):
+        if not _track_locked(timeline, t) and _track_enabled(timeline, t):
+            if _track_is_free(timeline, t, start_frame, duration):
+                return t, False
+
+    # 4. If no free track exists, add a new video track
+    added = timeline.AddTrack("video")
+    new_count = int(timeline.GetTrackCount("video") or (total_tracks + 1))
+    return new_count, True
+
+
+def _find_or_create_internal_bin(media_pool: Any, bin_name: str = INTERNAL_BIN_NAME) -> Any:
+    root = media_pool.GetRootFolder()
+    subfolders = root.GetSubFolderList() or []
+    for f in subfolders:
+        try:
+            if f.GetName() == bin_name:
+                return f
+        except Exception:
+            continue
+    try:
+        return media_pool.AddSubFolder(root, bin_name)
+    except Exception:
+        return root
+
+
+def snapshot_video_timeline(timeline: Any) -> Dict[str, Tuple[int, int]]:
+    snap: Dict[str, Tuple[int, int]] = {}
+    total_tracks = int(timeline.GetTrackCount("video") or 0)
+    for t in range(1, total_tracks + 1):
+        items = timeline.GetItemListInTrack("video", t) or []
+        for it in items:
+            try:
+                uid = it.GetUniqueId()
+                if not uid:
+                    uid = f"{t}_{it.GetName()}_{it.GetStart()}"
+                snap[str(uid)] = (int(it.GetStart()), int(it.GetEnd()))
+            except Exception:
+                continue
+    return snap
+
+
+def _existing_snapshot_unchanged(timeline: Any, snapshot: Dict[str, Tuple[int, int]]) -> bool:
+    total_tracks = int(timeline.GetTrackCount("video") or 0)
+    for t in range(1, total_tracks + 1):
+        items = timeline.GetItemListInTrack("video", t) or []
+        for it in items:
+            try:
+                uid = it.GetUniqueId()
+                if not uid:
+                    uid = f"{t}_{it.GetName()}_{it.GetStart()}"
+                key = str(uid)
+                if key in snapshot:
+                    orig_start, orig_end = snapshot[key]
+                    if int(it.GetStart()) != orig_start or int(it.GetEnd()) != orig_end:
+                        return False
+            except Exception:
+                continue
+    return True
+
+
+def _create_source_timeline(
+    media_pool: Any,
+    project: Any,
+    main_timeline: Any,
+    title_name: str,
+    display_name: str = "Preset",
+    duration_sec: float = 3.0,
+    log: Optional[Any] = None,
+) -> Tuple[Any, Any, Any, int]:
+    nominal, _ = _nominal_fps(project)
+    token = uuid.uuid4().hex[:6]
+    safe = _safe_name(display_name)
+    source_name = f"{SOURCE_TIMELINE_PREFIX}{token}_{safe}"
+
+    source_tl = media_pool.CreateEmptyTimeline(source_name)
+    if not source_tl:
+        raise RuntimeError(f"Could not create temporary source timeline '{source_name}'.")
+
+    try:
+        source_tl.SetStartTimecode("00:00:00:00")
+    except Exception:
+        pass
+
+    project.SetCurrentTimeline(source_tl)
+    source_item = source_tl.InsertFusionTitleIntoTimeline(str(title_name))
+    project.SetCurrentTimeline(main_timeline)
+
+    if not source_item:
+        raise RuntimeError(f"InsertFusionTitleIntoTimeline returned None for title '{title_name}'.")
+
+    duration_frames = 0
+    try:
+        duration_frames = int(source_item.GetDuration())
+    except Exception:
+        pass
+    if duration_frames <= 0:
+        try:
+            duration_frames = int(source_item.GetEnd()) - int(source_item.GetStart())
+        except Exception:
+            pass
+    if duration_frames <= 0:
+        duration_frames = max(24, int(duration_sec * nominal))
+
+    source_media = source_tl.GetMediaPoolItem()
+    if not source_media:
+        raise RuntimeError(f"Could not get MediaPoolItem from source timeline '{source_name}'.")
+
+    internal_bin = _find_or_create_internal_bin(media_pool, INTERNAL_BIN_NAME)
+    try:
+        media_pool.MoveClips([source_media], internal_bin)
+    except Exception:
+        pass
+
+    return source_tl, source_media, source_item, duration_frames
+
+
+def import_edit_preset_v2(
+    title_name: str,
+    display_name: Optional[str] = None,
+    preferred_track: int = 2,
+    record_frame: Optional[int] = None,
+    duration_sec: float = 3.0,
+    resolve_app: Optional[Any] = None,
+    log_callback: Optional[Any] = None,
+) -> Dict[str, Any]:
+    def log(msg: str):
+        if log_callback:
+            log_callback(msg)
+        else:
+            print(msg)
+
+    if resolve_app is None:
+        from src.core.resolve_bridge import load_resolve_api
+        resolve_app, _ = load_resolve_api()
+
+    if not resolve_app:
+        return {"ok": False, "error": "resolve_not_found", "message": "DaVinci Resolve không phản hồi."}
+
+    try:
+        page = str(resolve_app.GetCurrentPage() or "").lower()
+        if page != "edit":
+            resolve_app.OpenPage("edit")
+            time.sleep(0.12)
+    except Exception:
+        pass
+
+    pm = resolve_app.GetProjectManager()
+    project = pm.GetCurrentProject() if pm else None
+    if not project:
+        return {"ok": False, "error": "project_not_found", "message": "Không tìm thấy dự án đang mở."}
+
+    main_timeline = project.GetCurrentTimeline()
+    if not main_timeline:
+        return {"ok": False, "error": "timeline_not_found", "message": "Không tìm thấy Timeline đang mở."}
+
+    media_pool = project.GetMediaPool()
+    if not media_pool:
+        return {"ok": False, "error": "media_pool_not_found", "message": "Không truy cập được Media Pool."}
+
+    disp = display_name or title_name
+
+    # 1. Determine record frame
+    if record_frame is not None and record_frame >= 0:
+        rec_frame = int(record_frame)
+    else:
+        rec_frame, _ = current_record_frame(main_timeline, project)
+
+    # 2. Snapshot timeline state before insertion for rollback safety
+    snapshot = snapshot_video_timeline(main_timeline)
+
+    # 3. Create private source timeline (zero collision risk)
+    try:
+        source_tl, source_media, source_item, duration = _create_source_timeline(
+            media_pool=media_pool,
+            project=project,
+            main_timeline=main_timeline,
+            title_name=title_name,
+            display_name=disp,
+            duration_sec=duration_sec,
+            log=log,
+        )
+    except Exception as e:
+        return {"ok": False, "error": "source_timeline_creation_failed", "detail": str(e), "message": f"Lỗi tạo Source Timeline: {e}"}
+
+    # 4. Find or create free video track
+    target_track, track_was_added = find_or_create_free_video_track(
+        timeline=main_timeline,
+        start_frame=rec_frame,
+        duration=duration,
+        preferred_track=preferred_track,
+    )
+
+    # 5. Place via AppendToTimeline with precise track and frame
+    try:
+        placed = media_pool.AppendToTimeline([{
+            "mediaPoolItem": source_media,
+            "startFrame": 0,
+            "endFrame": int(duration),
+            "recordFrame": int(rec_frame),
+            "trackIndex": int(target_track),
+            "mediaType": 1,  # Video
+        }])
+    except Exception as e:
+        return {"ok": False, "error": "append_failed", "detail": str(e), "message": f"AppendToTimeline thất bại: {e}"}
+
+    if not placed:
+        return {"ok": False, "error": "append_returned_none", "message": "AppendToTimeline không tạo được TimelineItem."}
+
+    placed_item = placed[0]
+
+    # 6. Safety check: ensure existing clips did not ripple/shift
+    if not _existing_snapshot_unchanged(main_timeline, snapshot):
+        # Rollback immediately!
+        try:
+            main_timeline.DeleteClips([placed_item], False)
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "error": "ripple_detected_rollback",
+            "message": "Phát hiện hiện tượng dạt timeline (ripple), hệ thống đã tự động rollback về nguyên trạng.",
+        }
+
+    log(f" ✔ Đã chèn '{disp}' an toàn lên Track V{target_track} tại Frame {rec_frame} (Zero Ripple).")
+    return {
+        "ok": True,
+        "track": target_track,
+        "start": rec_frame,
+        "end": rec_frame + duration,
+        "duration": duration,
+        "track_added": track_was_added,
+        "item_name": placed_item.GetName() if hasattr(placed_item, "GetName") else disp,
+    }
+
+
+def run_title_insert_worker_isolated(
+    title_name: str,
+    display_name: Optional[str] = None,
+    preferred_track: int = 2,
+    duration_sec: float = 3.0,
+    record_frame: Optional[int] = None,
+    timeout: float = 15.0,
+) -> Dict[str, Any]:
+    """
+    Spawns title_insert_worker.py in a short-lived subprocess to isolate
+    fusionscript / COM state from the main GUI process.
+    Falls back to in-process import_edit_preset_v2 if subprocess cannot be launched.
+    """
+    cmd = [
+        sys.executable,
+        "-m",
+        "src.core.title_insert_worker",
+        "--title",
+        str(title_name),
+        "--preferred-track",
+        str(preferred_track),
+        "--duration",
+        str(duration_sec),
+    ]
+    if display_name:
+        cmd.extend(["--display-name", str(display_name)])
+    if record_frame is not None and record_frame >= 0:
+        cmd.extend(["--record-frame", str(int(record_frame))])
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        for line in proc.stdout.splitlines():
+            if line.startswith("CHUNDVC_RESULT:"):
+                payload_str = line[len("CHUNDVC_RESULT:"):].strip()
+                return json.loads(payload_str)
+
+        if proc.returncode != 0:
+            return {
+                "ok": False,
+                "error": "worker_failed",
+                "detail": proc.stderr or proc.stdout,
+            }
+    except Exception:
+        pass
+
+    # Clean fallback: execute in-process if subprocess failed or timed out
+    return import_edit_preset_v2(
+        title_name=title_name,
+        display_name=display_name,
+        preferred_track=preferred_track,
+        record_frame=record_frame,
+        duration_sec=duration_sec,
+    )
+

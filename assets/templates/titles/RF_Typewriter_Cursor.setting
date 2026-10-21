@@ -1,0 +1,325 @@
+{
+	Tools = ordered() {
+		RF_Typewriter_Cursor = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Typewriter + Blinking Cursor",
+			},
+			Inputs = ordered() {
+				Text = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Content",
+					Name = "Text",
+					Page = "Controls",
+				},
+				Font = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Font",
+					Name = "Font",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Style = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Style",
+					Name = "Style",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Size = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Size",
+					Name = "Size",
+					Page = "Controls",
+				},
+				Red = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Red1",
+					Name = "Color",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Green = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Green1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Blue = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Blue1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				TextCenter = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Center",
+					Name = "Line Start",
+					Page = "Controls",
+				},
+				Rate = InstanceInput {
+					SourceOp = "Text1",
+					Source = "FramesPerChar",
+					Name = "Frames per Character",
+					Page = "Animation",
+				},
+				Cursor = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Cursor",
+					Name = "Cursor Glyph",
+					Page = "Animation",
+				},
+				Blink = InstanceInput {
+					SourceOp = "Text1",
+					Source = "BlinkFrames",
+					Name = "Cursor Blink (frames)",
+					Page = "Animation",
+				},
+				Delay = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Delay",
+					Name = "Delay (frames)",
+					Page = "Animation",
+				},
+				Speed = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Speed",
+					Name = "Animation Speed",
+					Page = "Animation",
+				},
+				Position = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "Center",
+					Name = "Position",
+					Page = "Controls",
+				},
+				FadeIn = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "InFrames",
+					Name = "Fade In (frames)",
+					Page = "Animation",
+				},
+				FadeOut = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "OutFrames",
+					Name = "Fade Out (frames)",
+					Page = "Animation",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "OutFade",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				Text1 = TextPlus {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						StyledText = Input {
+							Value = "",
+							Expression = "Text((string.match(Text1.Content.Value, \"^\" .. string.rep(\"[^\\128-\\191][\\128-\\191]*\", floor(max(0, time) / max(0.01, Text1.FramesPerChar)))) or Text1.Content.Value) .. ((floor(time / max(1, Text1.BlinkFrames)) % 2 == 0) and Text1.Cursor.Value or \" \"))",
+						},
+						Font = Input {
+							Value = "Open Sans",
+						},
+						Style = Input {
+							Value = "Bold",
+						},
+						Size = Input {
+							Value = 0.08,
+						},
+						Center = Input {
+							Value = { 0.12, 0.5 },
+						},
+						Red1 = Input {
+							Value = 1,
+						},
+						Green1 = Input {
+							Value = 1,
+						},
+						Blue1 = Input {
+							Value = 1,
+						},
+						Alpha1 = Input {
+							Value = 1,
+						},
+						Content = Input {
+							Value = "RESOLVEFLOW",
+						},
+						Cursor = Input {
+							Value = "|",
+						},
+						HorizontalLeftCenterRight = Input {
+							Value = -1,
+						},
+						HorizontalJustificationNew = Input {
+							Value = 0,
+						},
+						FramesPerChar = Input {
+							Value = 2,
+						},
+						BlinkFrames = Input {
+							Value = 12,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 0 },
+					},
+					UserControls = ordered() {
+						Content = {
+							LINKS_Name = "Text",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Text",
+							INPID_InputControl = "TextEditControl",
+							TEC_Lines = 2,
+							INP_Default = 0,
+						},
+						Cursor = {
+							LINKS_Name = "Cursor Glyph",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Text",
+							INPID_InputControl = "TextEditControl",
+							TEC_Lines = 2,
+							INP_Default = 0,
+						},
+						FramesPerChar = {
+							LINKS_Name = "Frames per Character",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 2,
+							INP_MinScale = 0.25,
+							INP_MaxScale = 10,
+						},
+						BlinkFrames = {
+							LINKS_Name = "Cursor Blink (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 12,
+							INP_MinScale = 2,
+							INP_MaxScale = 30,
+						},
+					},
+				},
+				Canvas = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, -66 },
+					},
+				},
+				Timing = TimeSpeed {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Text1",
+							Source = "Output",
+						},
+						Speed = Input {
+							Value = 1,
+						},
+						Delay = Input {
+							Value = 0,
+						},
+						InterpolateBetweenFrames = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+				OutFade = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Canvas",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Timing",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Blend = Input {
+							Value = 1,
+							Expression = "min(iif(OutFade.InFrames > 0, min(1, max(0, (time - comp.RenderStart - Timing.Delay) / max(1, OutFade.InFrames))), 1), iif(OutFade.OutFrames > 0, min(1, max(0, (comp.RenderEnd - time) / max(1, OutFade.OutFrames))), 1))",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						InFrames = Input {
+							Value = 0,
+						},
+						OutFrames = Input {
+							Value = 8,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, 0 },
+					},
+					UserControls = ordered() {
+						InFrames = {
+							LINKS_Name = "Fade In (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+						OutFrames = {
+							LINKS_Name = "Fade Out (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 8,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Typewriter_Cursor",
+}

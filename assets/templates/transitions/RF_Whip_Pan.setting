@@ -1,0 +1,165 @@
+{
+	Tools = ordered() {
+		RF_Whip_Pan = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Whip Pan Left/Right",
+				Kind = "Transition",
+			},
+			Inputs = ordered() {
+				MainInput1 = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Input",
+				},
+				MainInput2 = InstanceInput {
+					SourceOp = "ClipB",
+					Source = "Input",
+				},
+				Reverse = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Reverse",
+					Name = "Right -> Left",
+					Page = "Controls",
+				},
+				Distance = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Distance",
+					Name = "Distance",
+					Page = "Controls",
+				},
+				Shutter = InstanceInput {
+					SourceOp = "Whip",
+					Source = "ShutterAngle",
+					Name = "Motion Blur Shutter",
+					Page = "Controls",
+				},
+				Quality = InstanceInput {
+					SourceOp = "Whip",
+					Source = "Quality",
+					Name = "Blur Quality",
+					Page = "Controls",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "Whip",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				ClipA = PipeRouter {
+					CtrlWZoom = false,
+					Inputs = {
+						Progress = Input {
+							Value = 0,
+							Expression = "(time - comp.RenderStart) / max(1, comp.RenderEnd - comp.RenderStart)",
+						},
+						Reverse = Input {
+							Value = 0,
+						},
+						Distance = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -66 },
+					},
+					UserControls = ordered() {
+						Progress = {
+							LINKS_Name = "Progress (auto)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 1,
+						},
+						Reverse = {
+							LINKS_Name = "Right -> Left",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "CheckboxControl",
+							INP_Integer = true,
+							INP_Default = 0,
+						},
+						Distance = {
+							LINKS_Name = "Distance",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 1,
+							INP_MinScale = 0.25,
+							INP_MaxScale = 2,
+						},
+					},
+				},
+				ClipB = PipeRouter {
+					CtrlWZoom = false,
+					Inputs = { },
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 66 },
+					},
+				},
+				Switch = Dissolve {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "ClipA",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "ClipB",
+							Source = "Output",
+						},
+						Mix = Input {
+							Value = 0,
+							Expression = "iif(ClipA.Progress >= 0.5, 1, 0)",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+				Whip = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Switch",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 + iif(ClipA.Progress < 0.5, -(1 - 2 * ClipA.Reverse) * ClipA.Distance * (min(1, max(0, (ClipA.Progress * 2)))^3), (1 - 2 * ClipA.Reverse) * ClipA.Distance * (1 - (1 - (1 - min(1, max(0, (ClipA.Progress * 2 - 1))))^3))), 0.5)",
+						},
+						Edges = Input {
+							Value = 1,
+						},
+						MotionBlur = Input {
+							Value = 1,
+						},
+						Quality = Input {
+							Value = 10,
+						},
+						ShutterAngle = Input {
+							Value = 360,
+						},
+						CenterBias = Input {
+							Value = 0,
+						},
+						SampleSpread = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, 0 },
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Whip_Pan",
+}

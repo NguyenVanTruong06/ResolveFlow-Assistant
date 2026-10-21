@@ -12,7 +12,7 @@
     "Clean"
   ],
   "description": "Phong cách thuyết trình tối giản đặc trưng của Apple, phông chữ thanh thoát, bóng đổ nhẹ không viền gắt.",
-  "font": "Arial",
+  "font": "Segoe UI",
   "size": 46,
   "weight": "bold",
   "standard_color": "#F5F5F7",

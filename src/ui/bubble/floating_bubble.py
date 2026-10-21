@@ -28,51 +28,7 @@ from PySide6.QtGui import (
     QFont, QCursor, QPainterPath, QPixmap
 )
 from src.ui.theme import ThemeColors, ThemeFonts
-
-
-def create_vector_icon(icon_type: str, color_hex: str, size: int = 20) -> QPixmap:
-    """Tạo biểu tượng vector sắc nét không phụ thuộc vào font emoji của hệ điều hành."""
-    pix = QPixmap(size, size)
-    pix.fill(Qt.transparent)
-    painter = QPainter(pix)
-    painter.setRenderHint(QPainter.Antialiasing)
-
-    scale = size / 24.0
-    painter.scale(scale, scale)
-
-    pen = QPen(QColor(color_hex), 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-    painter.setPen(pen)
-    painter.setBrush(Qt.NoBrush)
-
-    if icon_type == "ai":
-        # Biểu tượng AI Director (#i-ai trong thiết kế UI)
-        painter.drawRoundedRect(QRectF(4, 7, 16, 12), 3, 3)
-        painter.drawLine(QPointF(12, 7), QPointF(12, 4))
-        painter.drawLine(QPointF(9, 12), QPointF(9, 13))
-        painter.drawLine(QPointF(15, 12), QPointF(15, 13))
-        painter.drawLine(QPointF(9.5, 16), QPointF(14.5, 16))
-    elif icon_type == "grid":
-        # Biểu tượng Kho Đạo Cụ 2x2 grid (#i-grid trong thiết kế UI)
-        painter.drawRoundedRect(QRectF(4, 4, 7, 7), 1.5, 1.5)
-        painter.drawRoundedRect(QRectF(13, 4, 7, 7), 1.5, 1.5)
-        painter.drawRoundedRect(QRectF(4, 13, 7, 7), 1.5, 1.5)
-        painter.drawRoundedRect(QRectF(13, 13, 7, 7), 1.5, 1.5)
-    elif icon_type == "resolve":
-        # Biểu tượng DaVinci Resolve pinwheel (#i-resolve trong thiết kế UI)
-        painter.drawEllipse(QRectF(3, 3, 18, 18))
-        painter.drawEllipse(QRectF(8.8, 8.8, 6.4, 6.4))
-        painter.drawLine(QPointF(12, 3), QPointF(12, 8.8))
-        painter.drawLine(QPointF(19.8, 16.5), QPointF(14.8, 13.6))
-        painter.drawLine(QPointF(4.2, 16.5), QPointF(9.2, 13.6))
-    elif icon_type == "download":
-        # Biểu tượng mũi tên tải về / nạp dữ liệu (#i-download trong thiết kế UI)
-        painter.drawLine(QPointF(12, 5), QPointF(12, 14.5))
-        painter.drawLine(QPointF(7.5, 10.5), QPointF(12, 14.5))
-        painter.drawLine(QPointF(16.5, 10.5), QPointF(12, 14.5))
-        painter.drawLine(QPointF(5, 18.5), QPointF(19, 18.5))
-
-    painter.end()
-    return pix
+from src.ui.icons import create_vector_icon, get_vector_icon
 
 
 class BubbleTrayPopup(QWidget):

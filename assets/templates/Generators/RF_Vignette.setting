@@ -1,0 +1,107 @@
+{
+	Tools = ordered() {
+		RF_Vignette = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Vignette",
+				Kind = "Generator",
+				CompositeHint = "Normal",
+			},
+			Inputs = ordered() {
+				Strength = InstanceInput {
+					SourceOp = "Dark",
+					Source = "TopLeftAlpha",
+					Name = "Strength",
+					Page = "Controls",
+				},
+				Size = InstanceInput {
+					SourceOp = "Oval",
+					Source = "Width",
+					Name = "Size",
+					Page = "Controls",
+				},
+				Softness = InstanceInput {
+					SourceOp = "Oval",
+					Source = "SoftEdge",
+					Name = "Softness",
+					Page = "Controls",
+				},
+				Center = InstanceInput {
+					SourceOp = "Oval",
+					Source = "Center",
+					Name = "Center",
+					Page = "Controls",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "Dark",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				Oval = EllipseMask {
+					CtrlWZoom = false,
+					Inputs = {
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Width = Input {
+							Value = 1.25,
+						},
+						Height = Input {
+							Value = 1.25,
+						},
+						SoftEdge = Input {
+							Value = 0.35,
+						},
+						Invert = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 0 },
+					},
+				},
+				Dark = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 0.75,
+						},
+						EffectMask = Input {
+							SourceOp = "Oval",
+							Source = "Mask",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Vignette",
+}

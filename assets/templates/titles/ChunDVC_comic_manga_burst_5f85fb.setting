@@ -1,0 +1,35 @@
+{
+    Tools = ordered() {
+        RF_Comic_Manga_Burst = TextPlus {
+            Inputs = {
+                Width = Input { Value = 1920, },
+                Height = Input { Value = 1080, },
+                UseFrameFormatSettings = Input { Value = 1, },
+                Font = Input { Value = "Liberation Sans", },
+                Style = Input { Value = "Extra_Bold", },
+                Size = Input { Value = 0.0933, },
+                VerticalTopCenterBottom = Input { Value = 1, },
+                HorizontalLeftCenterRight = Input { Value = 0, },
+                Center = Input { Value = { 0.5, 0.16 }, },
+                StyledText = Input { Value = "BOOM! ACTION", },
+                Red1 = Input { Value = 1.000, },
+                Green1 = Input { Value = 0.000, },
+                Blue1 = Input { Value = 0.333, },
+                Enabled2 = Input { Value = 1, },
+                ElementShape2 = Input { Value = 1, }, -- Outline
+                Red2 = Input { Value = 0.000, },
+                Green2 = Input { Value = 0.000, },
+                Blue2 = Input { Value = 0.000, },
+                Thickness2 = Input { Value = 0.066, },
+                JoinStyle2 = Input { Value = 2, }, -- Round
+                Enabled3 = Input { Value = 1, },
+                ElementShape3 = Input { Value = 3, }, -- Glow
+                Red3 = Input { Value = 0.937, },
+                Green3 = Input { Value = 0.267, },
+                Blue3 = Input { Value = 0.267, },
+                Softness3 = Input { Value = 10, },
+            },
+            ViewInfo = OperatorInfo { Pos = { 220, 36.3 } },
+        }
+    }
+}

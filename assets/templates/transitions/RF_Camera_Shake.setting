@@ -1,0 +1,156 @@
+{
+	Tools = ordered() {
+		RF_Camera_Shake = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Camera Shake Impact",
+				Kind = "Transition",
+			},
+			Inputs = ordered() {
+				MainInput1 = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Input",
+				},
+				MainInput2 = InstanceInput {
+					SourceOp = "ClipB",
+					Source = "Input",
+				},
+				Strength = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Strength",
+					Name = "Shake Strength",
+					Page = "Controls",
+				},
+				Rotation = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Rotation",
+					Name = "Shake Rotation",
+					Page = "Controls",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "Shake",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				ClipA = PipeRouter {
+					CtrlWZoom = false,
+					Inputs = {
+						Progress = Input {
+							Value = 0,
+							Expression = "(time - comp.RenderStart) / max(1, comp.RenderEnd - comp.RenderStart)",
+						},
+						Strength = Input {
+							Value = 0.035,
+						},
+						Rotation = Input {
+							Value = 2.5,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -66 },
+					},
+					UserControls = ordered() {
+						Progress = {
+							LINKS_Name = "Progress (auto)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 1,
+						},
+						Strength = {
+							LINKS_Name = "Shake Strength",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0.035,
+							INP_MinScale = 0,
+							INP_MaxScale = 0.15,
+						},
+						Rotation = {
+							LINKS_Name = "Shake Rotation (deg)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 2.5,
+							INP_MinScale = 0,
+							INP_MaxScale = 15,
+						},
+					},
+				},
+				ClipB = PipeRouter {
+					CtrlWZoom = false,
+					Inputs = { },
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 66 },
+					},
+				},
+				Switch = Dissolve {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "ClipA",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "ClipB",
+							Source = "Output",
+						},
+						Mix = Input {
+							Value = 0,
+							Expression = "iif(ClipA.Progress >= 0.5, 1, 0)",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+				Shake = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Switch",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 + ClipA.Strength * iif(ClipA.Progress < 0.5, (ClipA.Progress * 2)^4 * 0.35, (1 - (ClipA.Progress - 0.5) * 2)^2) * (((sin(floor(time / max(1, 1)) * 12.9898 + 1.3) * 43758.5453) % 1) - 0.5) * 2, 0.5 + ClipA.Strength * iif(ClipA.Progress < 0.5, (ClipA.Progress * 2)^4 * 0.35, (1 - (ClipA.Progress - 0.5) * 2)^2) * (((sin(floor(time / max(1, 1)) * 12.9898 + 2.9) * 43758.5453) % 1) - 0.5) * 2)",
+						},
+						Angle = Input {
+							Value = 0,
+							Expression = "ClipA.Rotation * iif(ClipA.Progress < 0.5, (ClipA.Progress * 2)^4 * 0.35, (1 - (ClipA.Progress - 0.5) * 2)^2) * (((sin(floor(time / max(1, 1)) * 12.9898 + 6.1) * 43758.5453) % 1) - 0.5) * 2",
+						},
+						Size = Input {
+							Value = 1,
+							Expression = "1 + 2.2 * ClipA.Strength * iif(ClipA.Progress < 0.5, (ClipA.Progress * 2)^4 * 0.35, (1 - (ClipA.Progress - 0.5) * 2)^2)",
+						},
+						Edges = Input {
+							Value = 3,
+						},
+						MotionBlur = Input {
+							Value = 1,
+						},
+						Quality = Input {
+							Value = 6,
+						},
+						ShutterAngle = Input {
+							Value = 180,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, 0 },
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Camera_Shake",
+}

@@ -56,13 +56,13 @@ class DraggableLUTCard(QFrame):
         lbl_title.setStyleSheet(f"color: {ThemeColors.TEXT_ACCENT}; font-size: 12px;")
 
         cat_badge = QLabel(self.look.category.upper())
-        cat_badge.setStyleSheet("""
-            background-color: #1E293B;
-            border: 1px solid #334155;
-            color: #A855F7;
-            font-size: 9px;
-            font-weight: bold;
-            padding: 2px 6px;
+        cat_badge.setStyleSheet(f"""
+            background-color: {ThemeColors.VIOLET_LO};
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            color: {ThemeColors.TEXT_ACCENT};
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 7px;
             border-radius: 4px;
         """)
 
@@ -75,7 +75,7 @@ class DraggableLUTCard(QFrame):
         if self.look.description:
             lbl_desc = QLabel(self.look.description)
             lbl_desc.setWordWrap(True)
-            lbl_desc.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 10.5px; line-height: 1.2;")
+            lbl_desc.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11.5px; line-height: 1.3;")
             layout.addWidget(lbl_desc)
 
         # 3. 4-Color Palette Swatch Bar
@@ -95,13 +95,13 @@ class DraggableLUTCard(QFrame):
             h_tags.setSpacing(4)
             for t in self.look.tags[:4]:
                 lbl_tag = QLabel(f"#{t}")
-                lbl_tag.setStyleSheet("""
-                    background-color: #161B26;
-                    border: 1px solid #283348;
-                    color: #94A3B8;
-                    font-size: 9.5px;
-                    padding: 1px 5px;
-                    border-radius: 3px;
+                lbl_tag.setStyleSheet(f"""
+                    background-color: {ThemeColors.BG_INPUT};
+                    border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                    color: {ThemeColors.TEXT_SECONDARY};
+                    font-size: 11px;
+                    padding: 2px 6px;
+                    border-radius: 4px;
                 """)
                 h_tags.addWidget(lbl_tag)
             h_tags.addStretch(1)

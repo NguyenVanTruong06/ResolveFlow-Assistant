@@ -33,6 +33,22 @@ class AssetIndexer:
         self.transitions_dir = target_base / "templates" / "transitions"
         self.overlays_dir = target_base / "broll_memes" / "overlays"
         self.music_dir = target_base / "music"
+        self.starter_pack_dir = target_base / "starter_pack"
+        self.generators_dir = target_base / "templates" / "Generators"
+
+        self.titles_dirs = [
+            target_base / "templates" / "titles",
+            target_base / "templates" / "Titles",
+        ]
+        self.transitions_dirs = [
+            target_base / "templates" / "transitions",
+            target_base / "templates" / "Transitions",
+        ]
+        self.overlays_dirs = [
+            target_base / "broll_memes" / "overlays",
+            target_base / "templates" / "Generators",
+            target_base / "templates" / "generators",
+        ]
 
         self.ensure_dirs()
 
@@ -143,7 +159,7 @@ class AssetIndexer:
             _GLOBAL_ASSET_CACHE[key] = results
             return {k: [dict(item) for item in v] for k, v in results.items()}
 
-        recognized_exts = {".mp3", ".wav", ".m4a", ".aac", ".flac"}
+        recognized_exts = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
 
         for mood_folder in sorted(target_dir.iterdir()):
             if not mood_folder.is_dir():
@@ -174,17 +190,17 @@ class AssetIndexer:
         return {k: [dict(item) for item in v] for k, v in results.items()}
 
     @staticmethod
-    def _detect_sfx_emotion(stem: str) -> str:
-        s = stem.lower()
-        if any(k in s for k in ["whoosh", "swoosh", "riser", "swell", "chuyen", "trans", "reverse"]):
+    def _detect_sfx_emotion(stem: str, folder_hint: str = "") -> str:
+        s = f"{stem} {folder_hint}".lower()
+        if any(k in s for k in ["whoosh", "swoosh", "riser", "swell", "chuyen", "trans", "reverse", "whip", "fast"]):
             return "chuyen_canh"
-        elif any(k in s for k in ["boom", "braam", "bass", "drop", "hit", "shock", "pulse", "tim", "heartbeat"]):
+        elif any(k in s for k in ["boom", "braam", "bass", "drop", "hit", "shock", "pulse", "tim", "heartbeat", "impact", "thud", "punch", "slam", "crash"]):
             return "giat_minh"
-        elif any(k in s for k in ["cuoi", "laugh", "airhorn", "horn", "bonk", "de_keu", "funny", "coi"]):
+        elif any(k in s for k in ["cuoi", "laugh", "airhorn", "horn", "bonk", "de_keu", "funny", "coi", "fart", "slip", "boing"]):
             return "hai_huoc"
-        elif any(k in s for k in ["pop", "ding", "bell", "shutter", "ting", "camera", "cash", "coin", "tada"]):
+        elif any(k in s for k in ["pop", "ding", "bell", "shutter", "ting", "camera", "cash", "coin", "tada", "success", "magic"]):
             return "diem_nhan"
-        elif any(k in s for k in ["glitch", "click", "bleep", "beep", "censor", "type", "keyboard", "laser", "tech"]):
+        elif any(k in s for k in ["glitch", "click", "bleep", "beep", "censor", "type", "keyboard", "laser", "tech", "zap", "scifi", "sci-fi", "digital", "switch", "ui", "interface", "select", "mouse"]):
             return "cong_nghe"
         return "accent"
 
@@ -207,9 +223,26 @@ class AssetIndexer:
         key = self._get_cache_key("sfx")
         if not force_refresh and key in _GLOBAL_ASSET_CACHE:
             return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
-        res = self._scan_dir(self.sfx_dir, ['.wav'])
-        for item in res:
-            item["category"] = self._detect_sfx_emotion(item["name"])
+        target_dirs = [self.sfx_dir]
+        if hasattr(self, "starter_pack_dir") and (self.starter_pack_dir / "SFX").exists():
+            target_dirs.append(self.starter_pack_dir / "SFX")
+        elif (self.base_dir / "starter_pack" / "SFX").exists():
+            target_dirs.append(self.base_dir / "starter_pack" / "SFX")
+
+        seen_names = set()
+        res = []
+        for sdir in target_dirs:
+            if not sdir.exists():
+                continue
+            for item in self._scan_dir(sdir, ['.wav', '.mp3', '.ogg', '.flac', '.m4a']):
+                base_name = item["name"]
+                if base_name in seen_names:
+                    continue
+                seen_names.add(base_name)
+                parent_hint = Path(item["file_path"]).parent.name
+                item["category"] = self._detect_sfx_emotion(item["name"], parent_hint)
+                res.append(item)
+
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
@@ -235,7 +268,16 @@ class AssetIndexer:
         key = self._get_cache_key("overlays")
         if not force_refresh and key in _GLOBAL_ASSET_CACHE:
             return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
-        res = self._scan_dir(self.overlays_dir, ['.mp4', '.mov', '.png'], find_thumb=True)
+        seen = set()
+        res = []
+        target_dirs = getattr(self, "overlays_dirs", [self.overlays_dir])
+        for odir in target_dirs:
+            if not odir.exists():
+                continue
+            for item in self._scan_dir(odir, ['.mp4', '.mov', '.png', '.setting'], find_thumb=True):
+                if item["name"] not in seen:
+                    seen.add(item["name"])
+                    res.append(item)
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
@@ -243,7 +285,16 @@ class AssetIndexer:
         key = self._get_cache_key("titles")
         if not force_refresh and key in _GLOBAL_ASSET_CACHE:
             return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
-        res = self._scan_dir(self.titles_dir, ['.setting'], find_thumb=True)
+        seen = set()
+        res = []
+        target_dirs = getattr(self, "titles_dirs", [self.titles_dir])
+        for tdir in target_dirs:
+            if not tdir.exists():
+                continue
+            for item in self._scan_dir(tdir, ['.setting'], find_thumb=True):
+                if item["name"] not in seen:
+                    seen.add(item["name"])
+                    res.append(item)
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
@@ -251,7 +302,16 @@ class AssetIndexer:
         key = self._get_cache_key("transitions")
         if not force_refresh and key in _GLOBAL_ASSET_CACHE:
             return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
-        res = self._scan_dir(self.transitions_dir, ['.setting'], find_thumb=True)
+        seen = set()
+        res = []
+        target_dirs = getattr(self, "transitions_dirs", [self.transitions_dir])
+        for tdir in target_dirs:
+            if not tdir.exists():
+                continue
+            for item in self._scan_dir(tdir, ['.setting'], find_thumb=True):
+                if item["name"] not in seen:
+                    seen.add(item["name"])
+                    res.append(item)
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 

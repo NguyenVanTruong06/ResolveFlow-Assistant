@@ -121,7 +121,7 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
         badge_icon="💥",
         tags=["Viral", "Hormozi", "TikTok", "Shorts", "SpringPop", "HighEnergy"],
         description="Chữ nảy lò xo (Spring curve) bám từng từ khóa chính, màu vàng neon/xanh chuối viền đen dày tương phản cao cho Shorts/Reels triệu view.",
-        font="Arial",
+        font="Impact",
         size=54,
         weight="extra_bold",
         standard_color="#FFFFFF",
@@ -140,7 +140,7 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
         badge_icon="🖍️",
         tags=["Marker", "Highlighter", "Documentary", "Study", "Focus", "YellowBar"],
         description="Khung màu vàng dạ quang quét sau lưng từ khóa như đánh dấu bút nhớ dòng tài liệu nghiên cứu.",
-        font="Arial",
+        font="Arial Black",
         size=48,
         weight="bold",
         standard_color="#000000",
@@ -160,7 +160,7 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
         badge_icon="📄",
         tags=["Scrapbook", "Collage", "StopMotion", "Retro", "PaperCut", "Vintage"],
         description="Phong cách nhãn dán xé giấy thủ công Stop-motion, nền giấy ngà cổ điển tạo cảm giác mộc mạc và chân thực.",
-        font="Courier New",
+        font="Georgia",
         size=46,
         weight="bold",
         standard_color="#1A1A1A",
@@ -180,7 +180,7 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
         badge_icon="⚡",
         tags=["Cyberpunk", "Glitch", "Gaming", "SciFi", "RGB", "Aberration"],
         description="Tách kênh màu quang sai (Chromatic Aberration) đỏ-xanh kèm viền phát quang điện tử sắc nét phong cách Cyberpunk.",
-        font="Arial",
+        font="Impact",
         size=52,
         weight="extra_bold",
         standard_color="#E0F7FA",
@@ -395,7 +395,7 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
         badge_icon="⚡",
         tags=["MrBeast", "Viral", "YouTube", "Impact", "HighEnergy", "Yellow"],
         description="Chữ in hoa bùng nổ tông vàng chanh rực rỡ, viền đen dày dặn chuẩn phong cách thumbnail và video MrBeast.",
-        font="Arial",
+        font="Impact",
         size=58,
         weight="extra_bold",
         standard_color="#FFFFFF",
@@ -414,7 +414,7 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
         badge_icon="🍎",
         tags=["Apple", "Keynote", "Minimal", "Tech", "Elegant", "Clean"],
         description="Phong cách thuyết trình tối giản đặc trưng của Apple, phông chữ thanh thoát, bóng đổ nhẹ không viền gắt.",
-        font="Arial",
+        font="Segoe UI",
         size=46,
         weight="bold",
         standard_color="#F5F5F7",
@@ -452,7 +452,7 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
         badge_icon="💥",
         tags=["Comic", "Manga", "Action", "Gaming", "Punchy", "Anime"],
         description="Phong cách truyện tranh siêu anh hùng bùng nổ, viền đen cực dày, chữ nghiêng năng động tạo xung lực mạnh mẽ.",
-        font="Arial",
+        font="Arial Black",
         size=56,
         weight="extra_bold",
         standard_color="#FFF176",
@@ -512,7 +512,7 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
         badge_icon="🔥",
         tags=["Schannel", "Vlog", "Vietnamese", "TechReview", "Dynamic", "GenZ"],
         description="Phong cách phụ đề dí dỏm, nhịp nhảy chữ dồn dập bắt tai bắt mắt quen thuộc của kênh Schannel & review đồ chơi công nghệ.",
-        font="Arial",
+        font="Arial Black",
         size=52,
         weight="extra_bold",
         standard_color="#FFFFFF",
@@ -531,7 +531,7 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
         badge_icon="🌾",
         tags=["KhoaiLangThang", "ChuaLanh", "Travel", "MocMac", "Acoustic", "Vlog"],
         description="Tông chữ trắng ấm ngà dịu mắt, chuyển động êm đềm như những chuyến đi bình yên khám phá ẩm thực văn hóa Việt Nam.",
-        font="Arial",
+        font="Georgia",
         size=44,
         weight="bold",
         standard_color="#FEF3C7",
@@ -569,7 +569,7 @@ BUILTIN_PRESETS: List[TextStylePreset] = [
         badge_icon="🚨",
         tags=["Drama", "Showbiz", "TikTok", "GiatGan", "HotNews", "HongBien"],
         description="Màu hồng neon kết hợp phát sáng xanh cyan giật nảy liên tục, giữ chân người xem từng giây với tin nóng hổi.",
-        font="Arial",
+        font="Arial Black",
         size=54,
         weight="extra_bold",
         standard_color="#FFF0F5",
@@ -920,6 +920,13 @@ class FusionSettingGenerator:
                 Blue4 = Input {{ Value = {b_bx / 255.0:.3f}, }},"""
 
         clean_tool_name = re.sub(r'[^a-zA-Z0-9_]', '', f"RF_{preset.id.title()}")
+        def _esc_lua(val: Any) -> str:
+            if val is None: return ""
+            return str(val).replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n').replace('\r', '\\r')
+
+        esc_font = _esc_lua(resolve_system_font(preset.font))
+        esc_style = _esc_lua(preset.weight.title() if preset.weight != 'normal' else 'Regular')
+        esc_sample_text = _esc_lua(sample_text)
 
         setting_str = f"""{{
     Tools = ordered() {{
@@ -928,13 +935,13 @@ class FusionSettingGenerator:
                 Width = Input {{ Value = 1920, }},
                 Height = Input {{ Value = 1080, }},
                 UseFrameFormatSettings = Input {{ Value = 1, }},
-                Font = Input {{ Value = "{resolve_system_font(preset.font)}", }},
-                Style = Input {{ Value = "{preset.weight.title() if preset.weight != 'normal' else 'Regular'}", }},
+                Font = Input {{ Value = "{esc_font}", }},
+                Style = Input {{ Value = "{esc_style}", }},
                 Size = Input {{ Value = {fusion_size}, }},
                 VerticalTopCenterBottom = Input {{ Value = 1, }},
                 HorizontalLeftCenterRight = Input {{ Value = 0, }},
                 Center = Input {{ Value = {{ 0.5, {preset.position_y_16_9:.2f} }}, }},
-                StyledText = Input {{ Value = "{sample_text}", }},
+                StyledText = Input {{ Value = "{esc_sample_text}", }},
                 Red1 = Input {{ Value = {r_hl / 255.0:.3f}, }},
                 Green1 = Input {{ Value = {g_hl / 255.0:.3f}, }},
                 Blue1 = Input {{ Value = {b_hl / 255.0:.3f}, }},{outline_block}{extra_shading}
@@ -971,6 +978,15 @@ class FusionSettingGenerator:
         target_dir = cls.get_davinci_resolve_titles_dir()
         os.makedirs(target_dir, exist_ok=True)
         
+        # Cài đặt các mẫu Title hoạt họa Fusion Macro chuẩn (.setting)
+        import shutil
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        templates_dir = os.path.join(project_root, "assets", "templates", "Titles")
+        if os.path.exists(templates_dir):
+            for fn in os.listdir(templates_dir):
+                if fn.endswith(".setting"):
+                    shutil.copy2(os.path.join(templates_dir, fn), os.path.join(target_dir, fn))
+
         installed_count = 0
         for p in presets:
             clean_name = re.sub(r'[^\w\s-]', '', p.name).strip().replace(' ', '_')

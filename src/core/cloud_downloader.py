@@ -244,10 +244,18 @@ class GoogleDriveDownloader:
                         # Thử Fallback qua gdown nếu có
                         raise RuntimeError(f"Google Drive yêu cầu xác thực web hoặc giới hạn tải: {html_text_2[:200]}")
 
-                # Xác định tên file
-                target_filename = custom_filename or cls._extract_filename_from_headers(resp.headers, file_id)
-                target_filename = re.sub(r'[\\/*?:"<>|]', "_", target_filename)
-                target_path = os.path.join(output_dir, target_filename)
+                # Xác định tên file an toàn (chống path traversal & dotfiles)
+                raw_filename = custom_filename or cls._extract_filename_from_headers(resp.headers, file_id)
+                safe_filename = os.path.basename(raw_filename)
+                safe_filename = re.sub(r'[\\/*?:"<>|]', "_", safe_filename).strip(". ")
+                if not safe_filename:
+                    safe_filename = f"GoogleDrive_{file_id}.mp4"
+                output_dir_abs = os.path.abspath(output_dir)
+                target_path = os.path.abspath(os.path.join(output_dir_abs, safe_filename))
+                if not target_path.startswith(output_dir_abs):
+                    safe_filename = f"GoogleDrive_{file_id}.mp4"
+                    target_path = os.path.join(output_dir_abs, safe_filename)
+                target_filename = safe_filename
                 part_path = target_path + ".part"
 
                 total_length_header = resp.headers.get("Content-Length")
@@ -317,7 +325,9 @@ class GoogleDriveDownloader:
                 raise
             except Exception as e:
                 # Dọn dẹp file part nếu có
-                part_path = os.path.join(output_dir, (custom_filename or f"GoogleDrive_{file_id}.mp4") + ".part")
+                raw_cleanup_fn = custom_filename or f"GoogleDrive_{file_id}.mp4"
+                safe_cleanup_fn = os.path.basename(raw_cleanup_fn).strip(". ") or f"GoogleDrive_{file_id}.mp4"
+                part_path = os.path.join(output_dir, safe_cleanup_fn + ".part")
                 if os.path.exists(part_path):
                     try:
                         os.remove(part_path)
@@ -331,7 +341,8 @@ class GoogleDriveDownloader:
                 # Fallback cuối cùng: Thử gdown nếu urllib thất bại
                 try:
                     import gdown
-                    fallback_fn = custom_filename or f"GoogleDrive_{file_id}.mp4"
+                    raw_fallback_fn = custom_filename or f"GoogleDrive_{file_id}.mp4"
+                    fallback_fn = os.path.basename(raw_fallback_fn).strip(". ") or f"GoogleDrive_{file_id}.mp4"
                     fallback_target = os.path.join(output_dir, fallback_fn)
                     dl_res = gdown.download(id=file_id, output=fallback_target, quiet=True, fuzzy=True)
                     if dl_res and cls._is_valid_binary_file(fallback_target):

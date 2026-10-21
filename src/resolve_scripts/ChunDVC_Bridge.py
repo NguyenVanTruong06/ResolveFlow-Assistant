@@ -2,6 +2,8 @@ import socket
 import threading
 import json
 import time
+import os
+import secrets
 
 try:
     if 'resolve' not in globals():
@@ -11,11 +13,38 @@ except Exception:
     pass # Nếu chạy ngoài resolve sẽ báo lỗi, nhưng script này sinh ra để chạy TRONG Resolve
 
 PORT = 17005
+TOKEN_FILE = os.path.expanduser("~/.resolveflow_bridge_token")
 
-def handle_request(command, payload):
+def get_or_create_bridge_token() -> str:
+    env_token = os.environ.get("RESOLVEFLOW_BRIDGE_TOKEN")
+    if env_token:
+        return env_token.strip()
+    try:
+        if os.path.exists(TOKEN_FILE):
+            with open(TOKEN_FILE, "r", encoding="utf-8") as f:
+                t = f.read().strip()
+                if t:
+                    return t
+        t = secrets.token_hex(16)
+        with open(TOKEN_FILE, "w", encoding="utf-8") as f:
+            f.write(t)
+        try:
+            os.chmod(TOKEN_FILE, 0o600)
+        except Exception:
+            pass
+        return t
+    except Exception:
+        return "resolveflow_default_bridge_token"
+
+AUTH_TOKEN = get_or_create_bridge_token()
+
+def handle_request(command, payload, client_token=None):
     try:
         if command == "ping":
             return {"status": "ok", "message": "pong"}
+
+        if not AUTH_TOKEN or client_token != AUTH_TOKEN:
+            return {"status": "error", "message": "Unauthorized: Invalid bridge token"}
             
         pm = resolve.GetProjectManager()
         proj = pm.GetCurrentProject()
@@ -68,10 +97,10 @@ def server_loop():
     while True:
         try:
             client, addr = server.accept()
-            data = client.recv(4096)
+            data = client.recv(65536)
             if data:
                 req = json.loads(data.decode('utf-8'))
-                resp = handle_request(req.get('command'), req.get('payload', {}))
+                resp = handle_request(req.get('command'), req.get('payload', {}), req.get('token'))
                 client.sendall(json.dumps(resp).encode('utf-8'))
             client.close()
         except Exception as e:

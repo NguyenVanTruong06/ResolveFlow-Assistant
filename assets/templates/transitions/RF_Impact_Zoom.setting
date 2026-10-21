@@ -1,0 +1,182 @@
+{
+	Tools = ordered() {
+		RF_Impact_Zoom = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Impact Zoom Blur",
+				Kind = "Transition",
+			},
+			Inputs = ordered() {
+				MainInput1 = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Input",
+				},
+				MainInput2 = InstanceInput {
+					SourceOp = "ClipB",
+					Source = "Input",
+				},
+				Zoom = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Zoom",
+					Name = "Peak Zoom",
+					Page = "Controls",
+				},
+				Flash = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Flash",
+					Name = "Impact Bloom",
+					Page = "Controls",
+				},
+				Shutter = InstanceInput {
+					SourceOp = "Punch",
+					Source = "ShutterAngle",
+					Name = "Motion Blur Shutter",
+					Page = "Controls",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "Bloom",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				ClipA = PipeRouter {
+					CtrlWZoom = false,
+					Inputs = {
+						Progress = Input {
+							Value = 0,
+							Expression = "(time - comp.RenderStart) / max(1, comp.RenderEnd - comp.RenderStart)",
+						},
+						Zoom = Input {
+							Value = 3,
+						},
+						Flash = Input {
+							Value = 0.6,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -66 },
+					},
+					UserControls = ordered() {
+						Progress = {
+							LINKS_Name = "Progress (auto)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 1,
+						},
+						Zoom = {
+							LINKS_Name = "Peak Zoom",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 3,
+							INP_MinScale = 1.2,
+							INP_MaxScale = 8,
+						},
+						Flash = {
+							LINKS_Name = "Impact Bloom",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0.6,
+							INP_MinScale = 0,
+							INP_MaxScale = 1,
+						},
+					},
+				},
+				ClipB = PipeRouter {
+					CtrlWZoom = false,
+					Inputs = { },
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 66 },
+					},
+				},
+				Switch = Dissolve {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "ClipA",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "ClipB",
+							Source = "Output",
+						},
+						Mix = Input {
+							Value = 0,
+							Expression = "iif(ClipA.Progress >= 0.5, 1, 0)",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+				Punch = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Switch",
+							Source = "Output",
+						},
+						Size = Input {
+							Value = 1,
+							Expression = "iif(ClipA.Progress < 0.5, 1 + (ClipA.Zoom - 1) * (min(1, max(0, (ClipA.Progress * 2)))^3), 1 + (ClipA.Zoom - 1) * (1 - (1 - (1 - min(1, max(0, (ClipA.Progress * 2 - 1))))^3)))",
+						},
+						Edges = Input {
+							Value = 3,
+						},
+						MotionBlur = Input {
+							Value = 1,
+						},
+						Quality = Input {
+							Value = 10,
+						},
+						ShutterAngle = Input {
+							Value = 360,
+						},
+						CenterBias = Input {
+							Value = 0,
+						},
+						SampleSpread = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, 0 },
+					},
+				},
+				Bloom = SoftGlow {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Punch",
+							Source = "Output",
+						},
+						Threshold = Input {
+							Value = 0.3,
+						},
+						Gain = Input {
+							Value = 0,
+							Expression = "3 * max(0, 1 - abs(ClipA.Progress - 0.5) / 0.12)^2 * ClipA.Flash",
+						},
+						XGlowSize = Input {
+							Value = 30,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, 0 },
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Impact_Zoom",
+}

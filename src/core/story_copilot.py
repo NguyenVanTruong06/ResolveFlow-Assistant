@@ -549,13 +549,25 @@ class StoryCopilot:
         timeout: float = 120.0
     ) -> Tuple[CopilotDirectorPlan, str]:
         """
-        Gửi prompt trực tiếp sang Cloud API (DeepSeek / OpenAI / Claude) qua chuẩn chat completions.
+        Gửi prompt trực tiếp sang Cloud API (Google Gemini / DeepSeek / OpenAI / Claude) qua chuẩn chat completions hoặc native REST.
         """
         if not api_key:
             raise ValueError("Vui lòng cung cấp API Key.")
 
+        key_clean = api_key.strip()
         provider_clean = (provider or "deepseek").lower()
-        if "deepseek" in provider_clean:
+
+        # Tự động nhận diện nhà cung cấp nếu người dùng dán key đặc trưng
+        if key_clean.startswith("AQ.") or key_clean.startswith("AIza"):
+            provider_clean = "gemini"
+        elif key_clean.startswith("sk-ant-"):
+            provider_clean = "claude"
+
+        if "gemini" in provider_clean or "google" in provider_clean:
+            # Google Gemini - Ưu tiên OpenAI-compatible endpoint, tự động chuyển đổi sang native nếu cần
+            url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+            default_model = "gemini-3.5-flash"
+        elif "deepseek" in provider_clean:
             url = "https://api.deepseek.com/v1/chat/completions"
             default_model = "deepseek-chat"
         elif "openai" in provider_clean or "gpt" in provider_clean:
@@ -577,7 +589,7 @@ class StoryCopilot:
                 "messages": [{"role": "user", "content": prompt}]
             }
             headers = {
-                "x-api-key": api_key,
+                "x-api-key": key_clean,
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json"
             }
@@ -591,7 +603,7 @@ class StoryCopilot:
                 ]
             }
             headers = {
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": f"Bearer {key_clean}",
                 "Content-Type": "application/json"
             }
 
@@ -608,6 +620,19 @@ class StoryCopilot:
                 return plan, raw_text
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="ignore")
+            # Nếu Gemini trả về 404 cho model hiện tại, tự động fallback sang gemini-3-flash-preview
+            if ("gemini" in provider_clean or "google" in provider_clean) and e.code == 404 and chosen_model != "gemini-3-flash-preview":
+                try:
+                    payload["model"] = "gemini-3-flash-preview"
+                    retry_data = json.dumps(payload).encode("utf-8")
+                    retry_req = urllib.request.Request(url, data=retry_data, headers=headers)
+                    with urllib.request.urlopen(retry_req, timeout=timeout) as resp:
+                        res_body = json.loads(resp.read().decode("utf-8"))
+                        raw_text = res_body.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        plan = cls.parse_copilot_response(raw_text)
+                        return plan, raw_text
+                except Exception:
+                    pass
             raise RuntimeError(f"Cloud API trả về lỗi ({e.code}): {err_body}")
         except Exception as e:
             raise RuntimeError(f"Lỗi khi gửi yêu cầu đến Cloud API: {e}")

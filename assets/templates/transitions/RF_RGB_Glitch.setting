@@ -1,0 +1,374 @@
+{
+	Tools = ordered() {
+		RF_RGB_Glitch = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "RGB Glitch Transition",
+				Kind = "Transition",
+			},
+			Inputs = ordered() {
+				MainInput1 = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Input",
+				},
+				MainInput2 = InstanceInput {
+					SourceOp = "ClipB",
+					Source = "Input",
+				},
+				Amount = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Amount",
+					Name = "Glitch Amount",
+					Page = "Controls",
+				},
+				Hold = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Hold",
+					Name = "Glitch Hold (frames)",
+					Page = "Controls",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "SumB",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				ClipA = PipeRouter {
+					CtrlWZoom = false,
+					Inputs = {
+						Progress = Input {
+							Value = 0,
+							Expression = "(time - comp.RenderStart) / max(1, comp.RenderEnd - comp.RenderStart)",
+						},
+						Amount = Input {
+							Value = 0.06,
+						},
+						Hold = Input {
+							Value = 2,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -66 },
+					},
+					UserControls = ordered() {
+						Progress = {
+							LINKS_Name = "Progress (auto)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 1,
+						},
+						Amount = {
+							LINKS_Name = "Glitch Amount",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0.06,
+							INP_MinScale = 0,
+							INP_MaxScale = 0.3,
+						},
+						Hold = {
+							LINKS_Name = "Glitch Hold (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 2,
+							INP_MinScale = 1,
+							INP_MaxScale = 6,
+						},
+					},
+				},
+				ClipB = PipeRouter {
+					CtrlWZoom = false,
+					Inputs = { },
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 66 },
+					},
+				},
+				Switch = Dissolve {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "ClipA",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "ClipB",
+							Source = "Output",
+						},
+						Mix = Input {
+							Value = 0,
+							Expression = "iif(ClipA.Progress >= 0.5, 1, 0)",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+				OffR = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Switch",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 + ClipA.Amount * sin(pi * ClipA.Progress)^2 * (((sin(floor(time / max(1, ClipA.Hold)) * 12.9898 + 1.1) * 43758.5453) % 1) - 0.5) * 2, 0.5 + ClipA.Amount * 0.3 * sin(pi * ClipA.Progress)^2 * (((sin(floor(time / max(1, ClipA.Hold)) * 12.9898 + 4.1) * 43758.5453) % 1) - 0.5))",
+						},
+						Edges = Input {
+							Value = 3,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, -132 },
+					},
+				},
+				SolidR = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 1,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, -165 },
+					},
+				},
+				OnlyR = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "SolidR",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "OffR",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						ApplyMode = Input {
+							Value = "Multiply",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, -132 },
+					},
+				},
+				OffG = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Switch",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 + ClipA.Amount * sin(pi * ClipA.Progress)^2 * (((sin(floor(time / max(1, ClipA.Hold)) * 12.9898 + 4.7) * 43758.5453) % 1) - 0.5) * 2, 0.5 + ClipA.Amount * 0.3 * sin(pi * ClipA.Progress)^2 * (((sin(floor(time / max(1, ClipA.Hold)) * 12.9898 + 7.7) * 43758.5453) % 1) - 0.5))",
+						},
+						Edges = Input {
+							Value = 3,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, 0 },
+					},
+				},
+				SolidG = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 1,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, -33 },
+					},
+				},
+				OnlyG = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "SolidG",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "OffG",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						ApplyMode = Input {
+							Value = "Multiply",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, 0 },
+					},
+				},
+				SumG = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "OnlyR",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "OnlyG",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						ApplyMode = Input {
+							Value = "Screen",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 440, 0 },
+					},
+				},
+				OffB = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Switch",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 + ClipA.Amount * sin(pi * ClipA.Progress)^2 * (((sin(floor(time / max(1, ClipA.Hold)) * 12.9898 + 8.3) * 43758.5453) % 1) - 0.5) * 2, 0.5 + ClipA.Amount * 0.3 * sin(pi * ClipA.Progress)^2 * (((sin(floor(time / max(1, ClipA.Hold)) * 12.9898 + 11.3) * 43758.5453) % 1) - 0.5))",
+						},
+						Edges = Input {
+							Value = 3,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, 132 },
+					},
+				},
+				SolidB = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 1,
+						},
+						TopLeftAlpha = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, 99 },
+					},
+				},
+				OnlyB = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "SolidB",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "OffB",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						ApplyMode = Input {
+							Value = "Multiply",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, 132 },
+					},
+				},
+				SumB = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "SumG",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "OnlyB",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						ApplyMode = Input {
+							Value = "Screen",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 440, 132 },
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_RGB_Glitch",
+}

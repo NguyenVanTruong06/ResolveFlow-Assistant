@@ -1,0 +1,128 @@
+{
+	Tools = ordered() {
+		RF_Letterbox = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Cinematic letterbox bars (2.35 / 2.39 / 1.85)",
+				Kind = "Generator",
+				CompositeHint = "Normal",
+			},
+			Inputs = ordered() {
+				Ratio = InstanceInput {
+					SourceOp = "Picture",
+					Source = "TargetRatio",
+					Name = "Target Ratio",
+					Page = "Controls",
+				},
+				Aspect = InstanceInput {
+					SourceOp = "Picture",
+					Source = "SourceAspect",
+					Name = "Timeline Aspect",
+					Page = "Controls",
+				},
+				BarAlpha = InstanceInput {
+					SourceOp = "Bars",
+					Source = "TopLeftAlpha",
+					Name = "Bar Opacity",
+					Page = "Controls",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "Bars",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				Picture = RectangleMask {
+					CtrlWZoom = false,
+					Inputs = {
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Width = Input {
+							Value = 2,
+						},
+						Height = Input {
+							Value = 0.75,
+							Expression = "min(1, Picture.SourceAspect / max(0.1, Picture.TargetRatio))",
+						},
+						Invert = Input {
+							Value = 1,
+						},
+						SoftEdge = Input {
+							Value = 0,
+						},
+						SourceAspect = Input {
+							Value = 1.7777777777777777,
+						},
+						TargetRatio = Input {
+							Value = 2.35,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 0 },
+					},
+					UserControls = ordered() {
+						SourceAspect = {
+							LINKS_Name = "Timeline Aspect (W/H)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 1.7777777777777777,
+							INP_MinScale = 0.5,
+							INP_MaxScale = 3,
+						},
+						TargetRatio = {
+							LINKS_Name = "Target Ratio",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 2.35,
+							INP_MinScale = 1,
+							INP_MaxScale = 3,
+						},
+					},
+				},
+				Bars = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 1,
+						},
+						EffectMask = Input {
+							SourceOp = "Picture",
+							Source = "Mask",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Letterbox",
+}

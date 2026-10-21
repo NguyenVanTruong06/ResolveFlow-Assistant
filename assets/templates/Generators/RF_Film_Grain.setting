@@ -1,0 +1,77 @@
+{
+	Tools = ordered() {
+		RF_Film_Grain = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Film grain",
+				Kind = "Generator",
+				CompositeHint = "Overlay (opacity 15-35%)",
+			},
+			Inputs = ordered() {
+				Scale = InstanceInput {
+					SourceOp = "Grain",
+					Source = "XScale",
+					Name = "Grain Size (higher = finer)",
+					Page = "Controls",
+				},
+				Contrast = InstanceInput {
+					SourceOp = "Grain",
+					Source = "Contrast",
+					Name = "Grain Contrast",
+					Page = "Controls",
+				},
+				Speed = InstanceInput {
+					SourceOp = "Grain",
+					Source = "SeetheRate",
+					Name = "Grain Speed",
+					Page = "Controls",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "Grain",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				Grain = FastNoise {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						Detail = Input {
+							Value = 10,
+						},
+						Contrast = Input {
+							Value = 1.6,
+						},
+						Brightness = Input {
+							Value = 0,
+						},
+						XScale = Input {
+							Value = 420,
+						},
+						SeetheRate = Input {
+							Value = 6,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 0 },
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Film_Grain",
+}

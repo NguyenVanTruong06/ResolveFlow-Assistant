@@ -23,6 +23,8 @@ class TabCopilot(QWidget):
     """
     open_copilot_dialog_requested = pyqtSignal()
     quick_copy_prompt_requested = pyqtSignal()
+    copy_kinetic_prompt_requested = pyqtSignal()
+    one_click_kinetic_requested = pyqtSignal()
     browse_json_requested = pyqtSignal()
     apply_json_text_requested = pyqtSignal(str)
     run_local_ai_requested = pyqtSignal(str, str, str)    # format, model, endpoint
@@ -109,24 +111,24 @@ class TabCopilot(QWidget):
 
         lbl_free_hint = QLabel(
             "💡 <b>Quy trình Miễn Phí 0đ:</b><br>"
-            "1. Bấm <b>'Copy Prompt Đạo Diễn'</b> bên dưới.<br>"
-            "2. Dán vào <a href='https://claude.ai' style='color:#38BDF8;'>Claude.ai</a> hoặc <a href='https://chatgpt.com' style='color:#38BDF8;'>ChatGPT</a> (bản web miễn phí).<br>"
-            "3. Copy đoạn JSON kịch bản AI trả về và dán vào ô bên dưới."
+            "1. Chọn copy <b>Prompt Dựng Video</b> hoặc <b>Prompt Phụ Đề Chữ</b>.<br>"
+            "2. Dán vào <a href='https://claude.ai' style='color:#38BDF8;'>Claude.ai</a> hoặc <a href='https://chatgpt.com' style='color:#38BDF8;'>ChatGPT</a>.<br>"
+            "3. Copy đoạn JSON kết quả và dán vào ô bên dưới."
         )
         lbl_free_hint.setWordWrap(True)
         lbl_free_hint.setStyleSheet("color: #CBD5E1; font-size: 11px; line-height: 1.4;")
         v_free.addWidget(lbl_free_hint)
 
         h_free_btns = QHBoxLayout()
-        self.btn_quick_copy = QPushButton("📋 1. Copy Prompt Đạo Diễn (Kèm Dữ Liệu Video)")
+        self.btn_quick_copy = QPushButton("📋 1. Prompt Dựng Video")
         self.btn_quick_copy.setCursor(Qt.PointingHandCursor)
         self.btn_quick_copy.setStyleSheet("""
             QPushButton {
                 background-color: #0284C7;
                 color: white;
                 font-weight: bold;
-                font-size: 12px;
-                padding: 10px 14px;
+                font-size: 11px;
+                padding: 10px 10px;
                 border-radius: 6px;
             }
             QPushButton:hover {
@@ -135,7 +137,24 @@ class TabCopilot(QWidget):
         """)
         self.btn_quick_copy.clicked.connect(self.quick_copy_prompt_requested.emit)
 
-        self.btn_open_copilot = QPushButton("🧠 Tùy Chỉnh Tone...")
+        self.btn_copy_kinetic_prompt = QPushButton("✨ 2. Prompt Chữ Kinetic")
+        self.btn_copy_kinetic_prompt.setCursor(Qt.PointingHandCursor)
+        self.btn_copy_kinetic_prompt.setStyleSheet("""
+            QPushButton {
+                background-color: #6366F1;
+                color: white;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 10px 10px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #4F46E5;
+            }
+        """)
+        self.btn_copy_kinetic_prompt.clicked.connect(self.copy_kinetic_prompt_requested.emit)
+
+        self.btn_open_copilot = QPushButton("🧠 Tone...")
         self.btn_open_copilot.setCursor(Qt.PointingHandCursor)
         self.btn_open_copilot.setStyleSheet("""
             QPushButton {
@@ -144,7 +163,7 @@ class TabCopilot(QWidget):
                 border: 1px solid #334155;
                 font-weight: bold;
                 font-size: 11px;
-                padding: 10px 12px;
+                padding: 10px 8px;
                 border-radius: 6px;
             }
             QPushButton:hover {
@@ -155,8 +174,30 @@ class TabCopilot(QWidget):
         self.btn_open_copilot.clicked.connect(self.open_copilot_dialog_requested.emit)
 
         h_free_btns.addWidget(self.btn_quick_copy, stretch=3)
+        h_free_btns.addWidget(self.btn_copy_kinetic_prompt, stretch=3)
         h_free_btns.addWidget(self.btn_open_copilot, stretch=1)
         v_free.addLayout(h_free_btns)
+
+        self.btn_one_click_kinetic = QPushButton("🚀 1-CLICK: TỰ PHỦ PHỤ ĐỀ KINETIC LÊN TRACK V2 (0.2s)")
+        self.btn_one_click_kinetic.setCursor(Qt.PointingHandCursor)
+        self.btn_one_click_kinetic.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7C3AED, stop:1 #06B6D4);
+                color: white;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 8px 12px;
+                border-radius: 6px;
+                border: none;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6D28D9, stop:1 #0891B2);
+            }
+        """)
+        self.btn_one_click_kinetic.setToolTip("Tự động đọc Whisper, ngắt câu và bắn ngay chữ hoạt ảnh lên Track V2 DaVinci Resolve mà không cần qua AI Web!")
+        self.btn_one_click_kinetic.clicked.connect(self.one_click_kinetic_requested.emit)
+        v_free.addWidget(self.btn_one_click_kinetic)
+
         self.stack_engine.addWidget(view_free)
 
         # --- View 2: Local Ollama ---
@@ -207,14 +248,16 @@ class TabCopilot(QWidget):
 
         form_api = QFormLayout()
         self.combo_cloud_provider = QComboBox()
-        self.combo_cloud_provider.addItem("DeepSeek V3 (Ngon - Bổ - Rẻ nhất)", "deepseek")
-        self.combo_cloud_provider.addItem("Claude 3.7 Sonnet (Kịch bản đỉnh nhất)", "claude")
-        self.combo_cloud_provider.addItem("OpenAI GPT-4o (Ổn định)", "openai")
+        self.combo_cloud_provider.addItem("Google Gemini (AI Studio - Tốc độ cao)", "gemini")
+        self.combo_cloud_provider.addItem("DeepSeek V3 (Chi phí thấp, phản hồi nhanh)", "deepseek")
+        self.combo_cloud_provider.addItem("Claude 3.7 Sonnet (Phân tích kịch bản sâu)", "claude")
+        self.combo_cloud_provider.addItem("OpenAI GPT-4o (Đa dụng, ổn định)", "openai")
         form_api.addRow("Nhà cung cấp:", self.combo_cloud_provider)
 
         self.txt_cloud_key = QLineEdit()
         self.txt_cloud_key.setEchoMode(QLineEdit.Password)
-        self.txt_cloud_key.setPlaceholderText("Dán API Key vào đây (sk-...)")
+        self.txt_cloud_key.setPlaceholderText("Dán API Key vào đây (AQ... hoặc sk-...)")
+        self.txt_cloud_key.textChanged.connect(self._on_cloud_key_changed)
         form_api.addRow("API Key:", self.txt_cloud_key)
         v_api.addLayout(form_api)
 
@@ -534,9 +577,24 @@ class TabCopilot(QWidget):
         endpoint = self.txt_ollama_endpoint.text().strip() or "http://localhost:11434"
         self.run_local_ai_requested.emit(fmt, model, endpoint)
 
+    def _on_cloud_key_changed(self, text: str):
+        key = text.strip()
+        if key.startswith("AQ.") or key.startswith("AIza"):
+            idx = self.combo_cloud_provider.findData("gemini")
+            if idx >= 0:
+                self.combo_cloud_provider.setCurrentIndex(idx)
+        elif key.startswith("sk-ant-"):
+            idx = self.combo_cloud_provider.findData("claude")
+            if idx >= 0:
+                self.combo_cloud_provider.setCurrentIndex(idx)
+        elif key.startswith("sk-proj-"):
+            idx = self.combo_cloud_provider.findData("openai")
+            if idx >= 0:
+                self.combo_cloud_provider.setCurrentIndex(idx)
+
     def _on_run_api_clicked(self):
         fmt = self.combo_story_format.currentData() or "travel_vlog"
-        provider = self.combo_cloud_provider.currentData() or "deepseek"
+        provider = self.combo_cloud_provider.currentData() or "gemini"
         key = self.txt_cloud_key.text().strip()
         if not key:
             QMessageBox.warning(self, "Thiếu API Key", "Vui lòng nhập API Key để sử dụng tính năng này.")

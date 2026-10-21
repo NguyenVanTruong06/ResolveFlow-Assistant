@@ -52,11 +52,11 @@ class TabAutoCut(QWidget):
         self.banner_onboarding.setObjectName("banner_onboarding")
         self.banner_onboarding.setStyleSheet(f"""
             QFrame#banner_onboarding {{
-                background-color: #121A26;
-                border: 1px solid #1E3A5F;
+                background-color: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-left: 4px solid {ThemeColors.PRIMARY};
-                border-radius: 6px;
-                padding: 6px 8px;
+                border-radius: 8px;
+                padding: 8px 12px;
             }}
         """)
         b_layout = QVBoxLayout(self.banner_onboarding)

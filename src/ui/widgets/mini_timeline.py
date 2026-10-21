@@ -14,6 +14,7 @@ from PySide6.QtGui import (
     QMouseEvent, QPaintEvent, QLinearGradient
 )
 from src.core.autocut import seconds_to_timecode
+from src.ui.theme import ThemeColors
 
 
 class TimelineBlockType(str, Enum):
@@ -71,19 +72,19 @@ class MiniTimelineWidget(QWidget):
         self.stats_cut_dur: float = 0.0
         self.stats_speedup_dur: float = 0.0
 
-        # Cấu hình màu sắc hiện đại chuẩn Cyberpunk / Studio Dark Theme
-        self.COLOR_BG = QColor("#111318")
-        self.COLOR_RULER_BG = QColor("#1A1D24")
-        self.COLOR_RULER_TEXT = QColor("#8E95A5")
-        self.COLOR_TRACK_BG = QColor("#161920")
-        self.COLOR_GRID_LINE = QColor("#222733")
+        # Cấu hình màu sắc hiện đại chuẩn Cyberpunk / Studio Dark Theme đồng bộ ThemeColors
+        self.COLOR_BG = QColor(ThemeColors.BG_CONSOLE)
+        self.COLOR_RULER_BG = QColor(ThemeColors.BG_MAIN)
+        self.COLOR_RULER_TEXT = QColor(ThemeColors.TEXT_MUTED)
+        self.COLOR_TRACK_BG = QColor(ThemeColors.BG_CARD)
+        self.COLOR_GRID_LINE = QColor(ThemeColors.BORDER_DEFAULT)
 
-        self.COLOR_VOICE = QColor("#10B981")        # Xanh ngọc lục bảo Emerald
-        self.COLOR_SILENCE_CUT = QColor("#EF4444")  # Đỏ Ruby
-        self.COLOR_SPEEDUP = QColor("#F59E0B")      # Vàng Amber
-        self.COLOR_HOOK = QColor("#8B5CF6")         # Tím Neon Purple
-        self.COLOR_SUBTITLE = QColor("#3B82F6")     # Xanh Cyan Blue
-        self.COLOR_PLAYHEAD = QColor("#F43F5E")     # Đỏ tươi Rose
+        self.COLOR_VOICE = QColor(ThemeColors.GREEN)              # Xanh lá tự nhiên
+        self.COLOR_SILENCE_CUT = QColor(ThemeColors.RED)          # Đỏ cắt
+        self.COLOR_SPEEDUP = QColor(ThemeColors.AMBER)            # Vàng cam tua nhanh
+        self.COLOR_HOOK = QColor(ThemeColors.PRIMARY_HOVER)       # Tím Violet điểm nhấn
+        self.COLOR_SUBTITLE = QColor(ThemeColors.CYAN)            # Xanh Cyan phụ đề
+        self.COLOR_PLAYHEAD = QColor(ThemeColors.CYAN_HI)         # Cyan phát sáng Playhead
 
         self._init_default_demo_data()
 

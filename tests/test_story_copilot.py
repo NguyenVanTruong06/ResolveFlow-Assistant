@@ -539,3 +539,44 @@ def test_run_cloud_api_inference_mock(monkeypatch):
     assert len(plan.timeline_segments) == 1
 
 
+def test_run_cloud_api_gemini_auto_detect_mock(monkeypatch):
+    import json
+
+    valid_json = json.dumps({
+        "strategy_summary": "Test Gemini strategy",
+        "target_platform": "YouTube",
+        "timeline_segments": [
+            {"clip_index": 1, "clip_name": "test.mp4", "start_sec": 0.0, "end_sec": 10.0}
+        ]
+    })
+
+    mock_data = json.dumps({
+        "choices": [{"message": {"content": valid_json}}]
+    }).encode("utf-8")
+
+    captured_url = []
+    captured_auth = []
+
+    class MockResponse:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def read(self):
+            return mock_data
+
+    def mock_urlopen(req, timeout=120.0):
+        captured_url.append(req.full_url)
+        captured_auth.append(req.headers.get("Authorization", ""))
+        return MockResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+
+    # Key begins with AQ. -> should auto-route to Gemini
+    plan, raw = StoryCopilot.run_cloud_api_inference("test prompt", api_key="AQ.TEST_MOCK_GEMINI_KEY_EXEMPLAR_000")
+    assert plan.strategy_summary == "Test Gemini strategy"
+    assert "generativelanguage.googleapis.com" in captured_url[0]
+    assert "Bearer AQ.TEST_MOCK" in captured_auth[0]
+
+
+

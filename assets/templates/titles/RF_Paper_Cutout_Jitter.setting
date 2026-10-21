@@ -1,0 +1,518 @@
+{
+	Tools = ordered() {
+		RF_Paper_Cutout_Jitter = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Paper Cutout / Stop-motion Jitter",
+			},
+			Inputs = ordered() {
+				Text = InstanceInput {
+					SourceOp = "Text1",
+					Source = "StyledText",
+					Name = "Text",
+					Page = "Controls",
+				},
+				Font = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Font",
+					Name = "Text Font",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Style = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Style",
+					Name = "Text Style",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Size = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Size",
+					Name = "Text Size",
+					Page = "Controls",
+				},
+				Red = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Red1",
+					Name = "Text Color",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Green = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Green1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Blue = InstanceInput {
+					SourceOp = "Text1",
+					Source = "Blue1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				PaperRed = InstanceInput {
+					SourceOp = "PaperShape",
+					Source = "Red2",
+					Name = "Paper Color",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				PaperGreen = InstanceInput {
+					SourceOp = "PaperShape",
+					Source = "Green2",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				PaperBlue = InstanceInput {
+					SourceOp = "PaperShape",
+					Source = "Blue2",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				PaperBorder = InstanceInput {
+					SourceOp = "PaperShape",
+					Source = "Thickness2",
+					Name = "Paper Border",
+					Page = "Controls",
+				},
+				Tear = InstanceInput {
+					SourceOp = "Torn",
+					Source = "XRefraction",
+					Name = "Edge Roughness",
+					Page = "Controls",
+				},
+				Hold = InstanceInput {
+					SourceOp = "Jitter",
+					Source = "Hold",
+					Name = "Step (hold frames)",
+					Page = "Animation",
+				},
+				Wobble = InstanceInput {
+					SourceOp = "Jitter",
+					Source = "Wobble",
+					Name = "Rotation Jitter",
+					Page = "Animation",
+				},
+				Shake = InstanceInput {
+					SourceOp = "Jitter",
+					Source = "Shake",
+					Name = "Position Jitter",
+					Page = "Animation",
+				},
+				Delay = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Delay",
+					Name = "Delay (frames)",
+					Page = "Animation",
+				},
+				Speed = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Speed",
+					Name = "Animation Speed",
+					Page = "Animation",
+				},
+				Position = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "Center",
+					Name = "Position",
+					Page = "Controls",
+				},
+				FadeIn = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "InFrames",
+					Name = "Fade In (frames)",
+					Page = "Animation",
+				},
+				FadeOut = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "OutFrames",
+					Name = "Fade Out (frames)",
+					Page = "Animation",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "OutFade",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				Text1 = TextPlus {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						StyledText = Input {
+							Value = "RESOLVEFLOW",
+						},
+						Font = Input {
+							Value = "Open Sans",
+						},
+						Style = Input {
+							Value = "Bold",
+						},
+						Size = Input {
+							Value = 0.08,
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Red1 = Input {
+							Value = 1,
+						},
+						Green1 = Input {
+							Value = 1,
+						},
+						Blue1 = Input {
+							Value = 1,
+						},
+						Alpha1 = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 0 },
+					},
+				},
+				PaperShape = TextPlus {
+					SourceOp = "Text1",
+					CtrlWZoom = false,
+					Inputs = {
+						Red1 = Input {
+							Value = 1,
+							Expression = "PaperShape.Red2",
+						},
+						Green1 = Input {
+							Value = 0.8313725490196079,
+							Expression = "PaperShape.Green2",
+						},
+						Blue1 = Input {
+							Value = 0,
+							Expression = "PaperShape.Blue2",
+						},
+						Enabled2 = Input {
+							Value = 1,
+						},
+						Thickness2 = Input {
+							Value = 0.16,
+						},
+						Red2 = Input {
+							Value = 1,
+						},
+						Green2 = Input {
+							Value = 0.8313725490196079,
+						},
+						Blue2 = Input {
+							Value = 0,
+						},
+						Alpha2 = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -66 },
+					},
+				},
+				TearNoise = FastNoise {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						Detail = Input {
+							Value = 6,
+						},
+						Contrast = Input {
+							Value = 2.2,
+						},
+						XScale = Input {
+							Value = 55,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -132 },
+					},
+				},
+				Torn = Displace {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "PaperShape",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "TearNoise",
+							Source = "Output",
+						},
+						Type = Input {
+							Value = 1,
+						},
+						XRefraction = Input {
+							Value = 0.006,
+						},
+						YRefraction = Input {
+							Value = 0.006,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, -66 },
+					},
+				},
+				ShadowOff = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Torn",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.506, 0.492 },
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, -132 },
+					},
+				},
+				ShadowTint = BrightnessContrast {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "ShadowOff",
+							Source = "Output",
+						},
+						Gain = Input {
+							Value = 0,
+						},
+						Alpha = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, -132 },
+					},
+				},
+				PaperShadow = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "ShadowTint",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Torn",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, -66 },
+					},
+				},
+				Card = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "PaperShadow",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Text1",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 440, 0 },
+					},
+				},
+				Jitter = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Card",
+							Source = "Output",
+						},
+						Angle = Input {
+							Value = 0,
+							Expression = "Jitter.Wobble * (((sin(floor(time / max(1, Jitter.Hold)) * 12.9898 + 3.3) * 43758.5453) % 1) - 0.5) * 2",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 + Jitter.Shake * (((sin(floor(time / max(1, Jitter.Hold)) * 12.9898 + 5.1) * 43758.5453) % 1) - 0.5), 0.5 + Jitter.Shake * (((sin(floor(time / max(1, Jitter.Hold)) * 12.9898 + 8.9) * 43758.5453) % 1) - 0.5))",
+						},
+						Size = Input {
+							Value = 1,
+							Expression = "iif(time < 2*Jitter.Hold, 0.4, iif(time < 4*Jitter.Hold, 1.15, 1))",
+						},
+						Hold = Input {
+							Value = 3,
+						},
+						Wobble = Input {
+							Value = 3,
+						},
+						Shake = Input {
+							Value = 0.004,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 550, 0 },
+					},
+					UserControls = ordered() {
+						Hold = {
+							LINKS_Name = "Step (hold frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 3,
+							INP_MinScale = 1,
+							INP_MaxScale = 8,
+						},
+						Wobble = {
+							LINKS_Name = "Rotation Jitter (deg)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 3,
+							INP_MinScale = 0,
+							INP_MaxScale = 15,
+						},
+						Shake = {
+							LINKS_Name = "Position Jitter",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0.004,
+							INP_MinScale = 0,
+							INP_MaxScale = 0.03,
+						},
+					},
+				},
+				Canvas = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 660, -66 },
+					},
+				},
+				Timing = TimeSpeed {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Jitter",
+							Source = "Output",
+						},
+						Speed = Input {
+							Value = 1,
+						},
+						Delay = Input {
+							Value = 0,
+						},
+						InterpolateBetweenFrames = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 660, 0 },
+					},
+				},
+				OutFade = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Canvas",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Timing",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Blend = Input {
+							Value = 1,
+							Expression = "min(iif(OutFade.InFrames > 0, min(1, max(0, (time - comp.RenderStart - Timing.Delay) / max(1, OutFade.InFrames))), 1), iif(OutFade.OutFrames > 0, min(1, max(0, (comp.RenderEnd - time) / max(1, OutFade.OutFrames))), 1))",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						InFrames = Input {
+							Value = 0,
+						},
+						OutFrames = Input {
+							Value = 8,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 770, 0 },
+					},
+					UserControls = ordered() {
+						InFrames = {
+							LINKS_Name = "Fade In (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+						OutFrames = {
+							LINKS_Name = "Fade Out (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 8,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Paper_Cutout_Jitter",
+}

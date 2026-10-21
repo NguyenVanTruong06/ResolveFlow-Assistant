@@ -1,0 +1,219 @@
+{
+	Tools = ordered() {
+		RF_Flash_White_Glow = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Flash White / Glow Dissolve",
+				Kind = "Transition",
+			},
+			Inputs = ordered() {
+				MainInput1 = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Input",
+				},
+				MainInput2 = InstanceInput {
+					SourceOp = "ClipB",
+					Source = "Input",
+				},
+				Width = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Width",
+					Name = "Flash Width",
+					Page = "Controls",
+				},
+				Intensity = InstanceInput {
+					SourceOp = "ClipA",
+					Source = "Intensity",
+					Name = "Flash Intensity",
+					Page = "Controls",
+				},
+				FlashRed = InstanceInput {
+					SourceOp = "White",
+					Source = "TopLeftRed",
+					Name = "Flash Color",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				FlashGreen = InstanceInput {
+					SourceOp = "White",
+					Source = "TopLeftGreen",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				FlashBlue = InstanceInput {
+					SourceOp = "White",
+					Source = "TopLeftBlue",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				GlowSize = InstanceInput {
+					SourceOp = "Glow",
+					Source = "XGlowSize",
+					Name = "Glow Size",
+					Page = "Controls",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "Glow",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				ClipA = PipeRouter {
+					CtrlWZoom = false,
+					Inputs = {
+						Progress = Input {
+							Value = 0,
+							Expression = "(time - comp.RenderStart) / max(1, comp.RenderEnd - comp.RenderStart)",
+						},
+						Width = Input {
+							Value = 0.35,
+						},
+						Intensity = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -66 },
+					},
+					UserControls = ordered() {
+						Progress = {
+							LINKS_Name = "Progress (auto)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0,
+							INP_MinScale = 0,
+							INP_MaxScale = 1,
+						},
+						Width = {
+							LINKS_Name = "Flash Width",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0.35,
+							INP_MinScale = 0.05,
+							INP_MaxScale = 1,
+						},
+						Intensity = {
+							LINKS_Name = "Flash Intensity",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 1,
+							INP_MinScale = 0,
+							INP_MaxScale = 1,
+						},
+					},
+				},
+				ClipB = PipeRouter {
+					CtrlWZoom = false,
+					Inputs = { },
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 66 },
+					},
+				},
+				Switch = Dissolve {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "ClipA",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "ClipB",
+							Source = "Output",
+						},
+						Mix = Input {
+							Value = 0,
+							Expression = "(1 - (1 - min(1, max(0, (ClipA.Progress - 0.42) / 0.16)))^3)",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+				White = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 1,
+						},
+						TopLeftGreen = Input {
+							Value = 1,
+						},
+						TopLeftBlue = Input {
+							Value = 1,
+						},
+						TopLeftAlpha = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, -132 },
+					},
+				},
+				Flash = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Switch",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "White",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						Blend = Input {
+							Value = 0,
+							Expression = "ClipA.Intensity * max(0, 1 - abs(ClipA.Progress - 0.5) / max(0.01, ClipA.Width / 2))^1.5",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, 0 },
+					},
+				},
+				Glow = SoftGlow {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Flash",
+							Source = "Output",
+						},
+						Threshold = Input {
+							Value = 0.25,
+						},
+						Gain = Input {
+							Value = 0,
+							Expression = "2.5 * max(0, 1 - abs(ClipA.Progress - 0.5) / max(0.01, ClipA.Width / 2))",
+						},
+						XGlowSize = Input {
+							Value = 40,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, 0 },
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Flash_White_Glow",
+}

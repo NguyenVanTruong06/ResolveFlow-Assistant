@@ -64,7 +64,7 @@ from src.ui.theme import (
     get_application_stylesheet, get_badge_style, get_card_style, get_button_style
 )
 from src.ui.tabs import TabCopilot, TabAutoCut, TabAssets, TabSFX, TabExport
-from src.ui.bubble.floating_bubble import create_vector_icon
+from src.ui.icons import create_vector_icon, get_vector_icon
 from src.ui.widgets.mini_timeline import MiniTimelineWidget
 
 class PreviewDialog(QDialog):
@@ -131,10 +131,10 @@ class LLMDirectorWorker(QThread):
         self,
         engine_mode: str,  # "ollama" or "cloud"
         prompt: str,
-        model: str = "qwen2.5:7b-instruct",
+        model: Optional[str] = None,
         endpoint: str = "http://localhost:11434",
         api_key: str = "",
-        provider: str = "deepseek",
+        provider: str = "gemini",
         parent=None
     ):
         super().__init__(parent)
@@ -148,14 +148,16 @@ class LLMDirectorWorker(QThread):
     def run(self):
         try:
             if self.engine_mode == "ollama":
-                self.log_signal.emit(f"🤖 [Local AI] Đang gửi dữ liệu sang Ollama ({self.model}) tại {self.endpoint}...")
+                target_model = self.model or "qwen2.5:7b-instruct"
+                self.log_signal.emit(f"🤖 [Local AI] Đang gửi dữ liệu sang Ollama ({target_model}) tại {self.endpoint}...")
                 plan, raw_json = StoryCopilot.run_ollama_inference(
                     prompt=self.prompt,
-                    model=self.model,
+                    model=target_model,
                     endpoint=self.endpoint
                 )
             else:
-                self.log_signal.emit(f"⚡ [Cloud AI] Đang gửi dữ liệu sang {self.provider.upper()} API ({self.model})...")
+                target_desc = self.model or "Default"
+                self.log_signal.emit(f"⚡ [Cloud AI] Đang gửi dữ liệu sang {self.provider.upper()} API ({target_desc})...")
                 plan, raw_json = StoryCopilot.run_cloud_api_inference(
                     prompt=self.prompt,
                     api_key=self.api_key,
@@ -282,6 +284,7 @@ class PipelineWorker(QThread):
         self.story_arrangement_out = None
         self.last_exported_xml = None
         self.last_timeline_name = None
+        self.last_viral_pack_md = None
         
         # Cờ kiểm soát ngắt luồng an toàn
         self.is_interrupted = False
@@ -510,10 +513,24 @@ class PipelineWorker(QThread):
                             self.log_signal.emit("   🎙 Dịch giọng nói (Speech-to-Text Whisper)...")
                             lang_code = None if self.language == "Auto" else ("vi" if self.language == "Tiếng Việt" else "en")
                             
+                            last_log_pct = -1
+                            last_log_time = 0.0
+
                             def on_progress(ratio, text_snippet):
+                                nonlocal last_log_pct, last_log_time
                                 pct = int(ratio * 100)
-                                if pct % 20 == 0:
-                                    self.log_signal.emit(f"      ⏳ Quét giọng nói: {pct}% -> \"{text_snippet[:35]}...\"")
+                                now_t = time.time()
+                                snippet_clean = (text_snippet or "").strip()
+                                
+                                # Cập nhật tiến độ tổng mượt mà trong giai đoạn STT (15% -> 65%)
+                                clip_chunk = 50.0 / max(1, total_clips)
+                                current_overall = int(15 + (idx * clip_chunk) + (ratio * clip_chunk))
+                                self.progress_signal.emit(min(65, current_overall))
+
+                                if snippet_clean and (pct >= last_log_pct + 5 or (now_t - last_log_time) >= 0.7):
+                                    last_log_pct = pct
+                                    last_log_time = now_t
+                                    self.log_signal.emit(f"      🎙️ Đang nghe: \"{snippet_clean[:50]}\" ({pct}%)")
 
                             raw_subtitles = transcriber.transcribe(
                                 temp_wav, 
@@ -1276,6 +1293,9 @@ class PipelineWorker(QThread):
                         audit_reporter.add_output_file("Phụ đề Video Gốc (SRT)", output_cut_srt, "Phụ đề thô khớp với video quay ban đầu")
                         audit_reporter.add_output_file("Phụ đề Karaoke Gốc (FCPXML)", output_cut_fcpxml, f"Phụ đề chữ nhảy/đổi màu động (Text+) trên video gốc ({target_aspect})")
 
+                    self.log_signal.emit(f"   ✨ [Phụ đề Karaoke Text+] Đã tạo: {os.path.basename(output_cut_fcpxml)}")
+                    self.log_signal.emit(f"   📝 [Phụ đề Lời Thoại SRT] Đã tạo: {os.path.basename(output_cut_srt)}")
+
             if merged_edl_events and self.story_intent != "keep":
                 self._export_arranged_timeline(
                     events=merged_edl_events,
@@ -1308,15 +1328,6 @@ class PipelineWorker(QThread):
                         shutil.copy2(output_broll_file, os.path.join(output_dir, os.path.basename(output_broll_file)))
                     except Exception:
                         pass
-                with open(output_broll_file, "w", encoding="utf-8") as bf:
-                    bf.write(f"DANH SÁCH GỢI Ý CẢNH MINH HỌA B-ROLL (TRACK VIDEO 2)\n")
-                    bf.write(f"Dự án: {stamped_name}\n")
-                    bf.write("="*60 + "\n")
-                    for bc_idx, bc in enumerate(all_broll_cues, 1):
-                        bf.write(f"{bc_idx:02d}. [{bc.start}s - {bc.end}s] ({bc.duration}s)\n")
-                        bf.write(f"    - Từ khóa: {bc.keyword}\n")
-                        bf.write(f"    - Tìm kiếm: {bc.search_prompt}\n\n")
-                audit_reporter.add_output_file("Gợi ý B-Roll (TXT)", output_broll_file, "Danh sách từ khóa và mốc thời gian gợi ý chèn footage minh họa")
 
             if self.enable_subtitles and self.run_cut:
                 output_orig_srt = os.path.join(base_dir, f"{stamped_name}_PhuDe_VideoGoc.srt")
@@ -1348,6 +1359,7 @@ class PipelineWorker(QThread):
                     )
                     output_viral_pack_md = os.path.join(base_dir, f"{stamped_name}_GoiY_Marketing_ViralPack.md")
                     MarketingViralPackGenerator.export_markdown_report(viral_pack, output_viral_pack_md)
+                    self.last_viral_pack_md = output_viral_pack_md
                     audit_reporter.add_output_file("Gợi Ý Marketing & Viral Pack (MD)", output_viral_pack_md, "Bộ 5 Tiêu đề CTR cao, Hook mở đầu, Kịch bản CTA & SEO Description")
                     self.log_signal.emit(f"   🚀 [Marketing Viral Pack] Đã tạo gói gợi ý Tiêu đề & Kịch bản chuyển đổi: {os.path.basename(output_viral_pack_md)}")
             except Exception as e:
@@ -1780,6 +1792,7 @@ class AutoWindow(QMainWindow):
         self.validation_warnings = []
         self.project_structure: Optional[ProjectFolderStructure] = None
         self.story_review_state: Optional[StoryReviewState] = None
+        self.last_viral_pack_md: Optional[str] = None
 
         self.preset_mgr = PresetManager()
         self.recipe_mgr = RecipeManager()
@@ -1917,7 +1930,8 @@ class AutoWindow(QMainWindow):
         src_grid = QGridLayout()
         src_grid.setSpacing(6)
 
-        self.btn_browse_folder = QPushButton("📁 Thư mục")
+        self.btn_browse_folder = QPushButton(" Thư mục")
+        self.btn_browse_folder.setIcon(get_vector_icon("folder", "#fbbf24", 16))
         self.btn_browse_folder.setStyleSheet("""
             QPushButton {
                 background-color: #18181b;
@@ -1936,7 +1950,8 @@ class AutoWindow(QMainWindow):
         """)
         self.btn_browse_folder.clicked.connect(self._browse_folder)
 
-        self.btn_browse_files = QPushButton("🎬 Tệp video")
+        self.btn_browse_files = QPushButton(" Tệp video")
+        self.btn_browse_files.setIcon(get_vector_icon("video", "#38bdf8", 16))
         self.btn_browse_files.setStyleSheet("""
             QPushButton {
                 background-color: #18181b;
@@ -1955,7 +1970,8 @@ class AutoWindow(QMainWindow):
         """)
         self.btn_browse_files.clicked.connect(self._browse_file)
 
-        self.btn_from_davinci = QPushButton("🎞️ Từ DaVinci")
+        self.btn_from_davinci = QPushButton(" Từ DaVinci")
+        self.btn_from_davinci.setIcon(get_vector_icon("resolve", "#a78bfa", 16))
         self.btn_from_davinci.setStyleSheet("""
             QPushButton {
                 background-color: #18181b;
@@ -1974,7 +1990,8 @@ class AutoWindow(QMainWindow):
         """)
         self.btn_from_davinci.clicked.connect(self._auto_detect_video)
 
-        self.btn_google_drive = QPushButton("☁️ Google Drive")
+        self.btn_google_drive = QPushButton(" Google Drive")
+        self.btn_google_drive.setIcon(get_vector_icon("cloud", "#34d399", 16))
         self.btn_google_drive.setStyleSheet("""
             QPushButton {
                 background-color: #18181b;
@@ -2006,7 +2023,9 @@ class AutoWindow(QMainWindow):
         proj_layout.setSpacing(6)
 
         proj_top = QHBoxLayout()
-        lbl_p_icon = QLabel("📁")
+        lbl_p_icon = QLabel()
+        lbl_p_icon.setFixedSize(18, 18)
+        lbl_p_icon.setPixmap(create_vector_icon("folder", "#a1a1aa", 16))
         self.lbl_proj_name = QLabel("Chưa chọn dự án")
         self.lbl_proj_name.setStyleSheet("font-weight: bold; color: #a1a1aa; font-size: 12px;")
         proj_top.addWidget(lbl_p_icon)
@@ -2643,25 +2662,37 @@ class AutoWindow(QMainWindow):
         pw_lay.setContentsMargins(0, 0, 0, 0)
         pw_lay.setSpacing(8)
 
-        lbl_step1 = QLabel("1. Nhấn nút dưới đây để copy toàn bộ Transcript & Prompt gửi cho ChatGPT / Claude:")
+        lbl_step1 = QLabel("1. Chọn copy Prompt gửi cho ChatGPT / Claude (Miễn phí 0đ):")
         lbl_step1.setStyleSheet("color: #a1a1aa; font-size: 12px;")
         pw_lay.addWidget(lbl_step1)
 
-        self.btn_quick_copy = QPushButton("📋 1. Copy Prompt Đạo Diễn (Kèm Dữ Liệu Video)")
-        self.btn_quick_copy.setStyleSheet("background-color: #27272a; border: 1px solid #3f3f46; color: #f4f4f5; padding: 8px; border-radius: 6px; font-weight: bold;")
-        pw_lay.addWidget(self.btn_quick_copy)
+        row_copy_btns = QHBoxLayout()
+        row_copy_btns.setSpacing(6)
+        self.btn_quick_copy = QPushButton("📋 1. Prompt Dựng Video (V1)")
+        self.btn_quick_copy.setStyleSheet("background-color: #0284c7; color: #ffffff; padding: 8px; border-radius: 6px; font-weight: bold; font-size: 11px;")
+        row_copy_btns.addWidget(self.btn_quick_copy, stretch=1)
+
+        self.btn_copy_kinetic_prompt = QPushButton("✨ 2. Prompt Chữ Kinetic (V2)")
+        self.btn_copy_kinetic_prompt.setStyleSheet("background-color: #6366f1; color: #ffffff; padding: 8px; border-radius: 6px; font-weight: bold; font-size: 11px;")
+        row_copy_btns.addWidget(self.btn_copy_kinetic_prompt, stretch=1)
+        pw_lay.addLayout(row_copy_btns)
+
+        self.btn_one_click_kinetic = QPushButton("🚀 1-CLICK: Tự Phủ Chữ Kinetic Lên Track V2 (0.2s)")
+        self.btn_one_click_kinetic.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7c3aed, stop:1 #06b6d4); color: white; font-weight: bold; padding: 7px; border-radius: 6px; font-size: 11px; border: none;")
+        self.btn_one_click_kinetic.setToolTip("Tự động đọc Whisper, ngắt câu và bắn ngay chữ hoạt ảnh lên Track V2 DaVinci Resolve mà không cần qua AI Web!")
+        pw_lay.addWidget(self.btn_one_click_kinetic)
 
         lbl_step2 = QLabel("2. Dán mã JSON kịch bản mà AI trả về vào đây:")
         lbl_step2.setStyleSheet("color: #a1a1aa; font-size: 12px; margin-top: 6px;")
         pw_lay.addWidget(lbl_step2)
 
         self.txt_json_input = QPlainTextEdit()
-        self.txt_json_input.setPlaceholderText("Dán JSON kịch bản vào đây (bắt đầu bằng { 'timeline': ... })...")
-        self.txt_json_input.setFixedHeight(90)
+        self.txt_json_input.setPlaceholderText("Dán JSON kịch bản vào đây (Kịch bản Video V1 hoặc Kịch bản Chữ Kinetic V2)...")
+        self.txt_json_input.setFixedHeight(85)
         self.txt_json_input.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; border-radius: 6px; color: #22d3ee; font-family: monospace; font-size: 11px;")
         pw_lay.addWidget(self.txt_json_input)
 
-        self.lbl_json_hint = QLabel("💡 Dán JSON kịch bản vào ô trên · Nút [Bắt đầu dựng] bên dưới sẽ tự động kích hoạt")
+        self.lbl_json_hint = QLabel("💡 Tự động nhận diện: Video Plan (dựng Track V1) hoặc Kinetic Text Plan (phụ đề Track V2)")
         self.lbl_json_hint.setStyleSheet("color: #71717a; font-size: 11px; margin-top: 2px;")
         self.lbl_json_hint.setWordWrap(True)
         pw_lay.addWidget(self.lbl_json_hint)
@@ -2680,19 +2711,39 @@ class AutoWindow(QMainWindow):
         row_c1 = QHBoxLayout()
         row_c1.addWidget(QLabel("Nhà cung cấp:"))
         self.combo_cloud_provider = QComboBox()
-        self.combo_cloud_provider.addItems(["Google Gemini 1.5 Pro", "OpenAI GPT-4o", "Anthropic Claude 3.5 Sonnet"])
+        self.combo_cloud_provider.addItem("Google Gemini (AI Studio - Tốc độ cao)", "gemini")
+        self.combo_cloud_provider.addItem("DeepSeek V3 (Chi phí thấp, phản hồi nhanh)", "deepseek")
+        self.combo_cloud_provider.addItem("Claude 3.7 Sonnet (Phân tích kịch bản sâu)", "claude")
+        self.combo_cloud_provider.addItem("OpenAI GPT-4o (Đa dụng, ổn định)", "openai")
         self.combo_cloud_provider.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 6px; border-radius: 4px; color: #fff;")
         row_c1.addWidget(self.combo_cloud_provider, stretch=1)
         pc_lay.addLayout(row_c1)
 
         row_c2 = QHBoxLayout()
         row_c2.addWidget(QLabel("API Key:"))
-        self.txt_api_key = QLineEdit()
-        self.txt_api_key.setEchoMode(QLineEdit.Password)
-        self.txt_api_key.setPlaceholderText("sk-...")
-        self.txt_api_key.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 6px; border-radius: 4px; color: #fff;")
-        row_c2.addWidget(self.txt_api_key, stretch=1)
+        self.txt_cloud_api_key = QLineEdit()
+        self.txt_cloud_api_key.setEchoMode(QLineEdit.Password)
+        self.txt_cloud_api_key.setPlaceholderText("Dán API Key vào đây (AQ... hoặc sk-...)")
+        self.txt_cloud_api_key.setStyleSheet("background-color: #18181b; border: 1px solid #27272a; padding: 6px; border-radius: 4px; color: #fff;")
+        row_c2.addWidget(self.txt_cloud_api_key, stretch=1)
         pc_lay.addLayout(row_c2)
+
+        def _on_engine_key_changed(t: str):
+            key = t.strip()
+            if key.startswith("AQ.") or key.startswith("AIza"):
+                idx = self.combo_cloud_provider.findData("gemini")
+                if idx >= 0:
+                    self.combo_cloud_provider.setCurrentIndex(idx)
+            elif key.startswith("sk-ant-"):
+                idx = self.combo_cloud_provider.findData("claude")
+                if idx >= 0:
+                    self.combo_cloud_provider.setCurrentIndex(idx)
+            elif key.startswith("sk-proj-"):
+                idx = self.combo_cloud_provider.findData("openai")
+                if idx >= 0:
+                    self.combo_cloud_provider.setCurrentIndex(idx)
+
+        self.txt_cloud_api_key.textChanged.connect(_on_engine_key_changed)
 
         self.btn_run_api = QPushButton("⚡ 1-Click: Cloud AI Tự Động Lên Kịch Bản & Dựng")
         self.btn_run_api.setStyleSheet("background-color: #8b5cf6; color: #fff; font-weight: bold; padding: 8px; border-radius: 6px;")
@@ -2728,11 +2779,23 @@ class AutoWindow(QMainWindow):
         self.btn_mode_cloud.clicked.connect(lambda: switch_mode(1))
         self.btn_mode_ollama.clicked.connect(lambda: switch_mode(2))
 
+        def _get_active_api_key() -> str:
+            k = self.txt_cloud_api_key.text().strip() if hasattr(self, "txt_cloud_api_key") else ""
+            if not k and hasattr(self, "txt_api_key") and self.txt_api_key:
+                k = self.txt_api_key.text().strip()
+            return k
+
         self.btn_quick_copy.clicked.connect(self._quick_copy_copilot_prompt)
+        self.btn_copy_kinetic_prompt.clicked.connect(self._copy_kinetic_prompt_to_clipboard)
+        self.btn_one_click_kinetic.clicked.connect(self._on_one_click_kinetic_clicked)
         self.btn_apply_json.clicked.connect(self._on_btn_apply_json_clicked)
         self.txt_json_input.textChanged.connect(self._on_json_text_changed)
         self.btn_run_ollama.clicked.connect(lambda: self._run_local_ollama_pipeline("travel_vlog", self.combo_ollama_model.currentText(), "http://localhost:11434"))
-        self.btn_run_api.clicked.connect(lambda: self._run_cloud_api_pipeline("travel_vlog", self.combo_cloud_provider.currentText(), self.txt_api_key.text()))
+        self.btn_run_api.clicked.connect(lambda: self._run_cloud_api_pipeline(
+            "travel_vlog",
+            self.combo_cloud_provider.currentData() or self.combo_cloud_provider.currentText(),
+            _get_active_api_key()
+        ))
 
         ai_panel_layout.addWidget(self.ai_stack)
         acc_layout.addWidget(self.ai_engine_panel)
@@ -2874,25 +2937,57 @@ class AutoWindow(QMainWindow):
         self.btn_stop.setVisible(False)
         r_vbox.addWidget(self.btn_stop)
 
-        # Nút 1-Click DaVinci Resolve nổi bật khi chạy xong mà Resolve chưa bật
-        self.btn_1click_resolve = QPushButton("🚀 Đẩy ngay vào DaVinci Resolve (1-Click)")
+        # Nút 1-Click DaVinci Resolve nổi bật khi chạy xong mà Resolve chưa bật (Phong cách High-End Island Button)
+        self.btn_1click_resolve = QPushButton(" Đẩy ngay vào DaVinci Resolve (1-Click)")
+        self.btn_1click_resolve.setIcon(get_vector_icon("resolve", "#ffffff", 18))
+        self.btn_1click_resolve.setCursor(Qt.PointingHandCursor)
         self.btn_1click_resolve.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0288D1, stop:1 #00E5FF);
-                border: 1px solid #00E5FF;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7c3aed, stop:1 #0891b2);
+                border: 1px solid #8b5cf6;
                 color: #ffffff;
-                border-radius: 6px;
-                padding: 10px 16px;
-                font-weight: bold;
+                border-radius: 8px;
+                padding: 10px 18px;
+                font-weight: 600;
                 font-size: 13px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #03A9F4, stop:1 #18FFFF);
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8b5cf6, stop:1 #06b6d4);
+                border-color: #22d3ee;
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6d28d9, stop:1 #0e7490);
             }
         """)
         self.btn_1click_resolve.setVisible(False)
         self.btn_1click_resolve.clicked.connect(self._on_click_import_to_resolve)
         r_vbox.addWidget(self.btn_1click_resolve)
+
+        # Nút Mở Gợi Ý Marketing & Viral Pack (Markdown/Title/Hook)
+        self.btn_open_viral_pack = QPushButton(" 🚀 Xem Gợi Ý Marketing & Viral Pack")
+        self.btn_open_viral_pack.setIcon(get_vector_icon("evidence", "#ffffff", 16))
+        self.btn_open_viral_pack.setCursor(Qt.PointingHandCursor)
+        self.btn_open_viral_pack.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #059669, stop:1 #10b981);
+                border: 1px solid #34d399;
+                color: #ffffff;
+                border-radius: 8px;
+                padding: 10px 18px;
+                font-weight: 600;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #047857, stop:1 #059669);
+                border-color: #6ee7b7;
+            }
+            QPushButton:pressed {
+                background: #065f46;
+            }
+        """)
+        self.btn_open_viral_pack.setVisible(False)
+        self.btn_open_viral_pack.clicked.connect(self._on_click_open_viral_pack)
+        r_vbox.addWidget(self.btn_open_viral_pack)
 
         # Nhật ký Console
         log_head = QHBoxLayout()
@@ -3079,6 +3174,14 @@ class AutoWindow(QMainWindow):
         # Forward modern AI widgets to the TabCopilot backend dummy
         self.tab_copilot.txt_json_input = self.txt_json_input
         self.tab_copilot.btn_quick_copy = self.btn_quick_copy
+        self.tab_copilot.btn_copy_kinetic_prompt = self.btn_copy_kinetic_prompt
+        self.tab_copilot.btn_one_click_kinetic = self.btn_one_click_kinetic
+
+        # Kết nối các tín hiệu từ TabCopilot
+        self.tab_copilot.quick_copy_prompt_requested.connect(self._quick_copy_copilot_prompt)
+        self.tab_copilot.copy_kinetic_prompt_requested.connect(self._copy_kinetic_prompt_to_clipboard)
+        self.tab_copilot.one_click_kinetic_requested.connect(self._on_one_click_kinetic_clicked)
+        self.tab_copilot.apply_json_text_requested.connect(self._apply_json_text_plan)
 
         """Liên kết các thuộc tính widget trên các Tab để duy trì tính tương thích 100%."""
         # Tab 1: Auto Cut Delegates
@@ -3115,19 +3218,11 @@ class AutoWindow(QMainWindow):
         self.group_director = self.tab_autocut.group_director
         self.combo_ai_mode = self.tab_autocut.combo_ai_mode
         self.check_bad_takes = self.tab_autocut.check_bad_takes
-        self.check_punch_in = self.tab_autocut.check_punch_in
         self.txt_confidence_threshold = self.tab_autocut.txt_confidence_threshold
         self.group_vlog_hook = self.tab_autocut.group_vlog_hook
-        self.check_vlog_hook = self.tab_autocut.check_vlog_hook
         self.combo_hook_dur = self.tab_autocut.combo_hook_dur
         self.group_v4 = self.tab_autocut.group_v4
-        self.check_reframe = self.tab_autocut.check_reframe
-        self.check_broll = self.tab_autocut.check_broll
-        self.check_sfx = self.tab_autocut.check_sfx
-        self.check_evidence = getattr(self.tab_autocut, "check_evidence", getattr(self, "check_evidence", None))
-        self.check_geometry = getattr(self.tab_autocut, "check_geometry", getattr(self, "check_geometry", None))
         self.group_cut = self.tab_autocut.group_cut
-        self.check_cut = self.tab_autocut.check_cut
         self.check_speedup = self.tab_autocut.check_speedup
         self.slide_db = self.tab_autocut.slide_db
         self.lbl_db = self.tab_autocut.lbl_db
@@ -3135,9 +3230,41 @@ class AutoWindow(QMainWindow):
         self.lbl_dur = self.tab_autocut.lbl_dur
         self.combo_audio_track = self.tab_autocut.combo_audio_track
 
+        # Giữ các điều khiển hiển thị trên màn hình chính (center column) làm nguồn chân lý (Source of Truth)
+        # và thiết lập đồng bộ hai chiều (Bidirectional Sync) với tab_autocut & tab_titles
+        def _bind_bi_sync(vis_widget, tab_widget):
+            if vis_widget is None or tab_widget is None or vis_widget == tab_widget:
+                return
+            def on_vis(checked):
+                if tab_widget.isChecked() != checked:
+                    tab_widget.setChecked(checked)
+            def on_tab(checked):
+                if vis_widget.isChecked() != checked:
+                    vis_widget.setChecked(checked)
+            vis_widget.toggled.connect(on_vis)
+            tab_widget.toggled.connect(on_tab)
+            # Khởi tạo trạng thái ban đầu đồng bộ với màn hình chính
+            tab_widget.setChecked(vis_widget.isChecked())
+
+        # Thiết lập đồng bộ hai chiều cho 8 checkbox tính năng
+        if hasattr(self, "check_punch_in") and hasattr(self.tab_autocut, "check_punch_in"):
+            _bind_bi_sync(self.check_punch_in, self.tab_autocut.check_punch_in)
+        if hasattr(self, "check_broll") and hasattr(self.tab_autocut, "check_broll"):
+            _bind_bi_sync(self.check_broll, self.tab_autocut.check_broll)
+        if hasattr(self, "check_sfx") and hasattr(self.tab_autocut, "check_sfx"):
+            _bind_bi_sync(self.check_sfx, self.tab_autocut.check_sfx)
+        if hasattr(self, "check_reframe") and hasattr(self.tab_autocut, "check_reframe"):
+            _bind_bi_sync(self.check_reframe, self.tab_autocut.check_reframe)
+        if hasattr(self, "check_subtitle") and hasattr(self.tab_titles, "check_subtitle"):
+            _bind_bi_sync(self.check_subtitle, self.tab_titles.check_subtitle)
+        if hasattr(self, "check_cut") and hasattr(self.tab_autocut, "check_cut"):
+            _bind_bi_sync(self.check_cut, self.tab_autocut.check_cut)
+        if hasattr(self, "check_hook") and hasattr(self.tab_autocut, "check_vlog_hook"):
+            _bind_bi_sync(self.check_hook, self.tab_autocut.check_vlog_hook)
+        self.check_vlog_hook = self.check_hook
+
         # Tab 2: Titles Delegates
         self.group_sub = self.tab_titles.group_presets
-        self.check_subtitle = self.tab_titles.check_subtitle
         self.combo_text_preset = self.tab_titles.combo_text_preset
         self.btn_preview_preset = self.tab_titles.btn_preview_preset
         self.btn_save_custom_preset = self.tab_titles.btn_save_custom_preset
@@ -4190,6 +4317,16 @@ class AutoWindow(QMainWindow):
 
     def _run_cloud_api_pipeline(self, fmt: str, provider: str, api_key: str):
         """Chạy AI Đạo Diễn qua Cloud API ngầm không làm đơ giao diện."""
+        if not api_key:
+            if hasattr(self, "txt_cloud_api_key") and self.txt_cloud_api_key.text().strip():
+                api_key = self.txt_cloud_api_key.text().strip()
+            elif hasattr(self, "txt_api_key") and self.txt_api_key.text().strip():
+                api_key = self.txt_api_key.text().strip()
+
+        if not api_key:
+            QMessageBox.warning(self, "Thiếu API Key", "Vui lòng nhập API Key vào ô cấu hình Cloud API trước khi chạy.")
+            return
+
         proj_name, clips_data = self._build_copilot_clips_data()
         if not clips_data:
             QMessageBox.warning(self, "Chưa chọn video", "Vui lòng chọn video nguồn hoặc quét Cache ở Bước 1 trước khi chạy AI.")
@@ -4306,6 +4443,21 @@ class AutoWindow(QMainWindow):
             QMessageBox.warning(self, "Chưa có kịch bản JSON", "Vui lòng dán đoạn mã JSON kịch bản trước khi thi công.")
             return
 
+        # 1. Kiểm tra xem có phải là Director Text Plan (Kinetic Typography có "pages" và "presets") không
+        is_text_plan = False
+        raw_data = None
+        try:
+            import json
+            raw_data = json.loads(json_text)
+            if isinstance(raw_data, dict) and "pages" in raw_data and "presets" in raw_data:
+                is_text_plan = True
+        except Exception:
+            is_text_plan = False
+
+        if is_text_plan and raw_data:
+            self._apply_kinetic_text_plan(raw_data)
+            return
+
         self._set_ui_step_progress(15, "Đang phân tích kịch bản JSON...", 0)
         try:
             plan = StoryCopilot.parse_copilot_response(json_text)
@@ -4328,6 +4480,192 @@ class AutoWindow(QMainWindow):
             return
 
         self._on_copilot_plan_applied(plan)
+
+    def _extract_all_cached_words(self) -> list:
+        """Trích xuất toàn bộ mảng từ (word-level timestamps) từ Cache Whisper đã quét."""
+        from src.core.cache_manager import ScanCacheManager
+        cache_mgr = ScanCacheManager()
+        all_words = []
+        video_paths = getattr(self, "selected_files", [])
+        if not video_paths and hasattr(self, "project_structure") and self.project_structure:
+            video_paths = list(self.project_structure.all_video_paths)
+
+        model_name = self.combo_model.currentText() if hasattr(self, "combo_model") else "base"
+        lang_name = self.combo_lang.currentText() if hasattr(self, "combo_lang") else "vi"
+
+        for vp in video_paths:
+            cached = cache_mgr.get_cached_scan(vp, model_name, lang_name)
+            if cached:
+                raw_subs = cached.get("raw_subtitles", [])
+                for sub in raw_subs:
+                    w_list = sub.get("words", [])
+                    if w_list:
+                        for w in w_list:
+                            all_words.append({
+                                "word": w.get("word", "").strip(),
+                                "start": round(float(w.get("start", 0.0)), 3),
+                                "end": round(float(w.get("end", 0.0)), 3)
+                            })
+                    else:
+                        parts = sub.get("text", "").strip().split()
+                        st = float(sub.get("start", 0.0))
+                        et = float(sub.get("end", 0.0))
+                        step = (et - st) / max(len(parts), 1)
+                        for idx, p in enumerate(parts):
+                            all_words.append({
+                                "word": p,
+                                "start": round(st + idx * step, 3),
+                                "end": round(st + (idx + 1) * step, 3)
+                            })
+        return all_words
+
+    def _copy_kinetic_prompt_to_clipboard(self):
+        """Tạo Prompt Thiết Kế Phụ Đề Hoạt Ảnh (Director Text Plan) và copy vào Clipboard."""
+        from src.core.kinetic import generate_kinetic_prompt, DEMO_WORDS
+        all_words = self._extract_all_cached_words()
+        if not all_words:
+            reply = QMessageBox.question(
+                self,
+                "Chưa Quét Video Nguồn",
+                "Chưa tìm thấy dữ liệu từ vựng trong Cache.\n\n"
+                "👉 Bạn có muốn copy Prompt mẫu với 13 từ Demo Tiếng Việt để test thử với Claude / ChatGPT không?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            if reply == QMessageBox.Yes:
+                all_words = DEMO_WORDS
+            else:
+                return
+
+        aspect = "9:16"
+        if hasattr(self.tab_copilot, "combo_story_format"):
+            fmt = self.tab_copilot.combo_story_format.currentData() or "tiktok_short"
+            if fmt in ("travel_vlog", "podcast_summary"):
+                aspect = "16:9"
+
+        prompt = generate_kinetic_prompt(all_words, aspect=aspect)
+        QApplication.clipboard().setText(prompt)
+
+        self._log_message("=" * 60)
+        self._log_message("✨ [Kinetic Engine] ĐÃ COPY PROMPT THIẾT KẾ PHỤ ĐỀ KINETIC VÀO CLIPBOARD!")
+        self._log_message(f"👉 Số lượng từ: {len(all_words)} từ | Tỷ lệ khung hình: {aspect}")
+        self._log_message("👉 Hãy dán (Ctrl+V) vào Claude 3.7 hoặc ChatGPT để AI tạo kịch bản chữ.")
+        self._log_message("👉 Sau đó dán mã JSON trả về vào ô Kịch Bản và bấm 'Dựng Theo Kịch Bản Này'!")
+        self._log_message("=" * 60)
+
+        QMessageBox.information(
+            self,
+            "Đã Copy Prompt Chữ Kinetic!",
+            f"✨ Đã copy toàn bộ Prompt Thiết Kế Phụ Đề Kinetic ({len(all_words)} từ) vào Clipboard!\n\n"
+            "👉 Quy trình 3 bước:\n"
+            "1. Mở Claude 3.7 (claude.ai) hoặc ChatGPT.\n"
+            "2. Dán Prompt vào (Ctrl+V) và gửi.\n"
+            "3. Copy đoạn JSON kịch bản trả về, dán vào ô 'Dán JSON kịch bản' và bấm 'Dựng Theo Kịch Bản Này'."
+        )
+
+    def _on_one_click_kinetic_clicked(self):
+        """1-Click: Tự động phân tích mốc thời gian từ vựng và phủ phụ đề Kinetic lên Track V2."""
+        from src.core.kinetic import auto_plan, DEMO_WORDS
+        all_words = self._extract_all_cached_words()
+        if not all_words:
+            reply = QMessageBox.question(
+                self,
+                "Chưa Quét Video Nguồn",
+                "Chưa có dữ liệu từ vựng trong Cache.\n\n"
+                "👉 Bạn có muốn chạy thử nghiệm tính năng với 13 từ Demo Tiếng Việt không?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            if reply == QMessageBox.Yes:
+                all_words = DEMO_WORDS
+            else:
+                return
+
+        aspect = "9:16"
+        if hasattr(self.tab_copilot, "combo_story_format"):
+            fmt = self.tab_copilot.combo_story_format.currentData() or "tiktok_short"
+            if fmt in ("travel_vlog", "podcast_summary"):
+                aspect = "16:9"
+
+        self._log_message("🚀 [Kinetic Engine] Bắt đầu 1-Click Auto Plan (ngắt câu & tính đường cong đàn hồi Spring)...")
+        plan = auto_plan(all_words, aspect=aspect)
+        self._apply_kinetic_text_plan(plan)
+
+    def _apply_kinetic_text_plan(self, plan: dict):
+        """Phân tích và nạp Director Text Plan (Phụ đề hoạt ảnh Kinetic lên Track V2 DaVinci Resolve)."""
+        import os
+        import json
+        from src.core.kinetic import validate_plan, build_pages, page_to_comp, place_on_timeline, CANVAS
+
+        self._set_ui_step_progress(20, "Đang phân tích Director Text Plan...", 0)
+        self._log_message("🎨 [Kinetic Engine] Phát hiện Director Text Plan (Phụ đề Hoạt ảnh Fusion)...")
+
+        # Lấy danh sách words từ cache
+        all_words = self._extract_all_cached_words()
+        video_paths = getattr(self, "selected_files", [])
+        if not video_paths and hasattr(self, "project_structure") and self.project_structure:
+            video_paths = list(self.project_structure.all_video_paths)
+
+        if not all_words:
+            from src.core.kinetic import DEMO_WORDS
+            total_plan_words = max(p["word_range"][1] for p in plan["pages"]) + 1 if plan.get("pages") else 0
+            if total_plan_words == len(DEMO_WORDS):
+                all_words = DEMO_WORDS
+                self._log_message("   ℹ Sử dụng dữ liệu mốc từ demo (Demo Words) vì chưa quét video nguồn.")
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Chưa có Dữ Liệu Lời Thoại",
+                    f"Kịch bản chữ yêu cầu {total_plan_words} từ, nhưng hệ thống chưa có dữ liệu mốc thời gian từng từ trong Cache.\n\n"
+                    "👉 Vui lòng thêm Video và bấm 'Quét Phase 1' trước khi nạp Text Plan!"
+                )
+                self._set_ui_step_progress(0, "Chưa có Cache từ vựng", -1)
+                return
+
+        # Xác thực Plan
+        try:
+            validate_plan(plan, len(all_words))
+        except Exception as e:
+            QMessageBox.critical(self, "Lỗi Text Plan", f"Director Text Plan không hợp lệ:\n{e}")
+            self._set_ui_step_progress(0, "Lỗi Text Plan", -1)
+            return
+
+        self._set_ui_step_progress(50, "Đang sinh các Fusion comp (.comp)...", 0)
+        base_dir = os.path.dirname(os.path.abspath(video_paths[0])) if video_paths else os.getcwd()
+        out_dir = os.path.join(base_dir, "_TIMELINE_IMPORT", "kinetic_comps")
+        os.makedirs(out_dir, exist_ok=True)
+
+        aspect = plan.get("canvas", {}).get("aspect", "9:16")
+        fps = 30.0
+        W, H = CANVAS.get(aspect, (1080, 1920))
+
+        pages = build_pages(all_words, plan, fps)
+        for p in pages:
+            txt, _ = page_to_comp(p, fps, W, H)
+            with open(os.path.join(out_dir, f"page_{p.idx:04d}.comp"), "w", encoding="utf-8") as f:
+                f.write(txt)
+
+        self._log_message(f"   ✨ Đã sinh {len(pages)} Fusion composition (.comp) vào thư mục: {os.path.relpath(out_dir)}")
+
+        # Đặt lên timeline DaVinci Resolve nếu kết nối được
+        try:
+            place_on_timeline(pages, plan, out_dir, track=2)
+            self._log_message(f"   🚀 Đã nạp thành công {len(pages)} cụm chữ hoạt ảnh Kinetic lên Track V2 của DaVinci Resolve!")
+            QMessageBox.information(
+                self,
+                "Hoàn tất Dựng Chữ Kinetic",
+                f"Đã tạo thành công {len(pages)} Fusion Composition và nạp lên Track V2 của DaVinci Resolve!\n\n"
+                f"Thư mục lưu: {out_dir}"
+            )
+        except Exception as e:
+            self._log_message(f"   ℹ Các file Fusion .comp đã được tạo trong: {out_dir} (Không gọi được DaVinci API: {e})")
+            QMessageBox.information(
+                self,
+                "Đã sinh Fusion Comps",
+                f"Đã tạo thành công {len(pages)} tệp Fusion Comp tại:\n{out_dir}\n\n(Lưu ý: Để DaVinci tự động nhận diện qua API, cần mở DaVinci Resolve Studio và bật Preferences > General > External scripting = Local)."
+            )
+
+        self._set_ui_step_progress(100, "Hoàn tất Dựng Kinetic", 1)
 
     def _load_json_plan_from_disk(self):
         """Mở tệp JSON kịch bản (AI Copilot Director Plan) và xuất Timeline ngay lập tức trong 0.1s."""
@@ -4649,8 +4987,12 @@ class AutoWindow(QMainWindow):
                     aspect_ratio="16:9",
                     markers=markers
                 )
+                self.txt_console.appendPlainText(f"   ✨ [Phụ đề Karaoke Text+] Đã xuất: {os.path.basename(out_sub_fcpxml)}")
+                self.txt_console.appendPlainText(f"   📝 [Phụ đề Lời thoại SRT] Đã xuất: {os.path.basename(out_sub_srt)}")
             except Exception as e:
                 self.txt_console.appendPlainText(f"   ⚠ Lỗi khi xuất tệp phụ đề: {e}")
+        else:
+            self.txt_console.appendPlainText("   ℹ [Lưu ý Phụ đề] Chưa có dữ liệu transcript trong Cache nên không tạo file Phụ đề Karaoke. (Để có phụ đề Karaoke Text+ khi dựng kịch bản JSON, hãy chạy Quét Phase 1 trước).")
 
         # 4.1. Xuất file Kịch Bản Chi Tiết (TXT) để người dùng dễ đọc và theo dõi
         out_script_txt = str(Path(output_dir) / f"{timeline_name}_KichBan_ChiTiet.txt")
@@ -4846,7 +5188,7 @@ class AutoWindow(QMainWindow):
             import subprocess
             target_path = os.path.abspath(out_fcp7xml)
             if sys.platform.startswith("win"):
-                subprocess.run(f'explorer /select,"{target_path}"', shell=True)
+                subprocess.run(["explorer", f"/select,{target_path}"])
             elif sys.platform.startswith("darwin"):
                 subprocess.run(["open", "-R", target_path])
             else:
@@ -4956,6 +5298,24 @@ class AutoWindow(QMainWindow):
             self.txt_console.appendPlainText(f"⚠️ {msg}")
             QMessageBox.warning(self, "Chưa thể kết nối", f"{msg}\nVui lòng bật DaVinci Resolve và thử lại.")
 
+    def _on_click_open_viral_pack(self):
+        """Mở tệp Markdown Gợi ý Marketing & Viral Pack (Tiêu đề, Hooks, Kịch bản CTA)."""
+        target = getattr(self, "last_viral_pack_md", None)
+        if not target or not os.path.exists(target):
+            QMessageBox.information(self, "Chưa có file", "Chưa có file gợi ý Marketing Viral Pack được tạo cho phiên này.")
+            return
+        try:
+            import subprocess, sys
+            if sys.platform == "darwin":
+                subprocess.run(["open", target])
+            elif sys.platform.startswith("linux"):
+                subprocess.run(["xdg-open", target])
+            else:
+                os.startfile(target)
+            self.txt_console.appendPlainText(f"🚀 Đã mở file Marketing Viral Pack: {os.path.basename(target)}")
+        except Exception as e:
+            QMessageBox.warning(self, "Lỗi mở file", f"Không thể tự động mở file: {e}\nĐường dẫn: {target}")
+
     def _stop_pipeline(self):
         if self.worker and self.worker.isRunning():
             self.btn_run.setEnabled(False)
@@ -5016,6 +5376,8 @@ class AutoWindow(QMainWindow):
             self.btn_stop.setText("⏹ Dừng tiến trình")
         if hasattr(self, "btn_1click_resolve") and running:
             self.btn_1click_resolve.setVisible(False)
+        if hasattr(self, "btn_open_viral_pack") and running:
+            self.btn_open_viral_pack.setVisible(False)
 
         if running:
             self.btn_run.setEnabled(True)
@@ -5516,6 +5878,13 @@ class AutoWindow(QMainWindow):
                 if self.bubble: self.bubble.update_progress(0, "Đã dừng" if ("dừng" in message.lower() or "cancel" in message.lower()) else "Sự cố")
         
         if success:
+            self.progress_bar.setValue(100)
+            if hasattr(self, "lbl_pct_big"):
+                self.lbl_pct_big.setText("100%")
+            if hasattr(self, "step_tracker") and message != "phase1_done":
+                for k in self.step_tracker.step_keys:
+                    self.step_tracker._set_row_done(k)
+
             self._check_project_cache_status()
             if message == "phase1_done":
                 self._set_workflow_stage(2)
@@ -5613,6 +5982,11 @@ class AutoWindow(QMainWindow):
                         self.txt_console.appendPlainText("💡 DaVinci Resolve chưa bật. Bạn có thể mở Resolve và bấm '🚀 Đẩy ngay vào DaVinci Resolve (1-Click)'.")
                         if hasattr(self, "btn_1click_resolve"):
                             self.btn_1click_resolve.setVisible(True)
+
+                self.last_viral_pack_md = getattr(self.worker, "last_viral_pack_md", None)
+                if self.last_viral_pack_md and os.path.exists(self.last_viral_pack_md):
+                    if hasattr(self, "btn_open_viral_pack"):
+                        self.btn_open_viral_pack.setVisible(True)
         else:
             if "dừng" in message.lower() or "cancel" in message.lower():
                 self.lbl_progress_status.setText("🛑 Đã dừng tiến trình theo yêu cầu.")
@@ -5988,7 +6362,7 @@ def start_gui(): # DEPRECATED
     app = QApplication(sys.argv)
     default_font = QFont("Segoe UI", 10)
     app.setFont(default_font)
-    window = ChunDVCApp()
+    window = AutoWindow()
     window.show()
     sys.exit(app.exec())
 

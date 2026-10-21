@@ -1,0 +1,166 @@
+{
+	Tools = ordered() {
+		RF_Light_Leak = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Light leak",
+				Kind = "Generator",
+				CompositeHint = "Screen",
+			},
+			Inputs = ordered() {
+				TintRed = InstanceInput {
+					SourceOp = "Tint",
+					Source = "TopLeftRed",
+					Name = "Leak Color",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				TintGreen = InstanceInput {
+					SourceOp = "Tint",
+					Source = "TopLeftGreen",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				TintBlue = InstanceInput {
+					SourceOp = "Tint",
+					Source = "TopLeftBlue",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				Drift = InstanceInput {
+					SourceOp = "Leak",
+					Source = "SeetheRate",
+					Name = "Drift Speed",
+					Page = "Controls",
+				},
+				Brightness = InstanceInput {
+					SourceOp = "Leak",
+					Source = "Brightness",
+					Name = "Brightness",
+					Page = "Controls",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "Bloom",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				Leak = FastNoise {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						Detail = Input {
+							Value = 2,
+						},
+						Contrast = Input {
+							Value = 2.4,
+						},
+						Brightness = Input {
+							Value = -0.15,
+						},
+						XScale = Input {
+							Value = 1.4,
+						},
+						SeetheRate = Input {
+							Value = 0.08,
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "Point(0.5 + 0.25 * sin(time / 70), 0.5)",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, 0 },
+					},
+				},
+				Tint = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 1,
+						},
+						TopLeftGreen = Input {
+							Value = 0.45,
+						},
+						TopLeftBlue = Input {
+							Value = 0.12,
+						},
+						TopLeftAlpha = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -66 },
+					},
+				},
+				Colorize = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Leak",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Tint",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						ApplyMode = Input {
+							Value = "Multiply",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+				Bloom = SoftGlow {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "Colorize",
+							Source = "Output",
+						},
+						Threshold = Input {
+							Value = 0,
+						},
+						Gain = Input {
+							Value = 1.2,
+						},
+						XGlowSize = Input {
+							Value = 80,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, 0 },
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Light_Leak",
+}

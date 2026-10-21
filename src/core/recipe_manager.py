@@ -397,8 +397,14 @@ class RecipeManager:
         return file_path
 
     def delete_recipe(self, recipe_id: str) -> bool:
-        """Xóa recipe theo ID."""
-        file_path = os.path.join(self.base_dir, f"{recipe_id}.json")
+        """Xóa recipe theo ID một cách an toàn."""
+        safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', str(recipe_id)).lower().strip()
+        if not safe_id:
+            return False
+        file_path = os.path.abspath(os.path.join(self.base_dir, f"{safe_id}.json"))
+        base_dir_abs = os.path.abspath(self.base_dir)
+        if not file_path.startswith(base_dir_abs):
+            return False
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
@@ -406,3 +412,4 @@ class RecipeManager:
             except Exception:
                 return False
         return False
+

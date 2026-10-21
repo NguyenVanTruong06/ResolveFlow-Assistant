@@ -1,0 +1,617 @@
+{
+	Tools = ordered() {
+		RF_Minimal_Quote_Box = MacroOperator {
+			CtrlWZoom = false,
+			NameSet = true,
+			CustomData = {
+				Style = "Minimalist Quote Box",
+			},
+			Inputs = ordered() {
+				Text = InstanceInput {
+					SourceOp = "Quote",
+					Source = "StyledText",
+					Name = "Quote",
+					Page = "Controls",
+				},
+				Font = InstanceInput {
+					SourceOp = "Quote",
+					Source = "Font",
+					Name = "Quote Font",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Style = InstanceInput {
+					SourceOp = "Quote",
+					Source = "Style",
+					Name = "Quote Style",
+					ControlGroup = 10,
+					Page = "Controls",
+				},
+				Size = InstanceInput {
+					SourceOp = "Quote",
+					Source = "Size",
+					Name = "Quote Size",
+					Page = "Controls",
+				},
+				Red = InstanceInput {
+					SourceOp = "Quote",
+					Source = "Red1",
+					Name = "Quote Color",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Green = InstanceInput {
+					SourceOp = "Quote",
+					Source = "Green1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				Blue = InstanceInput {
+					SourceOp = "Quote",
+					Source = "Blue1",
+					ControlGroup = 11,
+					Page = "Controls",
+				},
+				AuthorText = InstanceInput {
+					SourceOp = "Author",
+					Source = "StyledText",
+					Name = "Author",
+					Page = "Controls",
+				},
+				AuthorFont = InstanceInput {
+					SourceOp = "Author",
+					Source = "Font",
+					Name = "Author Font",
+					ControlGroup = 40,
+					Page = "Controls",
+				},
+				AuthorStyle = InstanceInput {
+					SourceOp = "Author",
+					Source = "Style",
+					Name = "Author Style",
+					ControlGroup = 40,
+					Page = "Controls",
+				},
+				AuthorSize = InstanceInput {
+					SourceOp = "Author",
+					Source = "Size",
+					Name = "Author Size",
+					Page = "Controls",
+				},
+				AuthorRed = InstanceInput {
+					SourceOp = "Author",
+					Source = "Red1",
+					Name = "Author Color",
+					ControlGroup = 41,
+					Page = "Controls",
+				},
+				AuthorGreen = InstanceInput {
+					SourceOp = "Author",
+					Source = "Green1",
+					ControlGroup = 41,
+					Page = "Controls",
+				},
+				AuthorBlue = InstanceInput {
+					SourceOp = "Author",
+					Source = "Blue1",
+					ControlGroup = 41,
+					Page = "Controls",
+				},
+				BoxWidth = InstanceInput {
+					SourceOp = "BoxMask",
+					Source = "Width",
+					Name = "Box Width",
+					Page = "Controls",
+				},
+				BoxHeight = InstanceInput {
+					SourceOp = "BoxMask",
+					Source = "Height",
+					Name = "Box Height",
+					Page = "Controls",
+				},
+				Corner = InstanceInput {
+					SourceOp = "BoxMask",
+					Source = "CornerRadius",
+					Name = "Corner Radius",
+					Page = "Controls",
+				},
+				BorderWidth = InstanceInput {
+					SourceOp = "BorderMask",
+					Source = "BorderWidth",
+					Name = "Border Width",
+					Page = "Controls",
+				},
+				BoxAlpha = InstanceInput {
+					SourceOp = "Box",
+					Source = "TopLeftAlpha",
+					Name = "Box Opacity",
+					Page = "Controls",
+				},
+				BorderRed = InstanceInput {
+					SourceOp = "Border",
+					Source = "TopLeftRed",
+					Name = "Border Color",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				BorderGreen = InstanceInput {
+					SourceOp = "Border",
+					Source = "TopLeftGreen",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				BorderBlue = InstanceInput {
+					SourceOp = "Border",
+					Source = "TopLeftBlue",
+					ControlGroup = 30,
+					Page = "Controls",
+				},
+				StartScale = InstanceInput {
+					SourceOp = "GentleScale",
+					Source = "From",
+					Name = "Start Scale",
+					Page = "Animation",
+				},
+				ScaleFrames = InstanceInput {
+					SourceOp = "GentleScale",
+					Source = "Frames",
+					Name = "Scale Duration",
+					Page = "Animation",
+				},
+				Delay = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Delay",
+					Name = "Delay (frames)",
+					Page = "Animation",
+				},
+				Speed = InstanceInput {
+					SourceOp = "Timing",
+					Source = "Speed",
+					Name = "Animation Speed",
+					Page = "Animation",
+				},
+				Position = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "Center",
+					Name = "Position",
+					Page = "Controls",
+				},
+				FadeIn = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "InFrames",
+					Name = "Fade In (frames)",
+					Page = "Animation",
+				},
+				FadeOut = InstanceInput {
+					SourceOp = "OutFade",
+					Source = "OutFrames",
+					Name = "Fade Out (frames)",
+					Page = "Animation",
+				},
+			},
+			Outputs = {
+				MainOutput1 = InstanceOutput {
+					SourceOp = "OutFade",
+					Source = "Output",
+				},
+			},
+			ViewInfo = GroupInfo {
+				Pos = { 0, 0 },
+			},
+			Tools = ordered() {
+				BoxMask = RectangleMask {
+					CtrlWZoom = false,
+					Inputs = {
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Width = Input {
+							Value = 0.62,
+						},
+						Height = Input {
+							Value = 0.3,
+						},
+						CornerRadius = Input {
+							Value = 0.12,
+						},
+						SoftEdge = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -132 },
+					},
+				},
+				BorderMask = RectangleMask {
+					CtrlWZoom = false,
+					Inputs = {
+						Center = Input {
+							Value = { 0.5, 0.5 },
+							Expression = "BoxMask.Center",
+						},
+						Width = Input {
+							Value = 0.62,
+							Expression = "BoxMask.Width",
+						},
+						Height = Input {
+							Value = 0.3,
+							Expression = "BoxMask.Height",
+						},
+						CornerRadius = Input {
+							Value = 0.12,
+							Expression = "BoxMask.CornerRadius",
+						},
+						Solid = Input {
+							Value = 0,
+						},
+						BorderWidth = Input {
+							Value = 0.0025,
+						},
+						SoftEdge = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 0, -198 },
+					},
+				},
+				Box = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0.06,
+						},
+						TopLeftGreen = Input {
+							Value = 0.06,
+						},
+						TopLeftBlue = Input {
+							Value = 0.07,
+						},
+						TopLeftAlpha = Input {
+							Value = 0.72,
+						},
+						EffectMask = Input {
+							SourceOp = "BoxMask",
+							Source = "Mask",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, -132 },
+					},
+				},
+				Border = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 1,
+						},
+						TopLeftGreen = Input {
+							Value = 0.8313725490196079,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 1,
+						},
+						EffectMask = Input {
+							SourceOp = "BorderMask",
+							Source = "Mask",
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, -198 },
+					},
+				},
+				Quote = TextPlus {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						StyledText = Input {
+							Value = "“RESOLVEFLOW”",
+						},
+						Font = Input {
+							Value = "Open Sans",
+						},
+						Style = Input {
+							Value = "Italic",
+						},
+						Size = Input {
+							Value = 0.044000000000000004,
+						},
+						Center = Input {
+							Value = { 0.5, 0.53 },
+						},
+						Red1 = Input {
+							Value = 1,
+						},
+						Green1 = Input {
+							Value = 1,
+						},
+						Blue1 = Input {
+							Value = 1,
+						},
+						Alpha1 = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, -66 },
+					},
+				},
+				Author = TextPlus {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						StyledText = Input {
+							Value = "— Subtitle goes here",
+						},
+						Font = Input {
+							Value = "Open Sans",
+						},
+						Style = Input {
+							Value = "Regular",
+						},
+						Size = Input {
+							Value = 0.0256,
+						},
+						Center = Input {
+							Value = { 0.5, 0.42 },
+						},
+						Red1 = Input {
+							Value = 1,
+						},
+						Green1 = Input {
+							Value = 0.8313725490196079,
+						},
+						Blue1 = Input {
+							Value = 0,
+						},
+						Alpha1 = Input {
+							Value = 1,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 110, 0 },
+					},
+				},
+				BoxBorder = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Box",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Border",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 220, -132 },
+					},
+				},
+				BoxQuote = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "BoxBorder",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Quote",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 330, -66 },
+					},
+				},
+				BoxAll = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "BoxQuote",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Author",
+							Source = "Output",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 440, 0 },
+					},
+				},
+				GentleScale = Transform {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "BoxAll",
+							Source = "Output",
+						},
+						Size = Input {
+							Value = 1,
+							Expression = "GentleScale.From + (1 - GentleScale.From) * (1 - (1 - min(1, max(0, time / max(1, GentleScale.Frames))))^3)",
+						},
+						From = Input {
+							Value = 0.92,
+						},
+						Frames = Input {
+							Value = 20,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 550, 0 },
+					},
+					UserControls = ordered() {
+						From = {
+							LINKS_Name = "Start Scale",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 0.92,
+							INP_MinScale = 0.5,
+							INP_MaxScale = 1,
+						},
+						Frames = {
+							LINKS_Name = "Scale Duration",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 20,
+							INP_MinScale = 1,
+							INP_MaxScale = 90,
+						},
+					},
+				},
+				Canvas = Background {
+					CtrlWZoom = false,
+					Inputs = {
+						Width = Input {
+							Value = 1920,
+						},
+						Height = Input {
+							Value = 1080,
+						},
+						UseFrameFormatSettings = Input {
+							Value = 1,
+						},
+						TopLeftRed = Input {
+							Value = 0,
+						},
+						TopLeftGreen = Input {
+							Value = 0,
+						},
+						TopLeftBlue = Input {
+							Value = 0,
+						},
+						TopLeftAlpha = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 660, -66 },
+					},
+				},
+				Timing = TimeSpeed {
+					CtrlWZoom = false,
+					Inputs = {
+						Input = Input {
+							SourceOp = "GentleScale",
+							Source = "Output",
+						},
+						Speed = Input {
+							Value = 1,
+						},
+						Delay = Input {
+							Value = 0,
+						},
+						InterpolateBetweenFrames = Input {
+							Value = 0,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 660, 0 },
+					},
+				},
+				OutFade = Merge {
+					CtrlWZoom = false,
+					Inputs = {
+						Background = Input {
+							SourceOp = "Canvas",
+							Source = "Output",
+						},
+						Foreground = Input {
+							SourceOp = "Timing",
+							Source = "Output",
+						},
+						Center = Input {
+							Value = { 0.5, 0.5 },
+						},
+						Blend = Input {
+							Value = 1,
+							Expression = "min(iif(OutFade.InFrames > 0, min(1, max(0, (time - comp.RenderStart - Timing.Delay) / max(1, OutFade.InFrames))), 1), iif(OutFade.OutFrames > 0, min(1, max(0, (comp.RenderEnd - time) / max(1, OutFade.OutFrames))), 1))",
+						},
+						PerformDepthMerge = Input {
+							Value = 0,
+						},
+						InFrames = Input {
+							Value = 15,
+						},
+						OutFrames = Input {
+							Value = 8,
+						},
+					},
+					ViewInfo = OperatorInfo {
+						Pos = { 770, 0 },
+					},
+					UserControls = ordered() {
+						InFrames = {
+							LINKS_Name = "Fade In (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 15,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+						OutFrames = {
+							LINKS_Name = "Fade Out (frames)",
+							ICS_ControlPage = "Controls",
+							LINKID_DataType = "Number",
+							INPID_InputControl = "SliderControl",
+							INP_Default = 8,
+							INP_MinScale = 0,
+							INP_MaxScale = 60,
+						},
+					},
+				},
+			},
+		},
+	},
+	ActiveTool = "RF_Minimal_Quote_Box",
+}
