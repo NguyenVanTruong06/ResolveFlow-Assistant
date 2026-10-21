@@ -116,10 +116,10 @@ class DockRailWidget(QWidget):
 
         # 4. Director button
         self.btn_director = QPushButton()
-        self.btn_director.setIcon(get_vector_icon("play", "#06b6d4", 14))
-        self.btn_director.setIconSize(QSize(14, 14))
+        self.btn_director.setIcon(get_vector_icon("ai", "#06b6d4", 16))
+        self.btn_director.setIconSize(QSize(16, 16))
         self.btn_director.setFixedSize(34, 34)
-        self.btn_director.setToolTip("AI Director")
+        self.btn_director.setToolTip("Mở ChunDVC Director (AI AutoCut, Phụ đề, Prompt JSON)")
         self.btn_director.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_director.setCursor(Qt.PointingHandCursor)
         self.btn_director.setStyleSheet("""

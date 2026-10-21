@@ -5,8 +5,10 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QPushButton, QLineEdit, QLabel, QFrame
 )
-from PySide6.QtCore import Qt, Signal as pyqtSignal
+from PySide6.QtCore import Qt, QSize, Signal as pyqtSignal
 from PySide6.QtGui import QKeyEvent
+
+from src.ui.icons import get_vector_icon
 
 
 class SearchLineEdit(QLineEdit):
@@ -33,7 +35,7 @@ class SearchLineEdit(QLineEdit):
 class DockHeaderWidget(QWidget):
     """
     44px Top Header Bar:
-    [ ● Edit ]  [ ⌕ Tìm: chữ, shake... ]  [ ⤢ ] [ 📌 ] [ » ]
+    [ ● Edit ]  [ ⌕ Tìm: chữ, shake... ]  [ 🤖 ] [ 🎨 ] [ ⤢ ] [ 📌 ] [ » ]
     """
     search_changed = pyqtSignal(str)
     search_submitted = pyqtSignal()
@@ -41,6 +43,7 @@ class DockHeaderWidget(QWidget):
     page_clicked = pyqtSignal()
     pending_chip_clicked = pyqtSignal()
     profile_lock_selected = pyqtSignal(str)
+    director_clicked = pyqtSignal()
     wide_toggled = pyqtSignal()
     pin_toggled = pyqtSignal()
     collapse_clicked = pyqtSignal()
@@ -133,8 +136,22 @@ class DockHeaderWidget(QWidget):
         self.txt_search.escape_pressed.connect(self.escape_requested.emit)
         layout.addWidget(self.txt_search, stretch=1)
 
+        # 2.4. Director Mode button (ChunDVC Director: AI AutoCut, Subtitles, Prompt JSON)
+        self.btn_director = QPushButton()
+        self.btn_director.setIcon(get_vector_icon("ai", "#c4b5fd", 16))
+        self.btn_director.setIconSize(QSize(16, 16))
+        self.btn_director.setFixedSize(28, 28)
+        self.btn_director.setToolTip("Mở ChunDVC Director (AI AutoCut, Phụ đề, Web Prompt JSON 0đ)")
+        self.btn_director.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_director.setCursor(Qt.PointingHandCursor)
+        self.btn_director.setStyleSheet(self._button_style(active=False))
+        self.btn_director.clicked.connect(self.director_clicked.emit)
+        layout.addWidget(self.btn_director)
+
         # 2.5. Studio Mode button (Full 4-column assets library window)
-        self.btn_studio = QPushButton("🎨")
+        self.btn_studio = QPushButton()
+        self.btn_studio.setIcon(get_vector_icon("studio", "#a1a1aa", 16))
+        self.btn_studio.setIconSize(QSize(16, 16))
         self.btn_studio.setFixedSize(28, 28)
         self.btn_studio.setToolTip("Mở Kho Đạo Cụ Studio đầy đủ (4 cột)")
         self.btn_studio.setFocusPolicy(Qt.FocusPolicy.NoFocus)

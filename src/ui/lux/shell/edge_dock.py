@@ -216,6 +216,7 @@ class EdgeDockWindow(QWidget):
         self.header.pin_toggled.connect(self._on_toggle_pin)
         self.header.collapse_clicked.connect(self.collapse_dock)
         self.header.restore_standard_window_clicked.connect(self.restore_standard_window_requested.emit)
+        self.header.director_clicked.connect(self.director_requested.emit)
         self.header.pending_chip_clicked.connect(self.router.apply_pending)
         self.header.profile_lock_selected.connect(self.router.lock_profile)
         exp_layout.addWidget(self.header)

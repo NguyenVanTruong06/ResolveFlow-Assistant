@@ -231,6 +231,15 @@ def test_edge_dock_open_director_and_palette_command(qapp):
     dock._on_palette_command_executed("cmd_autocut")
     assert dock._director_window.isVisible() is True
 
+    # Thử qua header button và rail button
+    dock._director_window.close()
+    dock.header.btn_director.click()
+    assert dock._director_window.isVisible() is True
+
+    dock._director_window.close()
+    dock.rail.btn_director.click()
+    assert dock._director_window.isVisible() is True
+
     dock.close()
     dock._director_window.close()
     dock.palette.close()

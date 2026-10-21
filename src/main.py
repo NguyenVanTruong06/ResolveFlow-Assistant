@@ -121,11 +121,16 @@ def start_app():
         bubble.raise_()
         bubble.activateWindow()
 
-    # 7. Hỗ trợ mở trực tiếp các cửa sổ qua cờ CLI
-    if "--director" in sys.argv or "--auto" in sys.argv:
-        dock.open_director()
-    elif "--studio" in sys.argv:
+    # 7. Khởi chạy giao diện chính:
+    # Mặc định: Mở ChunDVC Director (AI Workstation) để người dùng chọn footage,
+    # kiểm tra cache Whisper, sinh Web Prompt JSON 0đ và cắt dựng video ngay lập tức.
+    # EdgeDock vẫn đồng thời sẵn sàng ở mép màn hình để chèn nhanh preset/asset.
+    if "--studio" in sys.argv:
         open_studio()
+    elif "--dock-only" in sys.argv:
+        pass  # Chỉ hiển thị EdgeDock
+    else:
+        dock.open_director()
 
     def cleanup():
         try:
