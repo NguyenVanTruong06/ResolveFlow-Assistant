@@ -37,6 +37,8 @@ class GlobalHotkeyService(QObject):
         self._running: bool = False
         self._enabled: bool = True
         self._display = None
+        import atexit
+        atexit.register(self.stop)
         self._init_platform_hotkeys()
 
     def _init_platform_hotkeys(self):

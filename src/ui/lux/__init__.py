@@ -6,7 +6,6 @@ Provides Floating Edge Drawer, Micro-Interactions, MacroCard Grid, and Resolve W
 from .lux_effects import RippleOverlay, SegmentIndicator, get_luxury_dark_stylesheet
 from .macro_card import MacroCard, MacroGridWidget
 from .window_anchor import ResolveWindowAnchor, get_resolve_window_rect, calculate_dock_geometry
-from .panel_edge_rail import EdgeDrawerWindow
 from .shell import EdgeDockWindow, DockState, DockStateMachine, ChunDVCTrayIcon
 from .shell.tray import USE_NEW_EDGE_DOCK, SHOW_FLOATING_BUBBLE
 from .palette import CommandPaletteWindow, CommandRegistry, PaletteSearchProvider
@@ -22,7 +21,6 @@ __all__ = [
     "ResolveWindowAnchor",
     "get_resolve_window_rect",
     "calculate_dock_geometry",
-    "EdgeDrawerWindow",
     "EdgeDockWindow",
     "DockState",
     "DockStateMachine",

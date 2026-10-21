@@ -3216,7 +3216,7 @@ class TabAssets(QWidget):
         )
 
         scanned_luts = indexer.scan_luts()
-        self.all_luts = dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else MOCKUP_LUTS.copy()
+        self.all_luts = MOCKUP_LUTS.copy() + (dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else [])
         
         scanned_memes = indexer.scan_memes()
         self.all_memes = dicts_to_assets(scanned_memes, "meme", "trending", "Meme", "🎭") if scanned_memes else MOCKUP_MEMES.copy()
@@ -3297,35 +3297,6 @@ class TabAssets(QWidget):
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-
-        # =====================================================================
-        # WIDGETS TƯƠNG THÍCH NGƯỢC (Bắt buộc cho app.py & test_ui.py)
-        # =====================================================================
-        self.group_presets = QGroupBox("Legacy")
-        self.check_subtitle = QCheckBox()
-        self.check_subtitle.setChecked(True)
-        self.combo_text_preset = QComboBox()
-        self.btn_preview_preset = QPushButton()
-        self.btn_save_custom_preset = QPushButton()
-        self.combo_split_mode = QComboBox()
-        self.combo_split_mode.addItem('Ký tự', 'characters')
-        self.combo_split_mode.addItem('Từ', 'words')
-        self.combo_split_mode.addItem('Câu', 'sentences')
-        self.txt_split_limit = QLineEdit("42")
-        self.txt_font = QLineEdit("Arial")
-        self.txt_size = QLineEdit("48")
-        self.txt_color = QLineEdit("#FFFFFF")
-
-        self.group_presets.hide()
-        self.check_subtitle.hide()
-        self.combo_text_preset.hide()
-        self.btn_preview_preset.hide()
-        self.btn_save_custom_preset.hide()
-        self.combo_split_mode.hide()
-        self.txt_split_limit.hide()
-        self.txt_font.hide()
-        self.txt_size.hide()
-        self.txt_color.hide()
 
         # =====================================================================
         # CỘT 1: RAIL ĐIỀU HƯỚNG CHÍNH (78px)
@@ -4810,12 +4781,6 @@ class TabAssets(QWidget):
         return cards
 
     def _populate_cards(self):
-        # Nạp combo_text_preset để tương thích test
-        self.combo_text_preset.clear()
-        for p in self.all_presets:
-            if isinstance(p, TextStylePreset):
-                self.combo_text_preset.addItem(p.name, p.id)
-
         # Cập nhật Model & SearchIndex ảo hóa
         if hasattr(self, "asset_model"):
             self.asset_model.set_assets(self.all_assets)
@@ -4994,10 +4959,6 @@ class TabAssets(QWidget):
     def _on_card_selected(self, preset_id: str):
         self._stop_inspector_sfx_play()
         RecentManager.add(preset_id)
-        # Cập nhật combo_text_preset cho unit tests
-        idx = self.combo_text_preset.findData(preset_id)
-        if idx >= 0:
-            self.combo_text_preset.setCurrentIndex(idx)
 
         # Highlight card
         tab = getattr(self, "current_rail_tab", "")
@@ -5389,7 +5350,7 @@ class TabAssets(QWidget):
         scanned_transitions = indexer.scan_transitions()
         self.all_transitions = BUILTIN_TRANSITIONS.copy() + dicts_to_assets(scanned_transitions, "trans", "custom", "Tùy chỉnh", "🎬")
         scanned_luts = indexer.scan_luts()
-        self.all_luts = dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else MOCKUP_LUTS.copy()
+        self.all_luts = MOCKUP_LUTS.copy() + (dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else [])
         scanned_memes = indexer.scan_memes()
         self.all_memes = dicts_to_assets(scanned_memes, "meme", "trending", "Meme", "🎭") if scanned_memes else MOCKUP_MEMES.copy()
         scanned_sfx = indexer.scan_sfx()
@@ -5837,12 +5798,12 @@ class TabAssets(QWidget):
                 self.icon_meme_widget._start_playback()
 
     def _on_font_changed(self, font_name: str):
-        self.txt_font.setText(font_name)
+        self.current_font = font_name
         self._update_text_preview_from_params()
 
     def _on_font_size_changed(self, value: int):
         self.lbl_font_size_val.setText(f"{value} px")
-        self.txt_size.setText(str(value))
+        self.current_font_size = value
         self._update_text_preview_from_params()
 
     def _on_stroke_width_changed(self, value: int):
@@ -6680,7 +6641,7 @@ class TabAssets(QWidget):
     def _on_copy_fusion_clicked(self):
         macro_code = self._get_current_fusion_macro_code()
         QApplication.clipboard().setText(macro_code)
-        preset_id = self.combo_text_preset.currentData() or getattr(self.selected_asset, "id", "karaoke_pop")
+        preset_id = getattr(self.selected_asset, "id", "karaoke_pop")
         self.copy_fusion_node_requested.emit(preset_id)
         self._show_toast("Đã copy Fusion node! Dán vào trang Fusion bằng Ctrl+V")
 

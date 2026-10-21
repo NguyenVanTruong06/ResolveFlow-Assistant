@@ -106,7 +106,9 @@ def server_loop():
         except Exception as e:
             print("[ChunDVC Bridge] Error:", e)
 
-# Chạy ngầm server socket trên một luồng tách biệt để không làm đơ Resolve UI
-t = threading.Thread(target=server_loop, daemon=True)
-t.start()
-print("[ChunDVC Bridge] Khởi chạy ngầm thành công. Bạn có thể đóng thông báo này và tiếp tục edit.")
+if __name__ in ("__main__", "__mp_main__"):
+    # Chạy ngầm server socket trên một luồng tách biệt để không làm đơ Resolve UI
+    t = threading.Thread(target=server_loop, daemon=True)
+    t.start()
+    print("[ChunDVC Bridge] Khởi chạy ngầm thành công. Bạn có thể đóng thông báo này và tiếp tục edit.")
+

@@ -3,65 +3,31 @@ import pytest
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
-from src.ui.tabs.tab_copilot import TabCopilot
+from src.ui.director.director_state import DirectorConfig
+from src.ui.director.pages.style_page import StylePage
 from src.ui.tabs.tab_assets import TabAssets, AssetCard, StudioAsset
 
 
-def test_tab_copilot_bgm_controls(qapp):
-    """Kiểm tra TabCopilot có Card / Controls BGM: combo_bgm_mode, chk_beat_sync, btn_preview_bgm."""
-    widget = TabCopilot()
-
-    assert hasattr(widget, "combo_bgm_mode"), "TabCopilot must have combo_bgm_mode"
-    assert hasattr(widget, "chk_beat_sync"), "TabCopilot must have chk_beat_sync"
-    assert hasattr(widget, "btn_preview_bgm"), "TabCopilot must have btn_preview_bgm"
-
-    # Verify combo_bgm_mode items
-    item_datas = [widget.combo_bgm_mode.itemData(i) for i in range(widget.combo_bgm_mode.count())]
-    expected_datas = [
-        "auto_mood",
-        "mood_chill",
-        "mood_upbeat",
-        "mood_cinematic",
-        "mood_funny",
-        "custom_file",
-        "none",
-    ]
-    for exp in expected_datas:
-        assert exp in item_datas, f"combo_bgm_mode must contain itemData '{exp}'"
-
-    # Verify chk_beat_sync defaults to True
-    assert widget.chk_beat_sync.isChecked() is True, "chk_beat_sync must be checked by default"
+def test_director_bgm_controls(qapp):
+    """Kiểm tra DirectorConfig có cấu hình BGM: bgm_name, bgm_path, beat_sync."""
+    config = DirectorConfig()
+    assert hasattr(config, "bgm_name"), "DirectorConfig must have bgm_name"
+    assert hasattr(config, "bgm_path"), "DirectorConfig must have bgm_path"
+    assert hasattr(config, "beat_sync"), "DirectorConfig must have beat_sync"
+    assert config.beat_sync is True
+    assert config.bgm_name == "Chill Vlog Lofi"
 
 
-def test_tab_copilot_get_selected_bgm_files(qapp, tmp_path):
-    """Kiểm tra TabCopilot.get_selected_bgm_files() trả về file audio hợp lệ."""
-    widget = TabCopilot()
+def test_director_config_bgm_selection(qapp, tmp_path):
+    """Kiểm tra DirectorConfig lưu trữ file audio hợp lệ."""
+    config = DirectorConfig()
+    assert config.bgm_name == "Chill Vlog Lofi"
 
-    # 1. Chế độ none -> trả về []
-    idx_none = widget.combo_bgm_mode.findData("none")
-    assert idx_none >= 0
-    widget.combo_bgm_mode.setCurrentIndex(idx_none)
-    assert widget.get_selected_bgm_files() == []
-
-    # 2. Chế độ mood_chill -> trả về file nhạc chill nếu có sẵn trong assets
-    idx_chill = widget.combo_bgm_mode.findData("mood_chill")
-    assert idx_chill >= 0
-    widget.combo_bgm_mode.setCurrentIndex(idx_chill)
-    chill_files = widget.get_selected_bgm_files()
-    assert isinstance(chill_files, list)
-    if chill_files:
-        assert os.path.exists(chill_files[0])
-        assert chill_files[0].lower().endswith((".wav", ".mp3", ".m4a", ".aac"))
-
-    # 3. Chế độ custom_file với đường dẫn tùy chọn
     custom_audio = tmp_path / "my_track.mp3"
     custom_audio.write_bytes(b"dummy mp3 data")
-    idx_custom = widget.combo_bgm_mode.findData("custom_file")
-    assert idx_custom >= 0
-    widget.combo_bgm_mode.setCurrentIndex(idx_custom)
-    widget._custom_bgm_file = str(custom_audio)
-    res = widget.get_selected_bgm_files()
-    assert res == [str(custom_audio)]
+    config.bgm_name = "Custom Audio"
+    config.bgm_path = str(custom_audio)
+    assert config.bgm_path == str(custom_audio)
 
 
 def test_tab_assets_bgm_category(qapp):

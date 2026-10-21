@@ -37,14 +37,22 @@ class HoverPreviewOverlay(QFrame):
                 border-radius: 6px;
             }
         """)
-        self.video_widget = QVideoWidget(self)
-        self.video_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self.video_widget)
+        self._video_widget: Optional[QVideoWidget] = None
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
         self.hide()
+
+    @property
+    def video_widget(self) -> Optional[QVideoWidget]:
+        return self._video_widget
+
+    def ensure_video_widget(self) -> QVideoWidget:
+        if self._video_widget is None:
+            self._video_widget = QVideoWidget(self)
+            self._video_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            self._layout.addWidget(self._video_widget)
+        return self._video_widget
 
 
 class SharedHoverPreview(QObject):
@@ -55,7 +63,7 @@ class SharedHoverPreview(QObject):
     def __init__(self, view: QListView, parent: Optional[QObject] = None):
         super().__init__(parent or view)
         self._view = view
-        self._overlay = HoverPreviewOverlay(view.viewport())
+        self._overlay: Optional[HoverPreviewOverlay] = None
 
         self._player: Optional[QMediaPlayer] = None
         self._audio_output: Optional[QAudioOutput] = None
@@ -73,20 +81,25 @@ class SharedHoverPreview(QObject):
         self._view.viewport().installEventFilter(self)
         self._view.verticalScrollBar().valueChanged.connect(self.stop)
 
-        self._init_player()
+        self._ensure_player_lazy = True
 
-    def _init_player(self):
-        try:
-            self._player = QMediaPlayer(self)
-            self._audio_output = QAudioOutput(self)
-            self._player.setAudioOutput(self._audio_output)
-            self._player.setVideoOutput(self._overlay.video_widget)
-            self._audio_output.setVolume(0.0)  # Muted by default for video hover
+    def _ensure_overlay(self) -> HoverPreviewOverlay:
+        if self._overlay is None:
+            self._overlay = HoverPreviewOverlay(self._view.viewport())
+        return self._overlay
 
-            self._player.mediaStatusChanged.connect(self._on_media_status_changed)
-        except Exception as e:
-            logger.warning("Failed to initialize QMediaPlayer: %s", e)
-            self._player = None
+    def _ensure_player(self) -> Optional[QMediaPlayer]:
+        if self._player is None:
+            try:
+                self._player = QMediaPlayer(self)
+                self._audio_output = QAudioOutput(self)
+                self._player.setAudioOutput(self._audio_output)
+                self._audio_output.setVolume(0.7 if self._enable_audio_preview else 0.0)
+                self._player.mediaStatusChanged.connect(self._on_media_status_changed)
+            except Exception as e:
+                logger.warning("Failed to initialize QMediaPlayer: %s", e)
+                self._player = None
+        return self._player
 
     def set_audio_preview_enabled(self, enabled: bool):
         self._enable_audio_preview = enabled
@@ -118,7 +131,7 @@ class SharedHoverPreview(QObject):
             self._timer.start()
 
     def _on_hover_timeout(self):
-        if not self._player or self._hovered_row < 0:
+        if self._hovered_row < 0:
             return
 
         model = self._view.model()
@@ -148,7 +161,8 @@ class SharedHoverPreview(QObject):
             self._play_video(idx, preview_p)
 
     def _play_video(self, index: Any, video_path: str):
-        if not self._player:
+        player = self._ensure_player()
+        if not player:
             return
 
         # Position overlay directly over the 16:9 preview part of the card
@@ -156,27 +170,32 @@ class SharedHoverPreview(QObject):
         if visual_rect.isEmpty():
             return
 
+        overlay = self._ensure_overlay()
+        vw = overlay.ensure_video_widget()
+        player.setVideoOutput(vw)
+
         pad = 4
         pw = visual_rect.width() - (pad * 2)
         ph = round(pw * 9 / 16)
         preview_rect = QRect(visual_rect.x() + pad, visual_rect.y() + pad, pw, ph)
 
-        self._overlay.setGeometry(preview_rect)
-        self._overlay.show()
-        self._overlay.raise_()
+        overlay.setGeometry(preview_rect)
+        overlay.show()
+        overlay.raise_()
 
         self._current_source_file = video_path
-        self._player.setSource(QUrl.fromLocalFile(os.path.abspath(video_path)))
+        player.setSource(QUrl.fromLocalFile(os.path.abspath(video_path)))
         if self._audio_output:
             self._audio_output.setVolume(0.0)  # Video previews hover muted
-        self._player.play()
+        player.play()
 
     def _play_audio(self, audio_path: str):
-        if not self._player or not self._audio_output:
+        player = self._ensure_player()
+        if not player or not self._audio_output:
             return
         self._audio_output.setVolume(0.7)
-        self._player.setSource(QUrl.fromLocalFile(os.path.abspath(audio_path)))
-        self._player.play()
+        player.setSource(QUrl.fromLocalFile(os.path.abspath(audio_path)))
+        player.play()
 
     def _on_media_status_changed(self, status: QMediaPlayer.MediaStatus):
         # Auto-loop video playback during hover
@@ -193,4 +212,5 @@ class SharedHoverPreview(QObject):
                 self._player.stop()
             except Exception:
                 pass
-        self._overlay.hide()
+        if self._overlay:
+            self._overlay.hide()

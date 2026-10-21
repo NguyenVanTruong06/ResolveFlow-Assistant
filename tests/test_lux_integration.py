@@ -12,25 +12,29 @@ def qapp():
     return app
 
 
-def test_chundvc_drawer_mode_toggle(qapp):
-    from src.ui.app import ChunDVCApp
-    from src.ui.lux.panel_edge_rail import EdgeDrawerWindow
+def test_chundvc_edge_dock_integration(qapp):
+    from src.ui.lux.shell import EdgeDockWindow, DockState
+    from src.ui.director import DirectorWindow
 
-    app_window = ChunDVCApp()
-    assert hasattr(app_window, "btn_toggle_drawer")
-    assert app_window.drawer is None
+    dock = EdgeDockWindow()
+    try:
+        assert hasattr(dock, "rail")
+        assert hasattr(dock, "sheet")
+        assert hasattr(dock, "fsm")
+        assert dock.fsm.state in (DockState.RAIL, DockState.OPEN, DockState.HIDDEN)
 
-    # Switch to Drawer Mode
-    app_window._toggle_drawer_mode()
-    assert isinstance(app_window.drawer, EdgeDrawerWindow)
-    assert app_window.drawer.isVisible() is True
-    assert app_window.isHidden() is True
+        # Test expand / collapse
+        dock.fsm.open_dock()
+        assert dock.fsm.state == DockState.OPEN
 
-    # Switch back to Standard Window
-    app_window._restore_from_drawer()
-    assert app_window.drawer.isHidden() is True
-    assert app_window.isVisible() is True
+        dock.fsm.collapse_dock()
+        assert dock.fsm.state == DockState.RAIL
 
-    # Clean up
-    app_window.drawer.close()
-    app_window.close()
+        # Test Director window trigger
+        assert hasattr(dock, "open_director")
+        dock.open_director()
+        assert dock._director_window is not None
+        assert isinstance(dock._director_window, DirectorWindow)
+        dock._director_window.close()
+    finally:
+        dock.close()

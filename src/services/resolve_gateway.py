@@ -13,7 +13,7 @@ import time
 import uuid
 from typing import Any, Callable, Dict, Optional, Tuple
 
-from PySide6.QtCore import QEventLoop, QObject, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QEventLoop, QObject, QThread, QTimer, Signal, Slot, QMetaObject, Qt, QCoreApplication
 
 logger = logging.getLogger("ResolveFlow.ResolveGateway")
 
@@ -37,7 +37,7 @@ class _GatewayWorker(QObject):
     def initialize(self):
         """Called once the thread has started."""
         self._init_connection()
-        self._retry_timer = QTimer()
+        self._retry_timer = QTimer(self)
         self._retry_timer.setInterval(3000)
         self._retry_timer.timeout.connect(self._check_connection)
         self._retry_timer.start()
@@ -101,6 +101,13 @@ class _GatewayWorker(QObject):
         self._running = False
         if self._retry_timer:
             self._retry_timer.stop()
+            self._retry_timer.deleteLater()
+            self._retry_timer = None
+        app = QCoreApplication.instance()
+        if app:
+            main_thread = app.thread()
+            if main_thread:
+                self.moveToThread(main_thread)
 
     @Slot()
     def process_queue(self):
@@ -252,9 +259,13 @@ class ResolveGateway(QObject):
 
     def shutdown(self):
         """Stops the worker thread cleanly."""
-        self._request_stop.emit()
-        self._thread.quit()
-        self._thread.wait(2000)
+        if hasattr(self, "_thread") and self._thread.isRunning():
+            try:
+                QMetaObject.invokeMethod(self._worker, "stop_worker", Qt.ConnectionType.BlockingQueuedConnection)
+            except Exception:
+                self._request_stop.emit()
+            self._thread.quit()
+            self._thread.wait(2000)
 
     def __del__(self):
         try:

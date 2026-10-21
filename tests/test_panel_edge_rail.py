@@ -2,8 +2,8 @@ import pytest
 import os
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
-from PySide6.QtCore import Qt, QRect
+from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import Qt
 
 @pytest.fixture(scope="session")
 def qapp():
@@ -13,59 +13,25 @@ def qapp():
     return app
 
 
-def test_edge_drawer_window_init(qapp):
-    from src.ui.lux.panel_edge_rail import EdgeDrawerWindow
+def test_dock_rail_widget_init(qapp):
+    from src.ui.lux.shell import DockRailWidget
 
-    drawer = EdgeDrawerWindow()
-    # Verify window flags
-    flags = drawer.windowFlags()
-    assert (flags & Qt.WindowType.FramelessWindowHint) == Qt.WindowType.FramelessWindowHint
-    assert (flags & Qt.WindowType.WindowStaysOnTopHint) == Qt.WindowType.WindowStaysOnTopHint
-
-    assert drawer.is_expanded is False
-    assert drawer.width() == EdgeDrawerWindow.COLLAPSED_WIDTH
+    rail = DockRailWidget()
+    assert rail.width() == 44 or rail.sizeHint().width() == 44
+    assert hasattr(rail, "btn_logo")
+    assert hasattr(rail, "btn_director")
+    assert hasattr(rail, "btn_palette")
 
 
-def test_edge_drawer_expand_and_collapse(qapp):
-    from src.ui.lux.panel_edge_rail import EdgeDrawerWindow
+def test_edge_dock_window_geometry_and_flags(qapp):
+    from src.ui.lux.shell import EdgeDockWindow, DockState
 
-    drawer = EdgeDrawerWindow()
-    drawer.set_anchor_rect((0, 0, 1920, 1080))
+    dock = EdgeDockWindow()
+    try:
+        flags = dock.windowFlags()
+        assert (flags & Qt.WindowType.FramelessWindowHint) == Qt.WindowType.FramelessWindowHint
+        assert (flags & Qt.WindowType.WindowStaysOnTopHint) == Qt.WindowType.WindowStaysOnTopHint
 
-    # Test immediate expand
-    drawer.expand(animated=False)
-    assert drawer.is_expanded is True
-    assert drawer.width() == EdgeDrawerWindow.EXPANDED_WIDTH
-    assert drawer.geometry().x() == 1920 - EdgeDrawerWindow.EXPANDED_WIDTH
-
-    # Test immediate collapse
-    drawer.collapse(animated=False)
-    assert drawer.is_expanded is False
-    assert drawer.width() == EdgeDrawerWindow.COLLAPSED_WIDTH
-    assert drawer.geometry().x() == 1920 - EdgeDrawerWindow.COLLAPSED_WIDTH
-
-
-def test_edge_drawer_central_widget_hosting(qapp):
-    from src.ui.lux.panel_edge_rail import EdgeDrawerWindow
-
-    drawer = EdgeDrawerWindow()
-    content = QLabel("Central Content Test")
-    drawer.set_central_widget(content)
-
-    assert drawer.central_widget == content
-
-
-def test_edge_drawer_peek_reveal(qapp):
-    from src.ui.lux.panel_edge_rail import EdgeDrawerWindow
-
-    drawer = EdgeDrawerWindow()
-    drawer.setGeometry(1920 - EdgeDrawerWindow.COLLAPSED_WIDTH, 0, EdgeDrawerWindow.COLLAPSED_WIDTH, 1080)
-
-    orig_x = drawer.geometry().x()
-    # Trigger peek reveal
-    drawer._peek_reveal(True)
-    assert drawer.geometry().x() == orig_x - EdgeDrawerWindow.PEEK_OFFSET
-
-    # Unpeek
-    drawer._peek_reveal(False)
-    assert drawer.geometry().x() == orig_x
+        assert dock.fsm.state in (DockState.RAIL, DockState.OPEN, DockState.HIDDEN)
+    finally:
+        dock.close()

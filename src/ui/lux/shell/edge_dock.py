@@ -735,3 +735,11 @@ class EdgeDockWindow(QWidget):
             return
 
         super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        if hasattr(self, "hotkey_service") and self.hotkey_service:
+            try:
+                self.hotkey_service.stop()
+            except Exception:
+                pass
+        super().closeEvent(event)
