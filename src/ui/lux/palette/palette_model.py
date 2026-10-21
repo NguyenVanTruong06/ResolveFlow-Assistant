@@ -49,9 +49,16 @@ class PaletteSearchProvider:
     def set_search_index(self, index: SearchIndex):
         self._search_index = index
 
-    def set_assets(self, assets: List[Dict[str, Any]]):
-        self._all_assets = assets
-        self._asset_map = {a.get("id", ""): a for a in assets if a.get("id")}
+    def set_assets(self, assets: List[Any]):
+        from ..library.asset_model import extract_asset_info
+        normalized = []
+        for a in assets:
+            if isinstance(a, dict):
+                normalized.append(a)
+            else:
+                normalized.append(extract_asset_info(a))
+        self._all_assets = normalized
+        self._asset_map = {a.get("id", ""): a for a in normalized if a.get("id")}
 
     def set_recent_ids(self, ids: List[str]):
         self._recent_ids = ids

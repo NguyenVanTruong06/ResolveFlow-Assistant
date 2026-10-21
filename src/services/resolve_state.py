@@ -55,6 +55,7 @@ class ResolveStateService(QObject):
     playhead_changed = Signal(str)       # Emits when timecode changes
     timeline_changed = Signal(str)       # Emits when timeline name changes
     connection_changed = Signal(bool)
+    state_changed = Signal(bool, str, str, str)  # connected, page, timeline, playhead_tc
 
     def __init__(self, gateway: ResolveGateway, parent: Optional[QObject] = None, poll_interval_ms: int = 700):
         super().__init__(parent)
@@ -104,6 +105,7 @@ class ResolveStateService(QObject):
     def _on_connection_changed(self, connected: bool):
         self._is_connected = connected
         self.connection_changed.emit(connected)
+        self.state_changed.emit(connected, self._current_page, self._current_timeline, self._current_playhead)
         if connected and not self._timer.isActive():
             self._timer.start()
         elif not connected and self._timer.isActive():
@@ -136,3 +138,5 @@ class ResolveStateService(QObject):
         if tl_name != self._current_timeline:
             self._current_timeline = tl_name
             self.timeline_changed.emit(tl_name)
+
+        self.state_changed.emit(self._is_connected, self._current_page, self._current_timeline, self._current_playhead)

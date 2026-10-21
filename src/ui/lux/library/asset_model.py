@@ -37,8 +37,8 @@ def extract_asset_info(item: Any) -> Dict[str, Any]:
     if isinstance(item, dict):
         asset_id = str(item.get("id") or item.get("name") or "")
         name = str(item.get("name") or asset_id)
-        cat = str(item.get("category") or item.get("tab") or "text").lower()
-        sub = str(item.get("sub") or item.get("sub_category") or "Tất cả")
+        cat = str(item.get("tab") or item.get("category") or "text").lower()
+        sub = str(item.get("sub") or item.get("sub_category") or (item.get("category") if item.get("tab") else "Tất cả"))
         dur = float(item.get("duration") or item.get("dur") or 0.0)
         file_path = str(item.get("file_path") or item.get("path") or "")
         preview_path = str(item.get("preview_path") or file_path)

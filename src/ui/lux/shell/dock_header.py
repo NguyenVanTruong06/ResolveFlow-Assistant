@@ -44,6 +44,7 @@ class DockHeaderWidget(QWidget):
     wide_toggled = pyqtSignal()
     pin_toggled = pyqtSignal()
     collapse_clicked = pyqtSignal()
+    restore_standard_window_clicked = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -131,6 +132,16 @@ class DockHeaderWidget(QWidget):
         self.txt_search.return_pressed_signal.connect(self.search_submitted.emit)
         self.txt_search.escape_pressed.connect(self.escape_requested.emit)
         layout.addWidget(self.txt_search, stretch=1)
+
+        # 2.5. Studio Mode button (Full 4-column assets library window)
+        self.btn_studio = QPushButton("🎨")
+        self.btn_studio.setFixedSize(28, 28)
+        self.btn_studio.setToolTip("Mở Kho Đạo Cụ Studio đầy đủ (4 cột)")
+        self.btn_studio.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_studio.setCursor(Qt.PointingHandCursor)
+        self.btn_studio.setStyleSheet(self._button_style(active=False))
+        self.btn_studio.clicked.connect(self.restore_standard_window_clicked.emit)
+        layout.addWidget(self.btn_studio)
 
         # 3. Wide toggle button (420px <-> 760px)
         self.btn_wide = QPushButton("⤢")
