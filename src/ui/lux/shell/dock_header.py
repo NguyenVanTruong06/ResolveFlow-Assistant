@@ -44,6 +44,7 @@ class DockHeaderWidget(QWidget):
     pending_chip_clicked = pyqtSignal()
     profile_lock_selected = pyqtSignal(str)
     director_clicked = pyqtSignal()
+    settings_clicked = pyqtSignal()
     wide_toggled = pyqtSignal()
     pin_toggled = pyqtSignal()
     collapse_clicked = pyqtSignal()
@@ -159,6 +160,18 @@ class DockHeaderWidget(QWidget):
         self.btn_studio.setStyleSheet(self._button_style(active=False))
         self.btn_studio.clicked.connect(self.restore_standard_window_clicked.emit)
         layout.addWidget(self.btn_studio)
+
+        # 2.6. Settings button (Dock Settings Dialog)
+        self.btn_settings = QPushButton()
+        self.btn_settings.setIcon(get_vector_icon("settings", "#a1a1aa", 16))
+        self.btn_settings.setIconSize(QSize(16, 16))
+        self.btn_settings.setFixedSize(28, 28)
+        self.btn_settings.setToolTip("Cài đặt thanh Dock (Đổi bên trái/phải, phím tắt...)")
+        self.btn_settings.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_settings.setCursor(Qt.PointingHandCursor)
+        self.btn_settings.setStyleSheet(self._button_style(active=False))
+        self.btn_settings.clicked.connect(self.settings_clicked.emit)
+        layout.addWidget(self.btn_settings)
 
         # 3. Wide toggle button (420px <-> 760px)
         self.btn_wide = QPushButton("⤢")
@@ -321,4 +334,13 @@ class DockHeaderWidget(QWidget):
 
         pos = self.btn_page_chip.mapToGlobal(self.btn_page_chip.rect().bottomLeft())
         menu.exec(pos)
+
+    def set_dock_edge(self, edge: str):
+        """Cập nhật biểu tượng mũi tên thu gọn dựa theo cạnh màn hình (trái/phải)."""
+        if edge == "left":
+            self.btn_collapse.setText("«")
+            self.btn_collapse.setToolTip("Thu gọn về mép trái (Esc)")
+        else:
+            self.btn_collapse.setText("»")
+            self.btn_collapse.setToolTip("Thu gọn về mép phải (Esc)")
 

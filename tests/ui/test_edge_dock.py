@@ -225,4 +225,51 @@ def test_system_tray_icon(qapp):
     menu_actions = [a.text() for a in tray.contextMenu().actions() if a.text()]
     assert any("Edge Dock" in a for a in menu_actions)
     assert any("AI Director" in a for a in menu_actions)
+    assert any("Cài đặt" in a for a in menu_actions)
     assert any("Thoát" in a for a in menu_actions)
+
+
+def test_edge_dock_left_right_position_and_settings_dialog(qapp):
+    from src.ui.lux.shell.dock_settings_dialog import DockSettingsDialog
+
+    dock = EdgeDockWindow()
+
+    # 1. Mặc định hoặc chuyển sang bên phải
+    dock.set_dock_edge("right")
+    assert dock.dock_edge == "right"
+    assert dock.header.btn_collapse.text() == "»"
+    sx, sy, sw, sh = dock._get_screen_rect()
+    geom_r = dock._calc_target_geometry(44)
+    assert geom_r.x() == sx + sw - 44
+
+    # 2. Chuyển sang bên trái
+    dock.set_dock_edge("left")
+    assert dock.dock_edge == "left"
+    assert dock.header.btn_collapse.text() == "«"
+    geom_l = dock._calc_target_geometry(44)
+    assert geom_l.x() == sx
+
+    # 3. Thử nghiệm hộp thoại DockSettingsDialog
+    dlg = DockSettingsDialog(current_edge="left")
+    assert dlg.rad_left.isChecked() is True
+
+    received_edge = []
+    dlg.dock_edge_changed.connect(lambda e: received_edge.append(e))
+
+    dlg.rad_right.setChecked(True)
+    assert received_edge[-1] == "right"
+
+    dlg.rad_left.setChecked(True)
+    assert received_edge[-1] == "left"
+
+    # Reset defaults
+    dlg.btn_reset.click()
+    assert dlg.rad_right.isChecked() is True
+    assert dlg.chk_auto_director.isChecked() is True
+
+    dlg.close()
+
+    # Đưa dock về lại bên phải chuẩn
+    dock.set_dock_edge("right")
+    dock.close()
+    dock.palette.close()

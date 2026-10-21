@@ -98,6 +98,11 @@ class CommandRegistry:
                 name=">ghim / bỏ ghim dock",
                 meta="Edge Dock: Bật/tắt ghim dock cố định trên màn hình",
             ),
+            CommandItem(
+                id="cmd_settings",
+                name=">cài đặt thanh dock",
+                meta="Cài đặt: Đổi vị trí neo bên trái / phải, phím tắt & hành vi",
+            ),
             # DaVinci resolve page navigation
             CommandItem(id="nav_edit", name=">đi tới trang edit", meta="DaVinci Resolve: Chuyển sang trang Edit", page_target="edit"),
             CommandItem(id="nav_fusion", name=">đi tới trang fusion", meta="DaVinci Resolve: Chuyển sang trang Fusion", page_target="fusion"),

@@ -229,7 +229,18 @@ def create_vector_icon(icon_type: str, color_hex: str = ThemeColors.TEXT_PRIMARY
     elif icon_type == "palette":
         # Kính lúp / Command HUD
         painter.drawEllipse(QRectF(5.5, 5.5, 9.5, 9.5))
-        painter.drawLine(QPointF(12.5, 12.5), QPointF(18.5, 18.5))
+    elif icon_type in ("settings", "gear"):
+        # Bánh răng cài đặt (Cog / Gear)
+        import math
+        painter.drawEllipse(QRectF(8, 8, 8, 8))
+        cx, cy = 12.0, 12.0
+        for i in range(6):
+            angle = i * (math.pi / 3.0)
+            x1 = cx + 6.8 * math.cos(angle)
+            y1 = cy + 6.8 * math.sin(angle)
+            x2 = cx + 10.0 * math.cos(angle)
+            y2 = cy + 10.0 * math.sin(angle)
+            painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
 
     else:
         # Fallback: Vòng tròn chấm tâm

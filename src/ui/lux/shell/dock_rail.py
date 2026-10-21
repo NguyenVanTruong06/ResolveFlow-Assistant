@@ -17,6 +17,7 @@ class DockRailWidget(QWidget):
     open_dock_requested = pyqtSignal()
     palette_requested = pyqtSignal()
     director_requested = pyqtSignal()
+    settings_requested = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -135,6 +136,28 @@ class DockRailWidget(QWidget):
         """)
         self.btn_director.clicked.connect(self.director_requested.emit)
         layout.addWidget(self.btn_director)
+
+        # 4.5. Settings button
+        self.btn_settings = QPushButton()
+        self.btn_settings.setIcon(get_vector_icon("settings", "#a1a1aa", 16))
+        self.btn_settings.setIconSize(QSize(16, 16))
+        self.btn_settings.setFixedSize(34, 34)
+        self.btn_settings.setToolTip("Cài đặt thanh Dock (Đổi bên trái/phải, phím tắt...)")
+        self.btn_settings.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_settings.setCursor(Qt.PointingHandCursor)
+        self.btn_settings.setStyleSheet("""
+            QPushButton {
+                background: #18181b;
+                border: 1px solid #27272a;
+                border-radius: 7px;
+            }
+            QPushButton:hover {
+                background: #27272a;
+                border-color: #7c3aed;
+            }
+        """)
+        self.btn_settings.clicked.connect(self.settings_requested.emit)
+        layout.addWidget(self.btn_settings)
 
         # 5. Status indicator dot
         self.lbl_status_dot = QLabel("●")

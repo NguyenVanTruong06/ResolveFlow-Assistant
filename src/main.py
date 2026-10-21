@@ -108,6 +108,7 @@ def start_app():
     tray.open_dock_requested.connect(dock.toggle)
     tray.open_director_requested.connect(dock.open_director)
     tray.open_studio_requested.connect(open_studio)
+    tray.settings_requested.connect(dock.open_settings)
     tray.quit_requested.connect(app.quit)
     tray.show()
 
@@ -122,14 +123,15 @@ def start_app():
         bubble.activateWindow()
 
     # 7. Khởi chạy giao diện chính:
-    # Mặc định: Mở ChunDVC Director (AI Workstation) để người dùng chọn footage,
-    # kiểm tra cache Whisper, sinh Web Prompt JSON 0đ và cắt dựng video ngay lập tức.
-    # EdgeDock vẫn đồng thời sẵn sàng ở mép màn hình để chèn nhanh preset/asset.
+    from PySide6.QtCore import QSettings
+    settings = QSettings("ChunDVC", "ResolveFlow")
+    auto_open = settings.value("auto_open_director", True, type=bool)
+
     if "--studio" in sys.argv:
         open_studio()
     elif "--dock-only" in sys.argv:
         pass  # Chỉ hiển thị EdgeDock
-    else:
+    elif auto_open or "--director" in sys.argv or "--auto" in sys.argv:
         dock.open_director()
 
     def cleanup():

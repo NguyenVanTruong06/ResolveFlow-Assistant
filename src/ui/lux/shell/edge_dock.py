@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import (
     Qt, QRect, QPoint, QSize, Signal as pyqtSignal, QVariantAnimation,
-    QEasingCurve, QTimer
+    QEasingCurve, QTimer, QSettings
 )
 from PySide6.QtGui import QKeyEvent, QScreen
 
@@ -120,8 +120,15 @@ class EdgeDockWindow(QWidget):
         self._anim.valueChanged.connect(self._on_anim_geometry)
         self._anim.finished.connect(self._on_anim_finished)
 
+        # Read saved dock edge preference (default: 'right')
+        settings = QSettings("ChunDVC", "ResolveFlow")
+        self.dock_edge = str(settings.value("dock_edge", "right"))
+        if self.dock_edge not in ("left", "right"):
+            self.dock_edge = "right"
+
         self._init_ui()
         self.setStyleSheet(get_luxury_dark_stylesheet())
+        self.header.set_dock_edge(self.dock_edge)
 
         # Initialize context profile appearance
         self._on_profile_changed(self.router.active_profile)
@@ -175,20 +182,25 @@ class EdgeDockWindow(QWidget):
         self.frame.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         outer_layout.addWidget(self.frame)
 
-        frame_layout = QHBoxLayout(self.frame)
-        frame_layout.setContentsMargins(0, 0, 0, 0)
-        frame_layout.setSpacing(0)
+        self.frame_layout = QHBoxLayout(self.frame)
+        self.frame_layout.setContentsMargins(0, 0, 0, 0)
+        self.frame_layout.setSpacing(0)
 
-        # 2px Accent Line along left edge
+        # 2px Accent Line along inner edge
         self.accent_line = QFrame(self.frame)
         self.accent_line.setFixedWidth(2)
         self.accent_line.setStyleSheet("background: #7c3aed;")
-        frame_layout.addWidget(self.accent_line)
 
         # Mode Stack: Page 0 = Rail/Peek (44px), Page 1 = Full Expanded Dock View
         self.stack = QStackedWidget(self.frame)
         self.stack.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        frame_layout.addWidget(self.stack, stretch=1)
+
+        if self.dock_edge == "left":
+            self.frame_layout.addWidget(self.stack, stretch=1)
+            self.frame_layout.addWidget(self.accent_line)
+        else:
+            self.frame_layout.addWidget(self.accent_line)
+            self.frame_layout.addWidget(self.stack, stretch=1)
 
         # --- Page 0: Collapsed Rail Widget ---
         self.rail = DockRailWidget(self.stack)
@@ -197,6 +209,7 @@ class EdgeDockWindow(QWidget):
         self.rail.category_selected.connect(self._on_rail_category_selected)
         self.rail.palette_requested.connect(self.palette_requested.emit)
         self.rail.director_requested.connect(self.director_requested.emit)
+        self.rail.settings_requested.connect(self.open_settings)
         self.stack.addWidget(self.rail)
 
         # --- Page 1: Expanded View Container ---
@@ -217,6 +230,7 @@ class EdgeDockWindow(QWidget):
         self.header.collapse_clicked.connect(self.collapse_dock)
         self.header.restore_standard_window_clicked.connect(self.restore_standard_window_requested.emit)
         self.header.director_clicked.connect(self.director_requested.emit)
+        self.header.settings_clicked.connect(self.open_settings)
         self.header.pending_chip_clicked.connect(self.router.apply_pending)
         self.header.profile_lock_selected.connect(self.router.lock_profile)
         exp_layout.addWidget(self.header)
@@ -355,6 +369,44 @@ class EdgeDockWindow(QWidget):
             self.open_director()
         elif cmd_id == "cmd_pin_dock":
             self.header.btn_pin.click()
+        elif cmd_id == "cmd_settings":
+            self.open_settings()
+
+    def set_dock_edge(self, edge: str):
+        """
+        Đặt vị trí neo của thanh Dock ('left' hoặc 'right').
+        Tự động cập nhật layout, hướng mũi tên thu gọn và lưu vào QSettings.
+        """
+        if edge not in ("left", "right"):
+            return
+        self.dock_edge = edge
+
+        # Lưu cấu hình vào QSettings
+        settings = QSettings("ChunDVC", "ResolveFlow")
+        settings.setValue("dock_edge", self.dock_edge)
+
+        # Cập nhật thứ tự frame_layout (đường accent line quay về phía timeline DaVinci)
+        if hasattr(self, "frame_layout") and hasattr(self, "accent_line") and hasattr(self, "stack"):
+            self.frame_layout.removeWidget(self.accent_line)
+            self.frame_layout.removeWidget(self.stack)
+            if self.dock_edge == "left":
+                self.frame_layout.addWidget(self.stack, stretch=1)
+                self.frame_layout.addWidget(self.accent_line)
+            else:
+                self.frame_layout.addWidget(self.accent_line)
+                self.frame_layout.addWidget(self.stack, stretch=1)
+
+        if hasattr(self, "header") and self.header:
+            self.header.set_dock_edge(self.dock_edge)
+
+        self._update_dock_position(target_w=self.width(), animated=False)
+
+    def open_settings(self):
+        """Mở hộp thoại Cài đặt thanh Dock."""
+        from .dock_settings_dialog import DockSettingsDialog
+        dlg = DockSettingsDialog(current_edge=self.dock_edge, parent=self)
+        dlg.dock_edge_changed.connect(self.set_dock_edge)
+        dlg.exec()
 
     # -------------------------------------------------------------------------
     # Geometry & Boundary Clamping
@@ -376,23 +428,31 @@ class EdgeDockWindow(QWidget):
             y = max(sy, ay)
             h = min(sh, ah)
 
-            if aw < 900:
-                # Narrow Resolve: float outside right edge if space permits
-                ideal_x = ax + aw
-                if ideal_x + target_w <= sx + sw:
-                    x = ideal_x
-                elif ax - target_w >= sx:
-                    # Float outside left edge
-                    x = ax - target_w
-                else:
-                    # Fit flush inside right edge
-                    x = ax + aw - target_w
+            if getattr(self, "dock_edge", "right") == "left":
+                # Neo vào cạnh trái của DaVinci Resolve
+                x = ax
             else:
-                # Normal docking flush to right edge of Resolve
-                x = ax + aw - target_w
+                if aw < 900:
+                    # Narrow Resolve: float outside right edge if space permits
+                    ideal_x = ax + aw
+                    if ideal_x + target_w <= sx + sw:
+                        x = ideal_x
+                    elif ax - target_w >= sx:
+                        # Float outside left edge
+                        x = ax - target_w
+                    else:
+                        # Fit flush inside right edge
+                        x = ax + aw - target_w
+                else:
+                    # Normal docking flush to right edge of Resolve
+                    x = ax + aw - target_w
         else:
-            # Fallback to primary screen right edge
-            x = sx + sw - target_w
+            if getattr(self, "dock_edge", "right") == "left":
+                # Neo vào cạnh trái màn hình
+                x = sx
+            else:
+                # Neo vào cạnh phải màn hình
+                x = sx + sw - target_w
             y = sy
             h = sh
 
