@@ -13,7 +13,7 @@ def qapp():
 def pytest_unconfigure(config):
     import os
     app = QApplication.instance()
-    if app is not None:
+    if app is not None and hasattr(app, "closeAllWindows"):
         app.closeAllWindows()
         app.processEvents()
     # On Linux with PySide6, Python finalization collides with Qt C++ static destructors.
