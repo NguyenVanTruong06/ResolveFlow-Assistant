@@ -71,6 +71,7 @@ def test_suggestion_chip_selection_and_quick_add(qapp, monkeypatch):
     dbl_ev = QMouseEvent(
         QMouseEvent.Type.MouseButtonDblClick,
         QPointF(10, 10),
+        QPointF(10, 10),
         Qt.MouseButton.LeftButton,
         Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier

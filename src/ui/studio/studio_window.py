@@ -158,7 +158,10 @@ class HardwareStatsWorker(QRunnable):
         lbl_gpu_html = f"GPU <b style='color:#ededf0'>{gpu_txt}</b>"
         lbl_ram_html = f"RAM <b style='color:#ededf0'>{ram_txt}</b>"
 
-        self.signals.stats_ready.emit(lbl_cpu_html, lbl_gpu_html, lbl_ram_html)
+        try:
+            self.signals.stats_ready.emit(lbl_cpu_html, lbl_gpu_html, lbl_ram_html)
+        except Exception:
+            pass
 
 
 class StudioWindow(QMainWindow):

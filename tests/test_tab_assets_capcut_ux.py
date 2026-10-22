@@ -2,7 +2,7 @@ import os
 import re
 import pytest
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt, QPoint, QEvent
+from PySide6.QtCore import Qt, QPoint, QPointF, QEvent
 from PySide6.QtGui import QMouseEvent, QEnterEvent
 
 from src.ui.tabs.tab_assets import (
@@ -31,12 +31,14 @@ def test_card_has_quick_add_button_and_double_click(qapp):
     selected_ids = []
     card.selected_signal.connect(lambda pid: selected_ids.append(pid))
 
+    from PySide6.QtCore import QPointF
     event = QMouseEvent(
-        QEvent.MouseButtonDblClick,
-        QPoint(10, 10),
-        Qt.LeftButton,
-        Qt.LeftButton,
-        Qt.NoModifier
+        QEvent.Type.MouseButtonDblClick,
+        QPointF(10, 10),
+        QPointF(10, 10),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier
     )
     card.mouseDoubleClickEvent(event)
     assert len(received_assets) == 1
@@ -130,11 +132,12 @@ def test_tab_assets_quick_add_and_double_click_integration(qapp, monkeypatch):
     # Tìm thẻ sfx đầu tiên và double click
     sfx_card = next(c for c in tab.card_widgets if getattr(c.preset, "tab", "") == "sfx")
     dbl_ev = QMouseEvent(
-        QEvent.MouseButtonDblClick,
-        QPoint(10, 10),
-        Qt.LeftButton,
-        Qt.LeftButton,
-        Qt.NoModifier
+        QEvent.Type.MouseButtonDblClick,
+        QPointF(10, 10),
+        QPointF(10, 10),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier
     )
     sfx_card.mouseDoubleClickEvent(dbl_ev)
     assert len(inserted_calls) == 2

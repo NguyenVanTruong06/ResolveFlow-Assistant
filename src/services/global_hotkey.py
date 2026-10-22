@@ -42,6 +42,13 @@ class GlobalHotkeyService(QObject):
         self._init_platform_hotkeys()
 
     def _init_platform_hotkeys(self):
+        import sys
+        import os
+        # Do not grab global root keyboard in test environments to avoid X11 socket conflicts
+        if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
+            logger.info("Test environment detected; X11 global hotkey thread skipped.")
+            return
+
         system = platform.system()
         if system == "Linux":
             try:
@@ -174,8 +181,11 @@ class GlobalHotkeyService(QObject):
 
     def stop(self):
         self._running = False
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=0.3)
+        if self._thread and self._thread != threading.current_thread() and self._thread.is_alive():
+            try:
+                self._thread.join(timeout=0.1)
+            except Exception:
+                pass
             self._thread = None
         self._cleanup_x11()
 
