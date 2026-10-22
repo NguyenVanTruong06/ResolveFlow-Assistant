@@ -93,10 +93,22 @@ def start_app():
     # 4. Quản lý cửa sổ Kho Đạo Cụ Studio (TabAssets 4 cột đầy đủ)
     studio_window = None
 
+    def on_return_to_dock():
+        if studio_window:
+            studio_window.hide()
+        dock.show()
+        dock.fsm.open_dock(animated=False)
+
+    def on_studio_assets_updated(new_assets):
+        dock.set_assets(new_assets)
+        search_index.set_assets(new_assets)
+
     def open_studio():
         nonlocal studio_window
         if studio_window is None:
             studio_window = StudioWindow()
+            studio_window.return_to_dock_requested.connect(on_return_to_dock)
+            studio_window.assets_updated.connect(on_studio_assets_updated)
         studio_window.show()
         studio_window.raise_()
         studio_window.activateWindow()

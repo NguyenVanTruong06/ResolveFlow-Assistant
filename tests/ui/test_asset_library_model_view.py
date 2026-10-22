@@ -376,3 +376,32 @@ def test_shared_hover_preview_audio_enabled_and_controls(qapp, tmp_path):
     assert abs(dialog_volume_states[-1] - 0.90) < 1e-4
     assert dlg.lbl_vol_val.text() == "90%"
 
+
+def test_studio_window_management_actions_and_workflow_banner(qapp):
+    from src.ui.studio.studio_window import StudioWindow
+
+    studio = StudioWindow()
+
+    # 1. Verify Management Action Buttons
+    assert hasattr(studio, "btn_import_folder")
+    assert hasattr(studio, "btn_import_file")
+    assert hasattr(studio, "btn_sync_dock")
+    assert hasattr(studio, "btn_switch_dock")
+
+    # 2. Verify Workflow Banner
+    assert hasattr(studio, "workflow_banner")
+    assert studio.workflow_banner.height() == 34
+
+    # 3. Test Return to Dock signal
+    return_dock_emitted = []
+    studio.return_to_dock_requested.connect(lambda: return_dock_emitted.append(True))
+    studio.btn_switch_dock.click()
+    assert len(return_dock_emitted) == 1
+
+    # 4. Test Assets Updated signal on sync
+    assets_updated_list = []
+    studio.assets_updated.connect(lambda a: assets_updated_list.append(a))
+    studio._on_sync_dock_clicked()
+    assert len(assets_updated_list) == 1
+    assert isinstance(assets_updated_list[0], list)
+

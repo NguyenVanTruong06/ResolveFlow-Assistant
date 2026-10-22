@@ -162,13 +162,17 @@ class HardwareStatsWorker(QRunnable):
 
 class StudioWindow(QMainWindow):
     """
-    Cửa sổ Hậu kỳ & Kho Đạo Cụ (Studio Mode).
+    Cửa sổ Hậu kỳ & Kho Đạo Cụ (Studio Asset Hub & Workshop).
+    Nơi quản lý thư viện lớn, nạp thư mục từ máy tính, gom nhóm bộ sưu tập và chế tác mẫu cá nhân.
     """
     open_auto_requested = pyqtSignal()
+    return_to_dock_requested = pyqtSignal()
+    assets_updated = pyqtSignal(list)
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("ResolveFlow · Kho Đạo Cụ")
-        self.resize(1140, 740)
+        self.setWindowTitle("ResolveFlow Studio · Xưởng & Kho Quản Lý Đạo Cụ")
+        self.resize(1180, 760)
         self.setMinimumSize(980, 620)
         self.setStyleSheet(get_application_stylesheet())
 
@@ -215,26 +219,86 @@ class StudioWindow(QMainWindow):
             background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8b5cf6, stop:0.5 #7c3aed, stop:1 #0e7490);
             border-radius: 7px;
         """)
-        # Vẽ biểu tượng camera play bên trong logo
         lbl_logo.setAlignment(Qt.AlignCenter)
         lbl_logo.setText("🎬")
         h_layout.addWidget(lbl_logo)
 
-        lbl_title = QLabel("<b>Kho Đạo Cụ</b>")
-        lbl_title.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 14px;")
+        lbl_title = QLabel("<b>ResolveFlow Studio</b> <span style='background:rgba(124, 58, 237, 0.2); color:#c4b5fd; border:1px solid rgba(124, 58, 237, 0.5); border-radius:4px; padding:2px 6px; font-size:11px; font-weight:600;'>Xưởng & Nạp Kho</span>")
+        lbl_title.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 13.5px;")
         h_layout.addWidget(lbl_title)
 
         h_layout.addStretch(1)
 
+        # Style cho các nút quản lý kho
+        btn_mgmt_style = """
+            QPushButton {
+                background-color: #18181b;
+                color: #e4e4e7;
+                border: 1px solid #3f3f46;
+                padding: 4px 10px;
+                border-radius: 6px;
+                font-size: 11.5px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #27272a;
+                border-color: #71717a;
+                color: #ffffff;
+            }
+        """
+
+        # 2. Bộ nút tác vụ quản lý cấp cao (High-Level Management Actions)
+        self.btn_import_folder = QPushButton("📁 Nạp Thư Mục")
+        self.btn_import_folder.setCursor(Qt.PointingHandCursor)
+        self.btn_import_folder.setToolTip("Quét nạp cả thư mục SFX, Meme, Footage, LUTs từ máy tính vào kho")
+        self.btn_import_folder.setStyleSheet(btn_mgmt_style)
+        self.btn_import_folder.clicked.connect(self._on_import_folder_clicked)
+        h_layout.addWidget(self.btn_import_folder)
+
+        self.btn_import_file = QPushButton("📥 Thêm Tệp")
+        self.btn_import_file.setCursor(Qt.PointingHandCursor)
+        self.btn_import_file.setToolTip("Nhập tệp mẫu đơn lẻ (.setting, .mp4, .mov, .wav, .cube, .png)")
+        self.btn_import_file.setStyleSheet(btn_mgmt_style)
+        self.btn_import_file.clicked.connect(self._on_import_file_clicked)
+        h_layout.addWidget(self.btn_import_file)
+
+        self.btn_sync_dock = QPushButton("🔄 Đồng Bộ Dock")
+        self.btn_sync_dock.setCursor(Qt.PointingHandCursor)
+        self.btn_sync_dock.setToolTip("Làm mới và đồng bộ tức thì toàn bộ tài nguyên sang Thanh Dock")
+        self.btn_sync_dock.setStyleSheet(btn_mgmt_style)
+        self.btn_sync_dock.clicked.connect(self._on_sync_dock_clicked)
+        h_layout.addWidget(self.btn_sync_dock)
+
         # Nút chuyển nhanh sang Cửa sổ AI Director
-        self.btn_switch_auto = QPushButton("⚡ AI Director (Auto Cut)")
+        self.btn_switch_auto = QPushButton("⚡ AI Director")
         self.btn_switch_auto.setProperty("role", "nav-switch")
         self.btn_switch_auto.setCursor(Qt.PointingHandCursor)
-        self.btn_switch_auto.setToolTip("Chuyển sang Cửa sổ AI Director (Auto Cut, Kịch Bản)")
+        self.btn_switch_auto.setToolTip("Chuyển sang Cửa sổ AI Director (Auto Cut, Kịch Bản, Phụ đề)")
         self.btn_switch_auto.clicked.connect(self.open_auto_requested.emit)
         h_layout.addWidget(self.btn_switch_auto)
 
-        # 2. Thống kê phần cứng (.stats)
+        # Nút chuyển sang Thanh Dock dán mép để bắt đầu dựng phim
+        self.btn_switch_dock = QPushButton("⚡ Dựng Với Thanh Dock")
+        self.btn_switch_dock.setCursor(Qt.PointingHandCursor)
+        self.btn_switch_dock.setToolTip("Thu nhỏ cửa sổ Kho và chuyển sang Thanh Dock dán sát mép DaVinci Resolve")
+        self.btn_switch_dock.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7c3aed, stop:1 #6d28d9);
+                color: #ffffff;
+                border: 1px solid #8b5cf6;
+                padding: 4px 12px;
+                border-radius: 6px;
+                font-size: 11.5px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #6d28d9;
+            }
+        """)
+        self.btn_switch_dock.clicked.connect(self.return_to_dock_requested.emit)
+        h_layout.addWidget(self.btn_switch_dock)
+
+        # 3. Thống kê phần cứng (.stats)
         stats_frame = QFrame()
         stats_frame.setStyleSheet(f"""
             color: {ThemeColors.TEXT_MUTED};
@@ -242,7 +306,7 @@ class StudioWindow(QMainWindow):
         """)
         s_layout = QHBoxLayout(stats_frame)
         s_layout.setContentsMargins(0, 0, 0, 0)
-        s_layout.setSpacing(12)
+        s_layout.setSpacing(10)
 
         self.lbl_cpu = QLabel("CPU <b style='color:#ededf0'>--</b>")
         self.lbl_gpu = QLabel("GPU <b style='color:#ededf0'>--</b>")
@@ -252,7 +316,7 @@ class StudioWindow(QMainWindow):
         s_layout.addWidget(self.lbl_ram)
         h_layout.addWidget(stats_frame)
 
-        # 3. Trạng thái Playhead DaVinci Resolve (.pill)
+        # 4. Trạng thái Playhead DaVinci Resolve (.pill)
         self.pill_playhead = QLabel("● Playhead V1 · 14:49")
         self.pill_playhead.setStyleSheet(f"""
             background-color: {ThemeColors.BG_CARD};
@@ -261,12 +325,13 @@ class StudioWindow(QMainWindow):
             color: {ThemeColors.GREEN};
             font-size: 11.5px;
             font-weight: 500;
-            padding: 3px 10px;
+            padding: 3px 8px;
         """)
         h_layout.addWidget(self.pill_playhead)
 
-        # 4. Nút Ghim Luôn trên cùng (#pinBtn)
-        self.btn_pin = QPushButton("📌 Luôn trên cùng")
+        # 5. Nút Ghim Luôn trên cùng (#pinBtn)
+        self.btn_pin = QPushButton("📌")
+        self.btn_pin.setToolTip("Ghim cửa sổ luôn trên cùng")
         self.btn_pin.setCheckable(True)
         self.btn_pin.setCursor(Qt.PointingHandCursor)
         self.btn_pin.clicked.connect(self._toggle_always_on_top)
@@ -275,7 +340,7 @@ class StudioWindow(QMainWindow):
                 background-color: transparent;
                 color: {ThemeColors.TEXT_MUTED};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                padding: 4px 12px;
+                padding: 4px 8px;
                 border-radius: 6px;
                 font-size: 11.5px;
             }}
@@ -293,6 +358,51 @@ class StudioWindow(QMainWindow):
         h_layout.addWidget(self.btn_pin)
 
         main_layout.addWidget(header)
+
+        # =====================================================================
+        # WORKFLOW BANNER (Thanh định vị mục đích sử dụng)
+        # =====================================================================
+        self.workflow_banner = QFrame()
+        self.workflow_banner.setFixedHeight(34)
+        self.workflow_banner.setStyleSheet("""
+            QFrame {
+                background-color: #12101e;
+                border-bottom: 1px solid #27272a;
+            }
+        """)
+        wb_layout = QHBoxLayout(self.workflow_banner)
+        wb_layout.setContentsMargins(14, 0, 14, 0)
+        wb_layout.setSpacing(10)
+
+        lbl_hint = QLabel(
+            "💡 <b style='color:#c4b5fd;'>Phân định vai trò:</b> "
+            "Dùng <b>Thanh Dock (dán mép)</b> để tìm nhanh & chèn playhead trong 1s khi đang dựng. "
+            "Mở <b>Kho Đạo Cụ</b> này khi cần: Nạp thư mục từ máy tính · Quản lý thư viện · Gom nhóm bộ sưu tập · Chế tác mẫu."
+        )
+        lbl_hint.setStyleSheet("font-size: 11.5px; color: #a1a1aa;")
+        wb_layout.addWidget(lbl_hint, stretch=1)
+
+        btn_banner_dock = QPushButton("⚡ Sang Thanh Dock")
+        btn_banner_dock.setCursor(Qt.PointingHandCursor)
+        btn_banner_dock.setStyleSheet("""
+            QPushButton {
+                background: rgba(124, 58, 237, 0.2);
+                color: #c4b5fd;
+                border: 1px solid #7c3aed;
+                border-radius: 4px;
+                padding: 2px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #7c3aed;
+                color: #ffffff;
+            }
+        """)
+        btn_banner_dock.clicked.connect(self.return_to_dock_requested.emit)
+        wb_layout.addWidget(btn_banner_dock)
+
+        main_layout.addWidget(self.workflow_banner)
 
         # =====================================================================
         # GIAO DIỆN 4 CỘT KHO ĐẠO CỤ (TabAssets)
@@ -317,6 +427,28 @@ class StudioWindow(QMainWindow):
         is_on_top = self.btn_pin.isChecked()
         self.setWindowFlag(Qt.WindowStaysOnTopHint, is_on_top)
         self.show()
+
+    def _on_import_folder_clicked(self):
+        if hasattr(self.tab_assets, "_scan_local_folder"):
+            self.tab_assets._scan_local_folder()
+            self._notify_assets_changed()
+
+    def _on_import_file_clicked(self):
+        if hasattr(self.tab_assets, "_import_files_or_folders"):
+            self.tab_assets._import_files_or_folders()
+            self._notify_assets_changed()
+
+    def _on_sync_dock_clicked(self):
+        if hasattr(self.tab_assets, "_rescan_assets"):
+            self.tab_assets._rescan_assets()
+        self._notify_assets_changed()
+        if hasattr(self.tab_assets, "_show_toast"):
+            self.tab_assets._show_toast("🔄 Đã làm mới & đồng bộ toàn bộ tài nguyên sang Thanh Dock!")
+
+    def _notify_assets_changed(self):
+        assets = getattr(self.tab_assets, "all_assets", [])
+        if assets:
+            self.assets_updated.emit(assets)
 
     def closeEvent(self, event):
         if hasattr(self, "_stats_timer") and self._stats_timer.isActive():
