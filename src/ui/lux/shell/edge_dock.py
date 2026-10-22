@@ -409,7 +409,15 @@ class EdgeDockWindow(QWidget):
         dlg.dock_edge_changed.connect(self.set_dock_edge)
         dlg.hover_audio_changed.connect(self._on_hover_audio_changed)
         dlg.hover_volume_changed.connect(self.grid.hover_controller.set_volume)
+        if hasattr(dlg, "dock_screen_changed"):
+            dlg.dock_screen_changed.connect(self.set_dock_screen_index)
         dlg.exec()
+
+    def set_dock_screen_index(self, index: int):
+        from src.services.multi_screen_service import get_multi_screen_service
+        svc = get_multi_screen_service()
+        svc.set_preferred_dock_screen(index)
+        self._update_dock_position(animated=False)
 
     def _on_hover_audio_changed(self, enabled: bool):
         self.grid.hover_controller.set_audio_preview_enabled(enabled)
@@ -428,9 +436,15 @@ class EdgeDockWindow(QWidget):
                 center_point = QPoint(ax + max(10, aw // 2), ay + max(10, ah // 2))
                 target_screen = app.screenAt(center_point)
 
-            # 2. Nếu không có anchor, thử tìm màn hình theo vị trí hiện tại của dock
+            # 2. Nếu không có anchor, dùng màn hình được người dùng chỉ định (mặc định Màn 1)
+            # Tuyệt đối KHÔNG dùng app.screenAt(self.geometry().center()) vì thanh dock dán sát
+            # mép biên giới giữa 2 màn hình, khi mở rộng kích thước sẽ khiến tâm cửa sổ tràn
+            # sang màn hình bên cạnh và gây lỗi tự động nhảy màn hình khi lướt chuột!
             if not target_screen:
-                target_screen = app.screenAt(self.geometry().center())
+                from src.services.multi_screen_service import get_multi_screen_service
+                svc = get_multi_screen_service()
+                pref_idx = svc.get_preferred_dock_screen()
+                target_screen = svc.get_screen_by_index(pref_idx)
 
             # 3. Fallback sang màn hình chính
             if not target_screen:

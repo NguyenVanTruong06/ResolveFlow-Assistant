@@ -310,6 +310,7 @@ class StudioWindow(QMainWindow):
         # Nút chuyển đổi màn hình (Dual-Monitor Switch)
         self.btn_switch_screen = QPushButton("🖥️ Sang Màn 2")
         self.btn_switch_screen.setCursor(Qt.PointingHandCursor)
+        self.btn_switch_screen.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_switch_screen.setToolTip("Chuyển cửa sổ Kho Đạo Cụ sang màn hình phụ hoặc màn hình chính")
         self.btn_switch_screen.setStyleSheet(btn_mgmt_style)
         self.btn_switch_screen.clicked.connect(self._on_switch_screen_clicked)

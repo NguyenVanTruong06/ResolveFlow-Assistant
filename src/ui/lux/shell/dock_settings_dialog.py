@@ -31,6 +31,7 @@ class DockSettingsDialog(QDialog):
     hover_audio_changed = pyqtSignal(bool)
     hover_volume_changed = pyqtSignal(float)
     auto_secondary_studio_changed = pyqtSignal(bool)
+    dock_screen_changed = pyqtSignal(int)
 
     def __init__(self, current_edge: str = "right", parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -264,6 +265,31 @@ class DockSettingsDialog(QDialog):
             screens_box.addWidget(s_label)
         sec3_mon_layout.addLayout(screens_box)
 
+        # Chọn màn hình neo cố định cho Thanh Dock (tránh tự nhảy màn hình)
+        dock_scr_layout = QHBoxLayout()
+        dock_scr_layout.setSpacing(12)
+        lbl_dock_scr = QLabel("Màn hình neo Thanh Dock:")
+        lbl_dock_scr.setStyleSheet(f"font-size: 12px; color: {ThemeColors.TEXT_SECONDARY};")
+        dock_scr_layout.addWidget(lbl_dock_scr)
+
+        self.btn_group_dock_scr = QButtonGroup(self)
+        self.rad_dock_scr1 = QRadioButton("Màn 1 (Chính - Mặc định)")
+        self.rad_dock_scr1.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rad_dock_scr2 = QRadioButton("Màn 2 (Phụ)")
+        self.rad_dock_scr2.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rad_dock_scr2.setEnabled(count >= 2)
+
+        self.btn_group_dock_scr.addButton(self.rad_dock_scr1, 0)
+        self.btn_group_dock_scr.addButton(self.rad_dock_scr2, 1)
+
+        self.rad_dock_scr1.toggled.connect(self._on_dock_screen_radio_toggled)
+        self.rad_dock_scr2.toggled.connect(self._on_dock_screen_radio_toggled)
+
+        dock_scr_layout.addWidget(self.rad_dock_scr1)
+        dock_scr_layout.addWidget(self.rad_dock_scr2)
+        dock_scr_layout.addStretch(1)
+        sec3_mon_layout.addLayout(dock_scr_layout)
+
         self.chk_auto_secondary = QCheckBox("Tự động mở Kho Đạo Cụ (Studio) trên màn hình phụ (Màn 2)")
         self.chk_auto_secondary.setCursor(Qt.CursorShape.PointingHandCursor)
         self.chk_auto_secondary.setEnabled(count >= 2)
@@ -433,12 +459,23 @@ class DockSettingsDialog(QDialog):
         auto_sec = self._multi_screen_service.is_auto_open_studio_on_secondary()
         self.chk_auto_secondary.setChecked(auto_sec)
 
+        pref_dock_scr = self._multi_screen_service.get_preferred_dock_screen()
+        if pref_dock_scr == 1 and hasattr(self, "rad_dock_scr2"):
+            self.rad_dock_scr2.setChecked(True)
+        elif hasattr(self, "rad_dock_scr1"):
+            self.rad_dock_scr1.setChecked(True)
+
     def _on_edge_radio_toggled(self):
         new_edge = "left" if self.rad_left.isChecked() else "right"
         if new_edge != self._current_edge:
             self._current_edge = new_edge
             self._settings.setValue("dock_edge", new_edge)
             self.dock_edge_changed.emit(new_edge)
+
+    def _on_dock_screen_radio_toggled(self):
+        new_scr = 1 if (hasattr(self, "rad_dock_scr2") and self.rad_dock_scr2.isChecked()) else 0
+        self._multi_screen_service.set_preferred_dock_screen(new_scr)
+        self.dock_screen_changed.emit(new_scr)
 
     def _on_auto_director_toggled(self, checked: bool):
         self._settings.setValue("auto_open_director", checked)
@@ -470,3 +507,6 @@ class DockSettingsDialog(QDialog):
         self.slider_volume.setValue(75)
         self._multi_screen_service.set_auto_open_studio_on_secondary(True)
         self.chk_auto_secondary.setChecked(True)
+        self._multi_screen_service.set_preferred_dock_screen(0)
+        if hasattr(self, "rad_dock_scr1"):
+            self.rad_dock_scr1.setChecked(True)
