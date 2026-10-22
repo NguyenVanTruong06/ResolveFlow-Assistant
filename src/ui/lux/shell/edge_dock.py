@@ -8,6 +8,7 @@ Features:
 - Sheet Inspector: Responsive overlay sliding from bottom (62%) or right (320px).
 """
 import logging
+import os
 from typing import Optional, Tuple, Dict, Any, List
 
 from PySide6.QtWidgets import (
@@ -27,7 +28,7 @@ from src.ui.lux.window_anchor import (
 from src.ui.lux.library.asset_model import AssetListModel
 from src.ui.lux.library.asset_filter import AssetFilterProxyModel
 from src.ui.lux.library.asset_grid import AssetGridView
-from src.services.insert_service import InsertService
+from src.services.insert_service import InsertService, to_asset_dict
 from src.services.resolve_state import ResolveStateService
 from src.core.fast_paste import focus_davinci_resolve
 
@@ -284,6 +285,7 @@ class EdgeDockWindow(QWidget):
         self.asset_model = AssetListModel(parent=self.expanded_container)
         self.proxy_model = AssetFilterProxyModel(parent=self.expanded_container)
         self.proxy_model.setSourceModel(self.asset_model)
+        self.proxy_model.set_category("text")
 
         self.grid = AssetGridView(self.expanded_container)
         self.grid.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -676,10 +678,11 @@ class EdgeDockWindow(QWidget):
         # Find asset in proxy model and insert
         for i in range(self.proxy_model.rowCount()):
             idx = self.proxy_model.index(i, 0)
-            asset = idx.data(Qt.ItemDataRole.UserRole)
-            if asset and (asset.get("id") == asset_id or asset.get("name") == asset_id):
-                self._selected_asset = asset
-                self._do_insert(asset, {})
+            raw_asset = idx.data(Qt.ItemDataRole.UserRole)
+            ad = to_asset_dict(raw_asset)
+            if ad and (ad.get("id") == asset_id or ad.get("name") == asset_id):
+                self._selected_asset = ad
+                self._do_insert(ad, {})
                 break
 
     def _on_pad_triggered(self, pad_id: str):
@@ -717,20 +720,23 @@ class EdgeDockWindow(QWidget):
             scroll_y = self.grid.verticalScrollBar().value()
             self.router.save_page_state(cat, sub, scroll_y)
 
-    def _on_asset_clicked(self, asset: Dict[str, Any]):
-        self._selected_asset = asset
+    def _on_asset_clicked(self, asset: Any):
+        asset_dict = to_asset_dict(asset)
+        self._selected_asset = asset_dict
         timecode = self.status_bar.lbl_timecode.text()
-        self.action_bar.set_asset(asset, timecode=timecode)
+        self.action_bar.set_asset(asset_dict, timecode=timecode)
+        cat = str(asset_dict.get("category") or asset_dict.get("tab") or "").lower()
+        if cat in ("trans", "transitions", "transition"):
+            name = asset_dict.get("name", "Chuyển cảnh")
+            self.action_bar.lbl_info.setText(f"{name} · Kéo từ Effects > Video Transitions > ResolveFlow vào điểm cắt")
 
-        # CRITICAL: Always return focus to Resolve immediately on card click
-        focus_davinci_resolve()
-
-    def _on_asset_double_clicked(self, asset: Dict[str, Any]):
-        self._selected_asset = asset
+    def _on_asset_double_clicked(self, asset: Any):
+        asset_dict = to_asset_dict(asset)
+        self._selected_asset = asset_dict
         if self.router.active_profile.page == "fusion":
             self._on_paste_fusion()
         else:
-            self._do_insert(asset, {})
+            self._do_insert(asset_dict, {})
         focus_davinci_resolve()
 
     def _on_primary_action(self):
@@ -742,12 +748,15 @@ class EdgeDockWindow(QWidget):
         elif curr_page == "media":
             self.director_requested.emit()
         elif self._selected_asset:
-            self._do_insert(self._selected_asset, {})
+            asset_dict = to_asset_dict(self._selected_asset)
+            self._do_insert(asset_dict, {})
         focus_davinci_resolve()
 
     def _on_tune_action(self):
         if not self._selected_asset:
             return
+        asset_dict = to_asset_dict(self._selected_asset)
+        self._selected_asset = asset_dict
         if self.sheet.is_open:
             self.sheet.close_sheet()
             self.fsm.set_sheet_open(False)
@@ -755,23 +764,26 @@ class EdgeDockWindow(QWidget):
         else:
             self.fsm.set_sheet_open(True)
             self.router.is_sheet_open = True
-            self.sheet.open_sheet(self._selected_asset)
+            self.sheet.open_sheet(asset_dict)
 
-    def _on_sheet_insert_requested(self, asset: Dict[str, Any], params: Dict[str, Any]):
-        self._do_insert(asset, params)
+    def _on_sheet_insert_requested(self, asset: Any, params: Dict[str, Any]):
+        asset_dict = to_asset_dict(asset)
+        self._do_insert(asset_dict, params)
         self.fsm.set_sheet_open(False)
         self.router.is_sheet_open = False
         focus_davinci_resolve()
 
     def _on_paste_fusion(self):
         if self._selected_asset and self._insert_service:
-            res = self._insert_service.insert(self._selected_asset, mode="fusion_paste")
-            self.asset_inserted.emit(self._selected_asset, {"mode": "fusion_paste", "result": res})
+            asset_dict = to_asset_dict(self._selected_asset)
+            res = self._insert_service.insert(asset_dict, mode="fusion_paste")
+            self.asset_inserted.emit(asset_dict, {"mode": "fusion_paste", "result": res})
         focus_davinci_resolve()
 
     def _on_copy_fusion_code(self):
         if self._selected_asset:
-            code = self._selected_asset.get("content", "") or self._selected_asset.get("path", "")
+            asset_dict = to_asset_dict(self._selected_asset)
+            code = asset_dict.get("content", "") or asset_dict.get("path", "")
             app = QApplication.instance()
             if app:
                 app.clipboard().setText(str(code))
@@ -783,25 +795,38 @@ class EdgeDockWindow(QWidget):
 
     def _on_insert_new_track(self):
         if self._selected_asset:
-            self._do_insert(self._selected_asset, {"track_mode": "new"})
+            asset_dict = to_asset_dict(self._selected_asset)
+            self._do_insert(asset_dict, {"track_mode": "new"})
         focus_davinci_resolve()
 
     def _on_toggle_fav(self):
         if self._selected_asset:
-            is_fav = not self._selected_asset.get("is_fav", False)
-            self._selected_asset["is_fav"] = is_fav
-            self.action_bar.set_asset(self._selected_asset, is_fav=is_fav)
+            asset_dict = to_asset_dict(self._selected_asset)
+            is_fav = not asset_dict.get("is_fav", False)
+            asset_dict["is_fav"] = is_fav
+            self._selected_asset = asset_dict
+            self.action_bar.set_asset(asset_dict, is_fav=is_fav)
 
-    def _do_insert(self, asset: Dict[str, Any], params: Dict[str, Any]):
+    def _do_insert(self, asset: Any, params: Dict[str, Any]):
         if not asset:
             return
-        logger.info("Inserting asset '%s' with params %s", asset.get("name"), params)
+        asset_dict = to_asset_dict(asset)
+        name = asset_dict.get("name") or asset_dict.get("id") or "Tài nguyên"
+        cat = str(asset_dict.get("category") or asset_dict.get("tab") or "").lower()
+        logger.info("Inserting asset '%s' with params %s", name, params)
         if self._insert_service:
             mode = "timeline_track" if params.get("track_mode") != "new" else "new_track"
-            res = self._insert_service.insert(asset, mode=mode, extra_params=params)
-            self.asset_inserted.emit(asset, {"params": params, "result": res})
+            res = self._insert_service.insert(asset_dict, mode=mode, extra_params=params)
+            if res and res.ok:
+                if cat in ("trans", "transitions", "transition") and res.track == "Transitions":
+                    self.action_bar.lbl_info.setText(f"✨ “{name}” đã sẵn sàng trong Effects > Video Transitions")
+                else:
+                    self.action_bar.lbl_info.setText(f"✔ Đã chèn “{name}” lên {res.track or 'Timeline'}")
+            elif res:
+                self.action_bar.lbl_info.setText(f"❌ Chèn thất bại: {res.error or 'Lỗi không xác định'}")
+            self.asset_inserted.emit(asset_dict, {"params": params, "result": res})
         else:
-            self.asset_inserted.emit(asset, params)
+            self.asset_inserted.emit(asset_dict, params)
 
     def _on_resolve_state_changed(self, connected: bool, page: str, timeline: str, playhead_tc: str):
         self.rail.set_connected(connected)

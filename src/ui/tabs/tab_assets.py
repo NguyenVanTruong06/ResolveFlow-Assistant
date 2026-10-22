@@ -818,13 +818,16 @@ class TextLivePreviewWidget(QWidget):
         p = min(1.0, max(0.0, self.progress))
 
         if mode == "bounce":
-            t = min(1.0, self.progress * 2.0)
-            if t < 0.6:
-                s = (t / 0.6) * 1.24
-            elif t < 0.85:
-                s = 1.24 - ((t - 0.6) / 0.25) * 0.28
+            if self.progress <= 0.01:
+                s = 1.0
             else:
-                s = 0.96 + ((t - 0.85) / 0.15) * 0.04
+                t = min(1.0, self.progress * 2.0)
+                if t < 0.6:
+                    s = (t / 0.6) * 1.24
+                elif t < 0.85:
+                    s = 1.24 - ((t - 0.6) / 0.25) * 0.28
+                else:
+                    s = 0.96 + ((t - 0.85) / 0.15) * 0.04
 
             # MrBeast extra impact scale
             if "mrbeast" in pid:
@@ -3032,9 +3035,9 @@ class SuggestionChip(QFrame):
         self.suggested = suggested_asset
         self.asset = getattr(suggested_asset, "asset", suggested_asset)
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(46)
-        self.setMinimumWidth(170)
-        self.setMaximumWidth(240)
+        self.setFixedHeight(34)
+        self.setMinimumWidth(150)
+        self.setMaximumWidth(220)
         self._init_ui()
 
     def _init_ui(self):
@@ -3042,7 +3045,7 @@ class SuggestionChip(QFrame):
             QFrame {
                 background-color: #181826;
                 border: 1px solid rgba(139, 92, 246, 0.35);
-                border-radius: 8px;
+                border-radius: 6px;
             }
             QFrame:hover {
                 background-color: #232338;
@@ -3050,32 +3053,32 @@ class SuggestionChip(QFrame):
             }
         """)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(6)
+        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setSpacing(5)
 
         # Icon
         badge = getattr(self.asset, "badge_icon", "✨")
         lbl_icon = QLabel(badge)
-        lbl_icon.setFixedSize(26, 26)
+        lbl_icon.setFixedSize(22, 22)
         lbl_icon.setAlignment(Qt.AlignCenter)
         lbl_icon.setStyleSheet("""
             background: rgba(139, 92, 246, 0.2);
-            border-radius: 6px;
-            font-size: 14px;
+            border-radius: 4px;
+            font-size: 12px;
         """)
         layout.addWidget(lbl_icon)
 
         # Texts (Name + Reason)
         vbox = QVBoxLayout()
         vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(1)
+        vbox.setSpacing(0)
 
         name = getattr(self.asset, "name", "Đạo cụ")
         short_name = name if len(name) <= 17 else name[:15] + ".."
         self.lbl_name = QLabel(short_name)
         self.lbl_name.setToolTip(name)
         self.lbl_name.setStyleSheet("""
-            font-size: 11px;
+            font-size: 10.5px;
             font-weight: bold;
             color: #ffffff;
         """)
@@ -3084,7 +3087,7 @@ class SuggestionChip(QFrame):
         reason = getattr(self.suggested, "reason", "⚡ Đề xuất AI")
         self.lbl_reason = QLabel(reason)
         self.lbl_reason.setStyleSheet("""
-            font-size: 9px;
+            font-size: 8.5px;
             color: #38bdf8;
             font-weight: 500;
         """)
@@ -3093,16 +3096,16 @@ class SuggestionChip(QFrame):
 
         # Quick Add Button
         self.btn_add = QPushButton("➕")
-        self.btn_add.setFixedSize(22, 22)
+        self.btn_add.setFixedSize(20, 20)
         self.btn_add.setCursor(Qt.PointingHandCursor)
         self.btn_add.setToolTip("Chèn nhanh vào DaVinci Resolve tại Playhead (1-Click)")
         self.btn_add.setStyleSheet("""
             QPushButton {
                 background: rgba(6, 182, 212, 0.15);
                 border: 1px solid rgba(6, 182, 212, 0.5);
-                border-radius: 11px;
+                border-radius: 10px;
                 color: #22d3ee;
-                font-size: 10px;
+                font-size: 9px;
                 font-weight: bold;
                 padding: 0;
             }
@@ -3299,10 +3302,10 @@ class TabAssets(QWidget):
         main_layout.setSpacing(0)
 
         # =====================================================================
-        # CỘT 1: RAIL ĐIỀU HƯỚNG CHÍNH (78px)
+        # CỘT 1: RAIL ĐIỀU HƯỚNG CHÍNH (86px)
         # =====================================================================
         self.rail = QFrame()
-        self.rail.setFixedWidth(78)
+        self.rail.setFixedWidth(86)
         self.rail.setStyleSheet(f"""
             QFrame {{
                 background-color: {ThemeColors.BG_MAIN};
@@ -3322,23 +3325,25 @@ class TabAssets(QWidget):
             ("meme", "🎭\nMeme"),
             ("sfx", "🔊\nÂm thanh"),
             ("bgm", "🎵\nNhạc nền"),
-            ("fav", "❤️\nMẫu của tôi")
+            ("fav", "❤️\nCủa tôi")
         ]
 
         self.rail_btns = {}
         for tid, tname in tabs_data:
             btn = QPushButton(tname)
             btn.setCheckable(True)
-            btn.setFixedSize(64, 58)
+            btn.setFixedSize(74, 52)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    border-radius: 10px;
+                    border-radius: 8px;
                     color: {ThemeColors.TEXT_MUTED};
-                    font-size: 11px;
+                    font-size: 10.5px;
+                    line-height: 12px;
                     text-align: center;
                     border: none;
                     background: transparent;
+                    padding: 2px 0;
                 }}
                 QPushButton:hover {{
                     color: {ThemeColors.TEXT_PRIMARY};
@@ -3393,7 +3398,7 @@ class TabAssets(QWidget):
         scroll_cats.setWidget(self.cats_container)
         cats_layout.addWidget(scroll_cats, stretch=1)
 
-        self.btn_starter_pack = QPushButton("📦 Nạp Gói Starter Pack (Hot Trend)")
+        self.btn_starter_pack = QPushButton("📦 Gói Starter Pack")
         self.btn_starter_pack.setCursor(Qt.PointingHandCursor)
         self.btn_starter_pack.setToolTip("Nạp trọn bộ 75+ SFX, Memes, LUTs và Nhạc nền Hot Trend chuẩn CapCut")
         self.btn_starter_pack.clicked.connect(self._on_starter_pack_clicked)
@@ -3948,8 +3953,10 @@ class TabAssets(QWidget):
 
         # 2. Thông tin chi tiết
         self.lbl_insp_title = QLabel("<b>Alex Hormozi Pop</b>")
+        self.lbl_insp_title.setWordWrap(True)
         self.lbl_insp_title.setStyleSheet(f"font-size: 15px; color: {ThemeColors.TEXT_PRIMARY};")
         self.lbl_insp_sub = QLabel("Kinetic bounce · Font: Arial Black")
+        self.lbl_insp_sub.setWordWrap(True)
         self.lbl_insp_sub.setStyleSheet(f"font-size: 12px; color: {ThemeColors.TEXT_MUTED};")
         self.insp_vbox.addWidget(self.lbl_insp_title)
         self.insp_vbox.addWidget(self.lbl_insp_sub)
@@ -4510,12 +4517,20 @@ class TabAssets(QWidget):
             }
         """)
 
-        h_acts_sub.addWidget(self.btn_drag_davinci)
-        h_acts_sub.addWidget(self.btn_fast_paste_fusion)
-        h_acts_sub.addWidget(self.btn_copy_fusion)
-        h_acts_sub.addWidget(self.btn_install_presets)
-        h_acts_sub.addWidget(self.btn_capture_playhead)
-        acts_vbox.addLayout(h_acts_sub)
+        # Cụm nút phụ: Chia 2 hàng tinh gọn, hiển thị trọn vẹn icon và nhãn chữ
+        grid_acts = QGridLayout()
+        grid_acts.setContentsMargins(0, 0, 0, 0)
+        grid_acts.setSpacing(6)
+
+        # Hàng 1: 2 nút hành động nhanh chính
+        grid_acts.addWidget(self.btn_fast_paste_fusion, 0, 0)
+        grid_acts.addWidget(self.btn_drag_davinci, 0, 1)
+
+        # Hàng 2: 3 nút tiện ích bổ trợ
+        grid_acts.addWidget(self.btn_copy_fusion, 1, 0)
+        grid_acts.addWidget(self.btn_install_presets, 1, 1)
+        grid_acts.addWidget(self.btn_capture_playhead, 1, 2)
+        acts_vbox.addLayout(grid_acts)
 
         insp_layout.addWidget(scroll_insp, stretch=1)
 
@@ -4975,8 +4990,18 @@ class TabAssets(QWidget):
             c.set_selected(False)
 
         if matched_card:
+            # Nếu card thuộc tab khác, tự chuyển sang tab đó để người dùng thấy rõ
+            target_tab = "text" if isinstance(matched_card.preset, TextStylePreset) else "trans" if isinstance(matched_card.preset, TransitionStylePreset) else getattr(matched_card.preset, "tab", "")
+            if target_tab and target_tab != getattr(self, "current_rail_tab", ""):
+                if hasattr(self, "_filter_by_rail"):
+                    self._filter_by_rail(target_tab)
+                elif hasattr(self, "_on_rail_tab_clicked"):
+                    self._on_rail_tab_clicked(target_tab)
+
             matched_card.set_selected(True)
             self.selected_asset = matched_card.preset
+            if hasattr(self, "scroll_area"):
+                self.scroll_area.ensureWidgetVisible(matched_card)
 
         # Cập nhật Inspector
         self._update_inspector_details()
@@ -4992,30 +5017,30 @@ class TabAssets(QWidget):
             }}
         """)
         sug_layout = QVBoxLayout(self.suggestion_bar)
-        sug_layout.setContentsMargins(16, 6, 16, 6)
-        sug_layout.setSpacing(6)
+        sug_layout.setContentsMargins(12, 3, 12, 3)
+        sug_layout.setSpacing(4)
 
         # Header Row: Tiêu đề + Input/Combobox + Nút Gợi ý + Nút Thu gọn
         sug_header = QHBoxLayout()
-        sug_header.setSpacing(8)
+        sug_header.setSpacing(6)
 
         lbl_sug_title = QLabel("💡 Gợi ý AI theo lời thoại:")
-        lbl_sug_title.setStyleSheet("font-weight: bold; font-size: 12px; color: #c4b5fd;")
+        lbl_sug_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #c4b5fd;")
         sug_header.addWidget(lbl_sug_title)
 
         self.combo_context_sentence = QComboBox()
         self.combo_context_sentence.setEditable(True)
         self.combo_context_sentence.lineEdit().setPlaceholderText("Nhập hoặc chọn câu thoại (VD: 'Thật không thể tin nổi!')...")
         self.combo_context_sentence.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.combo_context_sentence.setFixedHeight(28)
+        self.combo_context_sentence.setFixedHeight(24)
         self.combo_context_sentence.setStyleSheet(f"""
             QComboBox {{
                 background: {ThemeColors.BG_CARD};
                 border: 1px solid rgba(139, 92, 246, 0.3);
-                border-radius: 6px;
-                padding: 2px 8px;
+                border-radius: 4px;
+                padding: 1px 6px;
                 color: {ThemeColors.TEXT_PRIMARY};
-                font-size: 11px;
+                font-size: 10.5px;
             }}
             QComboBox:focus {{
                 border-color: {ThemeColors.PRIMARY};
@@ -5027,16 +5052,16 @@ class TabAssets(QWidget):
 
         self.btn_analyze_sentence = QPushButton("⚡ Gợi ý")
         self.btn_analyze_sentence.setCursor(Qt.PointingHandCursor)
-        self.btn_analyze_sentence.setFixedHeight(28)
+        self.btn_analyze_sentence.setFixedHeight(24)
         self.btn_analyze_sentence.setStyleSheet(f"""
             QPushButton {{
                 background: {ThemeColors.PRIMARY};
                 border: none;
-                border-radius: 6px;
+                border-radius: 4px;
                 color: #ffffff;
-                font-size: 11px;
+                font-size: 10.5px;
                 font-weight: bold;
-                padding: 0 12px;
+                padding: 0 10px;
             }}
             QPushButton:hover {{
                 background: {ThemeColors.PRIMARY_HOVER};
@@ -5046,16 +5071,16 @@ class TabAssets(QWidget):
         sug_header.addWidget(self.btn_analyze_sentence)
 
         self.btn_toggle_sug = QPushButton("▲")
-        self.btn_toggle_sug.setFixedSize(28, 28)
+        self.btn_toggle_sug.setFixedSize(24, 24)
         self.btn_toggle_sug.setCursor(Qt.PointingHandCursor)
         self.btn_toggle_sug.setToolTip("Thu gọn / Mở rộng khay gợi ý AI")
         self.btn_toggle_sug.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
                 border: 1px solid rgba(139, 92, 246, 0.3);
-                border-radius: 6px;
+                border-radius: 4px;
                 color: {ThemeColors.TEXT_MUTED};
-                font-size: 10px;
+                font-size: 9.5px;
             }}
             QPushButton:hover {{
                 color: {ThemeColors.TEXT_PRIMARY};
@@ -5069,7 +5094,7 @@ class TabAssets(QWidget):
 
         # Scroll area for suggestion chips
         self.scroll_sug = QScrollArea()
-        self.scroll_sug.setFixedHeight(56)
+        self.scroll_sug.setFixedHeight(40)
         self.scroll_sug.setWidgetResizable(True)
         self.scroll_sug.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll_sug.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -5078,8 +5103,8 @@ class TabAssets(QWidget):
         self.sug_chips_container = QWidget()
         self.sug_chips_container.setStyleSheet("background: transparent;")
         self.sug_chips_layout = QHBoxLayout(self.sug_chips_container)
-        self.sug_chips_layout.setContentsMargins(0, 2, 0, 2)
-        self.sug_chips_layout.setSpacing(8)
+        self.sug_chips_layout.setContentsMargins(0, 1, 0, 1)
+        self.sug_chips_layout.setSpacing(6)
         self.scroll_sug.setWidget(self.sug_chips_container)
 
         sug_layout.addWidget(self.scroll_sug)
@@ -5114,15 +5139,15 @@ class TabAssets(QWidget):
             for label, sample_txt, sample_role in samples:
                 btn_sample = QPushButton(label)
                 btn_sample.setCursor(Qt.PointingHandCursor)
-                btn_sample.setFixedHeight(26)
+                btn_sample.setFixedHeight(22)
                 btn_sample.setStyleSheet(f"""
                     QPushButton {{
                         background: {ThemeColors.BG_CARD};
                         border: 1px dashed rgba(139, 92, 246, 0.4);
-                        border-radius: 6px;
-                        padding: 0 10px;
+                        border-radius: 4px;
+                        padding: 0 8px;
                         color: {ThemeColors.TEXT_MUTED};
-                        font-size: 10px;
+                        font-size: 9.5px;
                     }}
                     QPushButton:hover {{
                         color: #c4b5fd;
@@ -5565,10 +5590,14 @@ class TabAssets(QWidget):
                     self.combo_font.setCurrentIndex(self.combo_font.count() - 1)
                 sz_val = getattr(self.selected_asset, "size", 72)
                 self.slide_font_size.setValue(int(sz_val))
+                if hasattr(self, "lbl_font_size_val"):
+                    self.lbl_font_size_val.setText(f"{int(sz_val)} px")
 
                 out_w = getattr(self.selected_asset, "outline_width", 0.15)
                 if hasattr(self, "slide_stroke_width"):
                     self.slide_stroke_width.setValue(int(out_w * 100.0))
+                if hasattr(self, "lbl_stroke_width_val"):
+                    self.lbl_stroke_width_val.setText(f"{out_w:.2f}")
 
                 w_val = getattr(self.selected_asset, "weight", "bold")
                 if hasattr(self, "weight_buttons"):
@@ -6038,23 +6067,144 @@ class TabAssets(QWidget):
         if not self.selected_asset:
             return
 
-        is_text = isinstance(self.selected_asset, TextStylePreset) or getattr(self.selected_asset, "tab", "") == "text"
-        is_sfx = getattr(self.selected_asset, "tab", "") == "sfx"
-        is_bgm = getattr(self.selected_asset, "tab", "") == "bgm"
-        is_lut = getattr(self.selected_asset, "tab", "") == "lut"
+        from src.services.insert_service import to_asset_dict
+        asset_d = to_asset_dict(self.selected_asset)
+        tab = str(asset_d.get("tab") or "").lower()
+        fp = str(asset_d.get("file_path") or "").lower()
+        ext = os.path.splitext(fp)[1] if fp else ""
+
+        is_trans = tab == "trans" or isinstance(self.selected_asset, TransitionStylePreset)
+        is_video = tab in ("meme", "overlay") or ext in (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".png", ".jpg", ".jpeg", ".webp", ".svg")
+        is_sfx = tab == "sfx" or ext in (".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a")
+        is_bgm = tab == "bgm"
+        is_lut = tab == "lut" or ext in (".cube", ".3dl")
+        is_text = tab == "text" or isinstance(self.selected_asset, TextStylePreset) or (not is_trans and not is_video and not is_sfx and not is_bgm and not is_lut)
 
         try:
             resolve_auto = ResolveAutomation()
         except Exception:
             resolve_auto = None
 
-        if is_text:
+        if is_video:
+            real_file_path = asset_d.get("file_path", "")
+            asset_name = asset_d.get("name", "Asset")
+            asset_id = asset_d.get("id", "")
+            if not real_file_path or not os.path.isfile(real_file_path):
+                try:
+                    from src.core.broll_sfx import BRollSFXResolver
+                    real_file_path = BRollSFXResolver().resolve_meme(asset_id or asset_name)
+                except Exception:
+                    pass
+            if not real_file_path or not os.path.isfile(real_file_path):
+                try:
+                    from src.utils.path_utils import PosixPathAdapter
+                    for sub in ("memes", "overlays", "green_screen", "cinematic"):
+                        cand = PosixPathAdapter.get_asset_path("broll_memes", sub, f"{asset_id}.mp4")
+                        if os.path.exists(cand):
+                            real_file_path = str(cand)
+                            break
+                        cand_mov = PosixPathAdapter.get_asset_path("broll_memes", sub, f"{asset_id}.mov")
+                        if os.path.exists(cand_mov):
+                            real_file_path = str(cand_mov)
+                            break
+                except Exception:
+                    pass
+
+            success = False
+            if real_file_path and os.path.isfile(real_file_path):
+                if resolve_auto and hasattr(resolve_auto, "insert_media_at_playhead"):
+                    try:
+                        success = bool(resolve_auto.insert_media_at_playhead(media_path=os.path.abspath(real_file_path), target_track=3))
+                    except Exception as e:
+                        logger.error(f"Lỗi khi chèn media vào DaVinci: {e}")
+                        success = False
+                if success:
+                    self._show_toast(f"✅ Đã chèn video “{asset_name}” tại Playhead (V3)")
+                else:
+                    self._show_toast(f"❌ Chưa thể chèn video “{asset_name}” vào DaVinci. Hãy kiểm tra Timeline.")
+            else:
+                self._show_toast(f"❌ Không tìm thấy tệp video của “{asset_name}” trên đĩa.")
+
+        elif is_trans:
+            trans_name = asset_d.get("name", "Chuyển cảnh")
+            pid = asset_d.get("id", trans_name)
+            dur = float(asset_d.get("duration", 0.8) or 0.8)
+            success = False
+            try:
+                from src.core.transition_preset import TransitionMacroGenerator
+                TransitionMacroGenerator.install_transitions_to_davinci_resolve()
+                from src.core.resolve_bridge import insert_transition_at_playhead
+                item = insert_transition_at_playhead(style=pid, duration_sec=dur, track_index=2)
+                success = item is not None
+            except Exception as e:
+                logger.error(f"Lỗi khi chèn transition vào DaVinci: {e}")
+                success = False
+
+            if success:
+                self._show_toast(f"✅ Đã chèn chuyển cảnh “{trans_name}” tại Playhead (V2)")
+            else:
+                self._show_toast(f"✨ “{trans_name}” đã sẵn sàng trong Effects > Video Transitions")
+
+        elif is_sfx or is_bgm:
+            real_file_path = asset_d.get("file_path", "")
+            pid = asset_d.get("id", "whoosh" if is_sfx else "bgm")
+            if real_file_path and os.path.isfile(real_file_path):
+                audio_file = real_file_path
+            else:
+                clean_id = pid.replace("sfx_", "").replace("bgm_", "")
+                audio_file = os.path.join("assets", "sfx", f"{clean_id}.wav")
+                if not os.path.exists(audio_file):
+                    audio_file = os.path.join("assets", "sfx", f"{pid}.wav")
+            dur = float(asset_d.get("duration", 1.5 if is_sfx else 120.0) or (1.5 if is_sfx else 120.0))
+            target_track = 4 if is_bgm else 2
+            vol_offset = -18.0 if is_bgm else -12.0
+            success = False
+            if resolve_auto and hasattr(resolve_auto, "insert_sfx_to_track"):
+                try:
+                    success = bool(resolve_auto.insert_sfx_to_track(
+                        sfx_path=os.path.abspath(audio_file) if os.path.exists(audio_file) else audio_file,
+                        target_track=target_track,
+                        volume_offset_db=vol_offset
+                    ))
+                except Exception as e:
+                    logger.error(f"Lỗi khi chèn SFX vào DaVinci: {e}")
+                    success = False
+            self.insert_sfx_requested.emit(audio_file, target_track, vol_offset)
+            track_name = "A4/A5" if is_bgm else "A2"
+            if success:
+                self._show_toast(f"✅ Đã chèn âm thanh “{asset_d.get('name', pid)}” tại Playhead ({track_name})")
+            else:
+                self._show_toast(f"❌ Chưa thể chèn âm thanh vào DaVinci. Hãy kiểm tra DaVinci đã mở Timeline chưa.")
+
+        elif is_lut:
+            lut_name = asset_d.get("name", "")
+            pid = asset_d.get("id", "")
+            real_file_path = asset_d.get("file_path", "")
+            if real_file_path and os.path.isfile(real_file_path):
+                lut_file = real_file_path
+            else:
+                lut_file = os.path.join("assets", "luts", f"ResolveFlow_{pid}.cube")
+            lut_res = None
+            if resolve_auto and hasattr(resolve_auto, "apply_look_lut"):
+                try:
+                    lut_res = resolve_auto.apply_look_lut(lut_path=os.path.abspath(lut_file) if os.path.exists(lut_file) else lut_file, scope="timeline")
+                except Exception as e:
+                    logger.error(f"Lỗi khi áp LUT vào DaVinci: {e}")
+            self.apply_lut_requested.emit(pid)
+            if lut_res and lut_res.get("applied", 0) > 0:
+                self._show_toast(f"✅ Đã áp LUT “{lut_name}” lên Timeline ({lut_res['applied']} mục)")
+            elif lut_res and lut_res.get("skipped", 0) > 0:
+                self._show_toast(f"ℹ️ LUT “{lut_name}” đã có sẵn trên Timeline")
+            else:
+                self._show_toast(f"❌ Chưa thể áp LUT “{lut_name}”. Hãy kiểm tra DaVinci đã mở Timeline chưa.")
+
+        elif is_text:
             text = self.txt_single_title.text().strip() or "ResolveFlow Title"
-            preset_id = getattr(self.selected_asset, "id", "karaoke_pop")
+            preset_id = asset_d.get("id", "karaoke_pop")
             dur = float(self.slide_title_dur.value()) / 10.0 if hasattr(self, 'slide_title_dur') and self.slide_title_dur.value() > 0 else 4.0
-            font_name = self.combo_font.currentText() if hasattr(self, 'combo_font') else getattr(self.selected_asset, "font", "Arial")
-            font_size = self.slide_font_size.value() if hasattr(self, 'slide_font_size') else getattr(self.selected_asset, "size", 48)
-            stroke_width = (float(self.slide_stroke_width.value()) / 100.0) if hasattr(self, 'slide_stroke_width') else getattr(self.selected_asset, "outline_width", 0.15)
+            font_name = self.combo_font.currentText() if hasattr(self, 'combo_font') else asset_d.get("font", "Arial")
+            font_size = self.slide_font_size.value() if hasattr(self, 'slide_font_size') else asset_d.get("size", 48)
+            stroke_width = (float(self.slide_stroke_width.value()) / 100.0) if hasattr(self, 'slide_stroke_width') else asset_d.get("outline_width", 0.15)
             
             weight = "bold"
             if hasattr(self, "weight_buttons"):
@@ -6077,14 +6227,15 @@ class TabAssets(QWidget):
                         timing_curve = k
                         break
 
-            color_hex = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, 'swatch_colors') else getattr(self.selected_asset, "standard_color", "#FFFFFF")
-            highlight_hex = self.swatch_colors.get("highlight", "#FACC15") if hasattr(self, 'swatch_colors') else getattr(self.selected_asset, "highlight_color", "#FACC15")
-            stroke_hex = self.swatch_colors.get("stroke", "#000000") if hasattr(self, 'swatch_colors') else getattr(self.selected_asset, "outline_color", "#000000")
-            box_glow_hex = self.swatch_colors.get("box_glow", "#EF4444") if hasattr(self, 'swatch_colors') else getattr(self.selected_asset, "box_color", "#EF4444")
+            color_hex = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, 'swatch_colors') else asset_d.get("standard_color", "#FFFFFF")
+            highlight_hex = self.swatch_colors.get("highlight", "#FACC15") if hasattr(self, 'swatch_colors') else asset_d.get("highlight_color", "#FACC15")
+            stroke_hex = self.swatch_colors.get("stroke", "#000000") if hasattr(self, 'swatch_colors') else asset_d.get("outline_color", "#000000")
+            box_glow_hex = self.swatch_colors.get("box_glow", "#EF4444") if hasattr(self, 'swatch_colors') else asset_d.get("box_color", "#EF4444")
 
+            success = False
             if resolve_auto and hasattr(resolve_auto, "insert_title_at_playhead"):
                 try:
-                    resolve_auto.insert_title_at_playhead(
+                    success = bool(resolve_auto.insert_title_at_playhead(
                         text=text,
                         preset_id=preset_id,
                         duration_sec=dur,
@@ -6098,75 +6249,20 @@ class TabAssets(QWidget):
                         weight=weight,
                         animation=animation,
                         timing_curve=timing_curve
-                    )
-                except Exception:
-                    pass
+                    ))
+                except Exception as e:
+                    logger.error(f"Lỗi khi chèn title vào DaVinci: {e}")
+                    success = False
             self.insert_title_requested.emit(text, preset_id, dur)
-            self._show_toast(f"Đã chèn “{getattr(self.selected_asset, 'name', text)}” tại Playhead (V2)")
-        elif is_sfx or is_bgm:
-            real_file_path = getattr(self.selected_asset, "file_path", "")
-            pid = getattr(self.selected_asset, "id", "whoosh" if is_sfx else "bgm")
-            if real_file_path and os.path.isfile(real_file_path):
-                audio_file = real_file_path
+            if success:
+                self._show_toast(f"✅ Đã chèn “{asset_d.get('name', text)}” tại Playhead (V2)")
             else:
-                clean_id = pid.replace("sfx_", "").replace("bgm_", "")
-                audio_file = os.path.join("assets", "sfx", f"{clean_id}.wav")
-                if not os.path.exists(audio_file):
-                    audio_file = os.path.join("assets", "sfx", f"{pid}.wav")
-            dur = getattr(self.selected_asset, "duration", 1.5 if is_sfx else 120.0)
-            target_track = 4 if is_bgm else 2
-            vol_offset = -18.0 if is_bgm else -12.0
-            if resolve_auto and hasattr(resolve_auto, "insert_sfx_to_track"):
-                try:
-                    resolve_auto.insert_sfx_to_track(
-                        sfx_path=os.path.abspath(audio_file) if os.path.exists(audio_file) else audio_file,
-                        target_track=target_track,
-                        volume_offset_db=vol_offset
-                    )
-                except Exception:
-                    pass
-            self.insert_sfx_requested.emit(audio_file, target_track, vol_offset)
-            track_name = "A4/A5" if is_bgm else "A2"
-            self._show_toast(f"Đã chèn âm thanh “{getattr(self.selected_asset, 'name', pid)}” tại Playhead ({track_name})")
-        elif is_lut:
-            lut_name = getattr(self.selected_asset, "name", "")
-            pid = getattr(self.selected_asset, "id", "")
-            real_file_path = getattr(self.selected_asset, "file_path", "")
-            if real_file_path and os.path.isfile(real_file_path):
-                lut_file = real_file_path
-            else:
-                lut_file = os.path.join("assets", "luts", f"ResolveFlow_{pid}.cube")
-            if resolve_auto and hasattr(resolve_auto, "apply_look_lut"):
-                try:
-                    resolve_auto.apply_look_lut(lut_path=os.path.abspath(lut_file) if os.path.exists(lut_file) else lut_file, scope="timeline")
-                except Exception:
-                    pass
-            self.apply_lut_requested.emit(pid)
-            self._show_toast(f"Đã áp LUT “{lut_name}” lên Timeline")
-        elif getattr(self.selected_asset, "tab", "") in ("meme", "overlay"):
-            real_file_path = getattr(self.selected_asset, "file_path", "")
-            if real_file_path and os.path.isfile(real_file_path):
-                if resolve_auto and hasattr(resolve_auto, "insert_media_at_playhead"):
-                    try:
-                        resolve_auto.insert_media_at_playhead(media_path=os.path.abspath(real_file_path), target_track=3)
-                    except Exception:
-                        pass
-                else:
-                    print(f"Requested insertion of video {real_file_path} to V3")
-                self._show_toast(f"Đã chèn video “{getattr(self.selected_asset, 'name', 'Asset')}” tại Playhead (V3)")
-            else:
-                self._show_toast(f"Đã chèn “{getattr(self.selected_asset, 'name', 'Asset')}” vào Timeline")
-        elif isinstance(self.selected_asset, TransitionStylePreset) or getattr(self.selected_asset, "tab", "") == "trans":
-            trans_name = getattr(self.selected_asset, "name", "Chuyển cảnh")
-            align = getattr(self, "trans_alignment", "tail")
-            pos_label = "ĐẦU clip" if align == "head" else "CUỐI clip"
-            frames = getattr(self, "trans_frames", 12)
-            self._show_toast(f"Đã áp chuyển cảnh “{trans_name}” vào {pos_label} ({frames} frames)!")
+                self._show_toast(f"❌ Chưa thể chèn vào DaVinci. Hãy kiểm tra DaVinci đã mở Timeline chưa.")
         else:
-            self._show_toast(f"Đã chèn “{getattr(self.selected_asset, 'name', 'Asset')}” vào Timeline")
+            self._show_toast(f"Đã chèn “{asset_d.get('name', 'Asset')}” vào Timeline")
 
         # Ghi nhận vào mục Gần đây (Recent)
-        RecentManager.add(getattr(self.selected_asset, "id", ""))
+        RecentManager.add(asset_d.get("id", ""))
 
     def _create_drag_mime_data(self, asset: Optional[Any] = None) -> QMimeData:
         target = asset if asset is not None else self.selected_asset

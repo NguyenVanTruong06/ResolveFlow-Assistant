@@ -1,9 +1,28 @@
 import os
 import json
 import hashlib
-from typing import Dict, Any, Optional, Tuple
+import logging
+from typing import Dict, Any, Optional, Tuple, List
+from pathlib import Path
 
+CACHE_SCHEMA_VERSION = 2
 _CHECKSUM_MEMO: Dict[str, Tuple[float, int, str]] = {}
+
+
+def normalize_language_code(lang: Optional[str]) -> str:
+    """
+    Chuẩn hóa mã ngôn ngữ về dạng chuẩn: 'vi', 'en', hoặc 'auto'.
+    """
+    if not lang:
+        return "auto"
+    l = str(lang).strip().lower()
+    if l in ["vi", "tiếng việt", "vietnamese"]:
+        return "vi"
+    if l in ["en", "tiếng anh", "english"]:
+        return "en"
+    if l in ["auto", "tự nhận diện", "tự động"]:
+        return "auto"
+    return l
 
 
 def compute_file_checksum(file_path: str) -> str:
@@ -11,7 +30,7 @@ def compute_file_checksum(file_path: str) -> str:
     Tính mã băm (checksum) siêu tốc cho tệp video nguồn kết hợp:
     - Kích thước tệp (file size)
     - Thời gian sửa đổi cuối (mtime)
-    - SHA256 của 2MB đầu + 2MB cuối của tệp (hoặc toàn bộ nếu file < 4MB)
+    - SHA256 của 64KB đầu + 64KB cuối của tệp (hoặc toàn bộ nếu file < 128KB)
     - Bộ nhớ đệm trong RAM (_CHECKSUM_MEMO) cho phản hồi <0.001ms.
     """
     norm_path = os.path.normpath(os.path.abspath(file_path))
@@ -22,7 +41,8 @@ def compute_file_checksum(file_path: str) -> str:
         stat = os.stat(norm_path)
         file_size = stat.st_size
         mtime = stat.st_mtime
-    except Exception:
+    except Exception as e:
+        logging.debug(f"Không thể lấy stat của '{norm_path}': {e}")
         return ""
 
     # Kiểm tra RAM cache
@@ -34,7 +54,7 @@ def compute_file_checksum(file_path: str) -> str:
     hasher = hashlib.sha256()
     hasher.update(f"{norm_path.lower()}_{file_size}_{mtime}_".encode("utf-8"))
 
-    sample_size = 64 * 1024  # 64KB (giảm từ 2MB xuống để quét siêu tốc, vẫn đủ bắt metadata 2 đầu)
+    sample_size = 64 * 1024  # 64KB
     try:
         with open(norm_path, "rb") as f:
             if file_size <= sample_size * 2:
@@ -43,7 +63,8 @@ def compute_file_checksum(file_path: str) -> str:
                 hasher.update(f.read(sample_size))
                 f.seek(file_size - sample_size)
                 hasher.update(f.read(sample_size))
-    except Exception:
+    except Exception as e:
+        logging.warning(f"Không thể đọc nội dung file '{norm_path}' để tính checksum: {e}")
         hasher.update(norm_path.encode("utf-8"))
 
     res_hash = hasher.hexdigest()[:24]
@@ -64,9 +85,9 @@ class ScanCacheManager:
             cache_dir = os.path.join(home, ".resolveflow_cache")
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
-        self._cached_dir_files = None
+        self._cached_dir_files: Optional[List[str]] = None
 
-    def _get_dir_files(self) -> list:
+    def _get_dir_files(self) -> List[str]:
         if self._cached_dir_files is None:
             if os.path.exists(self.cache_dir):
                 self._cached_dir_files = os.listdir(self.cache_dir)
@@ -76,12 +97,12 @@ class ScanCacheManager:
 
     def _build_cache_key(self, file_path: str, model_size: str, language: str) -> str:
         f_hash = compute_file_checksum(file_path)
-        lang_str = language or "auto"
+        lang_str = normalize_language_code(language)
         return f"{f_hash}_{model_size}_{lang_str}".lower()
 
     def _build_name_key(self, file_path: str, model_size: str, language: str) -> str:
         base_name = os.path.basename(file_path).lower()
-        lang_str = language or "auto"
+        lang_str = normalize_language_code(language)
         name_hash = hashlib.sha256(base_name.encode("utf-8")).hexdigest()[:16]
         return f"name_{name_hash}_{model_size}_{lang_str}".lower()
 
@@ -89,63 +110,118 @@ class ScanCacheManager:
         self, 
         file_path: str, 
         model_size: str = "small", 
-        language: str = "Auto"
+        language: str = "vi"
     ) -> Optional[Dict[str, Any]]:
         """
         Kiểm tra và lấy dữ liệu quét đã lưu nếu có (Cache Hit).
-        Hỗ trợ tra cứu đa tầng:
+        Hỗ trợ tra cứu đa tầng an toàn:
         1. Khóa chính xác: Checksum + Model + Lang
-        2. Khóa Checksum: Bất kỳ model nào đã quét trên file này
-        3. Khóa Filename: Tên file chính xác
-        4. Khóa Filename bất kỳ model nào
+        2. Tương thích ngược: Checksum + Model + 'auto' (nếu requested là 'vi' hoặc 'auto')
+        3. Khóa Filename fallback an toàn: Xác minh model khớp và file_size khớp với file hiện tại.
         """
         if not os.path.exists(self.cache_dir):
             return None
 
+        model_str = (model_size or "small").lower().strip()
+        norm_lang = normalize_language_code(language)
+
         # 1. Tra cứu chính xác theo checksum + model + lang
-        key = self._build_cache_key(file_path, model_size, language)
+        key = self._build_cache_key(file_path, model_str, norm_lang)
         cache_file = os.path.join(self.cache_dir, f"{key}.json")
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, "r", encoding="utf-8") as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning(f"Lỗi đọc file cache '{cache_file}': {e}")
 
-        # 2. Tra cứu bất kỳ bản cache nào của cùng file hash (bất kể model_size/lang đã quét)
+        # 2. Tương thích ngược cache cũ (chỉ khi model khớp):
         f_hash = compute_file_checksum(file_path)
         if f_hash:
-            try:
-                prefix = f"{f_hash.lower()}_"
+            # 2a. Nếu requested là 'vi' hoặc 'auto', tìm bản cache cũ 'auto'
+            if norm_lang in ["vi", "auto"]:
+                auto_key = f"{f_hash}_{model_str}_auto".lower()
+                auto_file = os.path.join(self.cache_dir, f"{auto_key}.json")
+                if os.path.exists(auto_file):
+                    try:
+                        with open(auto_file, "r", encoding="utf-8") as f:
+                            return json.load(f)
+                    except Exception as e:
+                        logging.warning(f"Lỗi đọc file cache tương thích ngược '{auto_file}': {e}")
+
+            # 2b. Nếu người dùng chọn 'auto', chấp nhận bất kỳ ngôn ngữ nào của đúng model này
+            if norm_lang == "auto":
+                prefix = f"{f_hash.lower()}_{model_str}_"
                 for fname in self._get_dir_files():
                     if fname.lower().startswith(prefix) and fname.endswith(".json"):
-                        with open(os.path.join(self.cache_dir, fname), "r", encoding="utf-8") as f:
-                            return json.load(f)
-            except Exception:
-                pass
+                        try:
+                            with open(os.path.join(self.cache_dir, fname), "r", encoding="utf-8") as f:
+                                return json.load(f)
+                        except Exception as e:
+                            logging.warning(f"Lỗi đọc cache prefix '{fname}': {e}")
 
-        # 3. Tra cứu theo tên file chính xác
-        name_key = self._build_name_key(file_path, model_size, language)
-        name_cache_file = os.path.join(self.cache_dir, f"{name_key}.json")
-        if os.path.exists(name_cache_file):
+        # 3. Fallback theo tên file (an toàn, bắt buộc kiểm tra file_size và model)
+        current_file_size: Optional[int] = None
+        if os.path.exists(file_path):
             try:
-                with open(name_cache_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                current_file_size = os.path.getsize(file_path)
             except Exception:
-                pass
+                current_file_size = None
 
-        # 4. Tra cứu theo bất kỳ tên file nào khớp hash
         base_name = os.path.basename(file_path).lower()
-        name_hash = hashlib.sha256(base_name.encode("utf-8")).hexdigest()[:16]
-        if name_hash:
-            try:
-                prefix_name = f"name_{name_hash.lower()}_"
-                for fname in self._get_dir_files():
-                    if fname.lower().startswith(prefix_name) and fname.endswith(".json"):
-                        with open(os.path.join(self.cache_dir, fname), "r", encoding="utf-8") as f:
-                            return json.load(f)
-            except Exception:
-                pass
+        name_hashes = [hashlib.sha256(base_name.encode("utf-8")).hexdigest()[:16]]
+        stem = Path(file_path).stem.lower()
+        for cand_stem in [f"{stem}.mp4", f"{stem}.mov", f"{stem}.mkv", stem]:
+            ch = hashlib.sha256(cand_stem.encode("utf-8")).hexdigest()[:16]
+            if ch not in name_hashes:
+                name_hashes.append(ch)
+
+        for nh in name_hashes:
+            prefix_name = f"name_{nh.lower()}_"
+            for fname in self._get_dir_files():
+                if fname.lower().startswith(prefix_name) and fname.endswith(".json"):
+                    cand_path = os.path.join(self.cache_dir, fname)
+                    try:
+                        with open(cand_path, "r", encoding="utf-8") as f:
+                            cand_data = json.load(f)
+                    except Exception as e:
+                        logging.warning(f"Lỗi đọc file cache fallback '{cand_path}': {e}")
+                        continue
+
+                    # Xác minh model_size
+                    cand_model = str(cand_data.get("model") or "").lower().strip()
+                    if not cand_model:
+                        # Thử lấy từ tên file: name_{hash}_{model}_{lang}.json
+                        parts = fname[:-5].split("_")
+                        if len(parts) >= 4:
+                            cand_model = parts[2].lower()
+                    if cand_model and cand_model != model_str:
+                        continue
+
+                    # Xác minh ngôn ngữ
+                    cand_lang = normalize_language_code(cand_data.get("language_requested"))
+                    if norm_lang != "auto" and cand_lang != norm_lang:
+                        # Cho phép nếu là bản cũ 'auto' và người dùng chọn 'vi' và model == 'small'
+                        if not (cand_lang == "auto" and norm_lang == "vi" and model_str == "small"):
+                            continue
+
+                    # Xác minh kích thước file nếu file hiện tại tồn tại
+                    if current_file_size is not None:
+                        cand_size = cand_data.get("file_size")
+                        if cand_size is not None:
+                            if cand_size != current_file_size:
+                                logging.info(
+                                    f"Từ chối cache fallback '{fname}' cho '{file_path}': "
+                                    f"Kích thước file không khớp ({cand_size} != {current_file_size})"
+                                )
+                                continue
+                        else:
+                            logging.warning(
+                                f"Cache v1 cũ '{fname}' cho '{file_path}' không có trường file_size. "
+                                "Nạp cache với cảnh báo tương thích ngược."
+                            )
+
+                    return cand_data
 
         return None
 
@@ -154,26 +230,54 @@ class ScanCacheManager:
         file_path: str,
         scan_data: Dict[str, Any],
         model_size: str = "small",
-        language: str = "Auto"
+        language: str = "vi",
+        detected_language: Optional[str] = None,
+        language_probability: Optional[float] = None,
     ) -> str:
         """
-        Lưu kết quả quét vào file cache JSON theo cả 2 khóa để tái sử dụng tối đa.
+        Lưu kết quả quét vào file cache JSON theo cả 2 khóa (checksum và filename)
+        với schema version 2 chứa đầy đủ metadata kiểm chứng.
         """
-        key = self._build_cache_key(file_path, model_size, language)
+        model_str = (model_size or "small").lower().strip()
+        norm_lang = normalize_language_code(language)
+
+        key = self._build_cache_key(file_path, model_str, norm_lang)
         cache_file = os.path.join(self.cache_dir, f"{key}.json")
         try:
+            payload = dict(scan_data)
+            payload["cache_schema_version"] = CACHE_SCHEMA_VERSION
+            payload["model"] = model_str
+            payload["language_requested"] = norm_lang
+            payload["content_hash"] = compute_file_checksum(file_path)
+            
+            try:
+                payload["file_size"] = os.path.getsize(file_path)
+            except Exception:
+                payload["file_size"] = payload.get("file_size", 0)
+
+            if detected_language is not None:
+                payload["detected_language"] = detected_language
+            elif "detected_language" not in payload:
+                payload["detected_language"] = None
+
+            if language_probability is not None:
+                payload["language_probability"] = language_probability
+            elif "language_probability" not in payload:
+                payload["language_probability"] = None
+
             with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(scan_data, f, indent=2, ensure_ascii=False)
+                json.dump(payload, f, indent=2, ensure_ascii=False)
             
             # Lưu thêm bản theo name_key
-            name_key = self._build_name_key(file_path, model_size, language)
+            name_key = self._build_name_key(file_path, model_str, norm_lang)
             name_cache_file = os.path.join(self.cache_dir, f"{name_key}.json")
             with open(name_cache_file, "w", encoding="utf-8") as f:
-                json.dump(scan_data, f, indent=2, ensure_ascii=False)
+                json.dump(payload, f, indent=2, ensure_ascii=False)
 
             self._cached_dir_files = None
             return cache_file
-        except Exception:
+        except Exception as e:
+            logging.warning(f"Không thể lưu cache quét cho '{file_path}': {e}")
             return ""
 
     def clear_cache(self) -> int:
@@ -185,7 +289,7 @@ class ScanCacheManager:
                     try:
                         os.remove(os.path.join(self.cache_dir, fname))
                         count += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.warning(f"Không thể xóa file cache '{fname}': {e}")
         self._cached_dir_files = None
         return count

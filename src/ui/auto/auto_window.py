@@ -365,17 +365,30 @@ class PipelineWorker(QThread):
                 self.enable_vlog_hook
             )
 
+            # Kiểm tra xem có clip nào thực sự cần chạy Whisper model không (hay tất cả đã có cache)
+            clips_needing_whisper = []
+            if self.use_cache and needs_transcription:
+                for vp in self.video_paths:
+                    if not cache_mgr.get_cached_scan(vp, self.model_size, self.language):
+                        clips_needing_whisper.append(vp)
+            else:
+                clips_needing_whisper = list(self.video_paths)
+
             if self.phase in [0, 1] and needs_transcription:
-                self.step_signal.emit("load_model", "running")
-                self.log_signal.emit(f"🤖 Tải mô hình Whisper AI '{self.model_size}'...")
-                model_config = ModelConfig(
-                    model_size=self.model_size,
-                    device="cuda",
-                    compute_type="float16"
-                )
-                transcriber = ResolveTranscriber(model_config)
-                transcriber.load_model()
-                self.step_signal.emit("load_model", "done")
+                if not clips_needing_whisper and self.use_cache:
+                    self.step_signal.emit("load_model", "done")
+                    self.log_signal.emit("⚡ Toàn bộ video đã có dữ liệu trong Scan Cache! Bỏ qua nạp Whisper AI để tiết kiệm 100% RAM/GPU.")
+                else:
+                    self.step_signal.emit("load_model", "running")
+                    self.log_signal.emit(f"🤖 Tải mô hình Whisper AI '{self.model_size}' cho {len(clips_needing_whisper)} clip chưa có cache...")
+                    model_config = ModelConfig(
+                        model_size=self.model_size,
+                        device="cuda",
+                        compute_type="float16"
+                    )
+                    transcriber = ResolveTranscriber(model_config)
+                    transcriber.load_model(log_callback=self.log_signal.emit)
+                    self.step_signal.emit("load_model", "done")
             elif self.phase in [0, 1]:
                 self.log_signal.emit("⚡ Bỏ qua việc tải mô hình Whisper AI do không có tính năng nào yêu cầu dịch giọng nói.")
 
@@ -511,7 +524,9 @@ class PipelineWorker(QThread):
                         
                         if needs_transcription:
                             self.log_signal.emit("   🎙 Dịch giọng nói (Speech-to-Text Whisper)...")
-                            lang_code = None if self.language == "Auto" else ("vi" if self.language == "Tiếng Việt" else "en")
+                            from src.core.cache_manager import normalize_language_code
+                            norm_lang = normalize_language_code(self.language)
+                            lang_code = None if norm_lang == "auto" else norm_lang
                             
                             last_log_pct = -1
                             last_log_time = 0.0
@@ -544,23 +559,54 @@ class PipelineWorker(QThread):
                                 self._handle_interrupted()
                                 return
 
-                            self.log_signal.emit(f"   ✔ Phát hiện {len(raw_subtitles)} đoạn thoại.")
+                            try:
+                                clip_dur = AudioExtractor.get_audio_duration(video_path)
+                            except Exception:
+                                clip_dur = 0.0
+
+                            from src.core.whisper_cleaner import clean_whisper_segments_with_stats, format_filter_summary
+                            target_filter_lang = norm_lang if norm_lang != "auto" else (getattr(transcriber, "last_detected_language", "vi") or "vi")
+                            clean_subs, filter_stats, _ = clean_whisper_segments_with_stats(
+                                raw_subtitles,
+                                language=target_filter_lang,
+                                clip_duration=clip_dur
+                            )
+                            dropped_count = len(raw_subtitles) - len(clean_subs)
+                            if dropped_count > 0:
+                                summary_line = format_filter_summary(dropped_count, filter_stats)
+                                self.log_signal.emit(f"   🧹 [Lọc ảo giác] {summary_line}")
+                            self.log_signal.emit(f"   ✔ Giữ lại {len(clean_subs)}/{len(raw_subtitles)} đoạn thoại chuẩn.")
+                            raw_subtitles = clean_subs
                             clip_subs = split_subtitles(raw_subtitles, limit=self.split_limit, mode=self.split_mode)
                         else:
                             raw_subtitles = []
                             clip_subs = []
-
-                        try:
-                            clip_dur = AudioExtractor.get_audio_duration(video_path)
-                        except Exception:
-                            clip_dur = 0.0
+                            try:
+                                clip_dur = AudioExtractor.get_audio_duration(video_path)
+                            except Exception:
+                                clip_dur = 0.0
 
                     keep_intervals = []
                     speedup_segments = []
                     cut_segments = []
-
                     visual_activity = None
-                    if self.enable_vlog_hook or self.story_intent != "keep" or (self.run_cut and (self.scene_guard or self.video_type != "talk")):
+
+                    # Tái sử dụng dữ liệu từ cache nếu có
+                    if cached_data:
+                        if cached_data.get("visual_activity") is not None:
+                            try:
+                                import numpy as np
+                                visual_activity = np.asarray(cached_data["visual_activity"], dtype=np.float32)
+                            except Exception:
+                                visual_activity = None
+                        keep_intervals = cached_data.get("silence_keep_intervals", [(0.0, clip_dur)])
+                        speedup_segments = cached_data.get("speedup_segments", [])
+                        cut_segments = cached_data.get("cut_segments", [])
+
+                    # Chỉ đo chuyển động hình ảnh nếu chưa có cache và đang ở Phase 0 hoặc 2
+                    if visual_activity is None and self.phase != 1 and (
+                        self.enable_vlog_hook or self.story_intent != "keep" or (self.run_cut and (self.scene_guard or self.video_type != "talk"))
+                    ):
                         self.log_signal.emit("   👁 [Scene Activity] Đo mức chuyển động hình ảnh (chỉ đọc keyframe, khá nhanh)...")
                         visual_activity = compute_visual_activity(video_path, duration=clip_dur)
                         if visual_activity is None:
@@ -579,7 +625,7 @@ class PipelineWorker(QThread):
                         from src.core.autocut import CutSegment
                         cut_segments = [CutSegment(start=0.0, end=clip_dur, action="keep", speed=1.0)]
                         keep_intervals = [(0.0, clip_dur)]
-                    elif self.run_cut:
+                    elif self.run_cut and not cut_segments and self.phase != 1:
                         if not os.path.exists(temp_wav) or os.path.getsize(temp_wav) == 0:
                             AudioExtractor.extract_audio(video_path, temp_wav)
 
@@ -690,7 +736,9 @@ class PipelineWorker(QThread):
                                 "speedup_segments": speedup_segments
                             },
                             model_size=self.model_size,
-                            language=self.language
+                            language=self.language,
+                            detected_language=getattr(transcriber, "last_detected_language", None) if transcriber else None,
+                            language_probability=getattr(transcriber, "last_language_probability", None) if transcriber else None
                         )
 
                     # Lưu cache
@@ -755,11 +803,13 @@ class PipelineWorker(QThread):
                 self.proposed_segments = proposed_all
                 has_cut_proposals = any(p.decision == "cut" for p in proposed_all)
                 if has_cut_proposals:
-                    self.log_signal.emit(f"✔ Đã lập {len(proposed_all)} phân đoạn đề xuất cắt/giữ.")
+                    cut_count = sum(1 for p in proposed_all if p.decision == "cut")
+                    self.log_signal.emit(f"✔ Đã lập {len(proposed_all)} phân đoạn đề xuất cắt/giữ ({cut_count} đề xuất cắt).")
                     self.progress_signal.emit(100)
+                    self.step_signal.emit("ai_director", "done")
                     self.finished_signal.emit(True, "phase1_done")
                     return
-                
+
                 self.log_signal.emit(f"✔ Toàn bộ {len(proposed_all)} phân đoạn thoại đều đạt chuẩn (không có đề xuất cắt). Tự động chuyển tiếp Phase 2...")
                 self.phase = 2
                 self.proposed_segments_override = proposed_all
@@ -2233,8 +2283,9 @@ class AutoWindow(QMainWindow):
         model_row.addWidget(lbl_model_tag)
 
         self.combo_model = QComboBox()
-        self.combo_model.addItems(["small", "base", "tiny", "medium", "large-v3"])
-        self.combo_model.setCurrentText("small")
+        self.combo_model.addItems(["small", "base", "tiny", "medium", "large-v3", "large-v3-turbo"])
+        from src.core.transcriber import suggest_default_model
+        self.combo_model.setCurrentText(suggest_default_model())
         self.combo_model.setStyleSheet("""
             QComboBox {
                 background-color: #27272a;
@@ -3289,7 +3340,7 @@ class AutoWindow(QMainWindow):
 
         if not hasattr(self, "combo_model"):
             self.combo_model = QComboBox()
-            self.combo_model.addItems(["small", "base", "tiny", "medium", "large-v3"])
+            self.combo_model.addItems(["small", "base", "tiny", "medium", "large-v3", "large-v3-turbo"])
         if not hasattr(self, "combo_lang"):
             self.combo_lang = QComboBox()
             self.combo_lang.addItems(["vi", "en", "auto"])
@@ -4108,6 +4159,12 @@ class AutoWindow(QMainWindow):
         self.project_structure = proj
         if not proj.all_video_paths:
             self.txt_console.appendPlainText(f"⚠ Không tìm thấy video hợp lệ trong thư mục: {folder_path}")
+            QMessageBox.warning(
+                self,
+                "Không tìm thấy video",
+                f"Không tìm thấy tệp video hợp lệ nào trong thư mục:\n{folder_path}\n\n"
+                "Định dạng hỗ trợ: MP4, MOV, MKV, AVI, M4V, WEBM, FLV, WMV, TS, MTS, M2TS."
+            )
             return
         
         self.selected_files = proj.all_video_paths
@@ -4331,47 +4388,29 @@ class AutoWindow(QMainWindow):
             QThreadPool.globalInstance().start(worker)
 
     def _build_copilot_clips_data(self) -> Tuple[str, List[Dict[str, Any]]]:
-        """Tổng hợp danh sách clip và transcript từ cache để phục vụ các động cơ AI."""
+        """Tổng hợp danh sách clip và transcript từ cache để phục vụ các động cơ AI qua ClipManifest."""
         if not hasattr(self, "selected_files") or not self.selected_files:
             return "", []
 
-        clips_data = []
-        cache_mgr = ScanCacheManager()
-        
-        for idx, vp in enumerate(self.selected_files):
-            clip_name = os.path.basename(vp)
-            chapter_name = "Chung"
-            if self.project_structure:
-                for grp in self.project_structure.groups:
-                    if vp in grp.video_paths:
-                        chapter_name = grp.name
-                        break
-            
-            cached = cache_mgr.get_cached_scan(vp, self.combo_model.currentText(), self.combo_lang.currentText())
-            dur = 0.0
-            if cached:
-                dur = float(cached.get("clip_dur", 0.0) or cached.get("duration", 0.0))
-            if dur <= 0:
-                try:
-                    dur = EDLGenerator.get_video_duration(vp)
-                except Exception:
-                    dur = 0.0
-            
-            raw_subs = cached.get("raw_subtitles", []) if cached else []
-            transcript_text = " ".join(s.get("text", "").strip() for s in raw_subs)
-            
-            clips_data.append({
-                "id": idx + 1,
-                "name": clip_name,
-                "path": vp,
-                "chapter": chapter_name,
-                "duration": dur,
-                "audio_peak_sec": dur * 0.5,
-                "visual_motion": "vừa",
-                "speech": transcript_text
-            })
+        from src.core.clip_manifest import ClipManifest, build_clips_data
+        from src.core.cache_manager import ScanCacheManager
 
         proj_name = self.project_structure.root_name if self.project_structure else (os.path.splitext(os.path.basename(self.selected_files[0]))[0] if len(self.selected_files) == 1 else "Vlog_Project")
+        
+        manifest = ClipManifest.get_or_create(self.selected_files, project_name=proj_name)
+        self.clip_manifest = manifest
+
+        cache_mgr = ScanCacheManager()
+        model_name = self.combo_model.currentText() if hasattr(self, "combo_model") else "base"
+        lang_name = self.combo_lang.currentText() if hasattr(self, "combo_lang") else "vi"
+
+        clips_data = build_clips_data(
+            manifest=manifest,
+            cache_mgr=cache_mgr,
+            model=model_name,
+            lang=lang_name,
+            project_structure=self.project_structure
+        )
         return proj_name, clips_data
 
     def _quick_copy_copilot_prompt(self):
@@ -4403,6 +4442,7 @@ class AutoWindow(QMainWindow):
                 except Exception as e:
                     self.txt_console.appendPlainText(f"   ⚠ Lỗi phát hiện beat: {e}")
 
+        mid = self.clip_manifest.manifest_id if hasattr(self, "clip_manifest") and self.clip_manifest else None
         prompt = StoryCopilot.generate_copilot_prompt(
             project_name=proj_name,
             clips_data=clips_data,
@@ -4410,13 +4450,16 @@ class AutoWindow(QMainWindow):
             story_intent=fmt,
             hook_duration=hook_dur,
             target_duration=target_dur,
-            music_beats=music_beats
+            music_beats=music_beats,
+            manifest_id=mid
         )
 
         QApplication.clipboard().setText(prompt)
         self.txt_console.appendPlainText("\n" + "="*60)
         self.txt_console.appendPlainText("📋 [AI Story Copilot] ĐÃ COPY TOÀN BỘ PROMPT ĐẠO DIỄN VÀO CLIPBOARD!")
         self.txt_console.appendPlainText(f"👉 Định dạng: {fmt.upper()} (Hook: {hook_dur}, Target: {target_dur}).")
+        if mid:
+            self.txt_console.appendPlainText(f"🆔 Manifest ID: {mid}")
         self.txt_console.appendPlainText("👉 Hãy chuyển sang trình duyệt (Claude.ai hoặc ChatGPT), bấm Ctrl+V để gửi.")
         self.txt_console.appendPlainText("👉 Khi nhận được đoạn kịch bản JSON, hãy dán vào ô bên dưới và bấm 'THI CÔNG TIMELINE'!")
         self.txt_console.appendPlainText("="*60 + "\n")
@@ -4455,6 +4498,7 @@ class AutoWindow(QMainWindow):
                 except Exception as e:
                     self.txt_console.appendPlainText(f"   ⚠ Lỗi phát hiện beat: {e}")
 
+        mid = self.clip_manifest.manifest_id if hasattr(self, "clip_manifest") and self.clip_manifest else None
         prompt = StoryCopilot.generate_copilot_prompt(
             project_name=proj_name,
             clips_data=clips_data,
@@ -4462,7 +4506,8 @@ class AutoWindow(QMainWindow):
             story_intent=fmt,
             hook_duration=hook_dur,
             target_duration=target_dur,
-            music_beats=music_beats
+            music_beats=music_beats,
+            manifest_id=mid
         )
         self.txt_console.appendPlainText(f"\n🧠 [Local AI] Bắt đầu yêu cầu kịch bản từ Ollama ({model})...")
         self.btn_run.setEnabled(False)
@@ -4513,6 +4558,7 @@ class AutoWindow(QMainWindow):
                 except Exception as e:
                     self.txt_console.appendPlainText(f"   ⚠ Lỗi phát hiện beat: {e}")
 
+        mid = self.clip_manifest.manifest_id if hasattr(self, "clip_manifest") and self.clip_manifest else None
         prompt = StoryCopilot.generate_copilot_prompt(
             project_name=proj_name,
             clips_data=clips_data,
@@ -4520,7 +4566,8 @@ class AutoWindow(QMainWindow):
             story_intent=fmt,
             hook_duration=hook_dur,
             target_duration=target_dur,
-            music_beats=music_beats
+            music_beats=music_beats,
+            manifest_id=mid
         )
         self.txt_console.appendPlainText(f"\n⚡ [Cloud AI] Bắt đầu gửi kịch bản sang {provider.upper()} API...")
         self.btn_run.setEnabled(False)
@@ -4656,10 +4703,12 @@ class AutoWindow(QMainWindow):
         model_name = self.combo_model.currentText() if hasattr(self, "combo_model") else "base"
         lang_name = self.combo_lang.currentText() if hasattr(self, "combo_lang") else "vi"
 
+        from src.core.whisper_cleaner import clean_whisper_segments
+
         for vp in video_paths:
             cached = cache_mgr.get_cached_scan(vp, model_name, lang_name)
             if cached:
-                raw_subs = cached.get("raw_subtitles", [])
+                raw_subs = clean_whisper_segments(cached.get("raw_subtitles", []))
                 for sub in raw_subs:
                     w_list = sub.get("words", [])
                     if w_list:
@@ -4874,47 +4923,10 @@ class AutoWindow(QMainWindow):
             QMessageBox.warning(self, "Chưa chọn video", "Vui lòng chọn tệp video hoặc thư mục dự án trước khi mở AI Copilot.")
             return
 
-        # Chuẩn bị dữ liệu danh sách clips siêu tốc từ Cache
-        clips_data = []
-        cache_mgr = ScanCacheManager()
-        
-        for idx, vp in enumerate(self.selected_files):
-            clip_name = os.path.basename(vp)
-            chapter_name = "Chung"
-            if self.project_structure:
-                for grp in self.project_structure.groups:
-                    if vp in grp.video_paths:
-                        chapter_name = grp.name
-                        break
-            
-            # Đọc từ cache
-            cached = cache_mgr.get_cached_scan(vp, self.combo_model.currentText(), self.combo_lang.currentText())
-            dur = 0.0
-            if cached:
-                dur = float(cached.get("clip_dur", 0.0) or cached.get("duration", 0.0))
-            
-            # Nếu chưa có cache, lấy độ dài nhanh hoặc ước lượng nhẹ để không block UI
-            if dur <= 0:
-                try:
-                    dur = EDLGenerator.get_video_duration(vp)
-                except Exception:
-                    dur = 0.0
-            
-            raw_subs = cached.get("raw_subtitles", []) if cached else []
-            transcript_text = " ".join(s.get("text", "").strip() for s in raw_subs)
-            
-            clips_data.append({
-                "id": idx + 1,
-                "name": clip_name,
-                "path": vp,
-                "chapter": chapter_name,
-                "duration": dur,
-                "audio_peak_sec": dur * 0.5,
-                "visual_motion": "vừa",
-                "speech": transcript_text
-            })
-
-        proj_name = self.project_structure.root_name if self.project_structure else (os.path.splitext(os.path.basename(self.selected_files[0]))[0] if len(self.selected_files) == 1 else "Vlog_Project")
+        proj_name, clips_data = self._build_copilot_clips_data()
+        if not clips_data:
+            QMessageBox.warning(self, "Chưa có clip", "Không thể chuẩn bị danh sách clip cho Copilot.")
+            return
 
         fmt = "travel_vlog"
         hook_dur = "30_60s"
@@ -4926,6 +4938,7 @@ class AutoWindow(QMainWindow):
         if hasattr(self.tab_copilot, "combo_target_duration"):
             target_dur = self.tab_copilot.combo_target_duration.currentData() or "full"
 
+        mid = self.clip_manifest.manifest_id if hasattr(self, "clip_manifest") and self.clip_manifest else None
         dlg = StoryCopilotDialog(
             project_name=proj_name,
             clips_data=clips_data,
@@ -4933,6 +4946,7 @@ class AutoWindow(QMainWindow):
             story_intent=fmt,
             hook_duration=hook_dur,
             target_duration=target_dur,
+            manifest_id=mid,
             parent=self
         )
         dlg.plan_applied_signal.connect(self._on_copilot_plan_applied)
@@ -4978,6 +4992,46 @@ class AutoWindow(QMainWindow):
         output_dir = str(Path(project_root_dir) / "_TIMELINE_IMPORT")
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+        # Lấy hoặc khởi tạo ClipManifest
+        from src.core.clip_manifest import ClipManifest
+        proj_name = self.project_structure.root_name if self.project_structure else (os.path.splitext(os.path.basename(self.selected_files[0]))[0] if len(self.selected_files) == 1 else "Vlog_Project")
+        manifest = getattr(self, "clip_manifest", None)
+        if manifest is None:
+            manifest = ClipManifest.get_or_create(self.selected_files, project_name=proj_name)
+            self.clip_manifest = manifest
+
+        # Cập nhật clip_manifest nếu có file mới được thêm vào selected_files
+        existing_paths = {os.path.abspath(c.current_path) for c in manifest.clips}
+        new_files = [f for f in self.selected_files if os.path.abspath(f) not in existing_paths]
+        if new_files:
+            old_mid = manifest.manifest_id
+            for nf in new_files:
+                manifest.add_clip(nf)
+            manifest.save()
+            self.txt_console.appendPlainText(
+                f"⚠ [Clip Manifest] Phát hiện {len(new_files)} video mới được thêm vào. "
+                f"Manifest ID đã cập nhật: {old_mid} -> {manifest.manifest_id}"
+            )
+
+        # Kiểm tra manifest_id
+        if plan.manifest_id:
+            if plan.manifest_id != manifest.manifest_id:
+                msg = (
+                    f"Lệch Manifest ID!\n\n"
+                    f"- Manifest ID trong kịch bản: {plan.manifest_id}\n"
+                    f"- Manifest ID hiện tại: {manifest.manifest_id}\n\n"
+                    f"Danh sách file hoặc thứ tự clip đã thay đổi so với thời điểm sinh kịch bản. "
+                    f"Để tránh dựng sai clip, quá trình dựng timeline đã bị chặn. Vui lòng tạo lại prompt mới."
+                )
+                self.txt_console.appendPlainText(f"❌ [LỖI MANIFEST] {msg}")
+                QMessageBox.critical(self, "Lệch Manifest ID - Chặn dựng timeline", msg)
+                self._set_ui_step_progress(0, "Lỗi: Lệch Manifest ID", -1)
+                return
+            else:
+                self.txt_console.appendPlainText(f"✓ [Manifest Verified] Manifest ID khớp: {manifest.manifest_id}")
+        else:
+            self.txt_console.appendPlainText("⚠ [CẢNH BÁO] Kịch bản cũ không có manifest_id, có thể dựng nhầm clip nếu thứ tự file đổi. Đang chạy chế độ tương thích...")
+
         # Nạp kho tài nguyên B-Roll / SFX của dự án
         asset_pool = GlobalAssetPool.get_instance()
         n_pm, n_ps = asset_pool.register_project_assets(project_root_dir)
@@ -4994,21 +5048,39 @@ class AutoWindow(QMainWindow):
             self.txt_console.appendPlainText("⚡ [Auto-Resolve] Đang tự động tìm và ánh xạ asset tương đương trong Kho Đạo Cụ...")
             plan = resolver.auto_resolve_missing_assets(plan)
 
-        # Ánh xạ phong phú index, filename, stem, relative path -> video_path
+        # Ánh xạ phong phú clip_id, index, filename, stem, relative path -> video_path từ ClipManifest
         path_map: Dict[Any, str] = {}
-        for idx, vp in enumerate(getattr(self, "selected_files", [])):
-            p_abs = str(PosixPathAdapter.resolve_path(vp))
-            b_name = os.path.basename(p_abs).lower()
+        for i, entry in enumerate(manifest.clips):
+            p_abs = str(PosixPathAdapter.resolve_path(entry.current_path))
+            cid = entry.clip_id
+            idx_1 = i + 1
+            idx_0 = i
+            b_name = entry.file_name.lower()
             s_name = os.path.splitext(b_name)[0]
-            path_map[idx + 1] = p_abs
-            path_map[str(idx + 1)] = p_abs
-            path_map[idx] = p_abs
-            path_map[str(idx)] = p_abs
-            path_map[f"clip_{idx+1}"] = p_abs
-            path_map[f"clip {idx+1}"] = p_abs
-            path_map[f"clip{idx+1}"] = p_abs
+
+            path_map[cid] = p_abs
+            path_map[cid.lower()] = p_abs
+            if cid.startswith("C") and cid[1:].isdigit():
+                try:
+                    cnum = int(cid[1:])
+                    path_map[f"c{cnum}"] = p_abs
+                    path_map[f"C{cnum}"] = p_abs
+                except Exception:
+                    pass
+
+            path_map[idx_1] = p_abs
+            path_map[str(idx_1)] = p_abs
+            path_map[idx_0] = p_abs
+            path_map[str(idx_0)] = p_abs
+            path_map[f"clip_{idx_1}"] = p_abs
+            path_map[f"clip {idx_1}"] = p_abs
+            path_map[f"clip{idx_1}"] = p_abs
+
             path_map[b_name] = p_abs
             path_map[s_name] = p_abs
+            path_map[os.path.basename(p_abs).lower()] = p_abs
+            path_map[os.path.splitext(os.path.basename(p_abs))[0].lower()] = p_abs
+
             try:
                 rel_str = PosixPathAdapter.to_posix(os.path.relpath(p_abs, project_root_dir))
                 path_map[rel_str] = p_abs
@@ -5022,13 +5094,17 @@ class AutoWindow(QMainWindow):
                 p_abs = str(PosixPathAdapter.resolve_path(vp))
                 b_name = os.path.basename(p_abs).lower()
                 s_name = os.path.splitext(b_name)[0]
-                path_map[b_name] = p_abs
-                path_map[s_name] = p_abs
+                if b_name not in path_map:
+                    path_map[b_name] = p_abs
+                if s_name not in path_map:
+                    path_map[s_name] = p_abs
                 try:
                     rel_str = PosixPathAdapter.to_posix(os.path.relpath(p_abs, project_root_dir))
-                    path_map[rel_str] = p_abs
+                    if rel_str not in path_map:
+                        path_map[rel_str] = p_abs
                     norm_rel = PosixPathAdapter.normalize_for_comparison(rel_str)
-                    path_map[norm_rel] = p_abs
+                    if norm_rel not in path_map:
+                        path_map[norm_rel] = p_abs
                 except Exception:
                     pass
 
@@ -5860,6 +5936,33 @@ class AutoWindow(QMainWindow):
                     cb = chk_box.findChild(QCheckBox)
                     if cb:
                         self.proposed_segments[row].approved = cb.isChecked()
+
+        # Kiểm tra xem mô hình Whisper đã có trên đĩa chưa nếu cần quét mới
+        needs_whisper = (ai_mode != "silence_only") or enable_subtitles
+        if needs_whisper and phase_to_run in [0, 1]:
+            from src.core.transcriber import is_model_on_disk, MODEL_DISK_SIZES
+            from src.core.cache_manager import ScanCacheManager
+            if not is_model_on_disk(model_size):
+                cache_mgr = ScanCacheManager()
+                any_uncached = any(
+                    cache_mgr.get_cached_scan(vp, model_size, language) is None
+                    for vp in video_paths
+                ) if use_cache else bool(video_paths)
+                if any_uncached:
+                    size_str = MODEL_DISK_SIZES.get(model_size, "~1.5 GB")
+                    reply = QMessageBox.question(
+                        self,
+                        "Tải mô hình Whisper AI",
+                        f"Mô hình Whisper '{model_size}' chưa có trên máy.\n\n"
+                        f"ResolveFlow sẽ cần tải khoảng {size_str} từ internet trong lần chạy đầu tiên.\n\n"
+                        f"Bạn có muốn tiếp tục tải và bắt đầu tiến trình không?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes
+                    )
+                    if reply != QMessageBox.StandardButton.Yes:
+                        self.is_processing = False
+                        self._update_run_button_state(running=False)
+                        return
 
         self._update_run_button_state(running=True)
         self.step_progress.reset()

@@ -25,7 +25,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QKeyEvent, QPixmap, QPainter, QColor
 
-from src.services.insert_service import InsertService
+from src.services.insert_service import InsertService, to_asset_dict
 from src.services.search_index import SearchIndex
 from src.core.fast_paste import focus_davinci_resolve
 from src.ui.lux.window_anchor import get_resolve_window_rect
@@ -632,7 +632,8 @@ class CommandPaletteWindow(QWidget):
             return
 
         # Asset Insertion
-        asset: Dict[str, Any] = item.data
+        raw_asset = item.data
+        asset = to_asset_dict(raw_asset)
         insert_mode = mode
         if mode == "shift":
             insert_mode = "fusion_paste" if self._current_page == "fusion" else "new_track"

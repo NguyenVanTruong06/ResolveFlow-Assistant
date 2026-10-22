@@ -231,11 +231,12 @@ class TransitionMacroGenerator:
         # Cài đặt các mẫu Transition Fusion Macro chuẩn (.setting)
         import shutil
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        templates_dir = os.path.join(project_root, "assets", "templates", "Transitions")
-        if os.path.exists(templates_dir):
-            for fn in os.listdir(templates_dir):
-                if fn.endswith(".setting"):
-                    shutil.copy2(os.path.join(templates_dir, fn), os.path.join(target_dir, fn))
+        for cand_name in ("transitions", "Transitions"):
+            templates_dir = os.path.join(project_root, "assets", "templates", cand_name)
+            if os.path.exists(templates_dir):
+                for fn in os.listdir(templates_dir):
+                    if fn.endswith(".setting"):
+                        shutil.copy2(os.path.join(templates_dir, fn), os.path.join(target_dir, fn))
 
         installed_count = 0
         for p in presets:

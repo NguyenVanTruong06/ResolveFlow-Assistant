@@ -9,18 +9,23 @@ Bao gồm:
     3. 💻 Local Ollama: Mô hình dropdown, endpoint URL, nút kiểm tra kết nối (ping) và 1-click dựng.
 """
 
+import os
 import json
+import logging
 from typing import Any, Dict, List, Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QApplication, QStackedWidget,
-    QPlainTextEdit, QLineEdit, QComboBox
+    QPlainTextEdit, QLineEdit, QComboBox, QButtonGroup,
+    QMessageBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QThread, QSettings
 from PySide6.QtGui import QKeyEvent
 from src.core.review_state import ReviewState
 from src.ui.director.director_state import DirectorConfig, parse_web_prompt_json
 from src.ui.director.widgets.mini_timeline_view import MiniTimelineWidget
+
+logger = logging.getLogger(__name__)
 
 try:
     from src.core.story_copilot import StoryCopilot
@@ -261,6 +266,7 @@ class ReviewPage(QWidget):
     prompt_copied = Signal(str)
     config_changed = Signal()
     json_applied = Signal(dict, str)
+    rough_scan_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -277,6 +283,13 @@ class ReviewPage(QWidget):
         self._row_widgets: List[ReviewRowWidget] = []
         self._pasted_data: Optional[Dict[str, Any]] = None
         self._pasted_summary: str = ""
+        self._video_plan_data: Optional[Dict[str, Any]] = None
+        self._video_plan_summary: str = ""
+        self._kinetic_plan_data: Optional[Dict[str, Any]] = None
+        self._kinetic_plan_summary: str = ""
+        self._clip_infos: List[Any] = []
+        self._style_intent: str = "travel_vlog"
+        self._hook_duration: str = "30_60s"
         self._ping_worker: Optional[OllamaPingWorker] = None
         self._init_ui()
 
@@ -293,9 +306,33 @@ class ReviewPage(QWidget):
         v_left.setContentsMargins(0, 0, 0, 0)
         v_left.setSpacing(8)
 
+        h_review_header = QHBoxLayout()
         lbl_h_review = QLabel("Duyệt câu thoại")
         lbl_h_review.setStyleSheet("color: #ffffff; font-size: 13.5px; font-weight: bold;")
-        v_left.addWidget(lbl_h_review)
+        h_review_header.addWidget(lbl_h_review)
+        h_review_header.addStretch(1)
+
+        self.btn_review_scan = QPushButton("⚡ Quét thô Whisper")
+        self.btn_review_scan.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_review_scan.setStyleSheet("""
+            QPushButton {
+                background: rgba(124, 58, 237, 0.2);
+                color: #c4b5fd;
+                border: 1px solid rgba(124, 58, 237, 0.4);
+                border-radius: 6px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #7c3aed;
+                color: #ffffff;
+            }
+        """)
+        self.btn_review_scan.setToolTip("Chạy bóc tách lại câu thoại và phát hiện khoảng lặng bằng Whisper")
+        self.btn_review_scan.clicked.connect(self.rough_scan_requested.emit)
+        h_review_header.addWidget(self.btn_review_scan)
+        v_left.addLayout(h_review_header)
 
         # ScrollArea chứa các dòng thoại
         scroll = QScrollArea(col_left)
@@ -445,7 +482,27 @@ class ReviewPage(QWidget):
         self.btn_copy_video_prompt.clicked.connect(self._copy_video_prompt)
         row_copy_btns.addWidget(self.btn_copy_video_prompt, stretch=1)
 
-        self.btn_copy_kinetic_prompt = QPushButton("✨ 2. Prompt Chữ Kinetic (V2)")
+        self.btn_copy_final_transcript = QPushButton("✂ 2. Copy Transcript Bản Dựng")
+        self.btn_copy_final_transcript.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_copy_final_transcript.setStyleSheet("""
+            QPushButton {
+                background-color: #059669;
+                color: #ffffff;
+                padding: 7px 8px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 11px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #047857;
+            }
+        """)
+        self.btn_copy_final_transcript.setToolTip("Trích xuất chỉ riêng các câu thoại thuộc Bản Dựng Cuối (Final Cut) đã lọc sạch ảo giác, đánh số [0]..[N-1] liên tục không tốn token")
+        self.btn_copy_final_transcript.clicked.connect(self._copy_final_cut_transcript)
+        row_copy_btns.addWidget(self.btn_copy_final_transcript, stretch=1)
+
+        self.btn_copy_kinetic_prompt = QPushButton("✨ 3. Prompt Chữ Kinetic (V2)")
         self.btn_copy_kinetic_prompt.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_copy_kinetic_prompt.setStyleSheet("""
             QPushButton {
@@ -469,12 +526,177 @@ class ReviewPage(QWidget):
         # Tương thích với alias cũ
         self.btn_copy_prompt = self.btn_copy_video_prompt
 
-        lbl_step2 = QLabel("2. Dán mã JSON kịch bản mà AI trả về vào đây:")
-        lbl_step2.setStyleSheet("color: #a1a1aa; font-size: 11.5px; margin-top: 4px;")
-        pw_lay.addWidget(lbl_step2)
+        # Thẻ trạng thái 2 Kế hoạch độc lập (Dual Plan Slots V1 & V2)
+        lbl_slots_head = QLabel("Trạng thái nạp 2 kịch bản (Độc lập không bị đè mất):")
+        lbl_slots_head.setStyleSheet("color: #a1a1aa; font-size: 11px; margin-top: 4px; font-weight: 500;")
+        pw_lay.addWidget(lbl_slots_head)
+
+        plan_status_layout = QHBoxLayout()
+        plan_status_layout.setSpacing(8)
+
+        self.card_slot_video = QFrame()
+        self.card_slot_video.setStyleSheet("""
+            QFrame {
+                background: #18181b;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                padding: 4px 6px;
+            }
+        """)
+        v_slot_vid = QVBoxLayout(self.card_slot_video)
+        v_slot_vid.setContentsMargins(4, 2, 4, 2)
+        v_slot_vid.setSpacing(3)
+
+        h_slot_vid_top = QHBoxLayout()
+        self.lbl_slot_vid_title = QLabel("🎬 1. Video Plan (V1)")
+        self.lbl_slot_vid_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #38bdf8;")
+        h_slot_vid_top.addWidget(self.lbl_slot_vid_title)
+        h_slot_vid_top.addStretch(1)
+
+        self.btn_paste_slot1 = QPushButton("📋 Dán vào Slot 1")
+        self.btn_paste_slot1.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_paste_slot1.setStyleSheet("""
+            QPushButton {
+                background: rgba(56, 189, 248, 0.15);
+                color: #38bdf8;
+                border: 1px solid rgba(56, 189, 248, 0.35);
+                border-radius: 4px;
+                padding: 2px 7px;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #0284c7;
+                color: #ffffff;
+            }
+        """)
+        self.btn_paste_slot1.setToolTip("Dán trực tiếp JSON từ Clipboard vào riêng Slot 1 (Video Plan)")
+        self.btn_paste_slot1.clicked.connect(lambda: self._paste_to_slot("slot1"))
+        h_slot_vid_top.addWidget(self.btn_paste_slot1)
+        v_slot_vid.addLayout(h_slot_vid_top)
+
+        self.lbl_slot_vid_status = QLabel("Chưa nạp (Dùng cắt thô)")
+        self.lbl_slot_vid_status.setStyleSheet("color: #71717a; font-size: 10px;")
+        v_slot_vid.addWidget(self.lbl_slot_vid_status)
+        plan_status_layout.addWidget(self.card_slot_video, stretch=1)
+
+        self.card_slot_kinetic = QFrame()
+        self.card_slot_kinetic.setStyleSheet("""
+            QFrame {
+                background: #18181b;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                padding: 4px 6px;
+            }
+        """)
+        v_slot_kin = QVBoxLayout(self.card_slot_kinetic)
+        v_slot_kin.setContentsMargins(4, 2, 4, 2)
+        v_slot_kin.setSpacing(3)
+
+        h_slot_kin_top = QHBoxLayout()
+        self.lbl_slot_kin_title = QLabel("✨ 2. Kinetic Plan (V2)")
+        self.lbl_slot_kin_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #a78bfa;")
+        h_slot_kin_top.addWidget(self.lbl_slot_kin_title)
+        h_slot_kin_top.addStretch(1)
+
+        self.btn_auto_kinetic = QPushButton("⚡ Tự tạo (0đ Token)")
+        self.btn_auto_kinetic.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_auto_kinetic.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8b5cf6, stop:1 #ec4899);
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 2px 8px;
+                font-size: 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7c3aed, stop:1 #db2777);
+            }
+        """)
+        self.btn_auto_kinetic.setToolTip("Tự động ngắt trang, căn thời gian và highlight từ khóa hoàn toàn Offline (0.05s, không tốn token)")
+        self.btn_auto_kinetic.clicked.connect(self._auto_generate_kinetic_plan)
+        h_slot_kin_top.addWidget(self.btn_auto_kinetic)
+
+        self.btn_paste_slot2 = QPushButton("✨ Dán vào Slot 2")
+        self.btn_paste_slot2.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_paste_slot2.setStyleSheet("""
+            QPushButton {
+                background: rgba(167, 139, 250, 0.15);
+                color: #a78bfa;
+                border: 1px solid rgba(167, 139, 250, 0.35);
+                border-radius: 4px;
+                padding: 2px 7px;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #7c3aed;
+                color: #ffffff;
+            }
+        """)
+        self.btn_paste_slot2.setToolTip("Dán trực tiếp JSON từ Clipboard vào riêng Slot 2 (Kinetic Plan)")
+        self.btn_paste_slot2.clicked.connect(lambda: self._paste_to_slot("slot2"))
+        h_slot_kin_top.addWidget(self.btn_paste_slot2)
+        v_slot_kin.addLayout(h_slot_kin_top)
+
+        self.lbl_slot_kin_status = QLabel("Chưa nạp (Dùng phụ đề)")
+        self.lbl_slot_kin_status.setStyleSheet("color: #71717a; font-size: 10px;")
+        v_slot_kin.addWidget(self.lbl_slot_kin_status)
+        plan_status_layout.addWidget(self.card_slot_kinetic, stretch=1)
+
+        pw_lay.addLayout(plan_status_layout)
+
+        # Header bước 2 + Bộ chọn Slot mục tiêu
+        row_step2_header = QHBoxLayout()
+        row_step2_header.setSpacing(6)
+
+        lbl_step2 = QLabel("2. Dán mã JSON (Dán lần lượt hoặc dán cả 2 cùng lúc):")
+        lbl_step2.setStyleSheet("color: #a1a1aa; font-size: 11px; margin-top: 2px;")
+        row_step2_header.addWidget(lbl_step2)
+        row_step2_header.addStretch(1)
+
+        self.btn_target_auto = QPushButton("🤖 Tự động")
+        self.btn_target_slot1 = QPushButton("🎬 Slot 1")
+        self.btn_target_slot2 = QPushButton("✨ Slot 2")
+        self.target_btn_group = QButtonGroup(self)
+        self.target_btn_group.addButton(self.btn_target_auto, 0)
+        self.target_btn_group.addButton(self.btn_target_slot1, 1)
+        self.target_btn_group.addButton(self.btn_target_slot2, 2)
+
+        target_btn_style = """
+            QPushButton {
+                background: #18181b;
+                border: 1px solid #27272a;
+                border-radius: 4px;
+                padding: 2px 7px;
+                font-size: 10px;
+                color: #a1a1aa;
+            }
+            QPushButton:hover {
+                color: #ffffff;
+                border-color: #3f3f46;
+            }
+            QPushButton:checked {
+                background: #27272a;
+                color: #ffffff;
+                border-color: #8b5cf6;
+                font-weight: bold;
+            }
+        """
+        for b in [self.btn_target_auto, self.btn_target_slot1, self.btn_target_slot2]:
+            b.setCheckable(True)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(target_btn_style)
+            row_step2_header.addWidget(b)
+        self.btn_target_auto.setChecked(True)
+        self.target_btn_group.idClicked.connect(self._on_target_slot_changed)
+
+        pw_lay.addLayout(row_step2_header)
 
         self.txt_json_input = QPlainTextEdit()
-        self.txt_json_input.setPlaceholderText("Dán JSON kịch bản vào đây (Video Plan V1 hoặc Chữ Kinetic V2)...")
+        self.txt_json_input.setPlaceholderText("Dán JSON kịch bản vào đây (Dán từng JSON hoặc dán cả 2 cùng lúc — Hệ thống nạp độc lập từng Slot không sợ đè)...")
         self.txt_json_input.setFixedHeight(75)
         self.txt_json_input.setStyleSheet("""
             QPlainTextEdit {
@@ -498,7 +720,7 @@ class ReviewPage(QWidget):
         self.paste_zone.json_recognized.connect(self._on_dropzone_json_recognized)
         pw_lay.addWidget(self.paste_zone)
 
-        self.lbl_json_hint = QLabel("💡 Tự động nhận diện: Video Plan (cắt ghép cảnh V1) hoặc Kinetic Plan (phụ đề hoạt ảnh V2)")
+        self.lbl_json_hint = QLabel("💡 Bạn có thể dán lần lượt từng JSON hoặc dán cả 2 cùng lúc — Hệ thống nạp độc lập từng Slot.")
         self.lbl_json_hint.setStyleSheet("color: #71717a; font-size: 10.5px;")
         self.lbl_json_hint.setWordWrap(True)
         pw_lay.addWidget(self.lbl_json_hint)
@@ -817,9 +1039,114 @@ class ReviewPage(QWidget):
             self.lbl_ping_status.setText(f"🔴 {message}")
             self.lbl_ping_status.setStyleSheet("color: #f87171; font-size: 10.5px;")
 
+    def set_review_rows(self, rows: List[List[Any]]):
+        """Cập nhật toàn bộ danh sách dòng thoại và làm mới giao diện."""
+        if not rows:
+            return
+        self._review_rows = list(rows)
+        while self.rows_layout.count() > 1:
+            item = self.rows_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._row_widgets.clear()
+
+        for i, row in enumerate(self._review_rows):
+            tag = row[3] if len(row) > 3 else ""
+            w = ReviewRowWidget(i, row[0], row[1], bool(row[2]), tag, self.rows_container)
+            w.toggled.connect(self._on_row_toggled)
+            self.rows_layout.insertWidget(i, w)
+            self._row_widgets.append(w)
+            if i % 30 == 0:
+                QApplication.processEvents()
+
+        # Cập nhật Mini Timeline
+        blocks = []
+        for i, r in enumerate(self._review_rows[:12]):
+            lbl = f"Đoạn {i+1}"
+            color = "#ef4444" if r[2] else ("#8b5cf6" if "hook" in str(r[3] if len(r) > 3 else "").lower() else "#22c55e")
+            blocks.append((lbl, 10.0, color))
+        if blocks:
+            self.mini_timeline.set_segments(blocks)
+
+    def set_story_metadata(self, style_intent: str = "travel_vlog", hook_dur: str = "30_60s"):
+        """Cập nhật thể loại kịch bản và thời lượng Hook mong muốn."""
+        self._style_intent = style_intent or "travel_vlog"
+        self._hook_duration = hook_dur or "30_60s"
+
+    def load_transcripts_from_cache(self, clip_infos: List[Any], whisper_model: str = "small", whisper_lang: str = "vi"):
+        """Nạp các câu thoại thực tế từ bộ nhớ đệm ScanCacheManager đã lọc nhiễu và sắp xếp theo thời gian."""
+        from src.core.chronological_sorter import sort_clips_chronologically
+        from src.core.whisper_cleaner import clean_whisper_segments
+        self._clip_infos = sort_clips_chronologically(list(clip_infos or []))
+        self._whisper_model = whisper_model
+        self._whisper_lang = whisper_lang
+        from src.core.cache_manager import ScanCacheManager
+        cache_mgr = ScanCacheManager()
+        rows = []
+        for c in self._clip_infos:
+            cpath = getattr(c, "path", c) if not isinstance(c, str) else c
+            cached = cache_mgr.get_cached_scan(cpath, whisper_model, whisper_lang)
+            if cached and cached.get("raw_subtitles"):
+                clean_subs = clean_whisper_segments(cached["raw_subtitles"])
+                for sub in clean_subs:
+                    s = float(sub.get("start", 0.0))
+                    h = int(s // 3600)
+                    m = int((s % 3600) // 60)
+                    sec = int(s % 60)
+                    tc = f"{h:02d}:{m:02d}:{sec:02d}"
+                    txt = sub.get("text", "").strip()
+                    if txt:
+                        rows.append([tc, txt, 0, ""])
+        if rows:
+            self.set_review_rows(rows)
+
     def _extract_words_from_rows(self) -> List[Dict[str, Any]]:
-        """Bóc tách từ vựng kèm timestamp từ các câu thoại chưa bị cắt."""
+        """Bóc tách từ vựng kèm timestamp từ cache Whisper thực tế hoặc review rows."""
+        from src.core.cache_manager import ScanCacheManager
+        from src.core.chronological_sorter import sort_clips_chronologically
+        from src.core.whisper_cleaner import clean_whisper_segments
+        cache_mgr = ScanCacheManager()
+        w_model = getattr(self, "_whisper_model", "small")
+        w_lang = getattr(self, "_whisper_lang", "vi")
+
         words = []
+        if self._clip_infos:
+            timeline_cursor = 0.0
+            sorted_clips = sort_clips_chronologically(self._clip_infos)
+            for c in sorted_clips:
+                cpath = getattr(c, "path", c) if not isinstance(c, str) else c
+                dur = float(getattr(c, "duration_sec", 0.0) or 0.0)
+                cached = cache_mgr.get_cached_scan(cpath, w_model, w_lang)
+                if cached:
+                    if dur <= 0:
+                        dur = float(cached.get("clip_dur") or cached.get("duration") or 0.0)
+                    clean_subs = clean_whisper_segments(cached.get("raw_subtitles", []))
+                    for sub in clean_subs:
+                        sub_words = sub.get("words", [])
+                        if sub_words:
+                            for w in sub_words:
+                                w_txt = str(w.get("word", "")).strip()
+                                if w_txt:
+                                    words.append({
+                                        "word": w_txt,
+                                        "start": round(timeline_cursor + float(w.get("start", 0.0)), 2),
+                                        "end": round(timeline_cursor + float(w.get("end", 0.0)), 2)
+                                    })
+                        else:
+                            st = float(sub.get("start", 0.0))
+                            txt_words = str(sub.get("text", "")).strip().split()
+                            word_dur = 0.35
+                            for idx, w_txt in enumerate(txt_words):
+                                words.append({
+                                    "word": w_txt,
+                                    "start": round(timeline_cursor + st + idx * word_dur, 2),
+                                    "end": round(timeline_cursor + st + (idx + 1) * word_dur, 2)
+                                })
+                timeline_cursor += (dur if dur > 0 else 60.0)
+
+        if words:
+            return words
+
         for row in self._review_rows:
             tc, text, is_cut = row[0], row[1], row[2]
             if is_cut:
@@ -845,22 +1172,230 @@ class ReviewPage(QWidget):
                 })
         return words if words else DEMO_WORDS
 
+    def get_final_cut_words(self) -> List[Dict[str, Any]]:
+        """
+        Bóc tách danh sách từ ngữ thực tế thuộc bản dựng cuối (Final Cut).
+        - Nếu đã nạp Video Plan (Slot 1), chỉ lấy lời thoại nằm trong các đoạn cắt được chọn
+          (global_hook + timeline_segments), căn mốc thời gian tịnh tiến liên tục trên timeline cuối.
+        - Nếu chưa có Video Plan, lấy lời thoại từ các dòng review không bị loại bỏ (is_cut == 0).
+        - Toàn bộ từ ngữ đều được lọc sạch ảo giác Whisper, ký tự ngoại ngữ CJK/Nga và khử lặp stutter.
+        """
+        import os
+        from src.core.cache_manager import ScanCacheManager
+        from src.core.chronological_sorter import sort_clips_chronologically
+        from src.core.whisper_cleaner import clean_whisper_segments, has_foreign_script, is_noise_chatter
+
+        cache_mgr = ScanCacheManager()
+        w_model = getattr(self, "_whisper_model", "small")
+        w_lang = getattr(self, "_whisper_lang", "vi")
+
+        # 1. Kiểm tra xem đã nạp Video Plan (Slot 1) chưa
+        v_plan = getattr(self, "_video_plan_data", None)
+        has_v_plan = bool(v_plan and isinstance(v_plan, dict) and (
+            v_plan.get("timeline_segments") or v_plan.get("scenes") or v_plan.get("timeline") or v_plan.get("segments")
+        ))
+
+        if has_v_plan and self._clip_infos:
+            from src.core.timeline_mapper import TimelineMapper, add_subtitles_for_range
+            from src.core.autocut import get_media_metadata
+
+            sorted_clips = sort_clips_chronologically(self._clip_infos)
+            video_map = {}
+            for idx, c in enumerate(sorted_clips):
+                cpath = getattr(c, "path", c) if not isinstance(c, str) else c
+                base = os.path.basename(cpath).lower()
+                video_map[base] = (idx + 1, cpath, c)
+                video_map[str(idx + 1)] = (idx + 1, cpath, c)
+
+            real_fps = 30.0
+            first_c = sorted_clips[0]
+            first_p = getattr(first_c, "path", first_c) if not isinstance(first_c, str) else first_c
+            try:
+                m_fps = get_media_metadata(first_p).get("fps")
+                if m_fps and float(m_fps) > 0:
+                    real_fps = float(m_fps)
+            except Exception as e:
+                logger.debug(f"Không thể đọc fps từ {first_p}: {e}")
+
+            mapper = TimelineMapper(fps=real_fps)
+
+            # Thu thập danh sách các đoạn cắt theo thứ tự timeline và nạp vào TimelineMapper
+            gh = v_plan.get("global_hook")
+            if gh and isinstance(gh, dict):
+                ref = str(gh.get("clip_name") or gh.get("clip_index") or "").lower()
+                st = float(gh.get("start_sec", 0.0) or 0.0)
+                en = float(gh.get("end_sec", 0.0) or 0.0)
+                if en > st and ref:
+                    match = video_map.get(ref) or video_map.get(os.path.basename(ref).lower())
+                    if not match:
+                        for k, v in video_map.items():
+                            if ref in k:
+                                match = v
+                                break
+                    if match:
+                        _, cpath, cinfo = match
+                        meta = get_media_metadata(cpath)
+                        max_dur = meta.get("duration", 0.0) or float(getattr(cinfo, "duration_sec", 0.0) or 0.0) or 3600.0
+                        mapper.add_segment(
+                            clip_id=str(gh.get("clip_id") or f"C{gh.get('clip_index', 1):02d}"),
+                            src_in_sec=st,
+                            src_out_sec=en,
+                            speed=1.0,
+                            role="hook",
+                            pad_sec=0.3,
+                            clip_duration_sec=max_dur,
+                            clip_name=os.path.basename(cpath),
+                            file_path=cpath,
+                            title="Intro Teaser"
+                        )
+
+            segs = v_plan.get("timeline_segments") or v_plan.get("scenes") or v_plan.get("timeline") or v_plan.get("segments") or []
+            for s in segs:
+                ref = str(s.get("clip_name") or s.get("clip_index") or "").lower()
+                st = float(s.get("start_sec", 0.0) or 0.0)
+                en = float(s.get("end_sec", 0.0) or 0.0)
+                spd = float(s.get("speed", 1.0) or 1.0)
+                if en > st and ref:
+                    match = video_map.get(ref) or video_map.get(os.path.basename(ref).lower())
+                    if not match:
+                        for k, v in video_map.items():
+                            if ref in k:
+                                match = v
+                                break
+                    if match:
+                        _, cpath, cinfo = match
+                        meta = get_media_metadata(cpath)
+                        max_dur = meta.get("duration", 0.0) or float(getattr(cinfo, "duration_sec", 0.0) or 0.0) or 3600.0
+                        mapper.add_segment(
+                            clip_id=str(s.get("clip_id") or f"C{s.get('clip_index', 1):02d}"),
+                            src_in_sec=st,
+                            src_out_sec=en,
+                            speed=spd,
+                            role=s.get("role", "story"),
+                            pad_sec=0.3,
+                            clip_duration_sec=max_dur,
+                            clip_name=os.path.basename(cpath),
+                            file_path=cpath,
+                            title=s.get("chapter_name", "") or os.path.basename(cpath)
+                        )
+
+            final_words = []
+            for seg_idx, placed in enumerate(mapper.segments):
+                cached = cache_mgr.get_cached_scan(placed.file_path, w_model, w_lang)
+                if cached:
+                    clean_subs = clean_whisper_segments(cached.get("raw_subtitles", []))
+                    mapped_subs = add_subtitles_for_range(mapper, seg_idx, clean_subs, vpath=placed.file_path)
+                    for sub in mapped_subs:
+                        for w in sub.get("words", []):
+                            w_txt = str(w.get("word", "")).strip()
+                            if w_txt and not has_foreign_script(w_txt) and not is_noise_chatter(w_txt):
+                                final_words.append({
+                                    "word": w_txt,
+                                    "start": w["start"],
+                                    "end": w["end"]
+                                })
+
+            if final_words:
+                return final_words
+
+
+        # 2. Fallback nếu chưa có Video Plan: Lấy từ các dòng review được giữ lại
+        return self._extract_words_from_rows()
+
+    def export_final_cut_transcript(self) -> str:
+        """Xuất chuỗi transcript định dạng [0] Từ (start - end) [1] ... của Bản Dựng Cuối."""
+        words = self.get_final_cut_words()
+        if not words:
+            return ""
+        return " ".join([f"[{i}] {w['word']} ({w['start']:.2f}s - {w['end']:.2f}s)" for i, w in enumerate(words)])
+
+    def _copy_final_cut_transcript(self):
+        """Sao chép toàn bộ lời thoại Bản Dựng Cuối (đã lọc sạch, đánh số liên tục) vào Clipboard."""
+        transcript_str = self.export_final_cut_transcript()
+        words = self.get_final_cut_words()
+        if not transcript_str or not words:
+            self.lbl_json_hint.setText("⚠ Không có câu thoại nào trong bản dựng để trích xuất transcript.")
+            self.lbl_json_hint.setStyleSheet("color: #fbbf24; font-size: 10.5px;")
+            return
+
+        QApplication.clipboard().setText(transcript_str)
+        orig_text = self.btn_copy_final_transcript.text()
+        self.btn_copy_final_transcript.setText(f"✓ Đã copy {len(words)} từ!")
+        QTimer.singleShot(2500, lambda: self.btn_copy_final_transcript.setText(orig_text))
+
+        has_vplan = bool(getattr(self, "_video_plan_data", None))
+        plan_desc = "bản dựng cắt tinh (Final Cut)" if has_vplan else "các đoạn thoại được chọn"
+        self.lbl_json_hint.setText(f"✓ Đã copy {len(words)} từ thoại của {plan_desc} vào Clipboard! Bạn có thể dán vào Prompt V2 để AI tạo Kinetic đỉnh cao không tốn token.")
+        self.lbl_json_hint.setStyleSheet("color: #4ade80; font-size: 10.5px; font-weight: bold;")
+
+    def _auto_generate_kinetic_plan(self):
+        """Tự động sinh kịch bản Kinetic Typography chuẩn xác 100% liên tục bằng auto_plan offline."""
+        words = self.get_final_cut_words()
+        if not words:
+            self.lbl_slot_kin_status.setText("⚠ Không có từ ngữ nào để tạo Kinetic")
+            self.lbl_slot_kin_status.setStyleSheet("color: #f59e0b; font-size: 10px;")
+            return
+
+        try:
+            from src.core.kinetic.kinetic_engine import auto_plan, validate_plan
+            plan = auto_plan(words, aspect="9:16", max_words=3, gap_s=0.45, emphasis_ratio=0.12)
+            validate_plan(plan, len(words))
+
+            has_vplan = bool(getattr(self, "_video_plan_data", None))
+            plan_label = "Bản Dựng Cuối" if has_vplan else "Video"
+            summary = f"Tự động tạo {len(plan['pages'])} trang Kinetic Typography cho {plan_label} (100% liên tục, 0đ Token)"
+            wrapped = {
+                "type": "kinetic_plan",
+                "count": len(plan["pages"]),
+                "is_offline": True,
+                "data": plan
+            }
+            self._apply_json_data(wrapped, summary)
+            self.lbl_json_hint.setText(f"✓ Đã tự động tạo {len(plan['pages'])} trang phụ đề Kinetic cho {plan_label} chuẩn xác 100% (Offline - 0đ Token)!")
+            self.lbl_json_hint.setStyleSheet("color: #a78bfa; font-size: 10.5px; font-weight: bold;")
+        except Exception as e:
+            self.lbl_slot_kin_status.setText(f"⚠ Lỗi tạo kinetic: {str(e)[:40]}")
+            self.lbl_slot_kin_status.setStyleSheet("color: #ef4444; font-size: 10px;")
+
     def get_video_prompt(self) -> str:
-        """Tạo Prompt Dựng Video & Cốt truyện (V1)."""
+        """Tạo Prompt Dựng Video & Cốt truyện (V1) với dữ liệu clip thực tế."""
         lines = [f"[{r[0]}] {r[1]}" for r in self._review_rows if not r[2]]
         transcription_text = "\n".join(lines)
         if StoryCopilot:
-            clips_data = [{
-                "clip_index": 0,
-                "clip_name": "Source_Main_Track.mp4",
-                "transcription": transcription_text
-            }]
+            from src.core.cache_manager import ScanCacheManager
+            from src.core.clip_manifest import ClipManifest, build_clips_data
+            cache_mgr = ScanCacheManager()
+            w_model = getattr(self, "_whisper_model", "small")
+            w_lang = getattr(self, "_whisper_lang", "vi")
+
+            manifest_id = None
+            if self._clip_infos:
+                raw_paths = [getattr(c, "path", c) if not isinstance(c, str) else c for c in self._clip_infos]
+                manifest = ClipManifest.get_or_create(raw_paths, project_name="ChunDVC_Project")
+                self._manifest = manifest
+                manifest_id = manifest.manifest_id
+                clips_data = build_clips_data(manifest, cache_mgr=cache_mgr, model=w_model, lang=w_lang)
+            else:
+                clips_data = [{
+                    "clip_id": "C01",
+                    "clip_index": 1,
+                    "id": 1,
+                    "name": "Source_Main_Track.mp4",
+                    "clip_name": "Source_Main_Track.mp4",
+                    "chapter": "Chung",
+                    "duration": 120.0,
+                    "transcript": transcription_text,
+                    "is_broll": False,
+                    "dialogue_intervals": []
+                }]
+
             prompt = StoryCopilot.generate_copilot_prompt(
                 project_name="ChunDVC_Project",
                 clips_data=clips_data,
-                story_intent="travel_vlog",
+                story_intent=self._style_intent,
                 target_duration="full",
-                hook_duration="30_60s"
+                hook_duration=self._hook_duration,
+                manifest_id=manifest_id
             )
             return prompt
         else:
@@ -872,7 +1407,7 @@ class ReviewPage(QWidget):
 
     def get_kinetic_prompt(self, aspect: str = "9:16") -> str:
         """Tạo Prompt Phụ Đề Chữ Kinetic Hoạt Ảnh (V2)."""
-        words = self._extract_words_from_rows()
+        words = self.get_final_cut_words()
         if generate_kinetic_prompt:
             return generate_kinetic_prompt(words, aspect=aspect)
         else:
@@ -898,18 +1433,50 @@ class ReviewPage(QWidget):
     def _copy_kinetic_prompt(self):
         prompt = self.get_kinetic_prompt(aspect="9:16")
         QApplication.clipboard().setText(prompt)
-        orig_text = "✨ 2. Prompt Chữ Kinetic (V2)"
+        orig_text = "✨ 3. Prompt Chữ Kinetic (V2)"
         self.btn_copy_kinetic_prompt.setText("✓ Đã sao chép Prompt V2!")
         QTimer.singleShot(2500, lambda: self.btn_copy_kinetic_prompt.setText(orig_text))
         self.lbl_json_hint.setText("✓ Đã sao chép Prompt Chữ Kinetic (V2) vào Clipboard! Hãy dán (Ctrl+V) vào ChatGPT hoặc Claude.")
         self.lbl_json_hint.setStyleSheet("color: #a78bfa; font-size: 10.5px;")
         self.prompt_copied.emit("kinetic")
 
+    def _get_current_target_slot(self) -> Optional[str]:
+        if hasattr(self, "btn_target_slot1") and self.btn_target_slot1.isChecked():
+            return "slot1"
+        if hasattr(self, "btn_target_slot2") and self.btn_target_slot2.isChecked():
+            return "slot2"
+        return None
+
+    def _on_target_slot_changed(self, btn_id: int):
+        if self.txt_json_input.toPlainText().strip():
+            self._on_json_text_changed()
+
+    def _paste_to_slot(self, slot: str):
+        """Dán trực tiếp nội dung từ Clipboard vào riêng một Slot (Slot 1 hoặc Slot 2)."""
+        cb_text = QApplication.clipboard().text().strip()
+        if not cb_text:
+            self.lbl_json_hint.setText("⚠ Clipboard rỗng. Hãy copy mã JSON từ ChatGPT / Claude trước.")
+            self.lbl_json_hint.setStyleSheet("color: #fbbf24; font-size: 10.5px;")
+            return
+
+        ok, msg, data = parse_web_prompt_json(cb_text, target_slot=slot)
+        if not ok or not data:
+            self.lbl_json_hint.setText(f"✕ Không thể nạp vào {slot.upper()}: {msg}")
+            self.lbl_json_hint.setStyleSheet("color: #ef4444; font-size: 10.5px;")
+            return
+
+        self.txt_json_input.setPlainText(cb_text)
+        self.paste_zone.set_success(msg, data)
+        self.lbl_json_hint.setText(f"✓ Đã nạp thành công vào {slot.upper()}: {msg}")
+        self.lbl_json_hint.setStyleSheet("color: #4ade80; font-size: 10.5px; font-weight: bold;")
+        self._apply_json_data(data, msg)
+
     def _on_json_text_changed(self):
         text = self.txt_json_input.toPlainText().strip()
         if not text:
             return
-        ok, msg, data = parse_web_prompt_json(text)
+        slot = self._get_current_target_slot()
+        ok, msg, data = parse_web_prompt_json(text, target_slot=slot)
         if ok and data:
             self.paste_zone.set_success(msg, data)
             self.lbl_json_hint.setText(f"✓ {msg}")
@@ -925,7 +1492,7 @@ class ReviewPage(QWidget):
         self.txt_json_input.setPlainText(json.dumps(raw_dict, indent=2, ensure_ascii=False))
         self.lbl_json_hint.setText(f"✓ {summary}")
         self.lbl_json_hint.setStyleSheet("color: #4ade80; font-size: 10.5px; font-weight: bold;")
-        self.config_changed.emit()
+        self._apply_json_data(data, summary)
 
     def _apply_json_script(self):
         text = self.txt_json_input.toPlainText().strip()
@@ -936,7 +1503,8 @@ class ReviewPage(QWidget):
                 text = cb_text
                 self.txt_json_input.setPlainText(text)
 
-        ok, msg, data = parse_web_prompt_json(text)
+        slot = self._get_current_target_slot()
+        ok, msg, data = parse_web_prompt_json(text, target_slot=slot)
         if not ok or not data:
             self.lbl_json_hint.setText(f"✕ Không thể áp dụng: {msg}")
             self.lbl_json_hint.setStyleSheet("color: #ef4444; font-size: 10.5px;")
@@ -947,21 +1515,112 @@ class ReviewPage(QWidget):
         self.paste_zone.set_success(msg, data)
         self.lbl_json_hint.setText(f"✓ Đã áp dụng thành công: {msg}")
         self.lbl_json_hint.setStyleSheet("color: #4ade80; font-size: 10.5px; font-weight: bold;")
+        self._apply_json_data(data, msg)
 
-        # Nếu là Video Plan: cập nhật khối Mini Timeline
-        if data.get("type") == "video_plan":
-            plan_data = data.get("data", {})
-            scenes = plan_data.get("scenes") or plan_data.get("timeline") or plan_data.get("segments") or []
+    def _apply_json_data(self, data: dict, summary: str):
+        """Phân loại và nạp độc lập vào Slot 1 (Video Plan) hoặc Slot 2 (Kinetic Plan) hoặc CẢ HAI (dual_plan)."""
+        ptype = data.get("type", "generic_plan")
+        raw_plan = data.get("data", {})
+
+        # Kiểm tra manifest_id đối soát an toàn
+        target_dict = data.get("video_plan", {}) if ptype == "dual_plan" else (raw_plan if isinstance(raw_plan, dict) and raw_plan else data)
+        plan_manifest_id = target_dict.get("manifest_id") if isinstance(target_dict, dict) else None
+
+        # Khởi tạo manifest nếu chưa có
+        if not getattr(self, "_manifest", None) and getattr(self, "_clip_infos", None):
+            try:
+                from src.core.clip_manifest import ClipManifest
+                raw_paths = [getattr(c, "path", c) if not isinstance(c, str) else c for c in self._clip_infos]
+                self._manifest = ClipManifest.get_or_create(raw_paths, project_name="ChunDVC_Project")
+            except Exception as e:
+                logger.warning(f"Không thể khởi tạo ClipManifest trong _apply_json_data: {e}")
+
+        if getattr(self, "_manifest", None) and ptype in ("video_plan", "dual_plan", "generic_plan"):
+            curr_id = self._manifest.manifest_id
+            if plan_manifest_id and plan_manifest_id != curr_id:
+                reply = QMessageBox.critical(
+                    self,
+                    "Lệch Manifest ID - Nguy cơ dựng sai clip!",
+                    f"⚠ CẢNH BÁO: Kịch bản AI được sinh từ danh sách clip khác!\n\n"
+                    f"- Manifest ID trong kịch bản: {plan_manifest_id}\n"
+                    f"- Manifest ID dự án hiện tại: {curr_id}\n\n"
+                    f"Nếu tiếp tục, DaVinci Resolve sẽ cắt nhầm clip. Bạn có muốn tạo lại Prompt mới theo danh sách clip hiện tại không?",
+                    QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel
+                )
+                if reply == QMessageBox.StandardButton.Retry:
+                    self._copy_video_prompt()
+                return
+            elif not plan_manifest_id:
+                logger.warning("Kịch bản cũ không có manifest_id, có thể dựng nhầm clip nếu thứ tự file đổi.")
+                self.lbl_json_hint.setText("⚠ Cảnh báo: Kịch bản cũ không có manifest_id, có thể lệch clip.")
+                self.lbl_json_hint.setStyleSheet("color: #eab308; font-size: 10.5px; font-weight: bold;")
+
+        if ptype == "dual_plan":
+            v_plan = data.get("video_plan", {})
+            k_plan = data.get("kinetic_plan", {})
+            v_sum = data.get("video_summary", "✓ Đã nạp Video Plan (V1)")
+            k_sum = data.get("kinetic_summary", "✓ Đã nạp Kinetic Plan (V2)")
+
+            self._video_plan_data = v_plan
+            self._video_plan_summary = v_sum
+            self.lbl_slot_vid_status.setText(v_sum)
+            self.lbl_slot_vid_status.setStyleSheet("color: #4ade80; font-size: 10px; font-weight: bold;")
+            self.card_slot_video.setStyleSheet("background: rgba(56, 189, 248, 0.12); border: 1px solid #38bdf8; border-radius: 6px; padding: 4px 6px;")
+
+            self._kinetic_plan_data = k_plan
+            self._kinetic_plan_summary = k_sum
+            self.lbl_slot_kin_status.setText(k_sum)
+            self.lbl_slot_kin_status.setStyleSheet("color: #4ade80; font-size: 10px; font-weight: bold;")
+            self.card_slot_kinetic.setStyleSheet("background: rgba(167, 139, 250, 0.12); border: 1px solid #a78bfa; border-radius: 6px; padding: 4px 6px;")
+
+            scenes = v_plan.get("timeline_segments") or v_plan.get("scenes") or v_plan.get("timeline") or v_plan.get("segments") or []
             if scenes:
                 blocks = []
                 for i, sc in enumerate(scenes[:8]):
                     title = sc.get("title") or sc.get("hook_title") or sc.get("chapter_name") or f"Cảnh {i+1}"
-                    color = "#7c3aed" if "hook" in str(title).lower() else ("#0284c7" if i % 2 == 0 else "#06b6d4")
+                    color = "#8b5cf6" if "hook" in str(title).lower() else ("#0284c7" if i % 2 == 0 else "#06b6d4")
                     blocks.append({"label": title, "color": color, "flex": 1})
                 self.mini_timeline.set_blocks(blocks)
 
+        elif ptype == "video_plan":
+            self._video_plan_data = raw_plan
+            self._video_plan_summary = summary
+            cnt = data.get("count", 0)
+            br_cnt = data.get("broll_count", 0)
+            sfx_cnt = data.get("sfx_count", 0)
+            self.lbl_slot_vid_status.setText(f"✓ Đã nạp ({cnt} cảnh · {br_cnt} meme · {sfx_cnt} sfx)")
+            self.lbl_slot_vid_status.setStyleSheet("color: #4ade80; font-size: 10px; font-weight: bold;")
+            self.card_slot_video.setStyleSheet("background: rgba(56, 189, 248, 0.12); border: 1px solid #38bdf8; border-radius: 6px; padding: 4px 6px;")
+
+            scenes = raw_plan.get("timeline_segments") or raw_plan.get("scenes") or raw_plan.get("timeline") or raw_plan.get("segments") or []
+            if scenes:
+                blocks = []
+                for i, sc in enumerate(scenes[:8]):
+                    title = sc.get("title") or sc.get("hook_title") or sc.get("chapter_name") or f"Cảnh {i+1}"
+                    color = "#8b5cf6" if "hook" in str(title).lower() else ("#0284c7" if i % 2 == 0 else "#06b6d4")
+                    blocks.append({"label": title, "color": color, "flex": 1})
+                self.mini_timeline.set_blocks(blocks)
+
+        elif ptype == "kinetic_plan":
+            self._kinetic_plan_data = raw_plan
+            self._kinetic_plan_summary = summary
+            cnt = data.get("count", 0)
+            if "0đ token" in summary.lower() or data.get("is_offline"):
+                self.lbl_slot_kin_status.setText(f"✓ Đã nạp ({cnt} trang Kinetic · 0đ Token)")
+            else:
+                self.lbl_slot_kin_status.setText(f"✓ Đã nạp ({cnt} phụ đề động)")
+            self.lbl_slot_kin_status.setStyleSheet("color: #4ade80; font-size: 10px; font-weight: bold;")
+            self.card_slot_kinetic.setStyleSheet("background: rgba(167, 139, 250, 0.12); border: 1px solid #a78bfa; border-radius: 6px; padding: 4px 6px;")
+
+        else:
+            self._video_plan_data = raw_plan
+            self._video_plan_summary = summary
+            self.lbl_slot_vid_status.setText("✓ Đã nạp kịch bản tùy biến")
+            self.lbl_slot_vid_status.setStyleSheet("color: #4ade80; font-size: 10px; font-weight: bold;")
+
         self.config_changed.emit()
-        self.json_applied.emit(data, msg)
+        self.json_applied.emit(data, summary)
 
     def _on_run_cloud_clicked(self):
         self.lbl_cloud_status.setText("Đang gửi transcript sang Cloud AI...")
@@ -1038,6 +1697,21 @@ class ReviewPage(QWidget):
             self.paste_zone.set_success(self._pasted_summary, self._pasted_data)
             self.txt_json_input.setPlainText(json.dumps(self._pasted_data.get("data", {}), indent=2, ensure_ascii=False))
 
+        # Khôi phục Dual Plan slots nếu có sẵn trong config
+        if getattr(config, "video_plan_data", None):
+            self._video_plan_data = config.video_plan_data
+            self._video_plan_summary = getattr(config, "video_plan_summary", "") or "Kịch bản mạch video & B-Roll / SFX"
+            self.card_slot_video.setStyleSheet("background: rgba(56, 189, 248, 0.12); border: 1px solid #38bdf8; border-radius: 6px; padding: 4px 8px;")
+            self.lbl_slot_vid_status.setText(f"✓ Đã nạp: {self._video_plan_summary}")
+            self.lbl_slot_vid_status.setStyleSheet("color: #4ade80; font-size: 10px; font-weight: bold;")
+
+        if getattr(config, "kinetic_plan_data", None):
+            self._kinetic_plan_data = config.kinetic_plan_data
+            self._kinetic_plan_summary = getattr(config, "kinetic_plan_summary", "") or "Kịch bản phụ đề Kinetic Typography"
+            self.card_slot_kinetic.setStyleSheet("background: rgba(167, 139, 250, 0.12); border: 1px solid #a78bfa; border-radius: 6px; padding: 4px 8px;")
+            self.lbl_slot_kin_status.setText(f"✓ Đã nạp: {self._kinetic_plan_summary}")
+            self.lbl_slot_kin_status.setStyleSheet("color: #4ade80; font-size: 10px; font-weight: bold;")
+
     def save_to_config(self, config: DirectorConfig):
         curr_idx = self.ai_stack.currentIndex()
         if curr_idx == 1:
@@ -1053,3 +1727,7 @@ class ReviewPage(QWidget):
         config.ollama_endpoint = self.txt_ollama_endpoint.text().strip() or "http://localhost:11434"
         config.web_prompt_pasted_data = self._pasted_data
         config.web_prompt_summary = self._pasted_summary
+        config.video_plan_data = self._video_plan_data
+        config.video_plan_summary = self._video_plan_summary
+        config.kinetic_plan_data = self._kinetic_plan_data
+        config.kinetic_plan_summary = self._kinetic_plan_summary

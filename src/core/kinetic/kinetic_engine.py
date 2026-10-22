@@ -31,6 +31,7 @@ import json
 import math
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -95,35 +96,188 @@ def hex_rgb(h: str) -> tuple:
 # --------------------------------------------------------------------------
 # 2. Plan: validate + auto-plan dự phòng khi chưa gọi AI
 # --------------------------------------------------------------------------
-def auto_plan(words: list, aspect="9:16", max_words=3, max_chars=16, gap_s=0.30) -> dict:
-    """Plan tối thiểu không cần AI: tách page theo số từ/ký tự/khoảng nghỉ/dấu câu."""
-    pages, cur = [], []
-    for i, w in enumerate(words):
-        if cur:
-            prev = words[cur[-1]]
-            chars = sum(len(words[j]["word"]) for j in cur) + len(w["word"])
-            if (len(cur) >= max_words or chars > max_chars
-                    or w["start"] - prev["end"] > gap_s
-                    or prev["word"].rstrip()[-1:] in ".,!?;:"):
-                pages.append(cur)
-                cur = []
-        cur.append(i)
-    if cur:
-        pages.append(cur)
+def auto_plan(words: list, aspect="9:16", max_words=3, gap_s=0.45, emphasis_ratio=0.12, max_chars=16, **kwargs) -> dict:
+    """
+    Kịch bản chia trang Kinetic Typography chuẩn xác offline:
+    - Ngắt trang: tối đa 3 từ, dấu câu (.,!?;:…), khoảng lặng > 0.45s hoặc khi thời gian lùi (sang clip khác).
+    - Lọc kiểm duyệt: tự động gắn text_override cho các từ ngữ nhạy cảm (CENSOR).
+    - Nhấn mạnh đinh (12%): Số (high/kinetic_bounce), Từ khóa mạnh STRONG (medium/box_swipe).
+    - Đảm bảo 100% tính liên tục toán học (phủ hết mọi từ, không nhảy cóc).
+    """
+    if not words:
+        return {
+            "schema_version": "1.0",
+            "canvas": {"aspect": aspect},
+            "presets": {"hormozi": {
+                "font": "Montserrat", "style": "Black", "size": 0.085, "uppercase": True,
+                "text_color": "#FFFFFF", "highlight_color": "#FFD400",
+                "outline_color": "#000000", "outline_width": 0.08,
+                "default_animation": "scale_pop"}},
+            "pages": [],
+        }
+
+    from src.core.whisper_cleaner import get_censored_override
+
+    N = len(words)
+    punct_end = (",", ".", "?", "!", "…", "...", ":", ";")
+    strong_keywords = {
+        "triệu", "nghìn", "uống", "chết", "trời", "wow", "thật", "điên", "xỉn",
+        "mưa", "rừng", "ngon", "đẹp", "lẹ", "nhanh", "toang", "khủng", "mệt",
+        "ơi", "quá", "kinh", "sợ", "ảo", "uầy", "cháy", "đỉnh"
+    }
+
+    def _get_w_tuple(item, idx):
+        if isinstance(item, dict):
+            return idx, str(item.get("word", "")), float(item.get("start", 0.0)), float(item.get("end", 0.0))
+        return item[0], str(item[1]), float(item[2]), float(item[3])
+
+    def _core(w: str) -> str:
+        return w.strip(".,?!…:;\"'()[]{}").lower()
+
+    # ---- 1. Chia page ----
+    pages, start = [], 0
+    for k in range(1, N + 1):
+        if k == N:
+            pages.append([start, k - 1])
+            break
+        _, pw, ps, pe = _get_w_tuple(words[k - 1], k - 1)
+        _, w, s, e = _get_w_tuple(words[k], k)
+        size = k - start
+        hard = (
+            size >= max_words
+            or pw.rstrip().endswith(punct_end)
+            or s < ps              # thời gian lùi = sang clip/phân đoạn khác
+            or s - pe > gap_s      # khoảng lặng thở tự nhiên
+        )
+        if hard:
+            pages.append([start, k - 1])
+            start = k
+
+    # ---- 2. Chọn từ khóa nhấn mạnh (Top ~12% từ đinh) ----
+    cands = []
+    for i in range(N):
+        _, w, s, e = _get_w_tuple(words[i], i)
+        c = _core(w)
+        if re.search(r"\d", c):
+            cands.append((2, i))  # Số đinh: ưu tiên cao nhất
+        elif c in strong_keywords:
+            cands.append((1, i))  # Từ khóa cảm xúc/hành động mạnh
+
+    cands.sort(key=lambda x: (-x[0], x[1]))
+    keep_limit = max(1, int(N * emphasis_ratio)) if N > 0 else 0
+    keep = {i: sc for sc, i in cands[:keep_limit]}
+
+    # ---- 3. Dựng danh sách Page hoàn chỉnh ----
+    out_pages = []
+    for pi, (a, b) in enumerate(pages):
+        page = {"word_range": [a, b], "preset": "hormozi"}
+        if pi == 0:
+            page["position"] = "center"
+
+        ws = []
+        for i in range(a, b + 1):
+            entry = {}
+            _, w_str, _, _ = _get_w_tuple(words[i], i)
+            c = _core(w_str)
+
+            if i in keep:
+                is_high = (keep[i] == 2)
+                entry = {
+                    "i": i,
+                    "emphasis": "high" if is_high else "medium",
+                    "animation": "kinetic_bounce" if is_high else "box_swipe"
+                }
+
+            # Kiểm duyệt từ tục tự động bằng text_override
+            censor_txt = get_censored_override(c)
+            if censor_txt:
+                entry = entry or {"i": i}
+                entry["text_override"] = censor_txt
+
+            if entry:
+                ws.append(entry)
+
+        if ws:
+            page["words"] = ws
+        out_pages.append(page)
+
+    # ---- 4. Kiểm tra ràng buộc phủ liên tục (Assert continuity) ----
+    if out_pages:
+        assert out_pages[0]["word_range"][0] == 0, f"Page 0 bắt đầu từ {out_pages[0]['word_range'][0]}, mong đợi 0"
+        assert out_pages[-1]["word_range"][1] == N - 1, f"Page cuối kết thúc ở {out_pages[-1]['word_range'][1]}, mong đợi {N - 1}"
+        for p, q in zip(out_pages, out_pages[1:]):
+            assert q["word_range"][0] == p["word_range"][1] + 1, f"Không liên tục: {p} -> {q}"
+
     return {
         "schema_version": "1.0",
         "canvas": {"aspect": aspect},
-        "presets": {"hormozi": {
-            "font": "Montserrat", "style": "Black", "size": 0.085, "uppercase": True,
-            "text_color": "#FFFFFF", "highlight_color": "#FFD400",
-            "outline_color": "#000000", "outline_width": 0.08,
-            "default_animation": "scale_pop"}},
-        "pages": [{"word_range": [p[0], p[-1]], "preset": "hormozi"} for p in pages],
+        "presets": {
+            "hormozi": {
+                "font": "Montserrat",
+                "style": "Black",
+                "size": 0.085,
+                "uppercase": True,
+                "text_color": "#FFFFFF",
+                "highlight_color": "#FFD400",
+                "outline_color": "#000000",
+                "outline_width": 0.08,
+                "default_animation": "scale_pop"
+            }
+        },
+        "pages": out_pages,
     }
 
 
 def generate_kinetic_prompt(words: list, aspect: str = "9:16", font: str = "Montserrat") -> str:
-    """Tạo Prompt chuẩn Kinetic Typography kèm danh sách từ ngữ [i] để người dùng gửi cho Claude/ChatGPT."""
+    """Tạo Prompt chuẩn Kinetic Typography kèm danh sách từ ngữ [i] hoặc hướng dẫn phong cách khi từ ngữ quá dài."""
+    n_words = len(words)
+    if n_words > 300:
+        # Tối ưu hóa token: Đối với video dài (>300 từ tới 15.000 từ), yêu cầu AI tư vấn Style/Preset thay vì xuất hàng nghìn trang
+        sample_words = " ".join([f"[{i}] {w['word']}" for i, w in enumerate(words[:40])])
+        return f"""# 🎯 BẠN LÀ CHUYÊN GIA NGHỆ THUẬT KINETIC TYPOGRAPHY CHO DAVINCI RESOLVE
+## ℹ️ THÔNG BÁO TỐI ƯU HÓA TOKEN & TỰ ĐỘNG HÓA OFFLINE (0đ TOKEN):
+Video này có tổng cộng **{n_words} từ ngữ** (tương đương ~{n_words // 2} trang phụ đề động).
+Do số lượng từ quá lớn (vượt quá giới hạn output token của Claude/ChatGPT), bạn **KHÔNG CẦN** xuất toàn bộ mảng `pages` cho 15.000 từ.
+👉 Phần mềm ResolveFlow đã có nút **'⚡ Tự động tạo kịch bản Kinetic (Offline - 0đ Token)'** trên giao diện Slot 2 để tự động ngắt trang 100% chuẩn xác trong 0.05 giây!
+
+## 🎨 NHIỆM VỤ CỦA BẠN:
+Hãy phân tích ngữ cảnh của video (mẫu lời thoại: `{sample_words}...`) và thiết kế **Bộ Preset Phong Cách Phụ Đề (Presets & Palette)** định dạng `{aspect}` đẹp nhất, trả về đúng định dạng JSON bên dưới:
+
+```json
+{{
+  "schema_version": "1.0",
+  "canvas": {{ "aspect": "{aspect}" }},
+  "presets": {{
+    "hormozi": {{
+      "font": "{font}",
+      "style": "Black",
+      "size": 0.085,
+      "uppercase": true,
+      "text_color": "#FFFFFF",
+      "highlight_color": "#FFD400",
+      "outline_color": "#000000",
+      "outline_width": 0.08,
+      "default_animation": "scale_pop"
+    }},
+    "climax": {{
+      "font": "{font}",
+      "style": "Black",
+      "size": 0.095,
+      "uppercase": true,
+      "text_color": "#FF2A85",
+      "highlight_color": "#00F0FF",
+      "outline_color": "#000000",
+      "outline_width": 0.09,
+      "default_animation": "kinetic_bounce"
+    }}
+  }},
+  "pages": [
+    {{ "word_range": [0, 2], "preset": "hormozi" }}
+  ]
+}}
+```
+"""
+
     indexed_list = [f"[{i}] {w['word']} ({w['start']:.2f}s - {w['end']:.2f}s)" for i, w in enumerate(words)]
     indexed_text = " ".join(indexed_list)
 

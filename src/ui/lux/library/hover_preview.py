@@ -240,8 +240,6 @@ class SharedHoverPreview(QObject):
         if self._player:
             try:
                 self._player.stop()
-                if self._audio_output:
-                    self._audio_output.setVolume(0.0)
             except Exception:
                 pass
         if self._overlay:

@@ -77,10 +77,16 @@ def text_tool(name: str, p: TitleParams, *, text_value: Optional[str] = None,
               pos=(0, 0), center=(0.5, 0.5), extra: Optional[dict] = None,
               controls: Optional[List[UserControl]] = None) -> Tool:
     r, g, b = color if color is not None else parse_color(p.color)
+    safe_font = p.font
+    try:
+        from src.utils.path_utils import resolve_system_font
+        safe_font = resolve_system_font(p.font)
+    except Exception:
+        pass
     inputs = {
         "Width": Inp(1920), "Height": Inp(1080), "UseFrameFormatSettings": Inp(1),
         "StyledText": Inp(value=p.text if text_value is None else text_value),
-        "Font": Inp(p.font), "Style": Inp(p.style),
+        "Font": Inp(safe_font), "Style": Inp(p.style),
         "Size": Inp(size if size is not None else p.size),
         "Center": Inp(Pt(*center)),
         "Red1": Inp(r), "Green1": Inp(g), "Blue1": Inp(b), "Alpha1": Inp(1.0),

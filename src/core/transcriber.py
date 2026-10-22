@@ -3,13 +3,24 @@ import re
 import os
 from typing import Literal, Optional, List, Dict, Any, Callable
 from src.core import transcript_quality
+from src.core.whisper_cleaner import is_whisper_hallucination
 from pydantic import BaseModel, Field
+
+# Kích thước ước lượng của các mô hình Faster-Whisper trên đĩa
+MODEL_DISK_SIZES: Dict[str, str] = {
+    "tiny": "~75 MB",
+    "base": "~145 MB",
+    "small": "~480 MB",
+    "medium": "~1.5 GB",
+    "large-v3": "~3.1 GB",
+    "large-v3-turbo": "~1.6 GB",
+}
 
 class ModelConfig(BaseModel):
     """
     Lớp cấu hình kiểm soát tham số tải mô hình AI bằng Pydantic.
     """
-    model_size: Literal["tiny", "base", "small", "medium", "large-v3"] = Field(
+    model_size: Literal["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"] = Field(
         default="small", 
         description="Kích thước mô hình Whisper (nhỏ hơn chạy nhanh hơn, lớn hơn dịch chuẩn hơn)"
     )
@@ -21,6 +32,46 @@ class ModelConfig(BaseModel):
         default="float16",
         description="Định dạng số học để tối ưu hóa bộ nhớ: float16 (khuyên dùng cho GPU) hoặc float32"
     )
+
+def is_model_on_disk(model_size: str) -> bool:
+    """
+    Kiểm tra xem mô hình Whisper đã được tải về máy trong HF hub cache chưa.
+    """
+    try:
+        cache_dir = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
+        if not os.path.exists(cache_dir):
+            return False
+        tag = model_size.lower().strip()
+        for d in os.listdir(cache_dir):
+            d_lower = d.lower()
+            if not d_lower.startswith("models--"):
+                continue
+            if "faster-whisper" in d_lower:
+                if d_lower.endswith(f"-{tag}") or f"-{tag}-" in d_lower or f"--{tag}" in d_lower:
+                    snapshots = os.path.join(cache_dir, d, "snapshots")
+                    if os.path.exists(snapshots) and os.listdir(snapshots):
+                        return True
+                    for _, _, files in os.walk(os.path.join(cache_dir, d)):
+                        if any(f.endswith(".bin") or f.endswith(".json") for f in files):
+                            return True
+    except Exception:
+        pass
+    return False
+
+def suggest_default_model() -> str:
+    """
+    Gợi ý mô hình Whisper phù hợp với phần cứng:
+    - Nếu có GPU NVIDIA với CUDA: 'large-v3-turbo' (nhanh hơn large-v3 4x, chất lượng tương đương, bộ nhớ ~1.6GB)
+    - Nếu chạy CPU: 'small' (đủ nhanh trên CPU, chất lượng tiếng Việt tương đối tốt)
+    """
+    try:
+        register_nvidia_dll_dirs()
+        import ctranslate2
+        if ctranslate2.get_cuda_device_count() > 0:
+            return "large-v3-turbo"
+    except Exception:
+        pass
+    return "small"
 
 def register_nvidia_dll_dirs() -> List[str]:
     """
@@ -52,41 +103,6 @@ def register_nvidia_dll_dirs() -> List[str]:
     return added
 
 
-def is_whisper_hallucination(text: str) -> bool:
-    """
-    Phát hiện các câu sinh tự động (hallucination) phổ biến của Whisper khi gặp khoảng lặng
-    hoặc âm thanh nhiễu (ví dụ: 'Thank you for watching', 'Thanks for watching',...).
-    """
-    clean = re.sub(r'[^a-zA-Z0-9\sàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]', '', text.lower().strip())
-    
-    # Danh sách các câu boilerplate/hallucination phổ biến
-    patterns = [
-        r"^thank\s+you\s+for\s+watching$",
-        r"^thank\s+you$",
-        r"^thanks\s+for\s+watching$",
-        r"^thank\s+you\s+so\s+much$",
-        r"^thanks$",
-        r"^subscribe$",
-        r"^please\s+subscribe$",
-        r"^subscribe\s+to\s+my\s+channel$",
-        r"^subtitles\s+by$",
-        r"^cảm\s+ơn\s+các\s+bạn\s+đã\s+xem$",
-        r"^cảm\s+ơn\s+đã\s+xem$",
-        r"^hẹn\s+gặp\s+lại$",
-        r"^tạm\s+biệt$"
-    ]
-    
-    for pat in patterns:
-        if re.search(pat, clean):
-            return True
-            
-    # Lọc các từ lặp vô nghĩa như "you", "shh", "sh", "uh", "um", "ah", "oh"
-    if clean in ["you", "shh", "sh", "uh", "um", "ah", "oh"]:
-        return True
-        
-    return False
-
-
 class ResolveTranscriber:
     """
     Lớp điều khiển tải mô hình và dịch âm thanh ngoại tuyến sử dụng faster-whisper.
@@ -97,21 +113,12 @@ class ResolveTranscriber:
         self.model = None
         self.active_device = None
         self.active_compute_type = None
+        self.last_detected_language: Optional[str] = None
+        self.last_language_probability: Optional[float] = None
 
     def is_model_cached(self) -> bool:
         """Kiểm tra xem mô hình Whisper đã được tải về máy trước đó chưa."""
-        try:
-            from faster_whisper.utils import _download_model
-            # Kiểm tra trong thư mục cache huggingface mặc định
-            cache_dir = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
-            model_tag = self.config.model_size
-            if os.path.exists(cache_dir):
-                for d in os.listdir(cache_dir):
-                    if model_tag in d.lower():
-                        return True
-        except Exception:
-            pass
-        return False
+        return is_model_on_disk(self.config.model_size)
 
     def load_model(self, log_callback: Optional[Callable[[str], None]] = None) -> None:
         """
@@ -148,7 +155,8 @@ class ResolveTranscriber:
         # Báo log tải mô hình lần đầu nếu cần
         if log_callback:
             if not self.is_model_cached():
-                log_callback(f"⏳ Đang tải mô hình Whisper '{self.config.model_size}' lần đầu về máy (dung lượng ~150MB - 1.5GB)... Quá trình này chỉ diễn ra 1 lần duy nhất.")
+                size_str = MODEL_DISK_SIZES.get(self.config.model_size, "~500MB - 1.5GB")
+                log_callback(f"⏳ Đang tải mô hình Whisper '{self.config.model_size}' lần đầu về máy (dung lượng {size_str})... Quá trình này chỉ diễn ra 1 lần duy nhất.")
             else:
                 log_callback(f"🤖 Đang nạp mô hình Whisper '{self.config.model_size}' ({device.upper()} - {compute_type})...")
 
@@ -212,6 +220,9 @@ class ResolveTranscriber:
             condition_on_previous_text=False
         )
 
+        self.last_detected_language = getattr(info, "language", None)
+        self.last_language_probability = getattr(info, "language_probability", 0.0)
+
         results = []
         total_duration = info.duration if hasattr(info, 'duration') and info.duration > 0 else 1.0
 
@@ -237,7 +248,11 @@ class ResolveTranscriber:
                 "start": segment.start,
                 "end": segment.end,
                 "text": segment_text,
-                "words": words_data
+                "words": words_data,
+                "avg_logprob": getattr(segment, "avg_logprob", 0.0),
+                "no_speech_prob": getattr(segment, "no_speech_prob", 0.0),
+                "compression_ratio": getattr(segment, "compression_ratio", 1.0),
+                "temperature": getattr(segment, "temperature", 0.0),
             })
 
             if progress_callback:
@@ -271,8 +286,17 @@ class ResolveTranscriber:
                 continue
             words = [{"word": w.word, "start": w.start + offset, "end": w.end + offset,
                       "probability": w.probability} for w in (seg.words or [])]
-            out.append({"start": seg.start + offset, "end": seg.end + offset, "text": text,
-                        "words": words, "filled": True})
+            out.append({
+                "start": seg.start + offset, 
+                "end": seg.end + offset, 
+                "text": text,
+                "words": words, 
+                "filled": True,
+                "avg_logprob": getattr(seg, "avg_logprob", 0.0),
+                "no_speech_prob": getattr(seg, "no_speech_prob", 0.0),
+                "compression_ratio": getattr(seg, "compression_ratio", 1.0),
+                "temperature": getattr(seg, "temperature", 0.0),
+            })
         return transcript_quality.split_stretched_segments(out)
 
     def fill_uncovered_gaps(

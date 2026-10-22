@@ -296,3 +296,9 @@ class GlobalAssetPool:
 
         return None
 
+
+# Backward-compatible aliases for other modules
+BRollSFXPool = GlobalAssetPool
+BRollSFXResolver = GlobalAssetPool
+
+

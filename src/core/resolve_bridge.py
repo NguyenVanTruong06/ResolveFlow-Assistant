@@ -78,10 +78,10 @@ def setup_resolve_environment() -> Tuple[Optional[str], Optional[str]]:
             if not lib_path:
                 lib_path = linux_lib_candidates[0]
 
-        # Nạp trước thư viện chia sẻ fusionscript với cờ RTLD_GLOBAL để các symbol C++ được chia sẻ
+        # Nạp trước thư viện chia sẻ fusionscript với cờ RTLD_LOCAL để tránh ô nhiễm symbol C++ (tránh crash Qt Multimedia)
         if lib_path and os.path.exists(lib_path):
             try:
-                ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+                ctypes.CDLL(lib_path, mode=ctypes.RTLD_LOCAL)
             except Exception:
                 pass
 
@@ -214,6 +214,17 @@ class Ctx:
 
 def context(require_timeline: bool = True) -> Ctx:
     resolve = get_resolve()
+    try:
+        fusion = resolve.Fusion()
+        if fusion and hasattr(fusion, "FontManager"):
+            import glob
+            fm = fusion.FontManager
+            user_fonts = os.path.expanduser("~/.local/share/fonts")
+            if os.path.exists(user_fonts):
+                for fp in glob.glob(os.path.join(user_fonts, "**", "*.ttf"), recursive=True):
+                    fm.AddFont(fp)
+    except Exception:
+        pass
     project = resolve.GetProjectManager().GetCurrentProject()
     if project is None:
         raise ResolveFlowError("No project is open in Resolve.")
@@ -451,6 +462,11 @@ def insert_title_at_playhead(style: str, params: Optional[dict] = None, track_in
     ctx.resolve.OpenPage("edit")
     tl = ctx.timeline
     p = TitleParams.from_dict(params or {})
+    try:
+        from src.utils.path_utils import resolve_system_font
+        p.font = resolve_system_font(p.font)
+    except Exception:
+        pass
     fps, nominal, _ = timeline_rate(tl)
     w = int(tl.GetSetting("timelineResolutionWidth") or 1920)
     h = int(tl.GetSetting("timelineResolutionHeight") or 1080)
@@ -482,12 +498,179 @@ def insert_title_at_playhead(style: str, params: Optional[dict] = None, track_in
             except Exception:
                 pass
     try:
+        active_comp = item.GetFusionCompByIndex(1)
+        if active_comp:
+            _ensure_media_out_connected(active_comp)
+    except Exception:
+        pass
+    try:
         item.SetName("RF " + build_title(style, p).name.replace("RF_", "").replace("_", " "))
     except Exception:
         pass
     if clip_color:
         item.SetClipColor(clip_color)
     return item
+
+
+def insert_transition_at_playhead(
+    style: str,
+    duration_sec: float = 0.5,
+    track_index: int = 2,
+    record_frame: Optional[int] = None,
+    clip_color: str = "Purple",
+) -> Optional[Any]:
+    """
+    Put an animated ResolveFlow Transition / Overlay clip at the playhead on V{track_index} (default V2).
+    Centered on playhead so it acts as a transition across the edit cut.
+    """
+    from src.core.fusion.transitions import TRANSITIONS
+    from src.core.fusion.overlays import OVERLAYS
+
+    ctx = context()
+    ctx.resolve.OpenPage("edit")
+    tl = ctx.timeline
+    fps, nominal, _ = timeline_rate(tl)
+    w = int(tl.GetSetting("timelineResolutionWidth") or 1920)
+    h = int(tl.GetSetting("timelineResolutionHeight") or 1080)
+    dur = max(6, int(round(duration_sec * fps)))
+    current_frame = playhead_frame(tl) if record_frame is None else int(record_frame)
+    start = max(0, current_frame - (dur // 2))
+    track = resolve_track(tl, track_index, start, start + dur, "next_free")
+
+    carrier = get_carrier_clip(ctx, dur, w, h)
+    placed = ctx.media_pool.AppendToTimeline([{
+        "mediaPoolItem": carrier,
+        "startFrame": 0,
+        "endFrame": dur - 1,
+        "trackIndex": track,
+        "recordFrame": start,
+        "mediaType": 1,
+    }])
+    if not placed:
+        raise ResolveFlowError(f"AppendToTimeline failed for transition (track V{track}, frame {start}).")
+    item = placed[0]
+
+    # Normalize style
+    raw_style = str(style or "flash_white").lower().replace("trans_", "").replace("rf_", "").replace("resolveflow_", "")
+    style_map = {
+        "whip_pan_left": "whip_pan",
+        "whip_pan": "whip_pan",
+        "zoom_blur_in": "impact_zoom",
+        "zoom_blur": "impact_zoom",
+        "zoom": "impact_zoom",
+        "impact": "impact_zoom",
+        "glitch": "rgb_glitch",
+        "rgb_glitch": "rgb_glitch",
+        "flash": "flash_white",
+        "flash_white": "flash_white",
+        "shake": "camera_shake",
+        "camera_shake": "camera_shake",
+        "spin": "spin_roll",
+        "spin_roll": "spin_roll",
+        "light_leak": "light_leak",
+    }
+    target_key = style_map.get(raw_style, raw_style)
+
+    macro_fn = None
+    if target_key in TRANSITIONS:
+        macro_fn = TRANSITIONS[target_key]
+    elif target_key in OVERLAYS:
+        macro_fn = OVERLAYS[target_key]
+    else:
+        macro_fn = TRANSITIONS.get("flash_white")
+
+    if macro_fn:
+        try:
+            m = macro_fn()
+            comp_path = os.path.join(cache_dir(), "comps", f"trans_{target_key}_{start}_{track}.comp")
+            os.makedirs(os.path.dirname(comp_path), exist_ok=True)
+            with open(comp_path, "w", encoding="utf-8") as f:
+                f.write(m.to_comp(dur, w, h, fps))
+            comp = item.ImportFusionComp(comp_path)
+            if comp:
+                names = list(item.GetFusionCompNameList() or [])
+                if names:
+                    item.LoadFusionCompByName(names[-1])
+                    for n in names[:-1]:
+                        try:
+                            item.DeleteFusionCompByName(n)
+                        except Exception:
+                            pass
+                active_comp = item.GetFusionCompByIndex(1)
+                if active_comp:
+                    mi = active_comp.FindTool("MediaIn1") or active_comp.AddTool("MediaIn")
+                    if mi:
+                        for t in active_comp.GetToolList().values():
+                            if t.GetAttrs().get("TOOLS_RegID") == "MacroOperator":
+                                inp1 = t.FindMainInput(1)
+                                if inp1 and inp1.GetConnectedOutput() is None:
+                                    inp1.ConnectTo(mi.FindMainOutput(1))
+                                inp2 = t.FindMainInput(2)
+                                if inp2 and inp2.GetConnectedOutput() is None:
+                                    inp2.ConnectTo(mi.FindMainOutput(1))
+                    _ensure_media_out_connected(active_comp)
+        except Exception as e:
+            pass
+
+    item_display = raw_style.replace("_", " ").title()
+    try:
+        item.SetName(f"RF {item_display}")
+    except Exception:
+        pass
+    if clip_color:
+        item.SetClipColor(clip_color)
+    return item
+
+
+def _ensure_media_out_connected(comp) -> bool:
+    """Đảm bảo MediaOut1 trong Fusion comp luôn được nối dây tới output của Macro hoặc công cụ kết xuất."""
+    if not comp:
+        return False
+    try:
+        mo = comp.FindTool("MediaOut1")
+        if not mo:
+            for t in comp.GetToolList().values():
+                if t.GetAttrs().get("TOOLS_RegID") == "MediaOut":
+                    mo = t
+                    break
+        if not mo:
+            return False
+
+        inp = mo.FindMainInput(1)
+        if not inp:
+            return False
+        if inp.GetConnectedOutput() is not None:
+            return True
+
+        tools = comp.GetToolList()
+        target_out = None
+        # 1. Tìm MacroOperator
+        for t in tools.values():
+            if t.GetAttrs().get("TOOLS_RegID") == "MacroOperator":
+                target_out = t.FindMainOutput(1)
+                if target_out:
+                    break
+        # 2. Hoặc tìm các tool render chính
+        if not target_out:
+            for pref in ("OutFade", "Timing", "Merge", "Merge1", "Text1"):
+                t = comp.FindTool(pref)
+                if t:
+                    target_out = t.FindMainOutput(1)
+                    if target_out:
+                        break
+        # 3. Fallback tool khác
+        if not target_out:
+            for t in reversed(list(tools.values())):
+                if t.GetAttrs().get("TOOLS_RegID") != "MediaOut":
+                    target_out = t.FindMainOutput(1)
+                    if target_out:
+                        break
+
+        if target_out:
+            return bool(inp.ConnectTo(target_out))
+    except Exception:
+        pass
+    return False
 
 
 # -----------------------------------------------------------------------------

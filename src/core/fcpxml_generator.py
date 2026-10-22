@@ -562,6 +562,19 @@ class FCPXMLGenerator:
         plan: List[Optional[Dict[str, Any]]] = []
         cursor_f = 0
         for ev in events:
+            if "src_in_frames" in ev and "src_dur_frames" in ev and "rec_dur_frames" in ev:
+                src_in_f = int(ev["src_in_frames"])
+                src_out_f = int(ev.get("src_out_frames", src_in_f + ev["src_dur_frames"]))
+                src_dur_f = int(ev["src_dur_frames"])
+                out_dur_f = int(ev["rec_dur_frames"])
+                offset_f = int(ev.get("rec_in_frames", cursor_f))
+                speed = float(ev.get("speed", 1.0) or 1.0)
+                retimed = abs(speed - 1.0) > 1e-3
+                plan.append({"src_in_f": src_in_f, "src_out_f": src_out_f, "src_dur_f": src_dur_f,
+                             "out_dur_f": out_dur_f, "offset_f": offset_f, "retimed": retimed})
+                cursor_f = offset_f + out_dur_f
+                continue
+
             max_file_dur = meta_map.get(ev["video_path"], {}).get("duration", 0.0)
             src_out_sec = ev["src_out"]
             if max_file_dur > 0:
@@ -1030,13 +1043,27 @@ class FCPXMLGenerator:
                 ET.SubElement(sc_a, "samplerate").text = "48000"
             return file_el
 
+        from src.core.timeline_mapper import get_speed_mode
+        speed_mode = str(kwargs.get("speed_mode") or get_speed_mode()).strip().lower()
+
         # Tính tổng thời lượng trước để ghi duration đúng chuẩn FCP7 XML
         total_timeline_frames = 0
         for ev in events:
-            s_in = max(0.0, float(ev.get("src_in", 0.0)))
-            s_out = float(ev.get("src_out", 0.0))
-            if s_out > s_in:
-                total_timeline_frames += max(1, sec_to_frame(s_out - s_in))
+            if "rec_dur_frames" in ev:
+                spd = float(ev.get("speed", 1.0) or 1.0)
+                if speed_mode == "off":
+                    total_timeline_frames += int(ev.get("src_dur_frames", ev["rec_dur_frames"]))
+                else:
+                    total_timeline_frames += int(ev["rec_dur_frames"])
+            else:
+                s_in = max(0.0, float(ev.get("src_in", 0.0)))
+                s_out = float(ev.get("src_out", 0.0))
+                spd = float(ev.get("speed", 1.0) or 1.0)
+                if speed_mode == "off":
+                    spd = 1.0
+                if s_out > s_in:
+                    src_dur = max(1, sec_to_frame(s_out - s_in))
+                    total_timeline_frames += max(1, round(src_dur / spd))
 
         # 2. Xây dựng XMEML Root chuẩn Apple Final Cut Pro 7 / DaVinci Resolve
         xmeml = ET.Element("xmeml", version="5")
@@ -1093,20 +1120,38 @@ class FCPXMLGenerator:
             f_meta = get_or_create_file_meta(vpath)
             f_id = f"file-v1-{idx}"
 
-            src_in_sec = max(0.0, float(ev.get("src_in", 0.0)))
-            src_out_sec = float(ev.get("src_out", 0.0))
-            max_dur = f_meta.get("duration", 0.0)
-            if max_dur > 0:
-                src_out_sec = min(src_out_sec, max_dur)
-            dur_sec = max(0.0, src_out_sec - src_in_sec)
-            if dur_sec <= 0.01:
-                continue
-
             tc_base = f_meta.get("start_tc_frames", 0)
-            in_f = tc_base + sec_to_frame(src_in_sec)
-            dur_f = max(1, sec_to_frame(dur_sec))
-            out_f = in_f + dur_f
             clip_dur_f = tc_base + f_meta.get("dur_frames", 1)
+
+            req_speed = float(ev.get("speed", 1.0) or 1.0)
+            spd = 1.0 if speed_mode == "off" else req_speed
+
+            if "src_in_frames" in ev and "src_dur_frames" in ev and "rec_dur_frames" in ev:
+                src_in_f = int(ev["src_in_frames"])
+                src_dur_f = int(ev["src_dur_frames"])
+                dur_f = src_dur_f if speed_mode == "off" else int(ev["rec_dur_frames"])
+                rec_start_f = int(ev.get("rec_in_frames", current_timeline_frame))
+                in_f = tc_base + src_in_f
+                out_f = in_f + src_dur_f
+            else:
+                src_in_sec = max(0.0, float(ev.get("src_in", 0.0)))
+                src_out_sec = float(ev.get("src_out", 0.0))
+                max_dur = f_meta.get("duration", 0.0)
+                if max_dur > 0:
+                    src_out_sec = min(src_out_sec, max_dur)
+                dur_sec = max(0.0, src_out_sec - src_in_sec)
+                if dur_sec <= 0.01:
+                    continue
+
+                src_in_f = sec_to_frame(src_in_sec)
+                src_dur_f = max(1, sec_to_frame(dur_sec))
+                dur_f = max(1, round(src_dur_f / spd))
+                in_f = tc_base + src_in_f
+                out_f = in_f + src_dur_f
+                rec_start_f = current_timeline_frame
+
+            start_f = rec_start_f
+            end_f = rec_start_f + dur_f
 
             # Video V1
             v_item = ET.SubElement(v_track1, "clipitem", id=f"clipitem-v1-{idx}")
@@ -1115,8 +1160,8 @@ class FCPXMLGenerator:
             v_rate = ET.SubElement(v_item, "rate")
             ET.SubElement(v_rate, "timebase").text = timebase_str
             ET.SubElement(v_rate, "ntsc").text = ntsc_str
-            ET.SubElement(v_item, "start").text = str(current_timeline_frame)
-            ET.SubElement(v_item, "end").text = str(current_timeline_frame + dur_f)
+            ET.SubElement(v_item, "start").text = str(start_f)
+            ET.SubElement(v_item, "end").text = str(end_f)
             ET.SubElement(v_item, "in").text = str(in_f)
             ET.SubElement(v_item, "out").text = str(out_f)
             add_file_node(v_item, f_meta, f_id, is_audio_only=False)
@@ -1125,6 +1170,32 @@ class FCPXMLGenerator:
             ET.SubElement(st_v, "mediatype").text = "video"
             ET.SubElement(st_v, "trackindex").text = "1"
 
+            if speed_mode == "timeremap" and abs(spd - 1.0) > 1e-3:
+                f_node = ET.SubElement(v_item, "filter")
+                eff_node = ET.SubElement(f_node, "effect")
+                ET.SubElement(eff_node, "name").text = "Time Remap"
+                ET.SubElement(eff_node, "effectid").text = "timeremap"
+                ET.SubElement(eff_node, "effectcategory").text = "motion"
+                ET.SubElement(eff_node, "effecttype").text = "motion"
+                ET.SubElement(eff_node, "mediatype").text = "video"
+
+                p_spd = ET.SubElement(eff_node, "parameter")
+                ET.SubElement(p_spd, "parameterid").text = "speed"
+                ET.SubElement(p_spd, "name").text = "speed"
+                ET.SubElement(p_spd, "valuemin").text = "-10000"
+                ET.SubElement(p_spd, "valuemax").text = "10000"
+                ET.SubElement(p_spd, "value").text = str(int(round(spd * 100)))
+
+                p_rev = ET.SubElement(eff_node, "parameter")
+                ET.SubElement(p_rev, "parameterid").text = "reverse"
+                ET.SubElement(p_rev, "name").text = "reverse"
+                ET.SubElement(p_rev, "value").text = "FALSE"
+
+                p_fb = ET.SubElement(eff_node, "parameter")
+                ET.SubElement(p_fb, "parameterid").text = "frameblending"
+                ET.SubElement(p_fb, "name").text = "frame blending"
+                ET.SubElement(p_fb, "value").text = "FALSE"
+
             # Audio A1 (Left)
             a_item1 = ET.SubElement(a_track1, "clipitem", id=f"clipitem-a1-{idx}")
             ET.SubElement(a_item1, "name").text = f_meta["name"]
@@ -1132,8 +1203,8 @@ class FCPXMLGenerator:
             a_rate1 = ET.SubElement(a_item1, "rate")
             ET.SubElement(a_rate1, "timebase").text = timebase_str
             ET.SubElement(a_rate1, "ntsc").text = ntsc_str
-            ET.SubElement(a_item1, "start").text = str(current_timeline_frame)
-            ET.SubElement(a_item1, "end").text = str(current_timeline_frame + dur_f)
+            ET.SubElement(a_item1, "start").text = str(start_f)
+            ET.SubElement(a_item1, "end").text = str(end_f)
             ET.SubElement(a_item1, "in").text = str(in_f)
             ET.SubElement(a_item1, "out").text = str(out_f)
             add_file_node(a_item1, f_meta, f_id, is_audio_only=False)
@@ -1149,8 +1220,8 @@ class FCPXMLGenerator:
             a_rate2 = ET.SubElement(a_item2, "rate")
             ET.SubElement(a_rate2, "timebase").text = timebase_str
             ET.SubElement(a_rate2, "ntsc").text = ntsc_str
-            ET.SubElement(a_item2, "start").text = str(current_timeline_frame)
-            ET.SubElement(a_item2, "end").text = str(current_timeline_frame + dur_f)
+            ET.SubElement(a_item2, "start").text = str(start_f)
+            ET.SubElement(a_item2, "end").text = str(end_f)
             ET.SubElement(a_item2, "in").text = str(in_f)
             ET.SubElement(a_item2, "out").text = str(out_f)
             add_file_node(a_item2, f_meta, f_id, is_audio_only=False)
@@ -1181,7 +1252,7 @@ class FCPXMLGenerator:
                 ET.SubElement(la2, "clipindex").text = str(idx)
                 ET.SubElement(la2, "groupindex").text = "1"
 
-            current_timeline_frame += dur_f
+            current_timeline_frame = end_f
 
         # 4. Duyệt và xếp B-Roll lên Video Track 2 (V2) & Audio B-Roll (A4/A5)
         if broll_inserts:

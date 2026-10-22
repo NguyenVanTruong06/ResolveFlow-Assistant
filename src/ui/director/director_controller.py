@@ -62,6 +62,12 @@ class DirectorController(QObject):
         enable_evidence = (FEAT_WEB_BROLL in cfg.enabled_features)
         enable_safe_zone = (FEAT_SAFE_ZONE in cfg.enabled_features)
 
+        text_preset = cfg.text_preset_id
+        if cfg.kinetic_plan_data and isinstance(cfg.kinetic_plan_data, dict):
+            text_preset = cfg.kinetic_plan_data.get("style_preset") or cfg.kinetic_plan_data.get("preset_id") or text_preset
+
+        story_plan = cfg.video_plan_data or (cfg.web_prompt_pasted_data.get("data") if cfg.web_prompt_pasted_data else None)
+
         kwargs = {
             "video_paths": list(cfg.video_paths),
             "model_size": cfg.whisper_model,
@@ -89,7 +95,7 @@ class DirectorController(QObject):
             "phase": phase,
             "proposed_segments_override": self.proposed_segments if phase == 2 else None,
             "clip_data_cache": self.clip_data_cache,
-            "text_preset_id": cfg.text_preset_id,
+            "text_preset_id": text_preset,
             "use_cache": cfg.use_cache,
             "use_proxy": True,
             "enable_loudnorm": False,
@@ -103,7 +109,7 @@ class DirectorController(QObject):
             "story_target": 60.0,
             "video_type": video_type_val,
             "hide_weak_subs": cfg.hide_weak_subs,
-            "story_arrangement_override": None,
+            "story_arrangement_override": story_plan,
             "project_structure": None,
             "enable_evidence_hunter": enable_evidence,
             "enable_shotbook": enable_punch,
@@ -143,6 +149,8 @@ class DirectorController(QObject):
     def cancel_pipeline(self):
         """Hủy an toàn worker đang chạy."""
         if self.worker and self.worker.isRunning():
+            if hasattr(self.worker, "stop"):
+                self.worker.stop()
             self.worker.requestInterruption()
             self.log_received.emit("Đã gửi yêu cầu hủy tiến trình pipeline.")
 

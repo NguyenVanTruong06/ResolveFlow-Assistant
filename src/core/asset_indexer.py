@@ -78,6 +78,11 @@ class AssetIndexer:
 
         # If it's a video file, try extracting first frame using ffmpeg
         if path.suffix.lower() in ('.mp4', '.mov', '.webm', '.mkv'):
+            try:
+                if not path.is_file() or path.stat().st_size < 100:
+                    return None
+            except Exception:
+                return None
             import shutil, subprocess
             ffmpeg = shutil.which('ffmpeg')
             if ffmpeg:

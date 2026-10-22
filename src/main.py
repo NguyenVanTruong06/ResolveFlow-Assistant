@@ -78,6 +78,12 @@ def start_app():
     resolve_state = ResolveStateService(gateway=gateway, poll_interval_ms=1000)
 
     # 2. Quét & nạp toàn bộ kho đạo cụ (600+ assets) và bộ chỉ mục tìm kiếm
+    try:
+        from src.core.transition_preset import TransitionMacroGenerator
+        TransitionMacroGenerator.install_transitions_to_davinci_resolve()
+    except Exception as e:
+        logger.warning("Auto-install transitions to DaVinci Resolve error: %s", e)
+
     all_assets = load_all_library_assets()
     search_index = SearchIndex(assets=all_assets)
 

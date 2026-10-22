@@ -53,25 +53,31 @@ def resolve_system_font(requested_font: str) -> str:
     if not requested_font:
         return "Arial" if sys.platform != "linux" else "Liberation Sans"
 
-    if sys.platform != "linux":
-        return requested_font
+    font_name = requested_font.strip()
+    for suffix in (" Bold", " Regular", " SemiBold", " ExtraBold", " Black", " Medium", " Light", " Italic", "-Bold", "-Regular"):
+        if font_name.endswith(suffix):
+            font_name = font_name[:-len(suffix)].strip()
+            break
 
-    if requested_font in _FONT_CACHE:
-        return _FONT_CACHE[requested_font]
+    if sys.platform != "linux":
+        return font_name
+
+    if font_name in _FONT_CACHE:
+        return _FONT_CACHE[font_name]
 
     installed = get_installed_linux_fonts()
     if installed:
-        if requested_font.lower() in installed:
-            _FONT_CACHE[requested_font] = requested_font
-            return requested_font
+        if font_name.lower() in installed:
+            _FONT_CACHE[font_name] = font_name
+            return font_name
 
         fallbacks = ["Liberation Sans", "DejaVu Sans", "Noto Sans", "Ubuntu", "Sans"]
         for fb in fallbacks:
             if fb.lower() in installed:
-                _FONT_CACHE[requested_font] = fb
+                _FONT_CACHE[font_name] = fb
                 return fb
 
-    _FONT_CACHE[requested_font] = "Liberation Sans"
+    _FONT_CACHE[font_name] = "Liberation Sans"
     return "Liberation Sans"
 
 

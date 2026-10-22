@@ -14,7 +14,13 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+# Ensure project root is in sys.path so 'src' can always be imported
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 _RESULT_FILE = ""
 
@@ -69,7 +75,7 @@ def setup_worker_resolve_environment() -> None:
         if lib_path and os.path.exists(lib_path):
             os.environ["RESOLVE_SCRIPT_LIB"] = lib_path
             try:
-                ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+                ctypes.CDLL(lib_path, mode=ctypes.RTLD_LOCAL)
             except Exception:
                 pass
 
@@ -113,7 +119,8 @@ def setup_worker_resolve_environment() -> None:
 def main() -> int:
     global _RESULT_FILE
     parser = argparse.ArgumentParser(description="ChunDVC Title Insertion Worker")
-    parser.add_argument("--title", required=True, help="Title Template Name / Style")
+    parser.add_argument("--title", "--title-name", dest="title", required=True, help="Title Template Name / Style")
+    parser.add_argument("--mode", default="auto", help="Insertion mode")
     parser.add_argument("--display-name", default="", help="Display name for generated assets")
     parser.add_argument("--timeline", default="", help="Target timeline name")
     parser.add_argument("--preferred-track", type=int, default=2, help="Preferred target video track")
@@ -174,7 +181,70 @@ def main() -> int:
             emit({"ok": False, "error": "timeline_not_found"})
             return 5
 
-        # Execute NEW-NESTED-NO-RIPPLE-V2 insertion
+        # 1. Thử tạo Title hoạt họa đầy đủ (Keyframes, Spring bounce, Glow...) qua Fusion Bridge
+        try:
+            from src.core.resolve_bridge import insert_title_at_playhead as bridge_insert_title, TITLES
+            style_map = {
+                "kinetic_hormozi": "spring_pop",
+                "karaoke_pop": "spring_pop",
+                "RF_SpringPop": "spring_pop",
+                "bounce_word": "spring_pop",
+                "highlighter_swipe": "highlighter",
+                "RF_Highlighter": "highlighter",
+                "box_highlight": "highlighter",
+                "typewriter": "typewriter",
+                "RF_Typewriter": "typewriter",
+                "vhs_retro": "typewriter",
+                "neon_pulse": "neon_pulse",
+                "RF_NeonPulse": "neon_pulse",
+                "glow_neon": "neon_pulse",
+                "rgb_glitch": "rgb_glitch",
+                "RF_RGBGlitch": "rgb_glitch",
+                "paper_cutout": "paper_cutout",
+                "RF_PaperCutout": "paper_cutout",
+                "clean_minimal": "lower_third",
+                "RF_LowerThird": "lower_third",
+                "quote_box": "quote_box",
+                "RF_QuoteBox": "quote_box",
+            }
+            target_style = style_map.get(args.title, args.title)
+            if target_style not in TITLES:
+                target_style = "spring_pop"
+
+            dur_frames = max(24, int(args.duration * 30))
+            display_text = args.display_name or args.title
+            rec_frame = None if args.record_frame < 0 else args.record_frame
+            from src.utils.path_utils import resolve_system_font
+            safe_font = resolve_system_font("Montserrat")
+            item = bridge_insert_title(
+                style=target_style,
+                params={
+                    "text": display_text,
+                    "font": safe_font,
+                    "style": "Bold",
+                    "size": 0.08,
+                    "color": "#FFFFFF",
+                    "accent": "#FACC15",
+                    "duration_frames": dur_frames,
+                },
+                track_index=args.preferred_track,
+                record_frame=rec_frame,
+            )
+            if item:
+                emit({
+                    "ok": True,
+                    "track": args.preferred_track,
+                    "start": item.GetStart(),
+                    "end": item.GetEnd(),
+                    "duration": dur_frames,
+                    "track_added": False,
+                    "item_name": item.GetName(),
+                })
+                return 0
+        except Exception as bridge_err:
+            pass
+
+        # 2. Dự phòng: Execute NEW-NESTED-NO-RIPPLE-V2 insertion
         from src.core.resolve_api import import_edit_preset_v2
 
         rec_frame = None if args.record_frame < 0 else args.record_frame

@@ -227,8 +227,203 @@ def create_vector_icon(icon_type: str, color_hex: str = ThemeColors.TEXT_PRIMARY
         painter.drawLine(QPointF(9.5, 5.5), QPointF(18, 4))
 
     elif icon_type == "palette":
-        # Kính lúp / Command HUD
-        painter.drawEllipse(QRectF(5.5, 5.5, 9.5, 9.5))
+        # Kính lúp / Command HUD với cán cầm sắc nét
+        painter.drawEllipse(QRectF(4.5, 4.5, 10.5, 10.5))
+        painter.drawLine(QPointF(12.5, 12.5), QPointF(19.5, 19.5))
+
+    elif icon_type == "pin":
+        # Thumbtack / Ghim (Trạng thái mở / Unpinned)
+        painter.drawLine(QPointF(8, 4.5), QPointF(16, 4.5))
+        body = QPainterPath()
+        body.moveTo(10, 4.5)
+        body.lineTo(10, 7.5)
+        body.lineTo(7, 12.5)
+        body.lineTo(17, 12.5)
+        body.lineTo(14, 7.5)
+        body.lineTo(14, 4.5)
+        painter.drawPath(body)
+        painter.drawLine(QPointF(12, 12.5), QPointF(12, 20.5))
+
+    elif icon_type in ("pinned", "pin_active"):
+        # Thumbtack / Ghim (Trạng thái đã ghim - tô đặc màu nhấn)
+        painter.drawLine(QPointF(8, 4.5), QPointF(16, 4.5))
+        body = QPainterPath()
+        body.moveTo(10, 4.5)
+        body.lineTo(10, 7.5)
+        body.lineTo(7, 12.5)
+        body.lineTo(17, 12.5)
+        body.lineTo(14, 7.5)
+        body.lineTo(14, 4.5)
+        body.closeSubpath()
+        painter.setBrush(QColor(color_hex))
+        painter.drawPath(body)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawLine(QPointF(12, 12.5), QPointF(12, 20.5))
+
+    elif icon_type in ("settings", "gear", "cog"):
+        # Bánh răng cài đặt cơ khí chuẩn xác (6 răng cân xứng)
+        import math
+        painter.drawEllipse(QRectF(9.5, 9.5, 5, 5))
+        gear_path = QPainterPath()
+        teeth = 6
+        r_inner = 6.0
+        r_outer = 9.2
+        step = 2 * math.pi / teeth
+        w_tooth = step * 0.28
+        for i in range(teeth):
+            base_a = i * step
+            p0 = (12 + r_inner * math.cos(base_a), 12 + r_inner * math.sin(base_a))
+            p1 = (12 + r_outer * math.cos(base_a + 0.08), 12 + r_outer * math.sin(base_a + 0.08))
+            p2 = (12 + r_outer * math.cos(base_a + w_tooth), 12 + r_outer * math.sin(base_a + w_tooth))
+            p3 = (12 + r_inner * math.cos(base_a + w_tooth + 0.08), 12 + r_inner * math.sin(base_a + w_tooth + 0.08))
+            p4 = (12 + r_inner * math.cos(base_a + step), 12 + r_inner * math.sin(base_a + step))
+            if i == 0:
+                gear_path.moveTo(*p0)
+            gear_path.lineTo(*p1)
+            gear_path.lineTo(*p2)
+            gear_path.lineTo(*p3)
+            gear_path.lineTo(*p4)
+        gear_path.closeSubpath()
+        painter.drawPath(gear_path)
+
+    elif icon_type in ("wide", "expand"):
+        # Mở rộng (2 mũi tên chéo góc hướng ra ngoài)
+        painter.drawLine(QPointF(14.5, 4.5), QPointF(19.5, 4.5))
+        painter.drawLine(QPointF(19.5, 4.5), QPointF(19.5, 9.5))
+        painter.drawLine(QPointF(13, 11), QPointF(19.5, 4.5))
+        painter.drawLine(QPointF(9.5, 19.5), QPointF(4.5, 19.5))
+        painter.drawLine(QPointF(4.5, 19.5), QPointF(4.5, 14.5))
+        painter.drawLine(QPointF(11, 13), QPointF(4.5, 19.5))
+
+    elif icon_type in ("shrink", "compress", "compact"):
+        # Thu nhỏ (2 mũi tên chéo góc hướng vào trong)
+        painter.drawLine(QPointF(14, 9), QPointF(19, 9))
+        painter.drawLine(QPointF(14, 9), QPointF(14, 4))
+        painter.drawLine(QPointF(19.5, 3.5), QPointF(14, 9))
+        painter.drawLine(QPointF(10, 15), QPointF(5, 15))
+        painter.drawLine(QPointF(10, 15), QPointF(10, 20))
+        painter.drawLine(QPointF(4.5, 20.5), QPointF(10, 15))
+
+    elif icon_type in ("collapse", "chevron_right"):
+        # Thu gọn / Mũi tên góc phải kép (>>)
+        painter.drawLine(QPointF(7.5, 6), QPointF(12.5, 12))
+        painter.drawLine(QPointF(12.5, 12), QPointF(7.5, 18))
+        painter.drawLine(QPointF(12.5, 6), QPointF(17.5, 12))
+        painter.drawLine(QPointF(17.5, 12), QPointF(12.5, 18))
+
+    elif icon_type in ("chevron_left", "expand_rail"):
+        # Mở rộng rail / Mũi tên góc trái kép (<<)
+        painter.drawLine(QPointF(16.5, 6), QPointF(11.5, 12))
+        painter.drawLine(QPointF(11.5, 12), QPointF(16.5, 18))
+        painter.drawLine(QPointF(11.5, 6), QPointF(6.5, 12))
+        painter.drawLine(QPointF(6.5, 12), QPointF(11.5, 18))
+
+    elif icon_type in ("chevron_down", "arrow_down"):
+        # Mũi tên trỏ xuống
+        painter.drawLine(QPointF(6, 9), QPointF(12, 15))
+        painter.drawLine(QPointF(12, 15), QPointF(18, 9))
+
+    elif icon_type in ("chevron_up", "arrow_up"):
+        # Mũi tên trỏ lên
+        painter.drawLine(QPointF(6, 15), QPointF(12, 9))
+        painter.drawLine(QPointF(12, 9), QPointF(18, 15))
+
+    elif icon_type in ("tune", "sliders"):
+        # 3 Cần gạt tinh chỉnh thông số (Sliders)
+        painter.drawLine(QPointF(4, 7), QPointF(20, 7))
+        painter.drawLine(QPointF(8, 4.5), QPointF(8, 9.5))
+        painter.drawLine(QPointF(4, 12), QPointF(20, 12))
+        painter.drawLine(QPointF(16, 9.5), QPointF(16, 14.5))
+        painter.drawLine(QPointF(4, 17), QPointF(20, 17))
+        painter.drawLine(QPointF(11, 14.5), QPointF(11, 19.5))
+
+    elif icon_type in ("more", "dots"):
+        # 3 dấu chấm tùy chọn ngang
+        painter.setBrush(QColor(color_hex))
+        painter.drawEllipse(QRectF(4.5, 10.5, 3, 3))
+        painter.drawEllipse(QRectF(10.5, 10.5, 3, 3))
+        painter.drawEllipse(QRectF(16.5, 10.5, 3, 3))
+
+    elif icon_type in ("star", "fav", "favorite"):
+        # Ngôi sao yêu thích (viền nét)
+        import math
+        path = QPainterPath()
+        r_out = 8.5
+        r_in = 3.8
+        for i in range(5):
+            a_out = -math.pi / 2 + i * (2 * math.pi / 5)
+            a_in = a_out + math.pi / 5
+            pt_out = QPointF(12 + r_out * math.cos(a_out), 12 + r_out * math.sin(a_out))
+            pt_in = QPointF(12 + r_in * math.cos(a_in), 12 + r_in * math.sin(a_in))
+            if i == 0:
+                path.moveTo(pt_out)
+            else:
+                path.lineTo(pt_out)
+            path.lineTo(pt_in)
+        path.closeSubpath()
+        painter.drawPath(path)
+
+    elif icon_type in ("star_filled", "fav_filled"):
+        # Ngôi sao yêu thích (tô đặc)
+        import math
+        path = QPainterPath()
+        r_out = 8.5
+        r_in = 3.8
+        for i in range(5):
+            a_out = -math.pi / 2 + i * (2 * math.pi / 5)
+            a_in = a_out + math.pi / 5
+            pt_out = QPointF(12 + r_out * math.cos(a_out), 12 + r_out * math.sin(a_out))
+            pt_in = QPointF(12 + r_in * math.cos(a_in), 12 + r_in * math.sin(a_in))
+            if i == 0:
+                path.moveTo(pt_out)
+            else:
+                path.lineTo(pt_out)
+            path.lineTo(pt_in)
+        path.closeSubpath()
+        painter.setBrush(QColor(color_hex))
+        painter.drawPath(path)
+
+    elif icon_type in ("plus", "add"):
+        # Dấu cộng
+        painter.drawLine(QPointF(12, 5.5), QPointF(12, 18.5))
+        painter.drawLine(QPointF(5.5, 12), QPointF(18.5, 12))
+
+    elif icon_type in ("copy", "clipboard"):
+        # Sao chép / 2 trang giấy
+        painter.drawRoundedRect(QRectF(8, 8, 11, 12), 1.5, 1.5)
+        path = QPainterPath()
+        path.moveTo(5, 15)
+        path.lineTo(5, 5)
+        path.lineTo(15, 5)
+        painter.drawPath(path)
+
+    elif icon_type in ("paste", "insert_playhead"):
+        # Bảng kẹp dán
+        painter.drawRoundedRect(QRectF(5, 6, 14, 14), 2, 2)
+        painter.drawLine(QPointF(9, 4), QPointF(15, 4))
+        painter.drawLine(QPointF(8, 11), QPointF(16, 11))
+        painter.drawLine(QPointF(8, 15), QPointF(14, 15))
+
+    elif icon_type in ("evidence", "badge"):
+        # Huy hiệu Viral Pack
+        path = QPainterPath()
+        path.moveTo(5, 4.5)
+        path.lineTo(19, 4.5)
+        path.lineTo(19, 19.5)
+        path.lineTo(12, 16)
+        path.lineTo(5, 19.5)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.drawLine(QPointF(9, 10.5), QPointF(11.5, 13))
+        painter.drawLine(QPointF(11.5, 13), QPointF(15.5, 9))
+
+    elif icon_type in ("music", "bgm"):
+        # Âm nhạc / BGM
+        painter.drawEllipse(QRectF(5, 13, 4.5, 3.5))
+        painter.drawEllipse(QRectF(13.5, 11, 4.5, 3.5))
+        painter.drawLine(QPointF(9.5, 14.5), QPointF(9.5, 5.5))
+        painter.drawLine(QPointF(18, 12.5), QPointF(18, 4))
+        painter.drawLine(QPointF(9.5, 5.5), QPointF(18, 4))
     elif icon_type in ("sound_on", "audio_on", "volume_on"):
         # Loa bật âm thanh: thân loa + phễu + sóng âm
         from PySide6.QtGui import QPolygonF

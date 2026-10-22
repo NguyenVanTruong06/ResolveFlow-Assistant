@@ -37,6 +37,7 @@ class StoryCopilotDialog(QDialog):
         story_intent: str = "travel_vlog",
         hook_duration: str = "30_60s",
         target_duration: str = "full",
+        manifest_id: Optional[str] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -46,6 +47,7 @@ class StoryCopilotDialog(QDialog):
         self.story_intent = story_intent
         self.hook_duration = hook_duration
         self.target_duration = target_duration
+        self.manifest_id = manifest_id
         self.current_plan: Optional[CopilotDirectorPlan] = None
 
         self.setWindowTitle("🧠 AI Story Copilot (Claude / ChatGPT / Gemini)")
@@ -222,7 +224,8 @@ class StoryCopilotDialog(QDialog):
             project_structure=self.project_structure,
             story_intent=self.story_intent,
             hook_duration=self.hook_duration,
-            target_duration=self.target_duration
+            target_duration=self.target_duration,
+            manifest_id=self.manifest_id
         )
         self.txt_prompt_preview.setPlainText(prompt)
 
@@ -248,6 +251,22 @@ class StoryCopilotDialog(QDialog):
             plan = StoryCopilot.parse_copilot_response(text)
             self.current_plan = plan
 
+            # Kiểm tra Manifest ID
+            if plan.manifest_id and self.manifest_id and plan.manifest_id != self.manifest_id:
+                QMessageBox.warning(
+                    self,
+                    "Lệch Manifest ID",
+                    f"⚠ CẢNH BÁO: Kịch bản được sinh từ manifest khác ({plan.manifest_id}) "
+                    f"so với manifest hiện tại ({self.manifest_id}).\n\n"
+                    f"Thứ tự clip hoặc danh sách file có thể đã thay đổi!"
+                )
+            elif not plan.manifest_id:
+                QMessageBox.information(
+                    self,
+                    "Kịch bản cũ",
+                    "ℹ Kịch bản này không chứa manifest_id (kịch bản phiên bản cũ)."
+                )
+
             # Đối soát nguồn tài nguyên (Footage, Meme, SFX)
             from src.core.source_resolver import SourceResolver
             v_list = getattr(self, "clips_data", []) or []
@@ -270,6 +289,8 @@ class StoryCopilotDialog(QDialog):
                 f"<b>🎭 B-Roll & SFX:</b> Tự động ghép nối {len(plan.broll_inserts)} meme & {len(plan.sfx_inserts)} SFX từ kho đạo cụ",
                 f"<b>📣 Kêu gọi hành động (CTA):</b> {plan.call_to_action or 'Không'}"
             ]
+            if plan.manifest_id:
+                lines.append(f"<b>🆔 Manifest ID:</b> <code>{plan.manifest_id}</code>")
             if plan.viral_headlines:
                 lines.append(f"<b>📌 Tiêu đề đề xuất:</b> {plan.viral_headlines[0]}")
 

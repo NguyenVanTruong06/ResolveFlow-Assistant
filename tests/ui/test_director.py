@@ -112,6 +112,38 @@ def test_parse_web_prompt_json(qapp):
     ok, msg, data = parse_web_prompt_json("")
     assert ok is False
 
+    # 5. Dual Plan (cả 2 block markdown trong cùng 1 văn bản trả về từ AI)
+    combined_response = f"""
+    Xin chào, đây là kịch bản hoàn chỉnh cho video của bạn:
+    
+    1. Kịch bản Video Plan:
+    ```json
+    {{"timeline_segments": [{{"title": "Cảnh 1", "start": 0, "end": 10}}]}}
+    ```
+    
+    2. Kịch bản Kinetic Typography:
+    ```json
+    {{"subtitles": [{{"start": 1.0, "end": 3.0, "text": "Đà Lạt phố hoa"}}]}}
+    ```
+    """
+    ok, msg, data = parse_web_prompt_json(combined_response)
+    assert ok is True
+    assert "CẢ 2" in msg
+    assert data["type"] == "dual_plan"
+    assert "timeline_segments" in data["video_plan"]
+    assert "subtitles" in data["kinetic_plan"]
+
+    # 6. Target Slot chỉ định rõ
+    generic_text = '{"info": "test data"}'
+    ok1, msg1, data1 = parse_web_prompt_json(generic_text, target_slot="slot1")
+    assert ok1 is True
+    assert data1["type"] == "video_plan"
+
+    ok2, msg2, data2 = parse_web_prompt_json(generic_text, target_slot="slot2")
+    assert ok2 is True
+    assert data2["type"] == "kinetic_plan"
+
+
 
 def test_director_stepper_widget(qapp):
     stepper = DirectorStepperWidget()
@@ -342,4 +374,54 @@ def test_review_page_json_apply_and_persistence(qapp):
     assert page.ai_stack.currentIndex() == 2
     assert page.combo_ollama_model.currentText() == "qwen2.5:7b"
     assert page.txt_ollama_endpoint.text() == "http://127.0.0.1:11434"
+
+
+def test_review_page_dual_plan_and_slot_paste(qapp):
+    from src.ui.director.pages.review_page import ReviewPage
+
+    page = ReviewPage()
+
+    # 1. Test nạp tuần tự: Dán Video Plan vào Slot 1
+    v_json = '{"timeline_segments": [{"id": 1, "title": "Cảnh 1", "start": 0, "end": 5}]}'
+    page.txt_json_input.setPlainText(v_json)
+    page.btn_apply_json.click()
+
+    assert page._video_plan_data is not None
+    assert "✓ Đã nạp" in page.lbl_slot_vid_status.text()
+    assert page._kinetic_plan_data is None  # Slot 2 chưa bị ảnh hưởng
+
+    # 2. Dán tiếp Kinetic Plan vào Slot 2
+    k_json = '{"subtitles": [{"start": 0.5, "end": 2.0, "text": "Phụ đề test"}]}'
+    page.txt_json_input.setPlainText(k_json)
+    page.btn_apply_json.click()
+
+    assert page._video_plan_data is not None  # Slot 1 VẪN NGUYÊN VẸN, không bị đè!
+    assert page._kinetic_plan_data is not None  # Slot 2 nạp thành công
+    assert "✓ Đã nạp" in page.lbl_slot_kin_status.text()
+
+    # 3. Test nạp CẢ 2 CÙNG LÚC (Dual Plan)
+    combined = """
+    ```json
+    {"timeline_segments": [{"id": 1, "title": "Cảnh mới", "start": 0, "end": 10}]}
+    ```
+    ```json
+    {"subtitles": [{"start": 1.0, "end": 4.0, "text": "Phụ đề mới"}]}
+    ```
+    """
+    page.txt_json_input.setPlainText(combined)
+    page.btn_apply_json.click()
+
+    assert page._video_plan_data["timeline_segments"][0]["title"] == "Cảnh mới"
+    assert page._kinetic_plan_data["subtitles"][0]["text"] == "Phụ đề mới"
+    assert "✓ Đã nạp" in page.lbl_slot_vid_status.text()
+    assert "✓ Đã nạp" in page.lbl_slot_kin_status.text()
+
+    # 4. Test Target Slot toggle selector
+    page.btn_target_slot1.setChecked(True)
+    assert page._get_current_target_slot() == "slot1"
+    page.btn_target_slot2.setChecked(True)
+    assert page._get_current_target_slot() == "slot2"
+    page.btn_target_auto.setChecked(True)
+    assert page._get_current_target_slot() is None
+
 

@@ -187,7 +187,9 @@ class DockHeaderWidget(QWidget):
         layout.addWidget(self.btn_audio)
 
         # 3. Wide toggle button (420px <-> 760px)
-        self.btn_wide = QPushButton("⤢")
+        self.btn_wide = QPushButton()
+        self.btn_wide.setIcon(get_vector_icon("wide", "#a1a1aa", 16))
+        self.btn_wide.setIconSize(QSize(16, 16))
         self.btn_wide.setFixedSize(28, 28)
         self.btn_wide.setToolTip("Mở rộng 760px / Thu hẹp (Wide Mode)")
         self.btn_wide.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -197,7 +199,9 @@ class DockHeaderWidget(QWidget):
         layout.addWidget(self.btn_wide)
 
         # 4. Pin toggle button
-        self.btn_pin = QPushButton("📌")
+        self.btn_pin = QPushButton()
+        self.btn_pin.setIcon(get_vector_icon("pin", "#a1a1aa", 16))
+        self.btn_pin.setIconSize(QSize(16, 16))
         self.btn_pin.setFixedSize(28, 28)
         self.btn_pin.setToolTip("Ghim Dock: không tự động thu gọn")
         self.btn_pin.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -207,7 +211,9 @@ class DockHeaderWidget(QWidget):
         layout.addWidget(self.btn_pin)
 
         # 5. Collapse button
-        self.btn_collapse = QPushButton("»")
+        self.btn_collapse = QPushButton()
+        self.btn_collapse.setIcon(get_vector_icon("collapse", "#a1a1aa", 16))
+        self.btn_collapse.setIconSize(QSize(16, 16))
         self.btn_collapse.setFixedSize(28, 28)
         self.btn_collapse.setToolTip("Thu gọn về Rail (Esc)")
         self.btn_collapse.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -215,15 +221,11 @@ class DockHeaderWidget(QWidget):
         self.btn_collapse.setStyleSheet("""
             QPushButton {
                 background: transparent;
-                color: #a1a1aa;
                 border: 1px solid transparent;
                 border-radius: 6px;
-                font-size: 15px;
-                font-weight: bold;
             }
             QPushButton:hover {
                 background: #27272a;
-                color: #ffffff;
                 border-color: #3f3f46;
             }
         """)
@@ -280,9 +282,21 @@ class DockHeaderWidget(QWidget):
 
     def set_pinned(self, pinned: bool):
         self.btn_pin.setStyleSheet(self._button_style(active=pinned))
+        if pinned:
+            self.btn_pin.setIcon(get_vector_icon("pinned", "#c4b5fd", 16))
+            self.btn_pin.setToolTip("Đã ghim Dock (Bấm để mở tự thu gọn)")
+        else:
+            self.btn_pin.setIcon(get_vector_icon("pin", "#a1a1aa", 16))
+            self.btn_pin.setToolTip("Ghim Dock: không tự động thu gọn")
 
     def set_wide(self, wide: bool):
         self.btn_wide.setStyleSheet(self._button_style(active=wide))
+        if wide:
+            self.btn_wide.setIcon(get_vector_icon("shrink", "#c4b5fd", 16))
+            self.btn_wide.setToolTip("Thu hẹp về 420px (Compact Mode)")
+        else:
+            self.btn_wide.setIcon(get_vector_icon("wide", "#a1a1aa", 16))
+            self.btn_wide.setToolTip("Mở rộng 760px (Wide Mode)")
 
     def _on_audio_btn_clicked(self):
         self._audio_enabled = not self._audio_enabled

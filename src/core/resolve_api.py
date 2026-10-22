@@ -88,7 +88,7 @@ class ResolveAutomation:
                     candidates.append(os.path.join(os.path.dirname(out), "fusionscript.dll"))
             elif sys.platform.startswith("linux"):
                 out = subprocess.run(
-                    ["pgrep", "-f", "/opt/resolve/bin/resolve"],
+                    ["pgrep", "-f", r"(/opt/resolve|bin_real/resolve|/bin/resolve)"],
                     capture_output=True, text=True, timeout=5
                 ).stdout.strip()
                 if out:
@@ -117,10 +117,25 @@ class ResolveAutomation:
             if sys.platform.startswith("linux"):
                 try:
                     import subprocess
-                    p_check = subprocess.run(["pgrep", "-x", "resolve"], capture_output=True, text=True, timeout=0.5)
-                    if p_check.returncode != 0:
-                        self.last_connect_error = "Tiến trình DaVinci Resolve chưa được bật trên hệ thống."
-                        return False
+                    p_check = subprocess.run(
+                        ["pgrep", "-f", r"(/opt/resolve|bin_real/resolve|/bin/resolve)"],
+                        capture_output=True, text=True, timeout=0.5
+                    )
+                    if p_check.returncode != 0 or not p_check.stdout.strip():
+                        found_proc = False
+                        for pid_dir in os.listdir("/proc"):
+                            if pid_dir.isdigit():
+                                try:
+                                    with open(f"/proc/{pid_dir}/cmdline", "rb") as f:
+                                        cmd = f.read().decode("utf-8", errors="ignore").lower()
+                                        if ("resolve" in cmd or "/opt/resolve" in cmd) and "python" not in cmd and "systemd" not in cmd:
+                                            found_proc = True
+                                            break
+                                except (OSError, IOError):
+                                    pass
+                        if not found_proc:
+                            self.last_connect_error = "Tiến trình DaVinci Resolve chưa được bật trên hệ thống."
+                            return False
                 except Exception:
                     pass
             elif sys.platform.startswith("win"):
@@ -158,6 +173,7 @@ class ResolveAutomation:
             try:
                 self.project_manager = self.resolve.GetProjectManager()
                 self.current_project = self.project_manager.GetCurrentProject()
+                self._sync_custom_fonts()
                 return True
             except Exception as e:
                 self.last_connect_error = f"Lỗi lấy ProjectManager từ Resolve: {e}"
@@ -165,6 +181,31 @@ class ResolveAutomation:
 
         self.last_connect_error = status_msg
         return False
+
+    def _sync_custom_fonts(self) -> None:
+        """Đồng bộ các font trong ~/.local/share/fonts vào FontManager của DaVinci Fusion."""
+        try:
+            if not self.resolve:
+                return
+            fusion = self.resolve.Fusion()
+            if not fusion or not hasattr(fusion, "FontManager"):
+                return
+            fm = fusion.FontManager
+            import glob
+            user_fonts_dir = os.path.expanduser("~/.local/share/fonts")
+            if os.path.exists(user_fonts_dir):
+                for font_path in glob.glob(os.path.join(user_fonts_dir, "**", "*.ttf"), recursive=True):
+                    try:
+                        fm.AddFont(font_path)
+                    except Exception:
+                        pass
+                for font_path in glob.glob(os.path.join(user_fonts_dir, "**", "*.otf"), recursive=True):
+                    try:
+                        fm.AddFont(font_path)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     def ensure_resolve_running(self, log_callback: Optional[Any] = None) -> bool:
         """
@@ -187,7 +228,10 @@ class ResolveAutomation:
             return True
 
         if sys.platform.startswith("linux"):
-            candidates_exe = ["/opt/resolve/bin/resolve"]
+            candidates_exe = [
+                "/opt/resolve/bin/resolve",
+                "/opt/resolve/bin_real/resolve"
+            ]
             import shutil
             which_res = shutil.which("resolve")
             if which_res and which_res not in candidates_exe:
@@ -973,6 +1017,153 @@ class ResolveAutomation:
         log(f" ✔ SFX '{os.path.basename(sfx_path)}' đã sẵn sàng trong Media Pool.")
         return True
 
+    def insert_media_at_playhead(
+        self,
+        media_path: str,
+        target_track: int = 3,
+        duration_sec: Optional[float] = None,
+        log_callback: Optional[Any] = None,
+    ) -> bool:
+        """
+        Chèn tệp video / meme / B-roll / overlay tại vị trí Playhead lên track video chỉ định (mặc định V3).
+        Tự động nạp vào Media Pool nếu chưa có.
+        """
+        def log(msg: str):
+            if log_callback:
+                log_callback(msg)
+            else:
+                print(msg)
+
+        if not os.path.exists(media_path):
+            resolved = None
+            try:
+                from src.core.broll_sfx import BRollSFXResolver
+                resolved = BRollSFXResolver().resolve_meme(media_path)
+            except Exception:
+                pass
+            if not resolved or not os.path.exists(resolved):
+                try:
+                    from src.utils.path_utils import PosixPathAdapter
+                    for sub in ("memes", "overlays", "green_screen", "cinematic"):
+                        cand = PosixPathAdapter.get_asset_path("broll_memes", sub, os.path.basename(media_path))
+                        if os.path.exists(cand):
+                            resolved = str(cand)
+                            break
+                        cand_mp4 = PosixPathAdapter.get_asset_path("broll_memes", sub, f"{os.path.splitext(os.path.basename(media_path))[0]}.mp4")
+                        if os.path.exists(cand_mp4):
+                            resolved = str(cand_mp4)
+                            break
+                except Exception:
+                    pass
+            if resolved and os.path.exists(resolved):
+                media_path = resolved
+            else:
+                log(f" ❌ Không tìm thấy tệp media: {media_path}")
+                return False
+
+        if not self.is_connected():
+            if not self.connect():
+                log(" ❌ Không thể kết nối tới DaVinci Resolve.")
+                return False
+
+        timeline = self.get_active_timeline()
+        if not timeline:
+            log(" ❌ Không tìm thấy Timeline đang mở trong DaVinci Resolve.")
+            return False
+
+        # 1. Nạp media vào Media Pool nếu chưa có
+        self.import_media_to_media_pool([media_path], log_callback=log)
+
+        # 2. Tìm MediaPoolItem
+        media_pool = self.current_project.GetMediaPool()
+        clips = self.get_media_pool_clips()
+        media_norm = os.path.normcase(os.path.abspath(media_path))
+        target_item = None
+        for c in clips:
+            try:
+                fp = c.GetClipProperty("File Path")
+                if fp and os.path.normcase(os.path.abspath(fp)) == media_norm:
+                    target_item = c
+                    break
+            except Exception:
+                pass
+
+        if not target_item and clips:
+            fname = os.path.basename(media_path).lower()
+            for c in clips:
+                try:
+                    if c.GetName() and c.GetName().lower() == fname:
+                        target_item = c
+                        break
+                except Exception:
+                    pass
+
+        if not target_item:
+            log(f" ❌ Không tìm thấy clip trong Media Pool sau khi nạp: {media_path}")
+            return False
+
+        # 3. Xác định recordFrame (Playhead)
+        try:
+            rec_frame, _ = current_record_frame(timeline, self.current_project)
+        except Exception:
+            rec_frame = 0
+
+        # 4. Xác định độ dài (frames)
+        fps = 30.0
+        try:
+            fps = float(timeline.GetSetting("timelineFrameRate") or 30.0)
+        except Exception:
+            pass
+        total_frames = 90
+        try:
+            total_frames = int(target_item.GetClipProperty("Frames") or 90)
+        except Exception:
+            pass
+
+        ext = os.path.splitext(media_path)[1].lower()
+        is_still = total_frames <= 1 or ext in (".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".webp", ".svg")
+
+        # 5. Đảm bảo track video tồn tại
+        try:
+            current_tracks = timeline.GetTrackCount("video")
+            if target_track > current_tracks:
+                for _ in range(current_tracks, target_track):
+                    timeline.AddTrack("video")
+        except Exception:
+            pass
+
+        # 6. Append to timeline at track
+        try:
+            if is_still:
+                append_spec = {
+                    "mediaPoolItem": target_item,
+                    "recordFrame": rec_frame,
+                    "trackIndex": target_track,
+                    "mediaType": 1,
+                }
+            else:
+                if duration_sec and duration_sec > 0:
+                    dur_frames = min(total_frames, max(1, int(round(duration_sec * fps))))
+                else:
+                    dur_frames = total_frames
+                append_spec = {
+                    "mediaPoolItem": target_item,
+                    "startFrame": 0,
+                    "endFrame": dur_frames - 1,
+                    "recordFrame": rec_frame,
+                    "trackIndex": target_track,
+                    "mediaType": 1,
+                }
+
+            placed = media_pool.AppendToTimeline([append_spec])
+            if placed:
+                log(f" ✔ Đã chèn '{os.path.basename(media_path)}' tại Playhead lên Track V{target_track}!")
+                return True
+        except Exception as e:
+            log(f" ❌ Lỗi khi AppendToTimeline: {e}")
+
+        return False
+
     def capture_playhead_preset(
         self,
         preset_name: str = "ChunDVC_Preset",
@@ -1024,44 +1215,12 @@ class ResolveAutomation:
         playhead_sec = self.get_current_playhead_seconds()
         log(f" 📝 Đang chèn Text+ Title '{text}' tại mốc {playhead_sec:.2f}s (Preset: {preset_id})...")
 
-        # 1. Thử chèn qua thuật toán NEW-NESTED-NO-RIPPLE-V2 (cô lập tiến trình hoặc in-process an toàn)
-        try:
-            # Map preset_id sang tên Fusion template tương ứng
-            template_name = kwargs.get("template_name", "")
-            if not template_name:
-                style_map = {
-                    "kinetic_hormozi": "RF_SpringPop",
-                    "bounce_word": "RF_SpringPop",
-                    "highlighter_swipe": "RF_Highlighter",
-                    "box_highlight": "RF_Highlighter",
-                    "typewriter": "RF_Typewriter",
-                    "vhs_retro": "RF_Typewriter",
-                    "neon_pulse": "RF_NeonPulse",
-                    "glow_neon": "RF_NeonPulse",
-                    "rgb_glitch": "RF_RGBGlitch",
-                    "paper_cutout": "RF_PaperCutout",
-                    "clean_minimal": "RF_LowerThird",
-                    "quote_box": "RF_QuoteBox",
-                }
-                template_name = style_map.get(preset_id, preset_id)
-
-            res = run_title_insert_worker_isolated(
-                title_name=template_name,
-                display_name=text,
-                preferred_track=preferred_track,
-                duration_sec=duration_sec,
-            )
-            if res.get("ok"):
-                log(f" ✔ Đã chèn thành công Title '{template_name}' lên Track V{res.get('track', preferred_track)} (Zero Ripple)!")
-                return True
-        except Exception as e:
-            log(f" ℹ Không chèn qua Nested Importer V2 được ({e}), đang dùng phương thức Fusion Bridge...")
-
-        # 2. Thử qua Fusion Bridge (cập nhật macro trực tiếp)
+        # 1. Thử qua Fusion Bridge (Tạo clip và import Fusion Comp có keyframe & animation động đầy đủ)
         try:
             from src.core.resolve_bridge import insert_title_at_playhead as bridge_insert_title
             style_map = {
                 "kinetic_hormozi": "spring_pop",
+                "karaoke_pop": "spring_pop",
                 "bounce_word": "spring_pop",
                 "highlighter_swipe": "highlighter",
                 "box_highlight": "highlighter",
@@ -1095,12 +1254,14 @@ class ResolveAutomation:
             fusion_size = round(max(0.04, min(0.25, font_size / 600.0)), 4)
             accent_col = highlight_hex or box_glow_hex or "#FFD400"
             font_style = "Black" if weight in ("black", "extra_bold") else ("Regular" if weight in ("regular", "normal") else "Bold")
+            from src.utils.path_utils import resolve_system_font
+            safe_font = resolve_system_font(font_name)
 
             bridge_insert_title(
                 style=style,
                 params={
                     "text": text,
-                    "font": font_name,
+                    "font": safe_font,
                     "style": font_style,
                     "size": fusion_size,
                     "color": color_hex,
@@ -1112,7 +1273,41 @@ class ResolveAutomation:
             log(f" ✔ Đã chèn thành công Title hoạt họa '{style}' lên Track V{preferred_track} qua Fusion Bridge!")
             return True
         except Exception as e:
-            log(f" ℹ Không chèn trực tiếp được qua Fusion Bridge ({e}), đang dùng phương thức FCPXML...")
+            log(f" ℹ Không chèn trực tiếp qua Fusion Bridge được ({e}), đang dùng phương thức dự phòng...")
+
+        # 2. Thử chèn qua thuật toán NEW-NESTED-NO-RIPPLE-V2 (cô lập tiến trình hoặc in-process an toàn)
+        try:
+            # Map preset_id sang tên Fusion template tương ứng
+            template_name = kwargs.get("template_name", "")
+            if not template_name:
+                style_map = {
+                    "kinetic_hormozi": "RF_SpringPop",
+                    "karaoke_pop": "RF_SpringPop",
+                    "bounce_word": "RF_SpringPop",
+                    "highlighter_swipe": "RF_Highlighter",
+                    "box_highlight": "RF_Highlighter",
+                    "typewriter": "RF_Typewriter",
+                    "vhs_retro": "RF_Typewriter",
+                    "neon_pulse": "RF_NeonPulse",
+                    "glow_neon": "RF_NeonPulse",
+                    "rgb_glitch": "RF_RGBGlitch",
+                    "paper_cutout": "RF_PaperCutout",
+                    "clean_minimal": "RF_LowerThird",
+                    "quote_box": "RF_QuoteBox",
+                }
+                template_name = style_map.get(preset_id, preset_id)
+
+            res = run_title_insert_worker_isolated(
+                title_name=template_name,
+                display_name=text,
+                preferred_track=preferred_track,
+                duration_sec=duration_sec,
+            )
+            if res.get("ok"):
+                log(f" ✔ Đã chèn thành công Title '{template_name}' lên Track V{res.get('track', preferred_track)} (Zero Ripple)!")
+                return True
+        except Exception as e:
+            log(f" ℹ Không chèn qua Nested Importer V2 được ({e}), đang dùng phương thức FCPXML...")
 
         # 3. Phương thức dự phòng qua FCPXML
         try:
@@ -1224,6 +1419,140 @@ class ResolveAutomation:
             log(f" ⚠️ Lỗi khi thêm Render Job: {str(e)}")
             return False
 
+    def apply_style_to_text_clip(
+        self,
+        timeline_item: Any,
+        style: str = "spring_pop",
+        font: Optional[str] = "Montserrat",
+        color: Optional[str] = "#FFFFFF",
+        accent: Optional[str] = "#FACC15",
+    ) -> bool:
+        """
+        Ép kiểu hoạt họa Preset (Spring Pop, Highlighter, Typewriter, Neon...)
+        lên một clip Text+ có sẵn trên Timeline, giữ nguyên nội dung văn bản và timing của clip.
+        """
+        try:
+            from src.core.resolve_bridge import export_title_comp, cache_dir, _ensure_media_out_connected
+            from src.core.fusion import TitleParams
+            from src.utils.path_utils import resolve_system_font
+
+            comp = timeline_item.GetFusionCompByIndex(1)
+            if not comp:
+                return False
+
+            # Đọc nội dung text hiện tại của clip
+            orig_text = ""
+            for t in comp.GetToolList().values():
+                if t.GetAttrs().get("TOOLS_RegID") in ("TextPlus", "Text"):
+                    orig_text = str(t.GetInput("StyledText") or "")
+                    break
+
+            if not orig_text:
+                orig_text = timeline_item.GetName().replace("Text+", "").replace("RF", "").strip() or "Subtitle"
+
+            timeline = self.get_active_timeline()
+            w = int(timeline.GetSetting("timelineResolutionWidth") or 1920) if timeline else 1920
+            h = int(timeline.GetSetting("timelineResolutionHeight") or 1080) if timeline else 1080
+            dur = timeline_item.GetDuration() or 90
+            fps = float(timeline.GetSetting("timelineFrameRate") or 30.0) if timeline else 30.0
+
+            style_map = {
+                "kinetic_hormozi": "spring_pop",
+                "karaoke_pop": "spring_pop",
+                "bounce_word": "spring_pop",
+                "highlighter_swipe": "highlighter",
+                "box_highlight": "highlighter",
+                "typewriter": "typewriter",
+                "neon_pulse": "neon_pulse",
+                "glow_neon": "neon_pulse",
+                "clean_minimal": "lower_third",
+                "quote_box": "quote_box",
+            }
+            target_style = style_map.get(style.lower(), style.lower())
+            from src.core.fusion.titles import TITLES
+            if target_style not in TITLES:
+                target_style = "spring_pop"
+
+            safe_font = resolve_system_font(font or "Montserrat")
+            p = TitleParams(
+                text=orig_text,
+                font=safe_font,
+                style="Bold",
+                size=0.08,
+                color=color or "#FFFFFF",
+                accent=accent or "#FACC15",
+                duration_frames=dur,
+            )
+
+            comp_path = os.path.join(cache_dir(), "comps", f"apply_{target_style}_{int(time.time()*1000)}.comp")
+            os.makedirs(os.path.dirname(comp_path), exist_ok=True)
+            export_title_comp(target_style, p, comp_path, w, h, fps)
+
+            new_comp = timeline_item.ImportFusionComp(comp_path)
+            if not new_comp:
+                return False
+
+            names = list(timeline_item.GetFusionCompNameList() or [])
+            if names:
+                timeline_item.LoadFusionCompByName(names[-1])
+                for n in names[:-1]:
+                    try:
+                        timeline_item.DeleteFusionCompByName(n)
+                    except Exception:
+                        pass
+
+            active_comp = timeline_item.GetFusionCompByIndex(1)
+            if active_comp:
+                _ensure_media_out_connected(active_comp)
+
+            timeline_item.SetName(f"RF {target_style.title()} - {orig_text[:20]}")
+            timeline_item.SetClipColor("Teal")
+            return True
+        except Exception as e:
+            return False
+
+    def batch_apply_style_to_track_text(
+        self,
+        track_index: int = 2,
+        style: str = "spring_pop",
+        font: Optional[str] = "Montserrat",
+        color: Optional[str] = "#FFFFFF",
+        accent: Optional[str] = "#FACC15",
+        time_range: Optional[Tuple[int, int]] = None,
+    ) -> int:
+        """
+        Áp kiểu hoạt họa hàng loạt cho TẤT CẢ các clip Text trên một Track (hoặc trong vùng chọn).
+        Trả về số lượng clip đã được áp kiểu thành công.
+        """
+        timeline = self.get_active_timeline()
+        if not timeline:
+            return 0
+
+        items = timeline.GetItemListInTrack("video", track_index) or []
+        count = 0
+        for item in items:
+            if time_range:
+                s, e = item.GetStart(), item.GetEnd()
+                if e <= time_range[0] or s >= time_range[1]:
+                    continue
+
+            name = item.GetName()
+            comp = item.GetFusionCompByIndex(1)
+            is_text = False
+            if "Text" in name or "RF" in name:
+                is_text = True
+            elif comp:
+                for t in comp.GetToolList().values():
+                    if t.GetAttrs().get("TOOLS_RegID") in ("TextPlus", "Text"):
+                        is_text = True
+                        break
+
+            if is_text:
+                if self.apply_style_to_text_clip(item, style=style, font=font, color=color, accent=accent):
+                    count += 1
+
+        return count
+
 
 def auto_import_timeline_to_resolve(
     xml_path: Union[str, os.PathLike],
@@ -1296,24 +1625,63 @@ def auto_import_timeline_to_resolve(
         if os.path.exists(alt_fcpxml):
             candidate_paths.append(alt_fcpxml)
 
-    opts = {"importSourceClips": True}
+    # Trích xuất video từ XML nạp trước vào Media Pool để chống media offline
+    v_list = []
+    try:
+        import xml.etree.ElementTree as ET
+        from src.core.validator import DryRunValidator
+        for cand in candidate_paths:
+            if os.path.exists(cand):
+                try:
+                    tree = ET.parse(cand)
+                    root = tree.getroot()
+                    for asset in root.findall(".//asset"):
+                        src = asset.attrib.get("src")
+                        if src:
+                            p = DryRunValidator._uri_to_local_path(src)
+                            if p and os.path.exists(p) and p not in v_list:
+                                v_list.append(os.path.abspath(p))
+                    for pathurl in root.findall(".//pathurl"):
+                        if pathurl.text:
+                            p = DryRunValidator._uri_to_local_path(pathurl.text)
+                            if p and os.path.exists(p) and p not in v_list:
+                                v_list.append(os.path.abspath(p))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    if v_list:
+        try:
+            media_pool.ImportMedia(v_list)
+        except Exception:
+            pass
+
+    trial_opts = []
     if timeline_name:
-        opts["timelineName"] = timeline_name
+        trial_opts.append({"timelineName": timeline_name, "importSourceClips": True})
+        trial_opts.append({"timelineName": timeline_name, "importSourceClips": False})
+        trial_opts.append({"timelineName": timeline_name})
+    else:
+        trial_opts.append({"importSourceClips": True})
+        trial_opts.append({"importSourceClips": False})
+    trial_opts.append(None)
 
     imported_path = None
     for cand in candidate_paths:
-        tl = None
-        try:
-            tl = media_pool.ImportTimelineFromFile(cand, opts)
-        except Exception:
-            pass
-        if not tl:
+        for opt in trial_opts:
+            tl = None
             try:
-                tl = media_pool.ImportTimelineFromFile(cand)
+                if opt is not None:
+                    tl = media_pool.ImportTimelineFromFile(cand, opt)
+                else:
+                    tl = media_pool.ImportTimelineFromFile(cand)
             except Exception:
                 pass
-        if tl:
-            imported_path = cand
+            if tl:
+                imported_path = cand
+                break
+        if imported_path:
             break
 
     if imported_path:
@@ -1861,10 +2229,16 @@ def _create_source_timeline(
 
     project.SetCurrentTimeline(source_tl)
     source_item = source_tl.InsertFusionTitleIntoTimeline(str(title_name))
+    if not source_item:
+        # Fallback sang các Fusion Title tiêu chuẩn có sẵn trong DaVinci
+        for fallback_title in ("Text+", "Text", "Scroll"):
+            source_item = source_tl.InsertFusionTitleIntoTimeline(fallback_title)
+            if source_item:
+                break
     project.SetCurrentTimeline(main_timeline)
 
     if not source_item:
-        raise RuntimeError(f"InsertFusionTitleIntoTimeline returned None for title '{title_name}'.")
+        raise RuntimeError(f"InsertFusionTitleIntoTimeline returned None for title '{title_name}' (và cả fallback Text+).")
 
     duration_frames = 0
     try:

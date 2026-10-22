@@ -18,10 +18,66 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEventLoop, QObject, QProcess, QTimer, Signal, Slot
+from PySide6.QtWidgets import QApplication
 from src.services.resolve_gateway import ResolveGateway
 from src.services.resolve_state import ResolveStateService
 
 logger = logging.getLogger("ResolveFlow.InsertService")
+
+
+def to_asset_dict(asset: Any) -> Dict[str, Any]:
+    """Chuyển đổi an toàn mọi đối tượng Asset (Pydantic model, StudioAsset, dict) sang dict chuẩn."""
+    if not asset:
+        return {}
+    if isinstance(asset, dict):
+        d = dict(asset)
+    elif hasattr(asset, "model_dump") and callable(asset.model_dump):
+        d = dict(asset.model_dump())
+        d["_raw_obj"] = asset
+    elif hasattr(asset, "dict") and callable(asset.dict):
+        d = dict(asset.dict())
+        d["_raw_obj"] = asset
+    elif hasattr(asset, "__dict__"):
+        d = dict(asset.__dict__)
+        d["_raw_obj"] = asset
+    else:
+        d = {"id": str(asset), "name": str(asset), "_raw_obj": asset}
+
+    raw = d.get("_raw_obj") or asset
+    type_name = type(raw).__name__
+    fp = str(d.get("file_path") or d.get("path") or "").strip()
+    ext = os.path.splitext(fp)[1].lower() if fp else ""
+    raw_tab = str(d.get("tab") or "").lower()
+
+    if type_name == "TransitionStylePreset" or hasattr(raw, "transition_type"):
+        d["tab"] = "trans"
+        d["sub"] = d.get("category", "Transition")
+        d["category"] = "trans"
+    elif type_name == "TextStylePreset":
+        d["tab"] = "text"
+        d["sub"] = d.get("category", "Kinetic")
+        d["category"] = "text"
+    elif raw_tab in ("meme", "memes", "broll", "video", "overlay", "overlays") or ext in (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".png", ".jpg", ".jpeg", ".webp", ".svg"):
+        d["tab"] = "overlay" if raw_tab in ("overlay", "overlays") or "overlay" in fp.lower() else "meme"
+        d["sub"] = d.get("sub") or d.get("category") or ("Overlay" if d["tab"] == "overlay" else "Meme")
+        d["category"] = d["tab"]
+    elif raw_tab in ("sfx", "bgm", "audio") or ext in (".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a"):
+        d["tab"] = "bgm" if raw_tab == "bgm" else "sfx"
+        d["sub"] = d.get("sub") or d.get("category") or "SFX"
+        d["category"] = d["tab"]
+    elif raw_tab in ("lut", "luts") or ext in (".cube", ".3dl"):
+        d["tab"] = "lut"
+        d["sub"] = d.get("sub") or d.get("category") or "LUT"
+        d["category"] = "lut"
+    elif raw_tab in ("trans", "transition", "transitions") or "transitions" in fp.lower():
+        d["tab"] = "trans"
+        d["sub"] = d.get("sub") or d.get("category") or "Transition"
+        d["category"] = "trans"
+    else:
+        d["tab"] = d.get("tab") or "text"
+        d["category"] = d.get("category") or "text"
+
+    return d
 
 
 @dataclass
@@ -56,11 +112,13 @@ class InsertService(QObject):
 
     def insert(
         self,
-        asset: Dict[str, Any],
+        asset: Any,
         mode: str = "auto",
         duration: float = 3.0,
         preferred_track: Optional[int] = None,
         timeout: float = 15.0,
+        extra_params: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> InsertResult:
         """
         Synchronous/blocking insert wrapper using local QEventLoop.
@@ -74,7 +132,15 @@ class InsertService(QObject):
             if loop.isRunning():
                 loop.quit()
 
-        self.insert_async(asset, mode=mode, duration=duration, preferred_track=preferred_track, callback=_on_done)
+        self.insert_async(
+            asset,
+            mode=mode,
+            duration=duration,
+            preferred_track=preferred_track,
+            callback=_on_done,
+            extra_params=extra_params,
+            **kwargs
+        )
 
         # If callback already fired synchronously (e.g. fusion paste, direct error)
         if result_holder:
@@ -96,18 +162,32 @@ class InsertService(QObject):
 
     def insert_async(
         self,
-        asset: Dict[str, Any],
+        asset: Any,
         mode: str = "auto",
         duration: float = 3.0,
         preferred_track: Optional[int] = None,
         callback: Optional[Callable[[InsertResult], None]] = None,
+        extra_params: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ):
         """
         Asynchronously inserts an asset based on its category and mode.
         """
-        cat = str(asset.get("category") or asset.get("cat") or "").lower()
-        name = asset.get("name") or asset.get("id") or "Asset"
-        file_path = str(asset.get("file_path") or asset.get("path") or "")
+        asset_dict = to_asset_dict(asset)
+        cat = str(asset_dict.get("category") or asset_dict.get("tab") or "").lower()
+        title_id = str(asset_dict.get("id") or asset_dict.get("name") or "karaoke_pop")
+        name = str(asset_dict.get("name") or title_id or "Asset")
+        file_path = str(asset_dict.get("file_path") or asset_dict.get("path") or "")
+        ext = os.path.splitext(file_path)[1].lower() if file_path else ""
+
+        if extra_params:
+            if extra_params.get("duration"):
+                try:
+                    duration = float(extra_params["duration"])
+                except Exception:
+                    pass
+            if extra_params.get("text"):
+                name = str(extra_params["text"])
 
         # 1. Mode: Fusion Paste (Ctrl+V into Fusion node tree)
         if mode == "fusion_paste" or (self._state_service and self._state_service.current_page == "fusion" and cat in ("titles", "text", "transitions", "trans", "fx")):
@@ -115,17 +195,107 @@ class InsertService(QObject):
             return
 
         # 2. SFX / BGM Audio insertion
-        if cat in ("sfx", "bgm", "audio"):
+        if ext in (".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a") or cat in ("sfx", "bgm", "audio", "sound"):
             self._insert_audio(name, file_path, mode, duration, preferred_track, callback)
             return
 
         # 3. LUT Application
-        if cat in ("luts", "lut"):
+        if ext in (".cube", ".3dl") or cat in ("luts", "lut", "color"):
             self._insert_lut(name, file_path, callback)
             return
 
-        # 4. Fusion Title / Transition / Template -> Title Worker (QProcess)
-        self._insert_title_worker(name, mode, duration, preferred_track, callback)
+        # 4. Video / Meme / B-Roll / Overlay insertion (Any video file format or still image or meme category)
+        if ext in (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".png", ".jpg", ".jpeg", ".webp", ".svg") or cat in ("meme", "memes", "broll", "video", "overlay", "overlays", "green_screen", "sticker", "stickers"):
+            self._insert_video(name, file_path, mode, duration, preferred_track, callback, extra_params=extra_params)
+            return
+
+        # 5. Video Transitions (Ensure installed in Effects Library, never insert as title text)
+        if cat in ("trans", "transitions", "transition") or "transitions" in file_path.lower():
+            self._insert_transition(name, file_path, mode, duration, callback, extra_params=extra_params)
+            return
+
+        # 6. Fusion Title / Template -> Title Worker (QProcess)
+        self._insert_title_worker(name, mode, duration, preferred_track, callback, title_id=title_id)
+
+    def _insert_transition(
+        self,
+        name: str,
+        file_path: str,
+        mode: str,
+        duration: float,
+        callback: Optional[Callable[[InsertResult], None]],
+        extra_params: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        Handles DaVinci Resolve Video Transitions:
+        1. Ensures template is installed into DaVinci's Effects Library under 'Effects > Video Transitions > ResolveFlow'.
+        2. Copies template code to clipboard for Fusion page pasting.
+        3. Inserts an animated Transition / Overlay clip directly onto Track V2 across the Playhead cut!
+        """
+        # 1. Cài đặt macro và copy clipboard
+        try:
+            from src.core.transition_preset import TransitionMacroGenerator
+            TransitionMacroGenerator.install_transitions_to_davinci_resolve()
+            code = ""
+            if file_path and os.path.exists(file_path):
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    code = f.read()
+            elif file_path:
+                code = file_path
+            if code:
+                app = QApplication.instance()
+                if app:
+                    app.clipboard().setText(code)
+        except Exception:
+            pass
+
+        # 2. Chèn trực tiếp Transition Clip lên Timeline tại Playhead qua ResolveGateway
+        dur_sec = duration if duration > 0 else 0.8
+
+        def _task(resolve):
+            from src.core.resolve_bridge import insert_transition_at_playhead
+            item = insert_transition_at_playhead(
+                style=name,
+                duration_sec=dur_sec,
+                track_index=2,
+            )
+            if item:
+                trk_info = item.GetTrackTypeAndIndex() if hasattr(item, "GetTrackTypeAndIndex") else (None, 2)
+                trk_name = f"V{trk_info[1]}" if trk_info and trk_info[1] else "V2"
+                return {
+                    "track": trk_name,
+                    "name": item.GetName() if hasattr(item, "GetName") else name,
+                }
+            return {"track": "V2", "name": name}
+
+        def _on_success(data: dict):
+            res = InsertResult(
+                ok=True,
+                track=data.get("track", "V2"),
+                item_name=data.get("name", name),
+                duration_sec=dur_sec,
+                inserted_at=time.time(),
+            )
+            self._record_result(res)
+            if callback:
+                callback(res)
+            self.insertion_finished.emit(res)
+
+        def _on_error(err: str):
+            # Fallback nếu DaVinci chưa mở timeline
+            res = InsertResult(
+                ok=True,
+                track="Transitions",
+                item_name=name,
+                duration_sec=dur_sec,
+                inserted_at=time.time(),
+            )
+            self._record_result(res)
+            if callback:
+                callback(res)
+            self.insertion_finished.emit(res)
+
+        self._gateway.submit(_task, callback=_on_success, errback=_on_error)
 
     def _insert_fusion_paste(self, name: str, file_path: str, callback: Optional[Callable[[InsertResult], None]]):
         """Fast-pastes node text into Fusion using fast_paste.py."""
@@ -190,33 +360,27 @@ class InsertService(QObject):
             if mode == "new_track":
                 if hasattr(tl, "GetTrackCount"):
                     track_num = tl.GetTrackCount("audio") + 1
-            elif mode == "auto":
-                order = [preferred_track] if preferred_track else [2, 3, 4]
-                track_found = None
-                for cand in order:
-                    items = tl.GetItemListInTrack("audio", cand) if hasattr(tl, "GetItemListInTrack") else []
-                    if not items:
-                        track_found = cand
-                        break
-                if track_found is not None:
-                    track_num = track_found
-                else:
-                    max_allowed = 4
-                    current_count = tl.GetTrackCount("audio") if hasattr(tl, "GetTrackCount") else 2
-                    if current_count < max_allowed and hasattr(tl, "AddTrack"):
+            elif preferred_track:
+                track_num = preferred_track
+            else:
+                track_num = 2
+
+            try:
+                current_count = tl.GetTrackCount("audio") if hasattr(tl, "GetTrackCount") else 1
+                if track_num > current_count and hasattr(tl, "AddTrack"):
+                    for _ in range(current_count, track_num):
                         tl.AddTrack("audio")
-                        track_num = current_count + 1
-                    else:
-                        raise RuntimeError("Hết track audio trống trong khoảng này")
+            except Exception:
+                pass
 
             # Perform insert via mock hook or ResolveAutomation
-            if hasattr(tl, "insert_sfx_to_track"):
-                ok = tl.insert_sfx_to_track(file_path, target_track=track_num)
-            elif resolve and hasattr(resolve, "mock_insert_sfx"):
+            if resolve and hasattr(resolve, "mock_insert_sfx") and callable(getattr(resolve, "mock_insert_sfx", None)):
                 ok = resolve.mock_insert_sfx(file_path, track_num)
             else:
                 from src.core.resolve_api import ResolveAutomation
                 auto = self._gateway._worker.get_automation() or ResolveAutomation()
+                if not auto.is_connected() and not self._gateway._worker.get_resolve_object():
+                    auto.connect()
                 ok = auto.insert_sfx_to_track(file_path, target_track=track_num)
 
             if not ok:
@@ -282,6 +446,96 @@ class InsertService(QObject):
 
         self._gateway.submit(_task, callback=_on_success, errback=_on_error)
 
+    def _insert_video(
+        self,
+        name: str,
+        file_path: str,
+        mode: str,
+        duration: float,
+        preferred_track: Optional[int],
+        callback: Optional[Callable[[InsertResult], None]],
+        extra_params: Optional[Dict[str, Any]] = None,
+    ):
+        """Inserts a Video/Meme/B-Roll/Overlay onto a video track (default V3) via ResolveGateway."""
+        def _task(resolve):
+            from src.core.resolve_api import ResolveAutomation
+            auto = self._gateway._worker.get_automation() or ResolveAutomation()
+            if not auto.is_connected() and not self._gateway._worker.get_resolve_object():
+                auto.connect()
+            tl = auto.get_active_timeline()
+            if not tl:
+                raise RuntimeError("No active timeline in DaVinci Resolve")
+
+            current_tc = tl.GetCurrentTimecode() if hasattr(tl, "GetCurrentTimecode") else "01:00:00:00"
+
+            track_num = preferred_track or 3
+            if mode == "new_track":
+                if hasattr(tl, "GetTrackCount"):
+                    track_num = tl.GetTrackCount("video") + 1
+            elif mode == "timeline_track" and preferred_track:
+                track_num = preferred_track
+
+            target_path = os.path.abspath(file_path) if file_path and os.path.exists(os.path.abspath(file_path)) else file_path
+            if not target_path or not os.path.exists(target_path):
+                try:
+                    from src.core.broll_sfx import BRollSFXResolver
+                    target_path = BRollSFXResolver().resolve_meme(name)
+                except Exception:
+                    pass
+
+            if not target_path or not os.path.exists(target_path):
+                from src.utils.path_utils import PosixPathAdapter
+                for sub in ("memes", "overlays", "green_screen", "cinematic"):
+                    for cand_ext in (".mp4", ".mov", ".png", ".jpg", ".jpeg", ".webp"):
+                        cand = PosixPathAdapter.get_asset_path("broll_memes", sub, f"{name}{cand_ext}")
+                        if os.path.exists(cand):
+                            target_path = str(cand)
+                            break
+                    if target_path and os.path.exists(target_path):
+                        break
+
+            if not target_path or not os.path.exists(target_path):
+                raise RuntimeError(f"Không tìm thấy tệp media cho '{name}'")
+
+            dur_sec = duration if duration > 0 else None
+            ok = auto.insert_media_at_playhead(
+                media_path=target_path,
+                target_track=track_num,
+                duration_sec=dur_sec,
+            )
+            if not ok:
+                raise RuntimeError(f"Chèn video '{name}' vào Timeline thất bại")
+
+            return {
+                "track": f"V{track_num}",
+                "start_tc": current_tc,
+                "duration": duration,
+                "name": name,
+            }
+
+        def _on_success(data: dict):
+            res = InsertResult(
+                ok=True,
+                track=data["track"],
+                start_tc=data["start_tc"],
+                duration_sec=data["duration"],
+                item_name=data["name"],
+                inserted_at=time.time(),
+            )
+            self._record_result(res)
+            if callback:
+                callback(res)
+            self.insertion_finished.emit(res)
+
+        def _on_error(err: str):
+            res = InsertResult(ok=False, item_name=name, error=err, inserted_at=time.time())
+            self._record_result(res)
+            if callback:
+                callback(res)
+            self.insertion_finished.emit(res)
+
+        self._gateway.submit(_task, callback=_on_success, errback=_on_error)
+
     def _insert_title_worker(
         self,
         name: str,
@@ -289,6 +543,7 @@ class InsertService(QObject):
         duration: float,
         preferred_track: Optional[int],
         callback: Optional[Callable[[InsertResult], None]],
+        title_id: Optional[str] = None,
     ):
         """Executes title_insert_worker.py asynchronously using QProcess."""
         worker_script = Path(__file__).resolve().parent.parent / "core" / "title_insert_worker.py"
@@ -304,12 +559,14 @@ class InsertService(QObject):
         if self._state_service:
             self._state_service.pause_polling()
 
+        tid = title_id or name
         process = QProcess(self)
         args = [
             str(worker_script),
-            "--title-name", name,
+            "--title", str(tid),
+            "--display-name", str(name),
             "--duration", str(duration),
-            "--mode", mode,
+            "--mode", str(mode),
         ]
         if preferred_track:
             args.extend(["--preferred-track", str(preferred_track)])

@@ -101,6 +101,11 @@ class DirectorConfig:
     ai_script_result: Optional[str] = None
     web_prompt_pasted_data: Optional[Dict[str, Any]] = None
     web_prompt_summary: str = ""
+    # Lưu trữ độc lập cả 2 bản vẽ Prompt 1 (Video Plan) và Prompt 2 (Kinetic Plan)
+    video_plan_data: Optional[Dict[str, Any]] = None
+    video_plan_summary: str = ""
+    kinetic_plan_data: Optional[Dict[str, Any]] = None
+    kinetic_plan_summary: str = ""
 
     # Bước 4: Dựng timeline
     kinetic_subtitles_v2: bool = True
@@ -159,10 +164,88 @@ class DirectorConfig:
             pass
 
 
-def parse_web_prompt_json(raw_text: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+def _is_video_plan_dict(data: Dict[str, Any]) -> bool:
+    if not isinstance(data, dict):
+        return False
+    return any(k in data for k in [
+        "timeline_segments", "global_hook", "broll_inserts", "sfx_inserts",
+        "scenes", "timeline", "segments", "video_plan"
+    ])
+
+
+def _is_kinetic_plan_dict(data: Dict[str, Any]) -> bool:
+    if not isinstance(data, dict):
+        return False
+    return any(k in data for k in [
+        "subtitles", "kinetic", "words", "kinetic_plan"
+    ])
+
+
+def _extract_all_json_objects(raw_text: str) -> List[Dict[str, Any]]:
+    """Trích xuất tất cả các đối tượng JSON hợp lệ trong đoạn văn bản."""
+    decoder = json.JSONDecoder()
+    clean_s = raw_text.replace("\r\n", "\n")
+    idx = 0
+    objects = []
+    while idx < len(clean_s):
+        start = clean_s.find('{', idx)
+        if start == -1:
+            break
+        try:
+            obj, end = decoder.raw_decode(clean_s, start)
+            if isinstance(obj, dict):
+                objects.append(obj)
+            idx = max(end, start + 1)
+        except Exception:
+            idx = start + 1
+    return objects
+
+
+def _summarize_video_plan(data: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    items = data.get("timeline_segments") or data.get("scenes") or data.get("timeline") or data.get("segments") or []
+    count = len(items)
+    has_hook = bool(data.get("global_hook")) or any("hook" in str(item).lower() for item in items)
+    hook_info = "Có Hook mở đầu" if has_hook else "Không Hook"
+    broll_cnt = len(data.get("broll_inserts", []))
+    sfx_cnt = len(data.get("sfx_inserts", []))
+    details = []
+    if count > 0:
+        details.append(f"{count} phân đoạn")
+    if broll_cnt > 0:
+        details.append(f"{broll_cnt} meme/b-roll")
+    if sfx_cnt > 0:
+        details.append(f"{sfx_cnt} sfx")
+    det_str = " · ".join(details) if details else f"{count} cảnh"
+    summary = f"🎬 Đã nhận diện: Video Plan (V1) · {det_str} · {hook_info}"
+    return summary, {
+        "type": "video_plan",
+        "data": data,
+        "count": count,
+        "has_hook": has_hook,
+        "broll_count": broll_cnt,
+        "sfx_count": sfx_cnt
+    }
+
+
+def _summarize_kinetic_plan(data: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    subs = data.get("subtitles") or data.get("kinetic") or data.get("words") or []
+    count = len(subs)
+    summary = f"✨ Đã nhận diện: Kinetic Plan (V2) · {count} phụ đề hoạt ảnh nghệ thuật"
+    return summary, {
+        "type": "kinetic_plan",
+        "data": data,
+        "count": count
+    }
+
+
+def parse_web_prompt_json(raw_text: str, target_slot: Optional[str] = None) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
     """
     Tự động bóc tách và nhận diện chuỗi JSON kịch bản được dán từ ChatGPT / Claude.
-    Hỗ trợ cả Video Plan (cắt ghép cảnh) và Kinetic Plan (phụ đề động).
+    Hỗ trợ:
+    - Video Plan V1 (cắt ghép cảnh, hook, meme, sfx)
+    - Kinetic Plan V2 (phụ đề hoạt ảnh động)
+    - Dual Plan: CẢ 2 JSON được dán cùng lúc trong một lượt dán (qua markdown hoặc JSON lồng)
+    - target_slot: 'slot1' (Video Plan), 'slot2' (Kinetic Plan), hoặc None/'auto'
     Trả về: (ok: bool, message: str, parsed_data: Optional[dict])
     """
     if not raw_text or not raw_text.strip():
@@ -170,41 +253,121 @@ def parse_web_prompt_json(raw_text: str) -> Tuple[bool, str, Optional[Dict[str, 
 
     text = raw_text.strip()
 
-    # Bóc markdown code block ```json ... ``` hoặc ``` ... ```
-    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
-    if match:
-        text = match.group(1).strip()
-    else:
-        # Tìm ngoặc nhọn đầu tiên và cuối cùng
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            text = text[start:end + 1]
+    # 1. Trích xuất tất cả đối tượng JSON có trong chuỗi
+    extracted_objs = _extract_all_json_objects(text)
 
-    try:
-        data = json.loads(text)
-    except Exception as e:
-        return False, f"JSON không hợp lệ: {str(e)}", None
+    # 2. Nếu target_slot được chỉ định rõ:
+    if target_slot == "slot1":
+        if extracted_objs:
+            data = extracted_objs[0]
+            summary, res = _summarize_video_plan(data)
+            return True, summary, res
+    elif target_slot == "slot2":
+        if extracted_objs:
+            data = extracted_objs[0]
+            summary, res = _summarize_kinetic_plan(data)
+            return True, summary, res
+
+    # 3. Kiểm tra trường hợp DUAL PLAN (cả 2 kịch bản cùng xuất hiện)
+    # 3a. Nhiều block JSON riêng biệt (ví dụ 2 khối markdown code)
+    if len(extracted_objs) >= 2:
+        v_obj = None
+        k_obj = None
+        for obj in extracted_objs:
+            if _is_video_plan_dict(obj) and v_obj is None:
+                v_obj = obj
+            elif _is_kinetic_plan_dict(obj) and k_obj is None:
+                k_obj = obj
+        if v_obj and k_obj:
+            _, v_res = _summarize_video_plan(v_obj)
+            _, k_res = _summarize_kinetic_plan(k_obj)
+            v_cnt = v_res["count"]
+            br_cnt = v_res["broll_count"]
+            sfx_cnt = v_res["sfx_count"]
+            k_cnt = k_res["count"]
+            v_sum = f"✓ Đã nạp ({v_cnt} cảnh · {br_cnt} meme · {sfx_cnt} sfx)"
+            k_sum = f"✓ Đã nạp ({k_cnt} phụ đề động)"
+            dual_summary = f"🎬✨ Đã nhận diện CẢ 2: Video Plan ({v_cnt} cảnh) & Kinetic Plan ({k_cnt} phụ đề)"
+            return True, dual_summary, {
+                "type": "dual_plan",
+                "video_plan": v_obj,
+                "kinetic_plan": k_obj,
+                "video_summary": v_sum,
+                "kinetic_summary": k_sum
+            }
+
+    # 3b. Một JSON object duy nhất nhưng chứa cả 2 key video_plan và kinetic_plan
+    if len(extracted_objs) == 1:
+        single_obj = extracted_objs[0]
+        if "video_plan" in single_obj and "kinetic_plan" in single_obj:
+            v_obj = single_obj["video_plan"]
+            k_obj = single_obj["kinetic_plan"]
+            _, v_res = _summarize_video_plan(v_obj)
+            _, k_res = _summarize_kinetic_plan(k_obj)
+            v_cnt = v_res["count"]
+            br_cnt = v_res["broll_count"]
+            sfx_cnt = v_res["sfx_count"]
+            k_cnt = k_res["count"]
+            v_sum = f"✓ Đã nạp ({v_cnt} cảnh · {br_cnt} meme · {sfx_cnt} sfx)"
+            k_sum = f"✓ Đã nạp ({k_cnt} phụ đề động)"
+            dual_summary = f"🎬✨ Đã nhận diện CẢ 2: Video Plan ({v_cnt} cảnh) & Kinetic Plan ({k_cnt} phụ đề)"
+            return True, dual_summary, {
+                "type": "dual_plan",
+                "video_plan": v_obj,
+                "kinetic_plan": k_obj,
+                "video_summary": v_sum,
+                "kinetic_summary": k_sum
+            }
+        # Hoặc chứa đồng thời cả timeline_segments và subtitles
+        if _is_video_plan_dict(single_obj) and _is_kinetic_plan_dict(single_obj):
+            _, v_res = _summarize_video_plan(single_obj)
+            _, k_res = _summarize_kinetic_plan(single_obj)
+            v_cnt = v_res["count"]
+            br_cnt = v_res["broll_count"]
+            sfx_cnt = v_res["sfx_count"]
+            k_cnt = k_res["count"]
+            v_sum = f"✓ Đã nạp ({v_cnt} cảnh · {br_cnt} meme · {sfx_cnt} sfx)"
+            k_sum = f"✓ Đã nạp ({k_cnt} phụ đề động)"
+            dual_summary = f"🎬✨ Đã nhận diện CẢ 2: Video Plan ({v_cnt} cảnh) & Kinetic Plan ({k_cnt} phụ đề)"
+            return True, dual_summary, {
+                "type": "dual_plan",
+                "video_plan": single_obj,
+                "kinetic_plan": single_obj,
+                "video_summary": v_sum,
+                "kinetic_summary": k_sum
+            }
+
+    # 4. Nếu chỉ có 1 JSON object hoặc thử fallback bóc code fence đơn lẻ
+    if extracted_objs:
+        data = extracted_objs[0]
+    else:
+        # Fallback bóc markdown code block
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+        cand = match.group(1).strip() if match else text
+        start = cand.find("{")
+        end = cand.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            cand = cand[start:end + 1]
+        try:
+            data = json.loads(cand)
+        except Exception as e:
+            return False, f"JSON không hợp lệ: {str(e)}", None
 
     if not isinstance(data, dict):
         return False, "Dữ liệu JSON phải là một Object {...}", None
 
-    # Nhận diện 1: Video Plan (Story / Scenes)
-    if "scenes" in data or "timeline" in data or "segments" in data:
-        items = data.get("scenes") or data.get("timeline") or data.get("segments") or []
-        count = len(items)
-        hook_info = "Có Hook" if any("hook" in str(item).lower() for item in items) else "Không Hook"
-        summary = f"Đã nhận diện: Video Plan · {count} cảnh · {hook_info}"
-        return True, summary, {"type": "video_plan", "data": data, "count": count}
+    # Nhận diện 1: Video Plan V1
+    if _is_video_plan_dict(data):
+        summary, res = _summarize_video_plan(data)
+        return True, summary, res
 
-    # Nhận diện 2: Kinetic Subtitle Plan
-    if "subtitles" in data or "kinetic" in data or "words" in data:
-        subs = data.get("subtitles") or data.get("kinetic") or data.get("words") or []
-        count = len(subs)
-        summary = f"Đã nhận diện: Kinetic Plan · {count} phụ đề hiệu ứng"
-        return True, summary, {"type": "kinetic_plan", "data": data, "count": count}
+    # Nhận diện 2: Kinetic Subtitle Plan V2
+    if _is_kinetic_plan_dict(data):
+        summary, res = _summarize_kinetic_plan(data)
+        return True, summary, res
 
     # Nhận diện 3: Cấu trúc JSON tùy biến có keys
     keys = list(data.keys())[:3]
     summary = f"Đã nhận diện: Kịch bản tùy biến ({', '.join(keys)})"
     return True, summary, {"type": "generic_plan", "data": data}
+

@@ -1,6 +1,6 @@
 import os
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from pydantic import ValidationError
 from src.core.resolve_api import SubtitleConfig, ResolveAutomation
 
@@ -399,4 +399,109 @@ def test_auto_import_timeline_fallback_fcpxml_to_xml(tmp_path):
         assert success is True
         assert "cut_test.xml" in msg
         mock_resolve.OpenPage.assert_called_once_with("edit")
+
+
+def test_connect_linux_process_detection_supports_bin_real():
+    """Kiểm tra connect() trên Linux nhận diện được tiến trình /opt/resolve/bin_real/resolve."""
+    automator = ResolveAutomation()
+    mock_resolve = MagicMock()
+    mock_pm = MagicMock()
+    mock_proj = MagicMock()
+    mock_resolve.GetProjectManager.return_value = mock_pm
+    mock_pm.GetCurrentProject.return_value = mock_proj
+
+    with patch("sys.platform", "linux"), \
+         patch("subprocess.run") as mock_subproc, \
+         patch("src.core.resolve_bridge.load_resolve_api", return_value=(mock_resolve, "OK")):
+        # pgrep -f matches
+        mock_subproc.return_value = MagicMock(returncode=0, stdout="14723\n")
+        assert automator.connect() is True
+        assert automator.is_connected() is True
+
+
+def test_director_window_import_from_resolve(tmp_path):
+    """Kiểm tra tính năng '⚡ Từ DaVinci' trong DirectorWindow."""
+    from PySide6.QtWidgets import QApplication
+    from src.ui.director.director_window import DirectorWindow
+
+    app = QApplication.instance() or QApplication([])
+    win = DirectorWindow()
+
+    fake_video = tmp_path / "DJI_001.MP4"
+    fake_video.write_text("video")
+
+    mock_ra = MagicMock()
+    mock_ra.connect.return_value = True
+    mock_ra.auto_detect_video_paths.return_value = [str(fake_video)]
+    mock_ra.current_project.GetName.return_value = "TestProj"
+
+    with patch("src.core.resolve_api.ResolveAutomation", return_value=mock_ra), \
+         patch("src.ui.director.pages.source_page.probe_video_file") as mock_probe, \
+         patch("PySide6.QtWidgets.QMessageBox.information"):
+        mock_probe.side_effect = lambda fpath, m, l: MagicMock(
+            path=fpath, filename=os.path.basename(fpath), duration_sec=10.0,
+            duration_str="00:10", resolution="1080p", has_cache=False, file_size_mb=5.0
+        )
+        win._on_import_from_resolve()
+
+    assert len(win.page_source._clip_infos) == 1
+    assert win.page_source._clip_infos[0].filename == "DJI_001.MP4"
+    win.close()
+
+
+def test_insert_media_at_playhead(tmp_path):
+    from src.core.resolve_api import ResolveAutomation
+    auto = ResolveAutomation()
+    auto.resolve = MagicMock()
+    auto.current_project = MagicMock()
+    auto.current_timeline = MagicMock()
+    auto.current_project.GetCurrentTimeline.return_value = auto.current_timeline
+
+    mock_mp = MagicMock()
+    auto.current_project.GetMediaPool.return_value = mock_mp
+    auto.current_timeline.GetTrackCount.return_value = 2
+    auto.current_timeline.GetCurrentTimecode.return_value = "01:00:00:00"
+
+    fake_clip = MagicMock()
+    fake_clip.GetName.return_value = "meme.mp4"
+    fake_clip.GetClipProperty.side_effect = lambda prop: "/tmp/meme.mp4" if prop == "File Path" else "90"
+    auto.get_media_pool_clips = MagicMock(return_value=[fake_clip])
+
+    mock_mp.AppendToTimeline.return_value = [MagicMock()]
+
+    test_file = tmp_path / "meme.mp4"
+    test_file.write_text("fake video data")
+
+    with patch("src.core.resolve_api.current_record_frame", return_value=(150, "01:00:05:00")):
+        res = auto.insert_media_at_playhead(str(test_file), target_track=3, duration_sec=2.5)
+
+    assert res is True
+    assert auto.current_timeline.AddTrack.called
+    assert mock_mp.AppendToTimeline.called
+    call_args = mock_mp.AppendToTimeline.call_args[0][0][0]
+    assert call_args["trackIndex"] == 3
+    assert call_args["recordFrame"] == 150
+    assert call_args["mediaType"] == 1
+
+
+def test_ensure_media_out_connected():
+    from src.core.resolve_bridge import _ensure_media_out_connected
+    comp = MagicMock()
+    mo = MagicMock()
+    inp = MagicMock()
+    inp.GetConnectedOutput.return_value = None
+    mo.FindMainInput.return_value = inp
+    comp.FindTool.side_effect = lambda name: mo if name == "MediaOut1" else None
+
+    macro = MagicMock()
+    macro.GetAttrs.return_value = {"TOOLS_RegID": "MacroOperator"}
+    out = MagicMock()
+    macro.FindMainOutput.return_value = out
+    comp.GetToolList.return_value = {"Macro1": macro, "MO": mo}
+
+    res = _ensure_media_out_connected(comp)
+    assert res is True
+    inp.ConnectTo.assert_called_once_with(out)
+
+
 

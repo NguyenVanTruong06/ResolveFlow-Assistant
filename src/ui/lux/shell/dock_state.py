@@ -34,11 +34,11 @@ class DockStateMachine(QObject):
     MIN_OPEN_WIDTH = 320
     WIDE_WIDTH = 760
 
-    # Timing constants (ms)
-    PEEK_HOVER_DELAY = 80
+    # Timing constants (ms) - Tối ưu chống giật/nhạy quá mức
+    PEEK_HOVER_DELAY = 180
     OPEN_HOVER_DELAY = 450
-    PEEK_LEAVE_DELAY = 300
-    OPEN_LEAVE_DELAY = 600
+    PEEK_LEAVE_DELAY = 350
+    OPEN_LEAVE_DELAY = 900
     OPEN_ANIM_DURATION = 200
     CLOSE_ANIM_DURATION = 160
 

@@ -13,6 +13,7 @@ from PySide6.QtCore import (
 from .editors import (
     TextPresetEditor, AudioEditor, LutEditor, MacroEditor, SafeTrackSelector
 )
+from src.ui.icons import get_vector_icon
 
 
 class SheetInspector(QWidget):
@@ -48,9 +49,11 @@ class SheetInspector(QWidget):
 
     def _init_ui(self):
         self.setObjectName("sheet_inspector")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
         self.setStyleSheet("""
             QWidget#sheet_inspector {
-                background: #141417;
+                background-color: #141417;
                 border: 1px solid #27272a;
                 border-radius: 10px;
             }
@@ -73,7 +76,8 @@ class SheetInspector(QWidget):
         self.lbl_title.setStyleSheet("color: #f4f4f5; font-size: 12.5px; font-weight: 600;")
         header_row.addWidget(self.lbl_title, stretch=1)
 
-        self.btn_close = QPushButton("✕")
+        self.btn_close = QPushButton()
+        self.btn_close.setIcon(get_vector_icon("cross", "#a1a1aa", 12))
         self.btn_close.setFixedSize(24, 24)
         self.btn_close.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_close.setCursor(Qt.PointingHandCursor)
@@ -81,15 +85,11 @@ class SheetInspector(QWidget):
         self.btn_close.setStyleSheet("""
             QPushButton {
                 background: transparent;
-                color: #71717a;
                 border: none;
-                font-size: 13px;
-                font-weight: bold;
+                border-radius: 4px;
             }
             QPushButton:hover {
-                color: #ffffff;
                 background: #27272a;
-                border-radius: 4px;
             }
         """)
         self.btn_close.clicked.connect(self.close_sheet)
@@ -119,6 +119,7 @@ class SheetInspector(QWidget):
 
         # 3. Footer: Primary Insert Button
         self.btn_insert = QPushButton("Chèn tại playhead  ⏎")
+        self.btn_insert.setIcon(get_vector_icon("paste", "#ffffff", 14))
         self.btn_insert.setFixedHeight(32)
         self.btn_insert.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_insert.setCursor(Qt.PointingHandCursor)
@@ -139,7 +140,16 @@ class SheetInspector(QWidget):
         self.btn_insert.clicked.connect(self._on_insert_clicked)
         layout.addWidget(self.btn_insert)
 
-    def open_sheet(self, asset: Dict[str, Any]):
+    def open_sheet(self, asset: Any):
+        if asset is not None and not isinstance(asset, dict):
+            if hasattr(asset, "model_dump") and callable(asset.model_dump):
+                asset = asset.model_dump()
+            elif hasattr(asset, "dict") and callable(asset.dict):
+                asset = asset.dict()
+            elif hasattr(asset, "__dict__"):
+                asset = dict(asset.__dict__)
+            else:
+                asset = {"id": str(asset), "name": str(asset)}
         self._current_asset = asset
         self._build_editors(asset)
         self._is_open = True

@@ -12,11 +12,91 @@ import os
 from typing import List, Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QFileDialog, QScrollArea, QMenu
+    QFrame, QFileDialog, QScrollArea, QMenu, QApplication, QMessageBox
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from src.core.transcriber import suggest_default_model, is_model_on_disk, MODEL_DISK_SIZES
 from src.ui.director.director_state import DirectorConfig, SourceClipInfo
+
+
+def probe_video_file(fpath: str, whisper_model: str = "small", whisper_lang: str = "vi") -> SourceClipInfo:
+    """Trích xuất thời lượng và thông số kỹ thuật thực tế của clip video kèm kiểm tra cache."""
+    fname = os.path.basename(fpath)
+    file_size_mb = 0.0
+    try:
+        file_size_mb = round(os.path.getsize(fpath) / (1024 * 1024), 1)
+    except Exception:
+        pass
+
+    # 1. Tra cứu bộ nhớ đệm thực tế từ ScanCacheManager
+    has_cache = False
+    duration_sec = 0.0
+    try:
+        from src.core.cache_manager import ScanCacheManager
+        cache_mgr = ScanCacheManager()
+        cached = cache_mgr.get_cached_scan(fpath, whisper_model, whisper_lang)
+        if cached:
+            has_cache = True
+            duration_sec = float(cached.get("clip_dur") or cached.get("duration") or 0.0)
+    except Exception:
+        pass
+
+    # 2. Nếu chưa có duration từ cache, probe thực tế bằng OpenCV
+    resolution = "1080p"
+    if not has_cache:
+        try:
+            import cv2
+            cap = cv2.VideoCapture(fpath)
+            if cap.isOpened():
+                fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+                frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1920)
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 1080)
+                if duration_sec <= 0.0 and fps > 0 and frames > 0:
+                    duration_sec = round(frames / fps, 2)
+                if h >= 2160 or w >= 3840:
+                    resolution = "4K"
+                elif h >= 1440:
+                    resolution = "2K"
+                elif h >= 1080:
+                    resolution = "1080p"
+                elif h >= 720:
+                    resolution = "720p"
+                elif w > 0 and h > 0:
+                    resolution = f"{w}x{h}"
+                cap.release()
+        except Exception:
+            pass
+    else:
+        # Nếu đã có cache, ước lượng resolution siêu tốc không đọc đĩa USB
+        resolution = "4K" if (file_size_mb > 350 or "dji" in fname.lower() or "4k" in fname.lower()) else "1080p"
+
+    if duration_sec <= 0.0:
+        try:
+            from src.core.autocut import get_media_metadata
+            meta = get_media_metadata(fpath)
+            if meta and meta.get("duration"):
+                duration_sec = float(meta["duration"])
+        except Exception:
+            pass
+
+    if duration_sec <= 0.0:
+        duration_sec = 10.0  # Fallback tối thiểu
+
+    mins = int(duration_sec // 60)
+    secs = int(duration_sec % 60)
+    duration_str = f"{mins:02d}:{secs:02d}"
+
+    return SourceClipInfo(
+        path=fpath,
+        filename=fname,
+        duration_sec=duration_sec,
+        duration_str=duration_str,
+        resolution=resolution,
+        has_cache=has_cache,
+        file_size_mb=file_size_mb
+    )
 
 
 class DropZoneWidget(QFrame):
@@ -86,7 +166,7 @@ class DropZoneWidget(QFrame):
 
 
 class SourceClipRow(QFrame):
-    """Một dòng hiển thị clip nguồn đã chọn kèm trạng thái cache."""
+    """Một dòng hiển thị clip nguồn đã chọn kèm trạng thái cache thực tế."""
     remove_requested = Signal(str)
 
     def __init__(self, clip: SourceClipInfo, parent=None):
@@ -121,7 +201,7 @@ class SourceClipRow(QFrame):
         layout.addWidget(lbl_name, stretch=1)
 
         # Cache badge
-        lbl_cache = QLabel("đã có cache" if self.clip.has_cache else "chưa phân tích")
+        lbl_cache = QLabel("🟢 Đã có cache" if self.clip.has_cache else "🟡 Chưa quét thô")
         if self.clip.has_cache:
             lbl_cache.setStyleSheet("""
                 color: #4ade80;
@@ -144,8 +224,11 @@ class SourceClipRow(QFrame):
             """)
         layout.addWidget(lbl_cache)
 
-        # Thời lượng
-        lbl_dur = QLabel(self.clip.duration_str)
+        # Thời lượng & Độ phân giải thật
+        dur_display = f"{self.clip.duration_str} · {self.clip.resolution}"
+        if self.clip.file_size_mb > 0:
+            dur_display += f" ({self.clip.file_size_mb}MB)"
+        lbl_dur = QLabel(dur_display)
         lbl_dur.setStyleSheet("color: #a1a1aa; font-size: 11px;")
         layout.addWidget(lbl_dur)
 
@@ -173,13 +256,32 @@ class SourcePage(QWidget):
     clips_changed = Signal(list)
     whisper_changed = Signal(str, str)
     resolve_import_requested = Signal()
+    rough_scan_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setAcceptDrops(True)
         self._clip_infos: List[SourceClipInfo] = []
-        self._whisper_model = "small"
-        self._whisper_lang = "vi"
+        settings = QSettings("ResolveFlow", "ResolveFlowAssistant")
+        saved_model = settings.value("whisper_model", "")
+        self._whisper_model = str(saved_model) if saved_model else suggest_default_model()
+        self._whisper_lang = str(settings.value("whisper_lang", "vi"))
         self._init_ui()
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event: QDropEvent):
+        if event.mimeData().hasUrls():
+            paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+            if paths:
+                event.acceptProposedAction()
+                self.add_paths(paths)
+        else:
+            super().dropEvent(event)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -234,6 +336,13 @@ class SourcePage(QWidget):
         h_list_header.addWidget(self.lbl_count)
 
         h_list_header.addStretch(1)
+
+        # Nút Quét Thô Nổi Bật
+        self.btn_scan = QPushButton("⚡ Quét thô (Whisper)")
+        self.btn_scan.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_scan.clicked.connect(self.rough_scan_requested.emit)
+        self.btn_scan.setVisible(False)
+        h_list_header.addWidget(self.btn_scan)
 
         # Chip Whisper ở góc
         self.btn_whisper_chip = QPushButton(f"Whisper {self._whisper_model} · {self._whisper_lang}")
@@ -310,7 +419,7 @@ class SourcePage(QWidget):
 
     def _on_pick_files(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Chọn tệp video", "", "Video files (*.mp4 *.mov *.mkv *.avi *.webm)"
+            self, "Chọn tệp video", "", "Video files (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.flv *.wmv *.ts *.mts *.m2ts)"
         )
         if files:
             self.add_paths(files)
@@ -333,7 +442,7 @@ class SourcePage(QWidget):
                 background-color: #7c3aed;
             }
         """)
-        for m in ["tiny", "base", "small", "medium", "large-v3"]:
+        for m in ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"]:
             action = menu.addAction(f"Model: {m}")
             action.triggered.connect(lambda checked=False, model=m: self._set_model(model))
 
@@ -345,48 +454,105 @@ class SourcePage(QWidget):
         menu.exec(self.btn_whisper_chip.mapToGlobal(self.btn_whisper_chip.rect().bottomLeft()))
 
     def _set_model(self, model: str):
+        if not is_model_on_disk(model):
+            size_str = MODEL_DISK_SIZES.get(model, "~1.5 GB")
+            reply = QMessageBox.question(
+                self,
+                "Tải mô hình Whisper",
+                f"Mô hình '{model}' chưa có trên máy.\n"
+                f"Ứng dụng sẽ cần tải khoảng {size_str} từ internet khi quét.\n\n"
+                f"Bạn có muốn chọn mô hình này không?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
         self._whisper_model = model
+        settings = QSettings("ResolveFlow", "ResolveFlowAssistant")
+        settings.setValue("whisper_model", self._whisper_model)
         self._update_whisper_label()
+        self.recheck_cache()
         self.whisper_changed.emit(self._whisper_model, self._whisper_lang)
 
     def _set_lang(self, lang: str):
         self._whisper_lang = lang
+        settings = QSettings("ResolveFlow", "ResolveFlowAssistant")
+        settings.setValue("whisper_lang", self._whisper_lang)
         self._update_whisper_label()
+        self.recheck_cache()
         self.whisper_changed.emit(self._whisper_model, self._whisper_lang)
 
     def _update_whisper_label(self):
         self.btn_whisper_chip.setText(f"Whisper {self._whisper_model} · {self._whisper_lang}")
 
+    def recheck_cache(self):
+        """Cập nhật lại trạng thái cache thực tế của các clip khi đổi model hoặc ngôn ngữ."""
+        from src.core.cache_manager import ScanCacheManager
+        cache_mgr = ScanCacheManager()
+        for c in self._clip_infos:
+            cached = cache_mgr.get_cached_scan(c.path, self._whisper_model, self._whisper_lang)
+            c.has_cache = bool(cached)
+            if cached and cached.get("clip_dur"):
+                c.duration_sec = float(cached["clip_dur"])
+                mins = int(c.duration_sec // 60)
+                secs = int(c.duration_sec % 60)
+                c.duration_str = f"{mins:02d}:{secs:02d}"
+        self._refresh_clip_list()
+
     def add_paths(self, paths: List[str]):
-        """Thêm các đường dẫn tệp hoặc quét thư mục tìm video."""
-        valid_exts = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
+        """Thêm các đường dẫn tệp hoặc quét thư mục tìm video với thông số kỹ thuật thực."""
+        valid_exts = {
+            ".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v",
+            ".flv", ".wmv", ".ts", ".mts", ".m2ts"
+        }
         found_files = []
 
+        system_ignore_dirs = {
+            ".git", ".svn", ".cache", "__pycache__", ".idea", ".vscode",
+            "_timeline_import", "_archive_xml", ".pytest_cache", ".venv", "venv"
+        }
+
         for p in paths:
+            if not p:
+                continue
+            p = os.path.abspath(p)
             if os.path.isdir(p):
-                for root, _, files in os.walk(p):
+                for root, dirs, files in os.walk(p):
+                    # Chỉ bỏ qua các thư mục hệ thống / cache ở cấp con hiện tại
+                    dirs[:] = [
+                        d for d in dirs
+                        if not d.startswith((".", "__")) and d.lower() not in system_ignore_dirs
+                    ]
                     for f in files:
-                        if os.path.splitext(f)[1].lower() in valid_exts:
+                        if not f.startswith(".") and os.path.splitext(f)[1].lower() in valid_exts:
                             found_files.append(os.path.join(root, f))
             elif os.path.isfile(p):
-                if os.path.splitext(p)[1].lower() in valid_exts:
+                if not os.path.basename(p).startswith(".") and os.path.splitext(p)[1].lower() in valid_exts:
                     found_files.append(p)
 
-        for fpath in found_files:
-            if not any(c.path == fpath for c in self._clip_infos):
-                fname = os.path.basename(fpath)
-                # Kiểm tra cache nhanh (giả lập hoặc check folder cache)
-                has_cache = os.path.exists(fpath + ".cache") or ("cache" in fname.lower())
-                info = SourceClipInfo(
-                    path=fpath,
-                    filename=fname,
-                    duration_sec=120.0,
-                    duration_str="02:00",
-                    resolution="1080p",
-                    has_cache=has_cache
-                )
-                self._clip_infos.append(info)
+        if not found_files and paths:
+            folder_names = ", ".join([os.path.basename(p) or p for p in paths])
+            QMessageBox.warning(
+                self,
+                "Không tìm thấy video",
+                f"Không tìm thấy tệp video hợp lệ nào trong:\n{folder_names}\n\n"
+                "Định dạng hỗ trợ: MP4, MOV, MKV, AVI, WEBM, M4V, FLV, WMV, TS, MTS, M2TS."
+            )
+            return
 
+        from src.core.chronological_sorter import sort_clips_chronologically
+        found_files = sort_clips_chronologically(found_files)
+
+        total_files = len(found_files)
+        for idx, fpath in enumerate(found_files):
+            if not any(c.path == fpath for c in self._clip_infos):
+                info = probe_video_file(fpath, self._whisper_model, self._whisper_lang)
+                self._clip_infos.append(info)
+            if idx % 5 == 0:
+                QApplication.processEvents()
+
+        self._clip_infos = sort_clips_chronologically(self._clip_infos)
         self._refresh_clip_list()
         self.clips_changed.emit([c.path for c in self._clip_infos])
 
@@ -402,13 +568,58 @@ class SourcePage(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-        for clip in self._clip_infos:
+        for idx, clip in enumerate(self._clip_infos):
             row = SourceClipRow(clip, self.list_container)
             row.remove_requested.connect(self.remove_path)
             self.list_layout.insertWidget(self.list_layout.count() - 1, row)
+            if idx % 20 == 0:
+                QApplication.processEvents()
 
         count = len(self._clip_infos)
         self.lbl_count.setText(f"Đã chọn · {count} clip nguồn" if count > 0 else "Chưa chọn clip nào")
+
+        uncached_count = sum(1 for c in self._clip_infos if not c.has_cache)
+        if count > 0:
+            self.btn_scan.setVisible(True)
+            self.btn_scan.setEnabled(True)
+            if uncached_count > 0:
+                self.btn_scan.setText(f"⚡ Quét thô Whisper ({uncached_count} clip chưa cache)")
+                self.btn_scan.setStyleSheet("""
+                    QPushButton {
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7c3aed, stop:1 #4f46e5);
+                        color: #ffffff;
+                        border: 1px solid #a78bfa;
+                        border-radius: 12px;
+                        padding: 3px 12px;
+                        font-size: 11px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8b5cf6, stop:1 #6366f1);
+                        border-color: #c4b5fd;
+                    }
+                """)
+                self.btn_scan.setToolTip("Bóc tách lời thoại và phát hiện khoảng lặng bằng Whisper để chuẩn bị kịch bản AI")
+            else:
+                self.btn_scan.setText("✓ Đã có cache toàn bộ (Quét lại)")
+                self.btn_scan.setStyleSheet("""
+                    QPushButton {
+                        background-color: rgba(16, 185, 129, 0.15);
+                        color: #34d399;
+                        border: 1px solid rgba(16, 185, 129, 0.4);
+                        border-radius: 12px;
+                        padding: 3px 12px;
+                        font-size: 11px;
+                        font-weight: 600;
+                    }
+                    QPushButton:hover {
+                        background-color: rgba(16, 185, 129, 0.25);
+                        color: #6ee7b7;
+                    }
+                """)
+                self.btn_scan.setToolTip("Toàn bộ clip đã có dữ liệu cache. Bấm nếu muốn quét lại bằng Whisper model khác.")
+        else:
+            self.btn_scan.setVisible(False)
 
     def load_from_config(self, config: DirectorConfig):
         self._whisper_model = config.whisper_model

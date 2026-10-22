@@ -314,8 +314,12 @@ class Macro:
             "NameSet": True,
             "CustomData": dict(self.info) if self.info else {"Generator": "ResolveFlow-Assistant"},
             "Inputs": Call("", inputs, ordered=True),
-            "Outputs": {"MainOutput1": Call("InstanceOutput", {
-                "SourceOp": self.output_tool, "Source": self.output_socket})},
+            "Outputs": {
+                "Output": Call("InstanceOutput", {
+                    "SourceOp": self.output_tool, "Source": self.output_socket}),
+                "MainOutput1": Call("InstanceOutput", {
+                    "SourceOp": self.output_tool, "Source": self.output_socket}),
+            },
             "ViewInfo": Call("GroupInfo", {"Pos": [0.0, 0.0]}),
             "Tools": self.tools_table(),
         }
@@ -333,7 +337,7 @@ class Macro:
         media_out = Call("MediaOut", {
             "CtrlWZoom": False,
             "Inputs": {"Index": Inp(value="0"),
-                       "Input": Inp(src=(self.name, "MainOutput1"))},
+                       "Input": Inp(src=(self.name, "Output"))},
             "ViewInfo": Call("OperatorInfo", {"Pos": [220.0, 0.0]}),
         })
         comp = Call("Composition", {

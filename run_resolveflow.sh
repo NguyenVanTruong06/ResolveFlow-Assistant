@@ -83,5 +83,5 @@ else
 fi
 
 # 6. Launch Application
-echo "🚀 Đang khởi chạy với Python: $(${PYTHON_EXEC} --version) ..."
+echo "🚀 Đang khởi chạy với Python: $("${PYTHON_EXEC}" --version 2>&1) ..."
 exec "${PYTHON_EXEC}" -m src.main "$@"

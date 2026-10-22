@@ -53,9 +53,27 @@ class DirectorWindow(QMainWindow):
             }
         """)
 
+        self.setAcceptDrops(True)
         self._init_ui()
         self._wire_signals()
         self.go_to_step(1)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+            if paths:
+                event.acceptProposedAction()
+                if hasattr(self, "page_source"):
+                    self.go_to_step(1)
+                    self.page_source.add_paths(paths)
+        else:
+            super().dropEvent(event)
 
     def _init_ui(self):
         central_widget = QWidget(self)
@@ -273,6 +291,7 @@ class DirectorWindow(QMainWindow):
         # Đồng bộ từ source_page
         self.page_source.clips_changed.connect(self._on_clips_changed)
         self.page_source.whisper_changed.connect(self._on_whisper_changed)
+        self.page_source.resolve_import_requested.connect(self._on_import_from_resolve)
 
         # Style page
         self.page_style.advanced_toggle_requested.connect(self.toggle_advanced_panel)
@@ -283,6 +302,10 @@ class DirectorWindow(QMainWindow):
 
         # Review page
         self.page_review.ai_run_requested.connect(self._on_run_ai_script)
+
+        # Rough scan từ SourcePage & ReviewPage
+        self.page_source.rough_scan_requested.connect(self._on_start_rough_scan)
+        self.page_review.rough_scan_requested.connect(self._on_start_rough_scan)
 
         # Build page
         self.page_build.bgm_browse_requested.connect(self._on_browse_bgm)
@@ -296,6 +319,29 @@ class DirectorWindow(QMainWindow):
 
         # Cancel từ progress panel
         self.prog_panel.cancel_requested.connect(self.controller.cancel_pipeline)
+
+    def _on_start_rough_scan(self):
+        """Khởi chạy quét thô Whisper (Phase 1) tạo cache và trích xuất câu thoại."""
+        self._sync_all_pages_to_config()
+        if not self.config.video_paths:
+            QMessageBox.warning(self, "Chưa chọn video", "Vui lòng chọn video nguồn trước khi quét thô.")
+            return
+
+        self._is_rough_scanning = True
+        self.adv_panel.hide()
+        self.prog_panel.reset()
+        self.prog_panel.show()
+
+        if hasattr(self.page_source, "btn_scan"):
+            self.page_source.btn_scan.setEnabled(False)
+            self.page_source.btn_scan.setText("⏳ Đang quét thô...")
+        if hasattr(self.page_review, "btn_review_scan"):
+            self.page_review.btn_review_scan.setEnabled(False)
+            self.page_review.btn_review_scan.setText("⏳ Đang quét thô...")
+
+        self.btn_primary.setEnabled(False)
+        self.btn_primary.setText("⏳ Đang quét thô Whisper...")
+        self.controller.start_pipeline(phase=1)
 
     def go_to_step(self, step: int):
         """Chuyển đổi giao diện sang bước tương ứng (1..4)."""
@@ -313,6 +359,18 @@ class DirectorWindow(QMainWindow):
             self.btn_primary.setText("Tiếp: Duyệt & kịch bản ›")
         elif self.current_step == 3:
             self.btn_primary.setText("Tiếp: Dựng timeline ›")
+            # Tự động nạp transcript thực tế từ Cache vào ReviewPage nếu có
+            if hasattr(self.page_review, "load_transcripts_from_cache"):
+                self.page_review.load_transcripts_from_cache(
+                    self.config.video_paths,
+                    self.config.whisper_model,
+                    self.config.whisper_language
+                )
+            if hasattr(self.page_review, "set_story_metadata"):
+                self.page_review.set_story_metadata(
+                    style_intent=self.config.footage_type,
+                    hook_dur=f"{int(self.config.vlog_hook_dur)}s" if self.config.vlog_hook_dur else "30_60s"
+                )
         elif self.current_step == 4:
             self.btn_primary.setText("✂ 🚀 Dựng timeline")
             # Lưu state và refresh summary card
@@ -333,6 +391,9 @@ class DirectorWindow(QMainWindow):
 
     def _start_build_timeline(self):
         self._sync_all_pages_to_config()
+        if not self.config.video_paths:
+            QMessageBox.warning(self, "Chưa chọn video", "Vui lòng chọn ít nhất một video nguồn trước khi dựng timeline.")
+            return
         self.adv_panel.hide()
         self.prog_panel.reset()
         self.prog_panel.show()
@@ -344,8 +405,43 @@ class DirectorWindow(QMainWindow):
         self.controller.start_pipeline(phase=0)
 
     def _on_pipeline_finished(self, success: bool, message: str):
+        is_rough_scan = getattr(self, "_is_rough_scanning", False)
+        self._is_rough_scanning = False
+
         self.btn_primary.setEnabled(True)
-        self.btn_primary.setText("✂ 🚀 Dựng timeline")
+        if self.current_step == 1:
+            self.btn_primary.setText("Tiếp: Kiểu dựng ›")
+        elif self.current_step == 2:
+            self.btn_primary.setText("Tiếp: Duyệt & kịch bản ›")
+        elif self.current_step == 3:
+            self.btn_primary.setText("Tiếp: Dựng timeline ›")
+        else:
+            self.btn_primary.setText("✂ 🚀 Dựng timeline")
+
+        if is_rough_scan:
+            self.prog_panel.hide()
+            self.page_source.recheck_cache()
+            if hasattr(self.page_review, "load_transcripts_from_cache"):
+                self.page_review.load_transcripts_from_cache(
+                    self.config.video_paths,
+                    self.config.whisper_model,
+                    self.config.whisper_language
+                )
+            if hasattr(self.page_review, "btn_review_scan"):
+                self.page_review.btn_review_scan.setEnabled(True)
+                self.page_review.btn_review_scan.setText("⚡ Quét thô Whisper")
+
+            if success:
+                QMessageBox.information(
+                    self,
+                    "Quét thô hoàn tất",
+                    "✓ Bóc tách lời thoại và phát hiện khoảng lặng bằng Whisper thành công!\n"
+                    "Dữ liệu câu thoại đã sẵn sàng trong cache cho Bước 3."
+                )
+            else:
+                QMessageBox.warning(self, "Lỗi quét thô", f"Quá trình quét thô gặp lỗi:\n{message}")
+            return
+
         if success:
             QMessageBox.information(self, "Thành công", f"Dựng timeline hoàn tất:\n{message}")
         else:
@@ -365,6 +461,41 @@ class DirectorWindow(QMainWindow):
         if paths:
             fname = paths[0].split("/")[-1]
             self.lbl_project.setText(fname)
+
+    def _on_import_from_resolve(self):
+        """Tự động nạp danh sách video từ Media Pool hoặc Timeline đang mở trong DaVinci Resolve."""
+        from src.core.resolve_api import ResolveAutomation
+        ra = ResolveAutomation()
+        if not ra.connect():
+            QMessageBox.warning(
+                self,
+                "Không thể kết nối DaVinci Resolve",
+                f"Không thể kết nối tới DaVinci Resolve.\n{ra.last_connect_error or 'Vui lòng đảm bảo DaVinci Resolve đang chạy và đã mở một Project.'}"
+            )
+            return
+
+        # 1. Thử phát hiện video từ Timeline hoặc selection hiện tại
+        video_paths = ra.auto_detect_video_paths()
+
+        # 2. Nếu Timeline trống, lấy toàn bộ các file media thực tế trong Media Pool
+        if not video_paths:
+            pool_paths = ra.get_media_pool_file_paths()
+            video_paths = [p for p in pool_paths if os.path.exists(p) and os.path.isfile(p)]
+
+        if video_paths:
+            self.page_source.add_paths(video_paths)
+            proj_name = ra.current_project.GetName() if ra.current_project else "DaVinci Resolve"
+            QMessageBox.information(
+                self,
+                "Đã nạp từ DaVinci Resolve",
+                f"✓ Đã phát hiện và nạp thành công {len(video_paths)} video từ dự án '{proj_name}' vào Bước 1!"
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "DaVinci Resolve",
+                "Đã kết nối DaVinci Resolve thành công nhưng không tìm thấy tệp video nào trong Media Pool hoặc Timeline hiện tại."
+            )
 
     def _on_whisper_changed(self, model, lang):
         self.config.whisper_model = model

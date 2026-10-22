@@ -6,7 +6,8 @@ from typing import Optional, List, Dict, Any
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QScrollArea, QFrame
 )
-from PySide6.QtCore import Qt, Signal as pyqtSignal
+from PySide6.QtCore import Qt, QSize, Signal as pyqtSignal
+from src.ui.icons import get_vector_icon
 
 
 DEFAULT_CATEGORIES = [
@@ -104,6 +105,14 @@ class CategoryNavWidget(QWidget):
     def select_sub_category(self, sub: str):
         self.select_subcategory(sub)
 
+    def _get_cat_icon(self, cid: str) -> str:
+        icon_map = {
+            "text": "text", "trans": "trans", "meme": "meme",
+            "overlay": "overlay", "sfx": "sfx", "bgm": "music",
+            "lut": "palette", "mine": "sparkles"
+        }
+        return icon_map.get(cid, "folder")
+
     def render_categories(self):
         # Clear existing buttons
         while self.cat_layout.count():
@@ -117,11 +126,13 @@ class CategoryNavWidget(QWidget):
         for cat in self._categories:
             cid = cat["id"]
             lbl = cat["label"]
-            btn = QPushButton(lbl)
+            btn = QPushButton(f" {lbl}")
             btn.setFixedHeight(28)
+            btn.setIconSize(QSize(13, 13))
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.setCursor(Qt.PointingHandCursor)
             is_active = (cid == self._current_cat)
+            btn.setIcon(get_vector_icon(self._get_cat_icon(cid), "#ffffff" if is_active else "#a1a1aa", 13))
             btn.setStyleSheet(self._cat_style(is_active))
             btn.clicked.connect(lambda checked=False, c=cid: self.select_category(c))
             self.cat_layout.addWidget(btn)
@@ -166,9 +177,11 @@ class CategoryNavWidget(QWidget):
         self._current_cat = cat_id
         self._current_sub = "Tất cả"
 
-        # Update styling
+        # Update styling & icons
         for cid, btn in self._cat_buttons.items():
-            btn.setStyleSheet(self._cat_style(cid == self._current_cat))
+            is_active = (cid == self._current_cat)
+            btn.setStyleSheet(self._cat_style(is_active))
+            btn.setIcon(get_vector_icon(self._get_cat_icon(cid), "#ffffff" if is_active else "#a1a1aa", 13))
 
         self.render_subcategories()
         self.category_changed.emit(self._current_cat)

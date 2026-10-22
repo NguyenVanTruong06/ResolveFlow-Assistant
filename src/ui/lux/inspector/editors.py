@@ -211,6 +211,30 @@ class TextPresetEditor(QWidget):
         row_txt.addWidget(self.txt_content, stretch=1)
         layout.addLayout(row_txt)
 
+        # 1b. Font size slider (Cỡ chữ)
+        row_sz = QHBoxLayout()
+        lbl_sz = QLabel("Cỡ chữ")
+        lbl_sz.setFixedWidth(70)
+        lbl_sz.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
+        row_sz.addWidget(lbl_sz)
+
+        default_sz = int(asset.get("size", 54) or 54)
+        self.slider_sz = QSlider(Qt.Orientation.Horizontal)
+        self.slider_sz.setRange(24, 140)
+        self.slider_sz.setValue(default_sz)
+        self.slider_sz.setFixedHeight(20)
+        self.slider_sz.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        self.lbl_sz_val = QLabel(f"{default_sz} px")
+        self.lbl_sz_val.setFixedWidth(44)
+        self.lbl_sz_val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.lbl_sz_val.setStyleSheet("color: #06b6d4; font-family: monospace; font-size: 11px; font-weight: bold;")
+        self.slider_sz.valueChanged.connect(lambda v: self.lbl_sz_val.setText(f"{v} px"))
+
+        row_sz.addWidget(self.slider_sz, stretch=1)
+        row_sz.addWidget(self.lbl_sz_val)
+        layout.addLayout(row_sz)
+
         # 2. Duration slider
         row_dur = QHBoxLayout()
         lbl_dur = QLabel("Thời lượng")
@@ -259,6 +283,7 @@ class TextPresetEditor(QWidget):
     def get_params(self) -> Dict[str, Any]:
         return {
             "text": self.txt_content.text(),
+            "size": self.slider_sz.value(),
             "duration": self.slider_dur.value() / 10.0,
             "motion": self.seg_motion.get_value(),
             "curve": self.seg_curve.get_value(),

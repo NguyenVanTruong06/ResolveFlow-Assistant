@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 VALID_MEDIA_EXTENSIONS = {
     ".mp4", ".mov", ".mkv", ".avi", ".m4v", ".webm", ".flv", ".wmv",
-    ".wav", ".mp3", ".m4a", ".aac", ".flac"
+    ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ts", ".mts", ".m2ts"
 }
 
 JUNK_FILE_PATTERNS = {
@@ -21,7 +21,8 @@ JUNK_FILE_PATTERNS = {
 
 BROLL_KEYWORDS = [
     "broll", "b_roll", "b-roll", "footage", "canh_quay", "canhquay", "insert",
-    "cutaway", "overlay", "minhhoa", "minh_hoa", "canh_chen", "canhchen"
+    "cutaway", "overlay", "minhhoa", "minh_hoa", "canh_chen", "canhchen",
+    "meme", "memes", "asset", "assets"
 ]
 
 INTRO_KEYWORDS = [
@@ -138,13 +139,16 @@ def scan_project_folder(root_dir: str) -> ProjectFolderStructure:
     abs_root = os.path.abspath(root_dir)
     root_name = os.path.basename(abs_root) or abs_root
 
-    # Kiểm tra các mục con trực tiếp (bỏ qua các thư mục hệ thống, asset, timeline bắt đầu bằng '.' hoặc '_')
-    SYSTEM_IGNORE_DIRS = {"assets", "_assets", "sfx", "_sfx", "luts", "_luts", "presets", "_presets", "memes", "_memes", "_archive_xml", "_timeline_import"}
+    # Kiểm tra các mục con trực tiếp (bỏ qua các thư mục hệ thống, cache bắt đầu bằng '.' hoặc '__' hoặc trong SYSTEM_IGNORE_DIRS)
+    SYSTEM_IGNORE_DIRS = {
+        ".git", ".svn", ".cache", "__pycache__", ".idea", ".vscode",
+        "_timeline_import", "_archive_xml", ".pytest_cache", ".venv", "venv"
+    }
     entries = sorted(os.listdir(abs_root), key=natural_sort_key)
     subdirs = [
         e for e in entries 
         if os.path.isdir(os.path.join(abs_root, e)) 
-        and not e.startswith((".", "_")) 
+        and not e.startswith((".", "__")) 
         and e.lower() not in SYSTEM_IGNORE_DIRS
     ]
     direct_files = [
@@ -175,8 +179,12 @@ def scan_project_folder(root_dir: str) -> ProjectFolderStructure:
         sdir_path = os.path.join(abs_root, sdir)
         collected_files: List[str] = []
         
-        # Quét đệ quy bên trong thư mục con này
-        for cur_root, _, files in os.walk(sdir_path):
+        # Quét đệ quy bên trong thư mục con này (bỏ qua thư mục hệ thống / cache)
+        for cur_root, cur_dirs, files in os.walk(sdir_path):
+            cur_dirs[:] = [
+                d for d in cur_dirs
+                if not d.startswith((".", "__")) and d.lower() not in SYSTEM_IGNORE_DIRS
+            ]
             sorted_files = sorted(files, key=natural_sort_key)
             for f in sorted_files:
                 if is_valid_media_file(f):

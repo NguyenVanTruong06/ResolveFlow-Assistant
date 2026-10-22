@@ -1,15 +1,19 @@
 import os
 import re
 import json
+import logging
 import urllib.request
 import urllib.error
 import urllib.parse
 from typing import List, Dict, Any, Optional, Tuple, Union, Sequence
 from pydantic import BaseModel, Field
 
+logger = logging.getLogger(__name__)
+
 
 class CopilotHookPlan(BaseModel):
     """Kế hoạch Hook mở đầu do AI Copilot chỉ định."""
+    clip_id: Optional[str] = None
     clip_index: int
     clip_name: str = ""
     start_sec: float
@@ -21,6 +25,7 @@ class CopilotHookPlan(BaseModel):
 
 class CopilotSegmentPlan(BaseModel):
     """Một phân đoạn trong mạch câu chuyện được AI Copilot sắp xếp."""
+    clip_id: Optional[str] = None
     clip_index: int
     clip_name: str = ""
     chapter_name: str = ""
@@ -45,6 +50,7 @@ class CopilotMediaInsert(BaseModel):
 
 class CopilotDirectorPlan(BaseModel):
     """Toàn bộ bản thiết kế dựng phim do Cloud AI trả về."""
+    manifest_id: Optional[str] = None
     strategy_summary: str = ""
     target_platform: str = "YouTube / Vlog"
     global_hook: Optional[CopilotHookPlan] = None
@@ -176,21 +182,34 @@ class StoryCopilot:
         story_intent: str = "travel_vlog",
         target_duration: str = "full",
         hook_duration: str = "30_60s",
-        music_beats: Optional[List[float]] = None
+        music_beats: Optional[List[float]] = None,
+        manifest_id: Optional[str] = None
     ) -> str:
         """
         Tạo Prompt hoàn chỉnh chứa đầy đủ Skill Marketing + Dữ liệu Video + Danh sách Meme để người dùng dán vào Claude/ChatGPT.
         """
         framework = cls.FORMAT_PROMPTS.get(story_intent, cls.FORMAT_PROMPTS.get("travel_vlog", cls.MARKETING_FRAMEWORK_PROMPT))
+        mid = manifest_id or getattr(project_structure, "manifest_id", None) or (clips_data[0].get("manifest_id") if clips_data else None)
+
+        # Lọc bỏ clip có thời lượng < 1.0s khỏi danh sách kịch bản
+        valid_clips = [
+            c for c in clips_data
+            if float(c.get("duration", c.get("duration_sec", 0.0))) >= 1.0 or float(c.get("duration", c.get("duration_sec", 0.0))) <= 0
+        ]
+
         lines = [
             framework,
             cls.get_available_assets_summary(),
             "",
             f"## 📁 THÔNG TIN DỰ ÁN: {project_name}",
-            f"- Tổng số clip: {len(clips_data)} video",
+        ]
+        if mid:
+            lines.append(f"- MANIFEST_ID: {mid}")
+        lines.extend([
+            f"- Tổng số clip: {len(valid_clips)} video",
             f"- Ý đồ dựng mục tiêu: {story_intent.upper()}",
             f"- Thời lượng mục tiêu: {target_duration.upper()}",
-        ]
+        ])
 
         if hook_duration == "30_60s":
             lines.extend([
@@ -229,45 +248,96 @@ class StoryCopilot:
                 "👉 YÊU CẦU ĐẶC BIỆT: Hãy ưu tiên điều chỉnh `timeline_sec` của `broll_inserts` và chuyển cảnh KHỚP với các mốc nhịp này để tạo hiệu ứng Beat-Sync đã mắt nhất."
             ])
 
+        def _fmt_tc(sec_val: float) -> str:
+            m = int(sec_val // 60)
+            s = int(sec_val % 60)
+            return f"{m:02d}:{s:02d}"
+
         lines.extend([
             "",
-            "## 🎬 DANH SÁCH DỮ LIỆU CÁC CLIP NGUỒN ĐÃ QUÉT:",
-            "| ID | Tên Clip | Chương/Thư mục | Độ dài | Cao trào âm thanh | Chuyển động | Nội dung lời thoại (Transcript) |",
+            "## 🎬 DANH SÁCH DỮ LIỆU CÁC CLIP NGUỒN (THEO THỜI GIAN THỰC TẾ):",
+            "| ID | Tên Clip | Chương/Thư mục | Độ dài | Phân loại | Đoạn thoại chính | Tóm tắt nội dung |",
             "| :---: | :--- | :--- | :---: | :---: | :---: | :--- |"
         ])
 
-        for idx, clip in enumerate(clips_data):
-            c_name = clip.get("name", f"Clip_{idx+1}")
+        for idx, clip in enumerate(valid_clips):
+            c_id = str(clip.get("clip_id") or f"C{idx+1:02d}")
+            c_name = clip.get("name", clip.get("clip_name", f"Clip_{idx+1}"))
             c_chap = clip.get("chapter", "Chung")
-            dur = clip.get("duration", 0.0)
-            peak = clip.get("audio_peak_sec", 0.0)
-            motion = clip.get("visual_motion", "vừa")
-            text = clip.get("transcript", clip.get("speech", "")).strip()
-            text_snippet = text.replace("\n", " ").replace("|", "-")
-            if not text_snippet:
-                text_snippet = "*(Cảnh quay visual / B-Roll không lời)*"
-            elif len(text_snippet) > 120:
-                text_snippet = text_snippet[:115] + "..."
+            dur = float(clip.get("duration", clip.get("duration_sec", 0.0)))
+            is_broll = bool(clip.get("is_broll", False))
+            intervals = clip.get("dialogue_intervals") or clip.get("speech_intervals") or []
 
-            lines.append(f"| {idx+1} | `{c_name}` | {c_chap} | {dur:.1f}s | {peak:.1f}s | {motion} | {text_snippet} |")
+            text = clip.get("transcript", clip.get("speech", clip.get("transcription", ""))).strip()
+            text_snippet = text.replace("\n", " ").replace("|", "-")
+            if is_broll or not text_snippet or "[CẢNH B-ROLL" in text_snippet:
+                is_broll = True
+                type_label = "🏞️ B-Roll"
+                speech_range = "*(Không lời)*"
+                text_snippet = "Cảnh thiên nhiên / B-roll không lời"
+            else:
+                type_label = "💬 Thoại"
+                if intervals:
+                    speech_range = f"{_fmt_tc(intervals[0]['start'])} - {_fmt_tc(intervals[-1]['end'])}"
+                else:
+                    speech_range = f"00:00 - {_fmt_tc(dur)}"
+                if len(text_snippet) > 80:
+                    text_snippet = text_snippet[:75] + "..."
+
+            lines.append(f"| {c_id} | `{c_name}` | {c_chap} | {dur:.1f}s | {type_label} | {speech_range} | {text_snippet} |")
+
+        lines.extend([
+            "",
+            "## ⏱️ CHI TIẾT LỜI THOẠI & TIMESTAMPS TỪNG CÂU (ĐÃ LỌC NHIỄU & CĂN CHUẨN THỜI GIAN):",
+            "*(Dựa vào mốc thời gian [start - end] bên dưới để chọn start_sec / end_sec bao trọn vẹn câu thoại và chèn Meme/SFX vào các khoảng lặng giữa câu!)*",
+            ""
+        ])
+
+        for idx, clip in enumerate(valid_clips):
+            c_id = str(clip.get("clip_id") or f"C{idx+1:02d}")
+            c_name = clip.get("name", clip.get("clip_name", f"Clip_{idx+1}"))
+            dur = float(clip.get("duration", clip.get("duration_sec", 0.0)))
+            is_broll = bool(clip.get("is_broll", False))
+            intervals = clip.get("dialogue_intervals") or clip.get("speech_intervals") or []
+            text = clip.get("transcript", "").strip()
+
+            if is_broll or not intervals or "[CẢNH B-ROLL" in text:
+                lines.append(f"- **Clip {c_id}** (`{c_name}` - {dur:.1f}s):\n  * 🏞️ *[TOÀN BỘ CLIP LÀ B-ROLL / PHONG CẢNH THIÊN NHIÊN ({dur:.1f}s)]*")
+            else:
+                lines.append(f"- **Clip {c_id}** (`{c_name}` - {dur:.1f}s):")
+                # Liệt kê từng câu thoại (tối đa 12 câu tiêu biểu để tránh nổ token)
+                limit_intervals = intervals[:12]
+                for s in limit_intervals:
+                    s_st = float(s.get("start", 0.0))
+                    s_en = float(s.get("end", 0.0))
+                    s_txt = str(s.get("text", "")).strip().replace("\n", " ")
+                    lines.append(f'  * [{_fmt_tc(s_st)} - {_fmt_tc(s_en)}] "{s_txt}"')
+                if len(intervals) > 12:
+                    rem = len(intervals) - 12
+                    lines.append(f"  * *(và {rem} câu thoại tiếp theo đến {_fmt_tc(dur)})*")
+                # Nếu cuối clip có khoảng lặng lớn (> 3s), báo cho AI biết đó là b-roll
+                last_en = float(intervals[-1].get("end", 0.0))
+                if dur - last_en >= 3.0:
+                    lines.append(f"  * 🍃 *(Khoảng lặng {_fmt_tc(last_en)} - {_fmt_tc(dur)}: B-roll / Cảnh quan)*")
 
         lines.extend([
             "",
             "---",
             "",
-            "## ⚠️ QUY TẮC BẮT BUỘC VỀ LỜI THOẠI & ÂM THANH (CHỐNG MẤT NHỊP / LẠM DỤNG SFX):",
+            "## 🧠 NGUYÊN TẮC BIÊN TẬP DÀNH CHO TỔNG ĐẠO DIỄN (CHIEF STORYTELLER):",
             "1. **BẢO TOÀN LỜI THOẠI (KHÔNG CẮT CỤT / MẤT NHỊP):**",
-            "   - Khi nhân vật đang nói, TUYỆT ĐỐI KHÔNG cắt giữa chừng câu thoại làm cụt chữ hoặc mất nhịp.",
-            "   - Hãy để câu nói kết thúc trọn vẹn, nghỉ thở tự nhiên rồi mới chuyển cảnh. Bạn CHỈ CẦN chọn đúng mốc thời gian, hệ thống sẽ TỰ ĐỘNG BÙ ĐỆM (padding) 0.3s.",
-            "   - Nếu một clip là một câu chuyện/câu nói liền mạch, hãy giữ nguyên từ 0.0s đến hết độ dài clip thay vì cắt vụn.",
-            "2. **ĐIỀU TIẾT HIỆU ỨNG ÂM THANH SFX (CHỐNG LẠM DỤNG / SPAM):**",
-            "   - TUYỆT ĐỐI KHÔNG lạm dụng SFX (như spam liên tục vine_boom, whoosh). Việc chèn quá nhiều SFX làm video bị rẻ tiền, nhức tai và đè mất tiếng nhân vật.",
-            "   - Tần suất: Tối đa 1 SFX mỗi 15-30 giây. Hệ thống backend sẽ TỰ ĐỘNG LOẠI BỎ các SFX chèn quá dày đặc (< 10 giây).",
-            "   - Phải đa dạng SFX, KHÔNG dùng lặp lại 1 âm thanh duy nhất nhiều lần.",
-            "   - SFX chỉ kéo dài 0.5s - 1.0s, không chèn đè lên lúc nhân vật đang nói câu thoại quan trọng.",
-            "3. **B-ROLL & MEME HỢP LÝ:**",
-            "   - Toàn bộ video dài chỉ nên chèn 2-4 meme/broll đắt giá nhất.",
-            "   - Video ngắn (Shorts/TikTok) chỉ chèn 1-2 meme. Tránh chèn liên tục làm loãng câu chuyện.",
+            "   - Hãy nhìn vào mốc thời gian chi tiết của từng câu ở phần trên để chọn `start_sec` và `end_sec` bao trùm trọn vẹn câu nói của nhân vật.",
+            "   - Hệ thống DaVinci Resolve sẽ TỰ ĐỘNG BÙ ĐỆM AN TOÀN 0.3s ở hai đầu cắt để câu nói không bao giờ bị cụt âm.",
+            "   - TUYỆT ĐỐI KHÔNG cắt giữa chừng khi nhân vật đang nói dở.",
+            "2. **KHAI THÁC CÁC CLIP B-ROLL / PHONG CẢNH KHÔNG CÓ THOẠI (🏞️):**",
+            "   - Các clip B-roll không lời là tài nguyên quý giá để tạo nhịp thở cho video.",
+            "   - Hãy cắt các đoạn 3s - 5s đặt làm cảnh chuyển tiếp (transition) giữa 2 phân đoạn nói chuyện khác nhau.",
+            "   - Hoặc khai thác trong `broll_inserts` trên Video Track 2 khi nhân vật đang nói về phong cảnh.",
+            "   - Không dùng speed khác 1.0 (đường xuất hiện tại không hỗ trợ). Mọi action 'speedup' sẽ được đưa về 1.0x.",
+            "3. **ĐIỂM RƠI SFX & MEME (ĐẶT VÀO KHOẢNG LẶNG, TRÁNH ĐÈ THOẠI):**",
+            "   - TUYỆT ĐỐI KHÔNG chèn SFX hoặc Meme đè lên lúc nhân vật đang nói câu quan trọng.",
+            "   - Hãy đặt `timeline_sec` rơi vào khoảng lặng ngay sau câu nói (punchline) để tạo tiếng cười hoặc điểm nhấn.",
+            "   - Tần suất: Tối đa 1 SFX mỗi 20-30 giây. Toàn bộ video dài chỉ dùng 2-4 meme đắt giá nhất.",
             "",
             "---",
             "",
@@ -276,6 +346,7 @@ class StoryCopilot:
             "",
             "```json",
             "{",
+            f'  "manifest_id": "{mid or "..."}",',
             '  "strategy_summary": "Giải thích ngắn gọn lý do chọn Hook và cách sắp xếp mạch chuyện",',
             '  "target_platform": "YouTube Vlog / Shorts",',
             '  "global_hook": {',
@@ -327,6 +398,7 @@ class StoryCopilot:
             "}",
             "```",
             "",
+            "👉 BẮT BUỘC giữ nguyên 'manifest_id' trong khối JSON kết quả nếu có!",
             "👉 Hãy phân tích thật kỹ toàn bộ danh sách clip trên và xuất bản khối JSON tối ưu nhất!"
         ])
 
@@ -492,7 +564,11 @@ class StoryCopilot:
                     except Exception:
                         pass
 
+        mid_val = data.get("manifest_id")
+        manifest_id_parsed = str(mid_val).strip() if mid_val else None
+
         return CopilotDirectorPlan(
+            manifest_id=manifest_id_parsed,
             strategy_summary=str(data.get("strategy_summary", "")),
             target_platform=str(data.get("target_platform", "YouTube / Vlog")),
             global_hook=hook_obj,
@@ -642,110 +718,115 @@ class StoryCopilot:
         cls,
         clip_index: Optional[Union[int, str]],
         clip_name: Optional[str],
-        video_paths_by_index: Dict[Any, str]
-    ) -> Optional[str]:
+        video_paths_by_index: Dict[Any, str],
+        warnings_collector: Optional[List[str]] = None,
+        return_tuple: bool = False
+    ) -> Union[Optional[str], Tuple[Optional[str], List[str]]]:
         """
-        Tìm kiếm đường dẫn tệp video tối ưu nhất từ bản vẽ kịch bản.
-        Hỗ trợ đối soát đa tầng: tên file, đường dẫn tương đối, stem, unicode normalization,
-        bóc tách số ID từ text, và fuzzy match.
+        Tìm kiếm đường dẫn tệp video tối ưu nhất từ bản vẽ kịch bản dựa trên ClipManifest.
+        Thứ tự ưu tiên:
+        1. clip_id / clip_index (khóa chính).
+        2. clip_name khớp chính xác (chỉ khi không có hoặc không tìm thấy clip_index).
+        3. Nếu có cả hai mà mâu thuẫn -> ưu tiên dùng index, ghi cảnh báo nêu cả hai.
+        4. KHÔNG dùng fuzzy matching hay fallback theo vị trí mảng. Nếu không tìm thấy -> trả None + cảnh báo.
         """
         import unicodedata
+        warnings: List[str] = []
+
         if not video_paths_by_index:
-            return None
+            warn = "Danh sách đường dẫn video (path_map) rỗng."
+            warnings.append(warn)
+            if warnings_collector is not None:
+                warnings_collector.append(warn)
+            return (None, warnings) if return_tuple else None
 
         def norm_txt(s: str) -> str:
-            clean = s.strip().strip("`'\"“”‘’").strip()
+            clean = str(s).strip().strip("`'\"“”‘’").strip()
             return unicodedata.normalize('NFC', clean.lower())
 
-        # 1. Khớp theo clip_name nếu có
+        path_from_index: Optional[str] = None
+        path_from_name: Optional[str] = None
+
+        # 1. Tra cứu theo clip_id / clip_index (khóa chính)
+        if clip_index is not None:
+            # Tra trực tiếp key
+            if clip_index in video_paths_by_index:
+                cand = video_paths_by_index[clip_index]
+                if cand:
+                    path_from_index = cand
+
+            # Thử biến thể chữ hoa / chữ thường nếu là chuỗi (vd "C01", "c01")
+            if not path_from_index and isinstance(clip_index, str):
+                for k in (clip_index.upper(), clip_index.lower()):
+                    if k in video_paths_by_index:
+                        cand = video_paths_by_index[k]
+                        if cand:
+                            path_from_index = cand
+                            break
+
+            # Thử trích xuất số nguyên từ chuỗi (vd "Clip 3", "#3", 3, "3")
+            if not path_from_index:
+                digits = re.findall(r'\d+', str(clip_index))
+                if digits:
+                    idx_int = int(digits[0])
+                    for k in (f"C{idx_int:02d}", f"C{idx_int:03d}", idx_int, str(idx_int), f"clip_{idx_int}", f"clip {idx_int}"):
+                        if k in video_paths_by_index:
+                            cand = video_paths_by_index[k]
+                            if cand:
+                                path_from_index = cand
+                                break
+
+        # 2. Tra cứu theo clip_name (chính xác filename hoặc stem)
         if clip_name:
             raw_cname = str(clip_name).strip().strip("`'\"“”‘’").strip()
             clean_name = norm_txt(os.path.basename(raw_cname))
             stem_name = norm_txt(os.path.splitext(os.path.basename(raw_cname))[0])
             rel_name = norm_txt(raw_cname.replace('\\', '/'))
 
-            # Kiểm tra key trực tiếp trong dict
             for cand_key in (clean_name, stem_name, rel_name, norm_txt(raw_cname)):
                 if cand_key in video_paths_by_index:
                     cand = video_paths_by_index[cand_key]
-                    if cand and os.path.exists(cand):
-                        return cand
+                    if cand:
+                        path_from_name = cand
+                        break
 
-            # Quét các đường dẫn giá trị trong map
-            for p in video_paths_by_index.values():
-                if not isinstance(p, str):
-                    continue
-                p_norm = norm_txt(p.replace('\\', '/'))
-                p_base = norm_txt(os.path.basename(p))
-                p_stem = norm_txt(os.path.splitext(os.path.basename(p))[0])
-
-                if p_base == clean_name or p_stem == stem_name:
-                    if os.path.exists(p):
-                        return p
-                if rel_name and (p_norm.endswith(rel_name) or rel_name in p_norm):
-                    if os.path.exists(p):
-                        return p
-
-        # 2. Khớp theo clip_index (hỗ trợ số nguyên, chuỗi, hoặc text chứa số như "Clip 13", "#13")
-        if clip_index is not None:
-            if clip_index in video_paths_by_index:
-                cand = video_paths_by_index[clip_index]
-                if cand and os.path.exists(cand):
-                    return cand
-
-            # Trích xuất số nguyên từ chuỗi
-            digits = re.findall(r'\d+', str(clip_index))
-            if digits:
-                idx_int = int(digits[0])
-                for k in (idx_int, str(idx_int), idx_int - 1, str(idx_int - 1)):
-                    if k in video_paths_by_index:
-                        cand = video_paths_by_index[k]
-                        if cand and os.path.exists(cand):
-                            return cand
-
-        # 3. Fallback: Nếu clip_name chứa số thứ tự (ví dụ: "Clip 12", "Video 5")
-        if clip_name:
-            digits_name = re.findall(r'\d+', str(clip_name))
-            if digits_name:
-                idx_int = int(digits_name[0])
-                for k in (idx_int, str(idx_int)):
-                    if k in video_paths_by_index:
-                        cand = video_paths_by_index[k]
-                        if cand and os.path.exists(cand):
-                            return cand
-
-        # 4. Fallback: Fuzzy matching trên toàn bộ danh sách đường dẫn
-        if clip_name:
-            c_lower = norm_txt(os.path.basename(str(clip_name)))
-            if c_lower and len(c_lower) >= 3:
+            if not path_from_name:
                 for p in video_paths_by_index.values():
                     if not isinstance(p, str):
                         continue
                     p_base = norm_txt(os.path.basename(p))
-                    if c_lower in p_base or p_base in c_lower:
-                        if os.path.exists(p):
-                            return p
+                    p_stem = norm_txt(os.path.splitext(os.path.basename(p))[0])
+                    if p_base == clean_name or p_stem == stem_name:
+                        path_from_name = p
+                        break
 
-        # 5. Fallback cuối cùng: Tránh việc AI đặt tên lạ làm rớt sạch clip khỏi Timeline
-        existing_vids = []
-        for p in video_paths_by_index.values():
-            if isinstance(p, str) and os.path.exists(p) and p not in existing_vids:
-                existing_vids.append(p)
+        # 3. Phân xử (Resolution)
+        resolved_path: Optional[str] = None
+        if path_from_index:
+            if path_from_name and os.path.abspath(path_from_index) != os.path.abspath(path_from_name):
+                # Mâu thuẫn giữa clip_index và clip_name
+                warn = (
+                    f"Xung đột giữa clip_index={clip_index} ({os.path.basename(path_from_index)}) "
+                    f"và clip_name='{clip_name}' ({os.path.basename(path_from_name)}): Ưu tiên sử dụng clip_index."
+                )
+                warnings.append(warn)
+                logger.warning(warn)
+                if warnings_collector is not None:
+                    warnings_collector.append(warn)
+            resolved_path = path_from_index
+        elif path_from_name:
+            resolved_path = path_from_name
+        else:
+            warn = f"Không tìm thấy clip tương ứng cho clip_index={clip_index}, clip_name='{clip_name}'. Phân đoạn sẽ bị loại bỏ."
+            warnings.append(warn)
+            logger.warning(warn)
+            if warnings_collector is not None:
+                warnings_collector.append(warn)
+            resolved_path = None
 
-        if len(existing_vids) == 1:
-            return existing_vids[0]
-
-        if clip_index is not None and existing_vids:
-            try:
-                digits = re.findall(r'\d+', str(clip_index))
-                if digits:
-                    c_idx = int(digits[0])
-                    if 1 <= c_idx <= len(existing_vids):
-                        return existing_vids[c_idx - 1]
-            except Exception:
-                pass
-
-        return None
+        if return_tuple:
+            return (resolved_path, warnings)
+        return resolved_path
 
     @classmethod
     def convert_plan_to_resolve_timeline(
@@ -754,16 +835,20 @@ class StoryCopilot:
         video_paths_by_index: Dict[Any, str],
         subtitles_by_path: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         bgm_files: Optional[Sequence[str]] = None,
-        music_beats: Optional[Sequence[float]] = None
+        music_beats: Optional[Sequence[float]] = None,
+        fps: float = 30.0,
+        speed_mode: Optional[str] = None
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Chuyển đổi bản vẽ Copilot thành danh sách Events (Track 1 & Track 2), Subtitles, Markers sẵn sàng nạp lên DaVinci Resolve.
+        Sử dụng TimelineMapper để đảm bảo mọi frame và vị trí phụ đề được tính toán đồng nhất theo frame nguyên.
         
         Returns:
             Tuple[events, subtitles, markers]
         """
         from src.core.broll_sfx import GlobalAssetPool
         from src.core.autocut import get_media_metadata
+        from src.core.timeline_mapper import TimelineMapper
         asset_pool = GlobalAssetPool.get_instance()
 
         events: List[Dict[str, Any]] = []
@@ -772,161 +857,151 @@ class StoryCopilot:
 
         base_asset_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "assets"))
 
-        cursor = 0.0
+        # Xác định FPS chuẩn từ clip đầu tiên nếu có
+        real_fps = float(fps)
+        first_v = None
+        for p in video_paths_by_index.values():
+            if isinstance(p, str) and os.path.exists(p):
+                first_v = p
+                break
+        if first_v:
+            try:
+                m_fps = get_media_metadata(first_v).get("fps")
+                if m_fps and float(m_fps) > 0:
+                    real_fps = float(m_fps)
+            except Exception as e:
+                logger.debug(f"Không thể đọc fps từ {first_v}: {e}")
 
-        def add_subtitles_for_range(vpath: str, src_start: float, src_end: float, base_rec: float, speed_val: float):
-            if not subtitles_by_path:
-                return
-            clip_subs = subtitles_by_path.get(vpath) or subtitles_by_path.get(os.path.abspath(vpath)) or []
-            if not clip_subs:
-                v_base = os.path.basename(vpath).lower()
-                for k, v in subtitles_by_path.items():
-                    if os.path.basename(k).lower() == v_base:
-                        clip_subs = v
-                        break
-            for s in clip_subs:
-                s_st = float(s.get("start", 0.0))
-                s_en = float(s.get("end", 0.0))
-                if s_en > src_start and s_st < src_end:
-                    clipped_st = max(s_st, src_start)
-                    clipped_en = min(s_en, src_end)
-                    rel_st = (clipped_st - src_start) / speed_val
-                    rel_en = (clipped_en - src_start) / speed_val
-                    
-                    sub_words = []
-                    for w in s.get("words", []):
-                        w_st = float(w.get("start", s_st))
-                        w_en = float(w.get("end", s_en))
-                        if w_en > src_start and w_st < src_end:
-                            sub_words.append({
-                                "word": w.get("word", ""),
-                                "start": base_rec + (max(w_st, src_start) - src_start) / speed_val,
-                                "end": base_rec + (min(w_en, src_end) - src_start) / speed_val,
-                            })
-                    
-                    subtitles.append({
-                        "start": base_rec + rel_st,
-                        "end": base_rec + rel_en,
-                        "text": s.get("text", "").strip(),
-                        "words": sub_words,
-                        "video_path": vpath
-                    })
+        mapper = TimelineMapper(fps=real_fps, speed_mode=speed_mode)
 
-        # 1. Chèn Global Hook lên đầu Timeline nếu có
+        # 1. Nạp Global Hook vào TimelineMapper nếu có
+        hook_placed = None
         if plan.global_hook:
             h = plan.global_hook
-            vpath = cls._find_clip_path(h.clip_index, h.clip_name, video_paths_by_index)
+            vpath = cls._find_clip_path(getattr(h, "clip_id", None) or h.clip_index, h.clip_name, video_paths_by_index)
             if vpath and os.path.exists(vpath):
                 meta = get_media_metadata(vpath)
                 max_dur = meta.get("duration", 0.0) or 3600.0
-                
-                start_val = max(0.0, h.start_sec - 0.3)
-                end_val = h.end_sec + 0.3
+                st = max(0.0, float(h.start_sec))
+                en = float(h.end_sec)
                 if max_dur > 0:
-                    end_val = min(max_dur, end_val)
-
-                if start_val < end_val:
-                    dur = max(0.5, end_val - start_val)
-                    clip_base = os.path.basename(vpath)
+                    en = min(max_dur, en)
+                if en > st:
                     clean_hook_title = h.hook_title or "Intro Teaser"
-                    hook_label = f"🔥 [TEASER HOOK {dur:.0f}s] {clean_hook_title}"
-                    events.append({
-                        "video_path": vpath,
-                        "src_in": start_val,
-                        "src_out": end_val,
-                        "rec_in": cursor,
-                        "rec_out": cursor + dur,
-                        "speed": 1.0,
-                        "punch_in": h.punch_in,
-                        "punch_in_scale": 1.15,
-                        "is_hook": True,
-                        "track": 1,
-                        "clip_name": hook_label,
-                        "chapter": f"🔥 TEASER HOOK ({dur:.0f}s)",
-                        "role": "hook",
-                        "note": f"🔥 [Đoạn Hook Mở Đầu {dur:.0f}s] - Bấm C/B tại {cursor + dur:.1f}s để tách sửa: {h.reason}",
-                        "reason": h.reason
-                    })
+                    hook_placed = mapper.add_segment(
+                        clip_id=getattr(h, "clip_id", None) or f"C{h.clip_index:02d}",
+                        src_in_sec=st,
+                        src_out_sec=en,
+                        speed=1.0,
+                        role="hook",
+                        pad_sec=0.3,
+                        clip_duration_sec=max_dur,
+                        clip_name=os.path.basename(vpath),
+                        file_path=vpath,
+                        title=f"🔥 [TEASER HOOK] {clean_hook_title}"
+                    )
 
-                    markers.append({
-                        "time": cursor,
-                        "duration": dur,
-                        "name": f"🔥 [GLOBAL HOOK {dur:.0f}s] {clean_hook_title[:30]}",
-                        "color": "Magenta",
-                        "note": f"🔥 [TEASER HOOK MỞ ĐẦU {dur:.0f}s - KẾT THÚC TẠI {cursor + dur:.1f}s]: Dễ dàng nhận diện để cắt/tách hoặc dời vị trí. Lý do: {h.reason}"
-                    })
-
-                    if subtitles_by_path:
-                        add_subtitles_for_range(vpath, start_val, end_val, cursor, 1.0)
-                    elif h.hook_title:
-                        subtitles.append({
-                            "start": cursor,
-                            "end": min(cursor + dur, cursor + 5.0),
-                            "text": h.hook_title,
-                            "words": [],
-                            "video_path": vpath
-                        })
-
-                    cursor += dur
-
-        # 2. Chèn các phân đoạn theo thứ tự kịch bản (Track 1)
+        # 2. Nạp các phân đoạn kịch bản vào TimelineMapper (Track 1)
         for seg in plan.timeline_segments:
-            vpath = cls._find_clip_path(seg.clip_index, seg.clip_name, video_paths_by_index)
+            vpath = cls._find_clip_path(getattr(seg, "clip_id", None) or seg.clip_index, seg.clip_name, video_paths_by_index)
             if not vpath or not os.path.exists(vpath):
                 continue
 
             meta = get_media_metadata(vpath)
             max_dur = meta.get("duration", 0.0) or 3600.0
-            
-            start_val = max(0.0, seg.start_sec - 0.3)
-            end_val = seg.end_sec + 0.3
+            st = max(0.0, float(seg.start_sec))
+            en = float(seg.end_sec)
             if max_dur > 0:
-                end_val = min(max_dur, end_val)
-            
-            if start_val >= end_val:
+                en = min(max_dur, en)
+            if en <= st:
                 continue
 
-            dur = max(0.2, end_val - start_val)
-            rec_dur = dur / seg.speed if seg.speed > 0 else dur
+            mapper.add_segment(
+                clip_id=getattr(seg, "clip_id", None) or f"C{seg.clip_index:02d}",
+                src_in_sec=st,
+                src_out_sec=en,
+                speed=float(seg.speed or 1.0),
+                role=seg.role or "build",
+                pad_sec=0.3,
+                clip_duration_sec=max_dur,
+                clip_name=os.path.basename(vpath),
+                file_path=vpath,
+                title=seg.chapter_name or os.path.basename(vpath)
+            )
 
+        # 3. Tạo events và markers trực tiếp từ TimelineMapper (A-Roll Track 1)
+        color_map = {
+            "intro": "Blue",
+            "build": "Yellow",
+            "climax": "Red",
+            "outro": "Purple",
+            "broll": "Cyan",
+            "dialogue": "Green",
+            "hook": "Magenta"
+        }
+
+        for seg_idx, placed in enumerate(mapper.segments):
+            dur_sec = placed.rec_dur_frames / mapper.fps
+            is_hook = (placed.role == "hook")
             events.append({
-                "video_path": vpath,
-                "src_in": start_val,
-                "src_out": end_val,
-                "rec_in": cursor,
-                "rec_out": cursor + rec_dur,
-                "speed": seg.speed,
-                "punch_in": False,
+                "video_path": placed.file_path,
+                "src_in": placed.src_in_frames / mapper.fps,
+                "src_out": placed.src_out_frames / mapper.fps,
+                "rec_in": placed.rec_in_frames / mapper.fps,
+                "rec_out": placed.rec_out_frames / mapper.fps,
+                "src_in_frames": placed.src_in_frames,
+                "src_out_frames": placed.src_out_frames,
+                "src_dur_frames": placed.src_dur_frames,
+                "rec_in_frames": placed.rec_in_frames,
+                "rec_out_frames": placed.rec_out_frames,
+                "rec_dur_frames": placed.rec_dur_frames,
+                "speed": placed.applied_speed,
+                "punch_in": is_hook,
+                "punch_in_scale": 1.15 if is_hook else 1.0,
+                "is_hook": is_hook,
                 "track": 1,
-                "chapter": seg.chapter_name,
-                "role": seg.role,
-                "note": seg.note
+                "clip_name": placed.title or placed.clip_name,
+                "chapter": placed.title or placed.clip_name,
+                "role": placed.role,
+                "note": placed.title
             })
 
-            # Màu marker theo vai trò
-            color_map = {
-                "intro": "Blue",
-                "build": "Yellow",
-                "climax": "Red",
-                "outro": "Purple",
-                "broll": "Cyan",
-                "dialogue": "Green",
-                "hook": "Magenta"
-            }
-            m_color = color_map.get(seg.role.lower(), "Green")
-
+            m_time = placed.rec_in_frames / mapper.fps
+            m_dur = min(dur_sec, 2.0)
             markers.append({
-                "time": cursor,
-                "duration": min(rec_dur, 2.0),
-                "name": f"🎬 [{seg.role.upper()}] {seg.chapter_name or os.path.basename(vpath)}",
-                "color": m_color,
-                "note": seg.note
+                "time": m_time,
+                "duration": m_dur,
+                "name": f"🎬 [{placed.role.upper()}] {placed.title[:30]}",
+                "color": color_map.get(placed.role.lower(), "Green"),
+                "note": f"Phân đoạn: {placed.title}"
             })
 
-            if subtitles_by_path:
-                add_subtitles_for_range(vpath, start_val, end_val, cursor, seg.speed)
+        from src.core.timeline_mapper import TimelineMapper, add_subtitles_for_range
 
-            cursor += rec_dur
+        # 4. Trích xuất phụ đề đồng bộ 100% qua mapper.src_to_timeline_sec
+        if subtitles_by_path:
+            for seg_idx, placed in enumerate(mapper.segments):
+                vpath = placed.file_path
+                clip_subs = subtitles_by_path.get(vpath) or subtitles_by_path.get(os.path.abspath(vpath)) or []
+                if not clip_subs:
+                    v_base = os.path.basename(vpath).lower()
+                    for k, v in subtitles_by_path.items():
+                        if os.path.basename(k).lower() == v_base:
+                            clip_subs = v
+                            break
+
+                mapped_subs = add_subtitles_for_range(mapper, seg_idx, clip_subs, vpath=vpath)
+                subtitles.extend(mapped_subs)
+        elif hook_placed and plan.global_hook and plan.global_hook.hook_title:
+            subtitles.append({
+                "start": hook_placed.rec_in_frames / mapper.fps,
+                "end": min((hook_placed.rec_in_frames + hook_placed.rec_dur_frames) / mapper.fps, (hook_placed.rec_in_frames / mapper.fps) + 5.0),
+                "text": plan.global_hook.hook_title,
+                "words": [],
+                "video_path": hook_placed.file_path
+            })
+
+        cursor = mapper.get_total_duration_sec()
 
         # 3. Chèn B-Roll / Meme Inserts (Track 2) - Tự động cắt gọt đúng duration_sec
         for broll in plan.broll_inserts:
@@ -1039,3 +1114,12 @@ class StoryCopilot:
                 })
 
         return events, subtitles, markers
+
+    @classmethod
+    def add_subtitles_for_range(cls, *args, **kwargs):
+        """Hàm ánh xạ phụ đề đồng bộ qua TimelineMapper."""
+        from src.core.timeline_mapper import add_subtitles_for_range as _asr
+        return _asr(*args, **kwargs)
+
+
+add_subtitles_for_range = StoryCopilot.add_subtitles_for_range

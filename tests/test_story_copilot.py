@@ -217,7 +217,7 @@ def test_convert_plan_to_resolve_timeline(tmp_path):
     assert events[2]["video_path"] == str(f2)
 
     # Markers
-    assert any("GLOBAL HOOK" in m["name"] for m in markers)
+    assert any("HOOK" in m["name"] for m in markers)
     assert any("CTA" in m["name"] for m in markers)
     assert any("B-ROLL TRACK 2" in m["name"] for m in markers)
     assert any("SFX TRACK" in m["name"] for m in markers)

@@ -97,3 +97,59 @@ def test_collect_video_paths_with_mixed_input(tmp_path):
     assert str(f1) in videos
     assert str(f2) in videos
     assert str(f3) in videos
+
+
+def test_scan_project_folder_includes_memes_and_assets(tmp_path):
+    proj_dir = tmp_path / "Content_Project"
+    proj_dir.mkdir()
+
+    memes_dir = proj_dir / "memes"
+    memes_dir.mkdir()
+    (memes_dir / "funny.mp4").write_text("dummy")
+
+    assets_dir = proj_dir / "assets"
+    assets_dir.mkdir()
+    (assets_dir / "logo_intro.mov").write_text("dummy")
+
+    day1_dir = proj_dir / "Day1"
+    day1_dir.mkdir()
+    (day1_dir / "shot1.mp4").write_text("dummy")
+
+    structure = scan_project_folder(str(proj_dir))
+    assert structure.total_files == 3
+    assert len(structure.groups) == 3
+
+    group_names = [g.name for g in structure.groups]
+    assert "memes" in group_names
+    assert "assets" in group_names
+    assert "Day1" in group_names
+
+    memes_group = next(g for g in structure.groups if g.name == "memes")
+    assert memes_group.is_broll is True
+
+
+def test_scan_project_folder_supports_camera_extensions_and_ignores_vcs(tmp_path):
+    proj_dir = tmp_path / "Sony_Camera_Footage"
+    proj_dir.mkdir()
+
+    dcim = proj_dir / "DCIM" / "100MSDCF"
+    dcim.mkdir(parents=True)
+    (dcim / "clip1.mts").write_text("dummy")
+    (dcim / "clip2.M2TS").write_text("dummy")
+    (dcim / "clip3.ts").write_text("dummy")
+
+    # Thư mục hệ thống cần bỏ qua
+    git_dir = proj_dir / ".git"
+    git_dir.mkdir()
+    (git_dir / "corrupt.mp4").write_text("dummy")
+
+    pycache_dir = dcim / "__pycache__"
+    pycache_dir.mkdir()
+    (pycache_dir / "cached.mp4").write_text("dummy")
+
+    structure = scan_project_folder(str(proj_dir))
+    assert structure.total_files == 3
+    for f in structure.all_video_paths:
+        assert ".git" not in f
+        assert "__pycache__" not in f
+

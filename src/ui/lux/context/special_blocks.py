@@ -143,16 +143,39 @@ class CutPadsBlock(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 4, 10, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 2, 10, 2)
+        layout.setSpacing(2)
 
-        lbl = QLabel("Pad âm thanh nhanh (Phím 1–9, 0, -, = khi mở Dock)")
-        lbl.setStyleSheet("color: #71717a; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px;")
-        layout.addWidget(lbl)
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        self.btn_toggle = QPushButton("▶ Pad âm thanh nhanh (12 phím tắt SFX)")
+        self.btn_toggle.setFixedHeight(22)
+        self.btn_toggle.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_toggle.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle.setToolTip("Bấm để mở/thu gọn 12 pad âm thanh nhanh")
+        self.btn_toggle.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #a1a1aa;
+                border: none;
+                font-size: 11px;
+                font-weight: 600;
+                text-align: left;
+                padding: 0;
+            }
+            QPushButton:hover {
+                color: #38bdf8;
+            }
+        """)
+        self.btn_toggle.clicked.connect(self._toggle_collapse)
+        header_row.addWidget(self.btn_toggle)
+        header_row.addStretch(1)
+        layout.addLayout(header_row)
 
-        grid = QGridLayout()
+        self._grid_widget = QWidget()
+        grid = QGridLayout(self._grid_widget)
         grid.setSpacing(4)
-        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setContentsMargins(0, 2, 0, 2)
 
         for i, (pid, name, key) in enumerate(self.PADS):
             btn = QPushButton(f"{name}\n{key}")
@@ -180,7 +203,14 @@ class CutPadsBlock(QWidget):
             grid.addWidget(btn, row, col)
             self._buttons[pid] = btn
 
-        layout.addLayout(grid)
+        layout.addWidget(self._grid_widget)
+        self._grid_widget.setVisible(False)
+
+    def _toggle_collapse(self):
+        is_visible = not self._grid_widget.isVisible()
+        self._grid_widget.setVisible(is_visible)
+        arrow = "▼" if is_visible else "▶"
+        self.btn_toggle.setText(f"{arrow} Pad âm thanh nhanh (12 phím tắt SFX)")
 
     def trigger_pad(self, pad_id: str):
         btn = self._buttons.get(pad_id)
