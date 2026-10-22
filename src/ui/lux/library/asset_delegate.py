@@ -107,10 +107,15 @@ class AssetCardDelegate(QStyledItemDelegate):
         painter.fillRect(preview_rect, QColor("#09090b"))
 
         is_audio = category in ("sfx", "audio", "sound", "bgm", "nhac_nen")
+        is_text = category in ("text", "title", "chu", "subtitle")
 
         if is_audio:
             # Render Procedural Waveform
             self._draw_procedural_waveform(painter, preview_rect, asset_id, category)
+        elif is_text:
+            # Render Rich Text Preset Typography Preview
+            from src.ui.lux.library.text_preview_generator import draw_text_preset_preview
+            draw_text_preset_preview(painter, preview_rect, asset_id, name)
         elif pixmap and isinstance(pixmap, QPixmap) and not pixmap.isNull():
             # Draw real loaded thumbnail (scaled to cover 16:9 without stretching)
             scaled = pixmap.scaled(
@@ -123,7 +128,7 @@ class AssetCardDelegate(QStyledItemDelegate):
             painter.drawPixmap(sx, sy, scaled)
         else:
             # Fallback procedural canvas
-            self._draw_procedural_canvas(painter, preview_rect, name, category)
+            self._draw_procedural_canvas(painter, preview_rect, name, category, asset_id)
 
         painter.restore()
 
@@ -204,13 +209,15 @@ class AssetCardDelegate(QStyledItemDelegate):
             by = center_y - bh
             painter.drawRoundedRect(QRectF(bx, by, max(2.0, bar_w - 2.0), bh * 2), 1.0, 1.0)
 
-    def _draw_procedural_canvas(self, painter: QPainter, rect: QRectF, name: str, category: str):
+    def _draw_procedural_canvas(self, painter: QPainter, rect: QRectF, name: str, category: str, asset_id: str = ""):
         """Draws procedural placeholder canvas for templates without thumbnail."""
+        if category in ("text", "title", "chu", "subtitle"):
+            from src.ui.lux.library.text_preview_generator import draw_text_preset_preview
+            draw_text_preset_preview(painter, rect, asset_id, name)
+            return
+
         grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
-        if category == "text":
-            grad.setColorAt(0.0, QColor("#1e1b4b"))
-            grad.setColorAt(1.0, QColor("#0f172a"))
-        elif category in ("trans", "transition"):
+        if category in ("trans", "transition"):
             grad.setColorAt(0.0, QColor("#311042"))
             grad.setColorAt(1.0, QColor("#111827"))
         elif category in ("lut", "color"):

@@ -25,6 +25,11 @@ from src.ui.lux.library.hover_preview import SharedHoverPreview
 from src.ui.lux.library.category_nav import CategoryNavWidget
 from src.ui.lux.library.action_bar import DockActionBar
 
+from src.ui.lux.library.text_preview_generator import (
+    draw_text_preset_preview,
+    get_text_preset_pixmap,
+)
+
 __all__ = [
     "AssetListModel",
     "AssetFilterProxyModel",
@@ -34,6 +39,8 @@ __all__ = [
     "CategoryNavWidget",
     "DockActionBar",
     "create_asset_mime_data",
+    "draw_text_preset_preview",
+    "get_text_preset_pixmap",
     "IdRole",
     "NameRole",
     "KindRole",

@@ -103,22 +103,25 @@ def test_asset_model_roles_and_data(qapp, sample_raw_assets):
 
 def test_asset_model_async_thumbnail_update(qapp, sample_raw_assets):
     model = AssetListModel(sample_raw_assets)
-    idx_0 = model.index(0, 0)
-    assert model.data(idx_0, ThumbnailRole) is None
+    idx_0 = model.index(0, 0)  # Text preset: có sẵn pixmap phong cách
+    assert model.data(idx_0, ThumbnailRole) is not None
 
-    # Create dummy pixmap and deliver it via update_thumbnail
+    idx_1 = model.index(1, 0)  # Transition: chưa có thumbnail, trả về None
+    assert model.data(idx_1, ThumbnailRole) is None
+
+    # Create dummy pixmap and deliver it via update_thumbnail for tr_shake
     dummy_pix = QPixmap(100, 100)
     dummy_pix.fill(Qt.GlobalColor.magenta)
 
     data_changed_emitted = []
     model.dataChanged.connect(lambda top_left, bottom_right, roles: data_changed_emitted.append((top_left.row(), roles)))
 
-    model.update_thumbnail("t_hormozi", dummy_pix)
+    model.update_thumbnail("tr_shake", dummy_pix)
 
     assert len(data_changed_emitted) == 1
-    assert data_changed_emitted[0][0] == 0
+    assert data_changed_emitted[0][0] == 1
     assert ThumbnailRole in data_changed_emitted[0][1]
-    assert model.data(idx_0, ThumbnailRole) is not None
+    assert model.data(idx_1, ThumbnailRole) is not None
 
 
 def test_asset_filter_category_and_search(qapp, sample_raw_assets):
@@ -260,3 +263,42 @@ def test_tab_assets_virtualization_integration(qapp):
     # Inspector selection updates cleanly
     tab.asset_grid.asset_selected.emit(tab.all_presets[0])
     assert tab.selected_asset is not None
+
+
+def test_text_preset_rich_previews_and_inspector_canvas(qapp):
+    from src.ui.lux.library.text_preview_generator import (
+        draw_text_preset_preview, get_text_preset_pixmap
+    )
+    from src.ui.lux.inspector.editors import TextPresetEditor, TextPresetPreviewCanvas
+
+    # 1. Test generator functions for diverse preset types
+    preset_ids = [
+        "kinetic_hormozi", "karaoke_pop", "box_highlight", "highlighter_swipe",
+        "glow_neon", "vhs_retro", "paper_cutout", "rgb_glitch", "gradient_fill",
+        "mrbeast_impact_yellow", "luxury_gold_serif", "comic_manga_burst"
+    ]
+
+    for pid in preset_ids:
+        pix = get_text_preset_pixmap(pid, name=pid, width=320, height=180)
+        assert pix is not None
+        assert not pix.isNull()
+        assert pix.width() == 320
+        assert pix.height() == 180
+
+    # 2. Test TextPresetEditor has interactive TextPresetPreviewCanvas
+    asset = {
+        "id": "kinetic_hormozi",
+        "name": "Alex Hormozi Title",
+        "category": "text",
+        "duration": 3.0
+    }
+    editor = TextPresetEditor(asset)
+    assert hasattr(editor, "preview_canvas")
+    assert isinstance(editor.preview_canvas, TextPresetPreviewCanvas)
+    assert editor.preview_canvas.preset_id == "kinetic_hormozi"
+    assert editor.preview_canvas.custom_text == "ResolveFlow Studio"
+
+    # Typing updates custom text in preview canvas
+    editor.txt_content.setText("TIỀN ĐÂU?")
+    assert editor.preview_canvas.custom_text == "TIỀN ĐÂU?"
+

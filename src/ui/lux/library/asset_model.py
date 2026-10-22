@@ -182,6 +182,14 @@ class AssetListModel(QAbstractListModel):
         if role == ThumbnailRole:
             if asset_id in self._thumb_cache:
                 return self._thumb_cache[asset_id]
+
+            if info["category"] in ("text", "title", "chu", "subtitle"):
+                from src.ui.lux.library.text_preview_generator import get_text_preset_pixmap
+                pix = get_text_preset_pixmap(asset_id, info["name"])
+                if pix and not pix.isNull():
+                    self._thumb_cache[asset_id] = pix
+                    return pix
+
             # Request async thumbnail if file path exists
             file_p = info["file_path"]
             if file_p and file_p not in self._pending_thumb_requests:

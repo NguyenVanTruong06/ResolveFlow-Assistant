@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QSlider, QPushButton, QComboBox, QFrame
 )
-from PySide6.QtCore import Qt, Signal as pyqtSignal
+from PySide6.QtCore import Qt, QRectF, Signal as pyqtSignal
+from PySide6.QtGui import QPainter
 
 
 class SegmentedControl(QWidget):
@@ -135,6 +136,34 @@ class SafeTrackSelector(QWidget):
         return self.combo.currentData()
 
 
+class TextPresetPreviewCanvas(QFrame):
+    """Khung xem trước phong cách chữ nghệ thuật trong Inspector."""
+    def __init__(self, preset_id: str, name: str, initial_text: str = "ResolveFlow Studio", parent=None):
+        super().__init__(parent)
+        self.preset_id = preset_id
+        self.name = name
+        self.custom_text = initial_text
+        self.setFixedHeight(88)
+        self.setStyleSheet("""
+            QFrame {
+                background-color: #09090b;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+            }
+        """)
+
+    def set_text(self, text: str):
+        self.custom_text = text.strip() if text.strip() else "ResolveFlow Studio"
+        self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        rect = QRectF(4, 4, self.width() - 8, self.height() - 8)
+        from src.ui.lux.library.text_preview_generator import draw_text_preset_preview
+        draw_text_preset_preview(painter, rect, self.preset_id, self.name, self.custom_text)
+
+
 class TextPresetEditor(QWidget):
     """Parameter editor for Text+ and Title presets."""
     def __init__(self, asset: Dict[str, Any], parent: Optional[QWidget] = None):
@@ -143,6 +172,17 @@ class TextPresetEditor(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
+
+        # 0. Live visual style preview box
+        asset_id = asset.get("id", "")
+        asset_name = asset.get("name", "")
+        self.preview_canvas = TextPresetPreviewCanvas(
+            preset_id=asset_id,
+            name=asset_name,
+            initial_text="ResolveFlow Studio",
+            parent=self
+        )
+        layout.addWidget(self.preview_canvas)
 
         # 1. Content field
         row_txt = QHBoxLayout()
@@ -167,6 +207,7 @@ class TextPresetEditor(QWidget):
                 border-color: #7c3aed;
             }
         """)
+        self.txt_content.textChanged.connect(self.preview_canvas.set_text)
         row_txt.addWidget(self.txt_content, stretch=1)
         layout.addLayout(row_txt)
 
