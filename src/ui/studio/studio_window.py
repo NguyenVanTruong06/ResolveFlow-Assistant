@@ -19,6 +19,7 @@ from PySide6.QtGui import QIcon, QPainter, QColor, QPen, QBrush, QPainterPath
 
 from src.ui.theme import ThemeColors, ThemeFonts, get_application_stylesheet
 from src.ui.tabs.tab_assets import TabAssets
+from src.services.multi_screen_service import get_multi_screen_service
 
 
 class HardwareStatsSignals(QObject):
@@ -171,7 +172,7 @@ class StudioWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("ResolveFlow Studio · Xưởng & Kho Quản Lý Đạo Cụ")
+        self.setWindowTitle("ResolveFlow Studio · Kho Đạo Cụ & Xưởng Sáng Tạo")
         self.resize(1180, 760)
         self.setMinimumSize(980, 620)
         self.setStyleSheet(get_application_stylesheet())
@@ -181,6 +182,11 @@ class StudioWindow(QMainWindow):
 
         self.tab_assets = TabAssets(self)
         self._init_ui()
+
+        # Dịch vụ đa màn hình (Dual-Monitor Workflow)
+        self._multi_screen_service = get_multi_screen_service()
+        self._multi_screen_service.screens_changed.connect(lambda _: self._update_screen_button_label())
+        self._update_screen_button_label()
 
         # Timer ngầm làm mới tài nguyên phần cứng mỗi 5s
         self._stats_timer = QTimer(self)
@@ -297,6 +303,14 @@ class StudioWindow(QMainWindow):
         """)
         self.btn_switch_dock.clicked.connect(self.return_to_dock_requested.emit)
         h_layout.addWidget(self.btn_switch_dock)
+
+        # Nút chuyển đổi màn hình (Dual-Monitor Switch)
+        self.btn_switch_screen = QPushButton("🖥️ Sang Màn 2")
+        self.btn_switch_screen.setCursor(Qt.PointingHandCursor)
+        self.btn_switch_screen.setToolTip("Chuyển cửa sổ Kho Đạo Cụ sang màn hình phụ hoặc màn hình chính")
+        self.btn_switch_screen.setStyleSheet(btn_mgmt_style)
+        self.btn_switch_screen.clicked.connect(self._on_switch_screen_clicked)
+        h_layout.addWidget(self.btn_switch_screen)
 
         # 3. Thống kê phần cứng (.stats)
         stats_frame = QFrame()
@@ -449,6 +463,42 @@ class StudioWindow(QMainWindow):
         assets = getattr(self.tab_assets, "all_assets", [])
         if assets:
             self.assets_updated.emit(assets)
+
+    def _on_switch_screen_clicked(self):
+        """Chuyển đổi tức thì Kho Đạo Cụ giữa màn hình chính và màn hình phụ."""
+        svc = get_multi_screen_service()
+        if not svc.is_multi_monitor():
+            return
+
+        curr_idx = svc.get_screen_index_of_widget(self)
+        target_idx = svc.get_other_screen_index(curr_idx)
+        success = svc.move_widget_to_screen(self, target_idx)
+        if success:
+            svc.set_preferred_studio_screen(target_idx)
+            self._update_screen_button_label()
+            if hasattr(self.tab_assets, "_show_toast"):
+                self.tab_assets._show_toast(f"🖥️ Đã chuyển Kho Đạo Cụ sang Màn hình {target_idx + 1}!")
+
+    def _update_screen_button_label(self):
+        """Cập nhật nhãn và trạng thái nút chuyển màn hình theo vị trí hiện tại."""
+        if not hasattr(self, "btn_switch_screen"):
+            return
+
+        svc = get_multi_screen_service()
+        if not svc.is_multi_monitor():
+            self.btn_switch_screen.setText("🖥️ 1 Màn Hình")
+            self.btn_switch_screen.setEnabled(False)
+            self.btn_switch_screen.setToolTip("Hệ thống chỉ có 1 màn hình. Khi cắm thêm màn hình thứ 2, tính năng chuyển màn hình sẽ sẵn sàng.")
+        else:
+            self.btn_switch_screen.setEnabled(True)
+            curr_idx = svc.get_screen_index_of_widget(self)
+            target_idx = svc.get_other_screen_index(curr_idx)
+            self.btn_switch_screen.setText(f"🖥️ Sang Màn {target_idx + 1}")
+            self.btn_switch_screen.setToolTip(f"Đang ở Màn {curr_idx + 1}. Bấm để chuyển tức thì sang Màn {target_idx + 1}")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_screen_button_label()
 
     def closeEvent(self, event):
         if hasattr(self, "_stats_timer") and self._stats_timer.isActive():

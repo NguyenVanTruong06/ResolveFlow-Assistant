@@ -13,27 +13,29 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QRadioButton, QButtonGroup, QCheckBox,
-    QFrame, QGridLayout, QSlider
+    QFrame, QGridLayout, QSlider, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal as pyqtSignal, QSettings, QSize
 from src.ui.icons import get_vector_icon
 from src.ui.theme import ThemeColors
+from src.services.multi_screen_service import get_multi_screen_service
 
 
 class DockSettingsDialog(QDialog):
     """
-    Cửa sổ Cài Đặt Giao Diện & Vị Trí Thanh Dock.
+    Cửa sổ Cài Đặt Giao Diện, Vị Trí Thanh Dock & Đa Màn Hình.
     """
     dock_edge_changed = pyqtSignal(str)          # 'left' | 'right'
     auto_director_changed = pyqtSignal(bool)
     pin_default_changed = pyqtSignal(bool)
     hover_audio_changed = pyqtSignal(bool)
     hover_volume_changed = pyqtSignal(float)
+    auto_secondary_studio_changed = pyqtSignal(bool)
 
     def __init__(self, current_edge: str = "right", parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setWindowTitle("Cài Đặt Thanh Dock")
-        self.setFixedSize(480, 560)
+        self.setWindowTitle("Cài Đặt Thanh Dock & Hiển Thị")
+        self.setFixedSize(510, 640)
         self.setWindowFlags(
             Qt.WindowType.Dialog |
             Qt.WindowType.CustomizeWindowHint |
@@ -42,6 +44,7 @@ class DockSettingsDialog(QDialog):
         )
         self._current_edge = current_edge if current_edge in ("left", "right") else "right"
         self._settings = QSettings("ChunDVC", "ResolveFlow")
+        self._multi_screen_service = get_multi_screen_service()
 
         self._init_ui()
         self._load_preferences()
@@ -225,18 +228,70 @@ class DockSettingsDialog(QDialog):
         vol_layout.addWidget(self.lbl_vol_val)
         sec2_layout.addLayout(vol_layout)
 
-        layout.addWidget(sec2_frame)
+        # 4. Section 3: Cấu hình Đa Màn Hình (Dual Monitor Workflow)
+        sec3_monitor_frame = QFrame()
+        sec3_monitor_frame.setObjectName("card_frame")
+        sec3_mon_layout = QVBoxLayout(sec3_monitor_frame)
+        sec3_mon_layout.setContentsMargins(14, 12, 14, 14)
+        sec3_mon_layout.setSpacing(10)
 
-        # 4. Section 3: Phím tắt nhanh
-        sec3_frame = QFrame()
-        sec3_frame.setObjectName("card_frame")
-        sec3_layout = QVBoxLayout(sec3_frame)
-        sec3_layout.setContentsMargins(14, 12, 14, 14)
-        sec3_layout.setSpacing(8)
+        lbl_sec3_mon = QLabel("🖥️ THIẾT LẬP ĐA MÀN HÌNH (DUAL MONITOR)")
+        lbl_sec3_mon.setStyleSheet(f"font-size: 11px; font-weight: 700; color: {ThemeColors.TEXT_ACCENT}; letter-spacing: 0.5px;")
+        sec3_mon_layout.addWidget(lbl_sec3_mon)
 
-        lbl_sec3 = QLabel("⌨️ PHÍM TẮT NHANH (GLOBAL HOTKEYS)")
-        lbl_sec3.setStyleSheet(f"font-size: 11px; font-weight: 700; color: {ThemeColors.TEXT_ACCENT}; letter-spacing: 0.5px;")
-        sec3_layout.addWidget(lbl_sec3)
+        screens_info = self._multi_screen_service.get_screens_info()
+        count = len(screens_info)
+
+        if count >= 2:
+            status_text = f"✓ Phát hiện <b>{count} màn hình</b> đang hoạt động:"
+        else:
+            status_text = f"ℹ️ Phát hiện <b>1 màn hình</b> đang kết nối:"
+
+        lbl_screens_status = QLabel(status_text)
+        lbl_screens_status.setStyleSheet("font-size: 12px; color: #a1a1aa;")
+        sec3_mon_layout.addWidget(lbl_screens_status)
+
+        screens_box = QVBoxLayout()
+        screens_box.setSpacing(6)
+        for s in screens_info:
+            role_desc = "Màn hình Chính (DaVinci Resolve Timeline/Viewer)" if s["is_primary"] else "Màn hình Phụ (Kho Đạo Cụ & AI Director)"
+            badge_color = "#7c3aed" if s["is_primary"] else "#0891b2"
+            s_label = QLabel(
+                f"<span style='background:{badge_color}; color:#ffffff; padding:2px 7px; border-radius:4px; font-weight:700; font-size:10px;'>MÀN {s['index'] + 1}</span> "
+                f"<b>{s['name']}</b> ({s['width']}x{s['height']}) · <span style='color:#a1a1aa; font-size:11px;'>{role_desc}</span>"
+            )
+            s_label.setStyleSheet("font-size: 12px; color: #ededf0;")
+            screens_box.addWidget(s_label)
+        sec3_mon_layout.addLayout(screens_box)
+
+        self.chk_auto_secondary = QCheckBox("Tự động mở Kho Đạo Cụ (Studio) trên màn hình phụ (Màn 2)")
+        self.chk_auto_secondary.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.chk_auto_secondary.setEnabled(count >= 2)
+        if count < 2:
+            self.chk_auto_secondary.setToolTip("Cần kết nối tối thiểu 2 màn hình để kích hoạt tính năng này.")
+        else:
+            self.chk_auto_secondary.setToolTip("Dành trọn Màn hình 1 cho DaVinci Resolve, mở toàn màn hình Kho Đạo Cụ trên Màn hình 2")
+        self.chk_auto_secondary.toggled.connect(self._on_auto_secondary_toggled)
+        sec3_mon_layout.addWidget(self.chk_auto_secondary)
+
+        lbl_sec3_hint = QLabel(
+            "💡 Mẹo: Khi dùng 2 màn hình, bạn có thể bấm nút <b>[🖥️ Sang Màn 2]</b> "
+            "trên thanh tiêu đề Kho Đạo Cụ để chuyển qua lại tức thì."
+        )
+        lbl_sec3_hint.setStyleSheet(f"font-size: 11px; color: {ThemeColors.TEXT_MUTED};")
+        lbl_sec3_hint.setWordWrap(True)
+        sec3_mon_layout.addWidget(lbl_sec3_hint)
+
+        # 5. Section 4: Phím tắt nhanh
+        sec4_frame = QFrame()
+        sec4_frame.setObjectName("card_frame")
+        sec4_layout = QVBoxLayout(sec4_frame)
+        sec4_layout.setContentsMargins(14, 12, 14, 14)
+        sec4_layout.setSpacing(8)
+
+        lbl_sec4 = QLabel("⌨️ PHÍM TẮT NHANH (GLOBAL HOTKEYS)")
+        lbl_sec4.setStyleSheet(f"font-size: 11px; font-weight: 700; color: {ThemeColors.TEXT_ACCENT}; letter-spacing: 0.5px;")
+        sec4_layout.addWidget(lbl_sec4)
 
         grid = QGridLayout()
         grid.setSpacing(6)
@@ -264,12 +319,52 @@ class DockSettingsDialog(QDialog):
             grid.addWidget(lbl_k, row, 0)
             grid.addWidget(lbl_d, row, 1)
 
-        sec3_layout.addLayout(grid)
-        layout.addWidget(sec3_frame)
+        sec4_layout.addLayout(grid)
 
-        layout.addStretch(1)
+        # Cuộn mượt mà các Card
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background: #18181b;
+                width: 6px;
+                border-radius: 3px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #3f3f46;
+                border-radius: 3px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #71717a;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
 
-        # 5. Bottom Buttons (Reset Defaults, Close)
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setContentsMargins(0, 0, 4, 0)
+        content_layout.setSpacing(14)
+
+        content_layout.addWidget(sec1_frame)
+        content_layout.addWidget(sec2_frame)
+        content_layout.addWidget(sec3_monitor_frame)
+        content_layout.addWidget(sec4_frame)
+        content_layout.addStretch(1)
+
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll, stretch=1)
+
+        # 6. Bottom Buttons (Reset Defaults, Close)
         btn_box = QHBoxLayout()
         btn_box.setSpacing(10)
 
@@ -335,6 +430,9 @@ class DockSettingsDialog(QDialog):
         self.slider_volume.setValue(hover_vol)
         self.lbl_vol_val.setText(f"{hover_vol}%")
 
+        auto_sec = self._multi_screen_service.is_auto_open_studio_on_secondary()
+        self.chk_auto_secondary.setChecked(auto_sec)
+
     def _on_edge_radio_toggled(self):
         new_edge = "left" if self.rad_left.isChecked() else "right"
         if new_edge != self._current_edge:
@@ -360,9 +458,15 @@ class DockSettingsDialog(QDialog):
         self._settings.setValue("library/hover_audio_volume", vol_float)
         self.hover_volume_changed.emit(vol_float)
 
+    def _on_auto_secondary_toggled(self, checked: bool):
+        self._multi_screen_service.set_auto_open_studio_on_secondary(checked)
+        self.auto_secondary_studio_changed.emit(checked)
+
     def _on_reset_defaults(self):
         self.rad_right.setChecked(True)
         self.chk_auto_director.setChecked(True)
         self.chk_pin_default.setChecked(False)
         self.chk_hover_audio.setChecked(True)
         self.slider_volume.setValue(75)
+        self._multi_screen_service.set_auto_open_studio_on_secondary(True)
+        self.chk_auto_secondary.setChecked(True)

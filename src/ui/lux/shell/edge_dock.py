@@ -419,9 +419,25 @@ class EdgeDockWindow(QWidget):
     # Geometry & Boundary Clamping
     # -------------------------------------------------------------------------
     def _get_screen_rect(self) -> Tuple[int, int, int, int]:
-        screen = QApplication.primaryScreen()
-        if screen:
-            geom = screen.availableGeometry()
+        app = QApplication.instance()
+        target_screen = None
+        if app:
+            # 1. Nếu có tọa độ Resolve window anchor, lấy màn hình chứa Resolve
+            if self._anchor_rect:
+                ax, ay, aw, ah = self._anchor_rect
+                center_point = QPoint(ax + max(10, aw // 2), ay + max(10, ah // 2))
+                target_screen = app.screenAt(center_point)
+
+            # 2. Nếu không có anchor, thử tìm màn hình theo vị trí hiện tại của dock
+            if not target_screen:
+                target_screen = app.screenAt(self.geometry().center())
+
+            # 3. Fallback sang màn hình chính
+            if not target_screen:
+                target_screen = QApplication.primaryScreen()
+
+        if target_screen:
+            geom = target_screen.availableGeometry()
             return (geom.x(), geom.y(), geom.width(), geom.height())
         return (0, 0, 1920, 1080)
 
