@@ -141,4 +141,19 @@ def test_dock_settings_dialog_dual_monitor_controls(qapp):
     assert svc.is_auto_open_studio_on_secondary() is True
     assert signals_received[-1] is True
 
+    # Test dock screen selection
+    dock_scr_signals = []
+    dlg.dock_screen_changed.connect(lambda s: dock_scr_signals.append(s))
+    if hasattr(dlg, "rad_dock_scr1"):
+        dlg.rad_dock_scr1.setChecked(True)
+        assert svc.get_preferred_dock_screen() == 0
+        if dlg.rad_dock_scr2.isEnabled():
+            dlg.rad_dock_scr2.setChecked(True)
+            assert svc.get_preferred_dock_screen() == 1
+            assert dock_scr_signals[-1] == 1
+            dlg.rad_dock_scr1.setChecked(True)
+            assert svc.get_preferred_dock_screen() == 0
+            assert dock_scr_signals[-1] == 0
+
     dlg.close()
+
