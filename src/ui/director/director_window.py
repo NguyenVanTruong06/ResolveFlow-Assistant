@@ -378,7 +378,7 @@ class DirectorWindow(QMainWindow):
 
     def _on_run_ai_script(self):
         self._sync_all_pages_to_config()
-        prompt = "Hãy dựng kịch bản video dựa trên transcript hiện tại."
+        prompt = self.page_review.get_active_prompt()
         self.controller.run_ai_script(prompt)
 
     def _on_browse_bgm(self):

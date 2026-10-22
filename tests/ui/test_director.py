@@ -243,3 +243,103 @@ def test_edge_dock_open_director_and_palette_command(qapp):
     dock.close()
     dock._director_window.close()
     dock.palette.close()
+
+
+def test_review_page_three_modes_and_two_prompts(qapp):
+    from src.ui.director.pages.review_page import ReviewPage
+
+    page = ReviewPage()
+
+    # 1. Mặc định ở chế độ Web Prompt (index 0)
+    assert page.ai_stack.currentIndex() == 0
+    assert page.btn_mode_web.isChecked() is True
+    assert page.btn_mode_cloud.isChecked() is False
+    assert page.btn_mode_ollama.isChecked() is False
+
+    # 2. Chuyển sang Cloud API (index 1)
+    page.btn_mode_cloud.click()
+    assert page.ai_stack.currentIndex() == 1
+    assert page.btn_mode_cloud.isChecked() is True
+
+    # 3. Chuyển sang Local Ollama (index 2)
+    page.btn_mode_ollama.click()
+    assert page.ai_stack.currentIndex() == 2
+    assert page.btn_mode_ollama.isChecked() is True
+
+    # Quay lại Web Prompt
+    page.btn_mode_web.click()
+    assert page.ai_stack.currentIndex() == 0
+
+    # 4. Kiểm tra sinh 2 luồng prompt:
+    # Luồng 1: Prompt Dựng Video (V1)
+    video_prompt = page.get_video_prompt()
+    assert "THÔNG TIN DỰ ÁN" in video_prompt or "transcript" in video_prompt.lower()
+    assert len(video_prompt) > 50
+
+    copied_signals = []
+    page.prompt_copied.connect(copied_signals.append)
+    page.btn_copy_video_prompt.click()
+    assert "video" in copied_signals
+
+    # Luồng 2: Prompt Chữ Kinetic (V2)
+    kinetic_prompt = page.get_kinetic_prompt(aspect="9:16")
+    assert "Kinetic" in kinetic_prompt or "subtitles" in kinetic_prompt or "pages" in kinetic_prompt
+    assert len(kinetic_prompt) > 50
+
+    page.btn_copy_kinetic_prompt.click()
+    assert "kinetic" in copied_signals
+
+
+def test_review_page_json_apply_and_persistence(qapp):
+    from src.ui.director.pages.review_page import ReviewPage
+
+    page = ReviewPage()
+
+    # 1. Nhập JSON kịch bản Video Plan
+    video_json = '{"scenes": [{"title": "Mở đầu hấp dẫn", "start": 0, "end": 5}]}'
+    page.txt_json_input.setPlainText(video_json)
+    assert page.paste_zone.is_recognized is True
+
+    applied_events = []
+    page.json_applied.connect(lambda data, msg: applied_events.append((data, msg)))
+    page.btn_apply_json.click()
+
+    assert len(applied_events) == 1
+    assert applied_events[0][0]["type"] == "video_plan"
+
+    # 2. Tự nhận diện prefix API Key
+    # Gemini
+    page.txt_cloud_api_key.setText("AQ.test_gemini_key")
+    assert page.combo_cloud_provider.currentData() == "gemini"
+
+    # Claude
+    page.txt_cloud_api_key.setText("sk-ant-test_claude_key")
+    assert page.combo_cloud_provider.currentData() == "claude"
+
+    # OpenAI
+    page.txt_cloud_api_key.setText("sk-proj-test_openai_key")
+    assert page.combo_cloud_provider.currentData() == "openai"
+
+    # DeepSeek
+    page.txt_cloud_api_key.setText("sk-deepseek-key-123")
+    assert page.combo_cloud_provider.currentData() == "deepseek"
+
+    # 3. Đồng bộ với DirectorConfig
+    cfg = DirectorConfig()
+    page._switch_mode(1)  # Cloud
+    page.save_to_config(cfg)
+    assert cfg.ai_engine_mode == "cloud"
+    assert cfg.cloud_provider == "deepseek"
+    assert cfg.api_key == "sk-deepseek-key-123"
+
+    # Load ngược lại
+    cfg2 = DirectorConfig()
+    cfg2.ai_engine_mode = "ollama"
+    cfg2.ollama_model = "qwen2.5:7b"
+    cfg2.ollama_endpoint = "http://127.0.0.1:11434"
+    page.load_from_config(cfg2)
+
+    assert page.ai_stack.currentIndex() == 2
+    assert page.combo_ollama_model.currentText() == "qwen2.5:7b"
+    assert page.txt_ollama_endpoint.text() == "http://127.0.0.1:11434"
+

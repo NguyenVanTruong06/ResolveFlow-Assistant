@@ -96,6 +96,8 @@ class DirectorConfig:
     ai_engine_mode: str = "web"          # web, ollama, cloud
     cloud_provider: str = "gemini"
     api_key: Optional[str] = None
+    ollama_model: str = "llama3:latest"
+    ollama_endpoint: str = "http://localhost:11434"
     ai_script_result: Optional[str] = None
     web_prompt_pasted_data: Optional[Dict[str, Any]] = None
     web_prompt_summary: str = ""

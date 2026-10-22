@@ -154,10 +154,14 @@ class DirectorController(QObject):
 
         cfg = self.config
         mode = "ollama" if cfg.ai_engine_mode == "ollama" else "cloud"
+        model = cfg.ollama_model if mode == "ollama" else None
+        endpoint = cfg.ollama_endpoint or "http://localhost:11434"
         try:
             self.llm_worker = LLMDirectorWorker(
                 engine_mode=mode,
                 prompt=prompt,
+                model=model,
+                endpoint=endpoint,
                 api_key=cfg.api_key or "",
                 provider=cfg.cloud_provider
             )

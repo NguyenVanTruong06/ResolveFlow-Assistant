@@ -120,3 +120,16 @@ class MiniTimelineWidget(QWidget):
 
     def set_segments(self, segments: List[Tuple[str, float, str]]):
         self.bar.set_segments(segments)
+
+    def set_blocks(self, blocks: list):
+        segs = []
+        for b in blocks:
+            if isinstance(b, dict):
+                label = b.get("label", "")
+                weight = float(b.get("flex", 10.0))
+                color = b.get("color", "#22c55e")
+                segs.append((label, weight, color))
+            elif isinstance(b, (list, tuple)) and len(b) >= 3:
+                segs.append((b[0], float(b[1]), b[2]))
+        if segs:
+            self.set_segments(segs)
