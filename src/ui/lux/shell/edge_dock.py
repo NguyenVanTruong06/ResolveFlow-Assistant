@@ -231,6 +231,7 @@ class EdgeDockWindow(QWidget):
         self.header.restore_standard_window_clicked.connect(self.restore_standard_window_requested.emit)
         self.header.director_clicked.connect(self.director_requested.emit)
         self.header.settings_clicked.connect(self.open_settings)
+        self.header.audio_preview_toggled.connect(self._on_hover_audio_changed)
         self.header.pending_chip_clicked.connect(self.router.apply_pending)
         self.header.profile_lock_selected.connect(self.router.lock_profile)
         exp_layout.addWidget(self.header)
@@ -406,7 +407,13 @@ class EdgeDockWindow(QWidget):
         from .dock_settings_dialog import DockSettingsDialog
         dlg = DockSettingsDialog(current_edge=self.dock_edge, parent=self)
         dlg.dock_edge_changed.connect(self.set_dock_edge)
+        dlg.hover_audio_changed.connect(self._on_hover_audio_changed)
+        dlg.hover_volume_changed.connect(self.grid.hover_controller.set_volume)
         dlg.exec()
+
+    def _on_hover_audio_changed(self, enabled: bool):
+        self.grid.hover_controller.set_audio_preview_enabled(enabled)
+        self.header.set_audio_preview_enabled(enabled)
 
     # -------------------------------------------------------------------------
     # Geometry & Boundary Clamping

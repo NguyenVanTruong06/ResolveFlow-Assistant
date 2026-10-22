@@ -5,7 +5,7 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QPushButton, QLineEdit, QLabel, QFrame
 )
-from PySide6.QtCore import Qt, QSize, Signal as pyqtSignal
+from PySide6.QtCore import Qt, QSize, Signal as pyqtSignal, QSettings
 from PySide6.QtGui import QKeyEvent
 
 from src.ui.icons import get_vector_icon
@@ -35,7 +35,7 @@ class SearchLineEdit(QLineEdit):
 class DockHeaderWidget(QWidget):
     """
     44px Top Header Bar:
-    [ ● Edit ]  [ ⌕ Tìm: chữ, shake... ]  [ 🤖 ] [ 🎨 ] [ ⤢ ] [ 📌 ] [ » ]
+    [ ● Edit ]  [ ⌕ Tìm: chữ, shake... ]  [ 🤖 ] [ 🎨 ] [ 🔊 ] [ ⚙ ] [ ⤢ ] [ 📌 ] [ » ]
     """
     search_changed = pyqtSignal(str)
     search_submitted = pyqtSignal()
@@ -45,6 +45,7 @@ class DockHeaderWidget(QWidget):
     profile_lock_selected = pyqtSignal(str)
     director_clicked = pyqtSignal()
     settings_clicked = pyqtSignal()
+    audio_preview_toggled = pyqtSignal(bool)
     wide_toggled = pyqtSignal()
     pin_toggled = pyqtSignal()
     collapse_clicked = pyqtSignal()
@@ -173,6 +174,18 @@ class DockHeaderWidget(QWidget):
         self.btn_settings.clicked.connect(self.settings_clicked.emit)
         layout.addWidget(self.btn_settings)
 
+        # 2.7. Hover Audio toggle button (Âm thanh xem trước Meme/SFX khi lướt chuột)
+        self.btn_audio = QPushButton()
+        self.btn_audio.setIconSize(QSize(16, 16))
+        self.btn_audio.setFixedSize(28, 28)
+        self.btn_audio.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_audio.setCursor(Qt.PointingHandCursor)
+        self._settings = QSettings("ChunDVC", "ResolveFlow")
+        self._audio_enabled = self._settings.value("library/hover_audio_enabled", True, type=bool)
+        self._update_audio_button_state()
+        self.btn_audio.clicked.connect(self._on_audio_btn_clicked)
+        layout.addWidget(self.btn_audio)
+
         # 3. Wide toggle button (420px <-> 760px)
         self.btn_wide = QPushButton("⤢")
         self.btn_wide.setFixedSize(28, 28)
@@ -270,6 +283,26 @@ class DockHeaderWidget(QWidget):
 
     def set_wide(self, wide: bool):
         self.btn_wide.setStyleSheet(self._button_style(active=wide))
+
+    def _on_audio_btn_clicked(self):
+        self._audio_enabled = not self._audio_enabled
+        self._settings.setValue("library/hover_audio_enabled", self._audio_enabled)
+        self._update_audio_button_state()
+        self.audio_preview_toggled.emit(self._audio_enabled)
+
+    def set_audio_preview_enabled(self, enabled: bool):
+        self._audio_enabled = bool(enabled)
+        self._update_audio_button_state()
+
+    def _update_audio_button_state(self):
+        if self._audio_enabled:
+            self.btn_audio.setIcon(get_vector_icon("sound_on", "#a78bfa", 16))
+            self.btn_audio.setToolTip("Âm thanh khi lướt Meme / SFX: ĐANG BẬT (Bấm để tắt)")
+            self.btn_audio.setStyleSheet(self._button_style(active=True))
+        else:
+            self.btn_audio.setIcon(get_vector_icon("sound_off", "#71717a", 16))
+            self.btn_audio.setToolTip("Âm thanh khi lướt Meme / SFX: ĐANG TẮT (Bấm để bật)")
+            self.btn_audio.setStyleSheet(self._button_style(active=False))
 
     def clear_search(self):
         self.txt_search.clear()

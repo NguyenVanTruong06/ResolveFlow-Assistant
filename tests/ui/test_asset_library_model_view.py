@@ -302,3 +302,77 @@ def test_text_preset_rich_previews_and_inspector_canvas(qapp):
     editor.txt_content.setText("TIỀN ĐÂU?")
     assert editor.preview_canvas.custom_text == "TIỀN ĐÂU?"
 
+
+def test_shared_hover_preview_audio_enabled_and_controls(qapp, tmp_path):
+    from src.ui.lux.library.hover_preview import SharedHoverPreview
+    from src.ui.lux.library.asset_grid import AssetGridView
+    from src.ui.lux.shell.dock_header import DockHeaderWidget
+    from src.ui.lux.shell.dock_settings_dialog import DockSettingsDialog
+    from PySide6.QtCore import QSettings
+
+    # 1. Test SharedHoverPreview properties and persistence
+    grid = AssetGridView()
+    hover = grid.hover_controller
+    assert isinstance(hover, SharedHoverPreview)
+
+    # Hover audio is enabled by default as requested
+    hover.set_audio_preview_enabled(True)
+    assert hover.is_audio_preview_enabled is True
+
+    # Volume setting and clamping
+    hover.set_volume(0.8)
+    assert abs(hover.volume - 0.8) < 1e-4
+
+    hover.set_volume(1.5)
+    assert hover.volume == 1.0
+
+    hover.set_volume(-0.5)
+    assert hover.volume == 0.0
+
+    hover.set_volume(0.75)
+
+    # Mute toggle
+    hover.set_audio_preview_enabled(False)
+    assert hover.is_audio_preview_enabled is False
+
+    hover.set_audio_preview_enabled(True)
+    assert hover.is_audio_preview_enabled is True
+
+    # 2. Test DockHeaderWidget audio toggle button
+    header = DockHeaderWidget()
+    assert hasattr(header, "btn_audio")
+
+    toggled_states = []
+    header.audio_preview_toggled.connect(lambda s: toggled_states.append(s))
+
+    # Click toggles state
+    header._audio_enabled = True
+    header.btn_audio.click()
+    assert len(toggled_states) == 1
+    assert toggled_states[-1] is False
+    assert "ĐANG TẮT" in header.btn_audio.toolTip()
+
+    header.btn_audio.click()
+    assert len(toggled_states) == 2
+    assert toggled_states[-1] is True
+    assert "ĐANG BẬT" in header.btn_audio.toolTip()
+
+    # 3. Test DockSettingsDialog controls
+    dlg = DockSettingsDialog()
+    assert hasattr(dlg, "chk_hover_audio")
+    assert hasattr(dlg, "slider_volume")
+
+    dialog_audio_states = []
+    dialog_volume_states = []
+    dlg.hover_audio_changed.connect(lambda s: dialog_audio_states.append(s))
+    dlg.hover_volume_changed.connect(lambda v: dialog_volume_states.append(v))
+
+    dlg.chk_hover_audio.setChecked(False)
+    assert len(dialog_audio_states) >= 1
+    assert dialog_audio_states[-1] is False
+
+    dlg.slider_volume.setValue(90)
+    assert len(dialog_volume_states) >= 1
+    assert abs(dialog_volume_states[-1] - 0.90) < 1e-4
+    assert dlg.lbl_vol_val.text() == "90%"
+

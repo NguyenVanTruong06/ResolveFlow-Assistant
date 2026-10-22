@@ -229,18 +229,23 @@ def create_vector_icon(icon_type: str, color_hex: str = ThemeColors.TEXT_PRIMARY
     elif icon_type == "palette":
         # Kính lúp / Command HUD
         painter.drawEllipse(QRectF(5.5, 5.5, 9.5, 9.5))
-    elif icon_type in ("settings", "gear"):
-        # Bánh răng cài đặt (Cog / Gear)
-        import math
-        painter.drawEllipse(QRectF(8, 8, 8, 8))
-        cx, cy = 12.0, 12.0
-        for i in range(6):
-            angle = i * (math.pi / 3.0)
-            x1 = cx + 6.8 * math.cos(angle)
-            y1 = cy + 6.8 * math.sin(angle)
-            x2 = cx + 10.0 * math.cos(angle)
-            y2 = cy + 10.0 * math.sin(angle)
-            painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+    elif icon_type in ("sound_on", "audio_on", "volume_on"):
+        # Loa bật âm thanh: thân loa + phễu + sóng âm
+        from PySide6.QtGui import QPolygonF
+        horn = QPolygonF([QPointF(4, 9), QPointF(8, 9), QPointF(12, 5), QPointF(12, 19), QPointF(8, 15), QPointF(4, 15)])
+        painter.drawPolygon(horn)
+        # Sóng âm thanh
+        painter.drawArc(QRectF(13, 8, 4, 8), -60 * 16, 120 * 16)
+        painter.drawArc(QRectF(15, 5, 6, 14), -60 * 16, 120 * 16)
+
+    elif icon_type in ("sound_off", "audio_off", "volume_off", "mute"):
+        # Loa tắt âm thanh: thân loa + dấu gạch chéo
+        from PySide6.QtGui import QPolygonF
+        horn = QPolygonF([QPointF(4, 9), QPointF(8, 9), QPointF(12, 5), QPointF(12, 19), QPointF(8, 15), QPointF(4, 15)])
+        painter.drawPolygon(horn)
+        # Gạch chéo
+        painter.drawLine(QPointF(14, 8), QPointF(20, 16))
+        painter.drawLine(QPointF(20, 8), QPointF(14, 16))
 
     else:
         # Fallback: Vòng tròn chấm tâm

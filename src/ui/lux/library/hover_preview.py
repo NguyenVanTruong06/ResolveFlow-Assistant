@@ -12,12 +12,12 @@ import math
 import logging
 from typing import Optional, Any
 
-from PySide6.QtCore import Qt, QObject, QTimer, QUrl, QRect, QPoint, QEvent
+from PySide6.QtCore import Qt, QObject, QTimer, QUrl, QRect, QPoint, QEvent, QSettings
 from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QListView
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
-from src.ui.lux.library.asset_model import PreviewPathRole, CategoryRole, IdRole
+from src.ui.lux.library.asset_model import PreviewPathRole, CategoryRole, IdRole, FilePathRole
 
 logger = logging.getLogger("ResolveFlow.HoverPreview")
 
@@ -59,6 +59,7 @@ class SharedHoverPreview(QObject):
     """
     Coordinates hover preview over an AssetGridView.
     Only ONE player exists, saving memory and GPU decoders.
+    Supports video playback with audio for memes and SFX.
     """
     def __init__(self, view: QListView, parent: Optional[QObject] = None):
         super().__init__(parent or view)
@@ -67,7 +68,11 @@ class SharedHoverPreview(QObject):
 
         self._player: Optional[QMediaPlayer] = None
         self._audio_output: Optional[QAudioOutput] = None
-        self._enable_audio_preview: bool = False
+
+        self._settings = QSettings("ChunDVC", "ResolveFlow")
+        # Default to True so hovering memes/videos/SFX plays audio immediately
+        self._enable_audio_preview: bool = self._settings.value("library/hover_audio_enabled", True, type=bool)
+        self._volume: float = float(self._settings.value("library/hover_audio_volume", 0.75))
 
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -94,7 +99,8 @@ class SharedHoverPreview(QObject):
                 self._player = QMediaPlayer(self)
                 self._audio_output = QAudioOutput(self)
                 self._player.setAudioOutput(self._audio_output)
-                self._audio_output.setVolume(0.7 if self._enable_audio_preview else 0.0)
+                vol = self._volume if self._enable_audio_preview else 0.0
+                self._audio_output.setVolume(vol)
                 self._player.mediaStatusChanged.connect(self._on_media_status_changed)
             except Exception as e:
                 logger.warning("Failed to initialize QMediaPlayer: %s", e)
@@ -102,9 +108,24 @@ class SharedHoverPreview(QObject):
         return self._player
 
     def set_audio_preview_enabled(self, enabled: bool):
-        self._enable_audio_preview = enabled
+        self._enable_audio_preview = bool(enabled)
+        self._settings.setValue("library/hover_audio_enabled", self._enable_audio_preview)
         if self._audio_output:
-            self._audio_output.setVolume(0.7 if enabled else 0.0)
+            self._audio_output.setVolume(self._volume if self._enable_audio_preview else 0.0)
+
+    def set_volume(self, volume: float):
+        self._volume = max(0.0, min(1.0, float(volume)))
+        self._settings.setValue("library/hover_audio_volume", self._volume)
+        if self._audio_output and self._enable_audio_preview:
+            self._audio_output.setVolume(self._volume)
+
+    @property
+    def is_audio_preview_enabled(self) -> bool:
+        return self._enable_audio_preview
+
+    @property
+    def volume(self) -> float:
+        return self._volume
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         try:
@@ -142,21 +163,27 @@ class SharedHoverPreview(QObject):
         if not idx.isValid():
             return
 
-        preview_p = str(idx.data(PreviewPathRole) or "")
+        preview_p = str(idx.data(PreviewPathRole) or "").strip()
         category = str(idx.data(CategoryRole) or "").lower()
+
+        # Fallback to FilePathRole if preview_path is empty or not a file on disk
+        if not preview_p or not os.path.isfile(preview_p):
+            file_p = str(idx.data(FilePathRole) or "").strip()
+            if file_p and os.path.isfile(file_p):
+                preview_p = file_p
 
         if not preview_p or not os.path.isfile(preview_p):
             return
 
         ext = os.path.splitext(preview_p)[1].lower()
 
-        # Audio files
+        # Audio files (SFX, Sound, BGM)
         if ext in AUDIO_EXTS:
             if self._enable_audio_preview:
                 self._play_audio(preview_p)
             return
 
-        # Video preview files
+        # Video preview files (Memes, Overlays, Transitions, Videos)
         if ext in VIDEO_EXTS:
             self._play_video(idx, preview_p)
 
@@ -186,14 +213,17 @@ class SharedHoverPreview(QObject):
         self._current_source_file = video_path
         player.setSource(QUrl.fromLocalFile(os.path.abspath(video_path)))
         if self._audio_output:
-            self._audio_output.setVolume(0.0)  # Video previews hover muted
+            # Play meme and video audio at configured volume when audio preview is enabled
+            vol = self._volume if self._enable_audio_preview else 0.0
+            self._audio_output.setVolume(vol)
         player.play()
 
     def _play_audio(self, audio_path: str):
         player = self._ensure_player()
         if not player or not self._audio_output:
             return
-        self._audio_output.setVolume(0.7)
+        vol = self._volume if self._enable_audio_preview else 0.0
+        self._audio_output.setVolume(vol)
         player.setSource(QUrl.fromLocalFile(os.path.abspath(audio_path)))
         player.play()
 
@@ -204,12 +234,14 @@ class SharedHoverPreview(QObject):
             self._player.play()
 
     def stop(self):
-        """Immediately stops playback and hides overlay."""
+        """Immediately stops playback, silences audio, and hides overlay."""
         self._timer.stop()
         self._hovered_row = -1
         if self._player:
             try:
                 self._player.stop()
+                if self._audio_output:
+                    self._audio_output.setVolume(0.0)
             except Exception:
                 pass
         if self._overlay:

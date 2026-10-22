@@ -159,6 +159,10 @@ class AssetGridView(QListView):
     def set_insert_service(self, service: Any):
         self._insert_service = service
 
+    @property
+    def hover_controller(self) -> SharedHoverPreview:
+        return self._hover_controller
+
     def set_sample_text_getter(self, getter: Callable[[], str]):
         self._sample_text_getter = getter
 

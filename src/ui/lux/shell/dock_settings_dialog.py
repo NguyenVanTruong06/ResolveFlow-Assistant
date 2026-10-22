@@ -13,7 +13,7 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QRadioButton, QButtonGroup, QCheckBox,
-    QFrame, QGridLayout
+    QFrame, QGridLayout, QSlider
 )
 from PySide6.QtCore import Qt, Signal as pyqtSignal, QSettings, QSize
 from src.ui.icons import get_vector_icon
@@ -27,11 +27,13 @@ class DockSettingsDialog(QDialog):
     dock_edge_changed = pyqtSignal(str)          # 'left' | 'right'
     auto_director_changed = pyqtSignal(bool)
     pin_default_changed = pyqtSignal(bool)
+    hover_audio_changed = pyqtSignal(bool)
+    hover_volume_changed = pyqtSignal(float)
 
     def __init__(self, current_edge: str = "right", parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowTitle("Cài Đặt Thanh Dock")
-        self.setFixedSize(480, 520)
+        self.setFixedSize(480, 560)
         self.setWindowFlags(
             Qt.WindowType.Dialog |
             Qt.WindowType.CustomizeWindowHint |
@@ -182,6 +184,47 @@ class DockSettingsDialog(QDialog):
         self.chk_pin_default.toggled.connect(self._on_pin_default_toggled)
         sec2_layout.addWidget(self.chk_pin_default)
 
+        self.chk_hover_audio = QCheckBox("Bật âm thanh khi lướt chuột qua Meme / Video / SFX (Hover Audio)")
+        self.chk_hover_audio.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.chk_hover_audio.toggled.connect(self._on_hover_audio_toggled)
+        sec2_layout.addWidget(self.chk_hover_audio)
+
+        vol_layout = QHBoxLayout()
+        vol_layout.setSpacing(10)
+        lbl_vol_title = QLabel("Âm lượng lướt xem:")
+        lbl_vol_title.setStyleSheet(f"font-size: 12px; color: {ThemeColors.TEXT_SECONDARY};")
+        self.slider_volume = QSlider(Qt.Orientation.Horizontal)
+        self.slider_volume.setRange(0, 100)
+        self.slider_volume.setValue(75)
+        self.slider_volume.setFixedHeight(20)
+        self.slider_volume.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                height: 4px;
+                background: #27272a;
+                border-radius: 2px;
+            }}
+            QSlider::sub-page:horizontal {{
+                background: {ThemeColors.PRIMARY};
+                border-radius: 2px;
+            }}
+            QSlider::handle:horizontal {{
+                background: #ffffff;
+                width: 14px;
+                margin-top: -5px;
+                margin-bottom: -5px;
+                border-radius: 7px;
+            }}
+        """)
+        self.lbl_vol_val = QLabel("75%")
+        self.lbl_vol_val.setFixedWidth(36)
+        self.lbl_vol_val.setStyleSheet(f"font-size: 11.5px; color: {ThemeColors.TEXT_MUTED}; font-weight: 600;")
+        self.slider_volume.valueChanged.connect(self._on_volume_slider_changed)
+
+        vol_layout.addWidget(lbl_vol_title)
+        vol_layout.addWidget(self.slider_volume, stretch=1)
+        vol_layout.addWidget(self.lbl_vol_val)
+        sec2_layout.addLayout(vol_layout)
+
         layout.addWidget(sec2_frame)
 
         # 4. Section 3: Phím tắt nhanh
@@ -285,6 +328,13 @@ class DockSettingsDialog(QDialog):
         pin_def = self._settings.value("pinned_by_default", False, type=bool)
         self.chk_pin_default.setChecked(pin_def)
 
+        hover_aud = self._settings.value("library/hover_audio_enabled", True, type=bool)
+        self.chk_hover_audio.setChecked(hover_aud)
+
+        hover_vol = int(float(self._settings.value("library/hover_audio_volume", 0.75)) * 100)
+        self.slider_volume.setValue(hover_vol)
+        self.lbl_vol_val.setText(f"{hover_vol}%")
+
     def _on_edge_radio_toggled(self):
         new_edge = "left" if self.rad_left.isChecked() else "right"
         if new_edge != self._current_edge:
@@ -300,7 +350,19 @@ class DockSettingsDialog(QDialog):
         self._settings.setValue("pinned_by_default", checked)
         self.pin_default_changed.emit(checked)
 
+    def _on_hover_audio_toggled(self, checked: bool):
+        self._settings.setValue("library/hover_audio_enabled", checked)
+        self.hover_audio_changed.emit(checked)
+
+    def _on_volume_slider_changed(self, val: int):
+        self.lbl_vol_val.setText(f"{val}%")
+        vol_float = val / 100.0
+        self._settings.setValue("library/hover_audio_volume", vol_float)
+        self.hover_volume_changed.emit(vol_float)
+
     def _on_reset_defaults(self):
         self.rad_right.setChecked(True)
         self.chk_auto_director.setChecked(True)
         self.chk_pin_default.setChecked(False)
+        self.chk_hover_audio.setChecked(True)
+        self.slider_volume.setValue(75)
