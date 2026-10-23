@@ -264,13 +264,26 @@ class PackManager:
                 cat_prefix = parts[0].lower()
                 filename = parts[-1]
                 ext = Path(filename).suffix.lower()
+                lower_full_path = member.filename.lower()
+                lower_fn = filename.lower()
 
                 # Ánh xạ danh mục thông minh:
-                # 1) Nếu cat_prefix khớp danh mục chuẩn ResolveFlow
-                if cat_prefix in CATEGORY_DIR_MAP:
+                # 1) Kiểm tra tài liệu hướng dẫn / tutorial / text help
+                if any(k in lower_full_path for k in ["tutorial", "help/", "readme", "instruction", "only studio", "license"]):
+                    sub_dir = Path("docs") / "packs"
+                    cat_key = "docs"
+                # 2) Kiểm tra video/ảnh demo preview chuyển cảnh
+                elif any(k in lower_full_path for k in [
+                    "preview transition", "transitions preview", "transition preview",
+                    "transitions/preview", "transition/preview", "preview transitions"
+                ]) or ("trans" in lower_full_path and any(w in lower_fn for w in ["bounce", "spin", "pan", "zoom", "fisheye", "persp", "flight", "warp", "slide", "roll"])):
+                    sub_dir = Path("templates") / "transitions" / "previews"
+                    cat_key = "transitions"
+                # 3) Nếu cat_prefix khớp danh mục chuẩn ResolveFlow
+                elif cat_prefix in CATEGORY_DIR_MAP:
                     sub_dir = CATEGORY_DIR_MAP[cat_prefix]
                     cat_key = cat_prefix
-                # 2) Nhận diện theo định dạng tệp chuẩn DaVinci / Media:
+                # 4) Nhận diện theo định dạng tệp chuẩn DaVinci / Media:
                 elif ext in [".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac"]:
                     sub_dir = Path("sfx")
                     cat_key = "sfx"
@@ -281,24 +294,38 @@ class PackManager:
                     sub_dir = Path("luts") / "powergrades"
                     cat_key = "luts"
                 elif ext in [".drfx", ".setting"]:
-                    lower_name = member.filename.lower()
-                    if "trans" in lower_name:
+                    if "trans" in lower_full_path:
                         sub_dir = Path("templates") / "transitions"
                         cat_key = "transitions"
                     else:
                         sub_dir = Path("templates") / "titles"
                         cat_key = "titles"
                 elif ext in [".mp4", ".mov", ".webm", ".avi", ".wmv"]:
-                    lower_name = member.filename.lower()
-                    if any(k in lower_name for k in ["overlay", "light", "leak", "dust"]):
+                    if any(k in lower_full_path for k in ["overlay", "light_leak", "light leak", "dust", "film_grain"]):
                         sub_dir = Path("broll_memes") / "overlays"
                         cat_key = "overlays"
+                    elif "trans" in lower_full_path or "transition" in lower_full_path:
+                        sub_dir = Path("templates") / "transitions" / "previews"
+                        cat_key = "transitions"
                     else:
                         sub_dir = Path("broll_memes") / "memes"
                         cat_key = "memes"
                 elif ext in [".png", ".jpg", ".jpeg"]:
-                    sub_dir = Path("broll_memes") / "overlays"
-                    cat_key = "overlays"
+                    if "trans" in lower_full_path or "transition" in lower_full_path:
+                        sub_dir = Path("templates") / "transitions" / "previews"
+                        cat_key = "transitions"
+                    elif "title" in lower_full_path or "text" in lower_full_path:
+                        sub_dir = Path("templates") / "titles"
+                        cat_key = "titles"
+                    elif "lut" in lower_full_path:
+                        sub_dir = Path("luts")
+                        cat_key = "luts"
+                    elif "meme" in lower_full_path:
+                        sub_dir = Path("broll_memes") / "memes"
+                        cat_key = "memes"
+                    else:
+                        sub_dir = Path("broll_memes") / "overlays"
+                        cat_key = "overlays"
                 else:
                     sub_dir = CATEGORY_DIR_MAP.get(cat_prefix, Path("broll_memes") / "memes")
                     cat_key = cat_prefix

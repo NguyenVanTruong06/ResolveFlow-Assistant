@@ -349,18 +349,39 @@ class AssetIndexer:
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
+    @staticmethod
+    def _is_non_meme_video(filename: str, filepath: str = "") -> bool:
+        """Kiểm tra video có phải là video demo chuyển cảnh, tutorial, hay tài liệu kỹ thuật không phải meme."""
+        lower_p = (filepath or filename).lower()
+        if any(k in lower_p for k in [
+            "preview transition", "transitions/preview", "transition/preview",
+            "transitions for dr", "tutorial", "help/text", "readme", "instruction"
+        ]):
+            return True
+        fn_lower = filename.lower()
+        trans_keywords = [
+            "3d box", "pan tilt", "pan bounce", "pan hit", "pan warp", "persp ",
+            "fisheye", "camera flight", "particles flight", "dist poly", "dist plank",
+            "sh square", "shape arrow", "shape arc", "shape parall", "parallax pan",
+            "spin zoom", "whip pan", "seamless transition"
+        ]
+        if any(fn_lower.startswith(k) or f"_{k}" in fn_lower or f" - {k}" in fn_lower for k in trans_keywords):
+            return True
+        return False
+
     def scan_memes(self, force_refresh: bool = False) -> list[dict]:
         key = self._get_cache_key("memes")
         if not force_refresh and key in _GLOBAL_ASSET_CACHE:
             return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
         res = self._scan_dir(self.memes_dir, ['.mp4', '.mov'], find_thumb=True)
+        res = [item for item in res if not self._is_non_meme_video(item["name"], item.get("file_path", ""))]
         for item in res:
             item["category"] = self._detect_meme_emotion(item["name"])
 
         seen_names = {x["name"] for x in res}
         ext_memes = self._scan_external_for_category("memes", ['.mp4', '.mov', '.webm', '.mkv'], find_thumb=True)
         for item in ext_memes:
-            if item["name"] not in seen_names:
+            if not self._is_non_meme_video(item["name"], item.get("file_path", "")) and item["name"] not in seen_names:
                 seen_names.add(item["name"])
                 res.append(item)
 
@@ -378,13 +399,13 @@ class AssetIndexer:
             if not odir.exists():
                 continue
             for item in self._scan_dir(odir, ['.mp4', '.mov', '.png', '.setting'], find_thumb=True):
-                if item["name"] not in seen:
+                if not self._is_non_meme_video(item["name"], item.get("file_path", "")) and item["name"] not in seen:
                     seen.add(item["name"])
                     res.append(item)
 
         ext_ov = self._scan_external_for_category("overlays", ['.mp4', '.mov', '.png', '.setting', '.webm'], find_thumb=True)
         for item in ext_ov:
-            if item["name"] not in seen:
+            if not self._is_non_meme_video(item["name"], item.get("file_path", "")) and item["name"] not in seen:
                 seen.add(item["name"])
                 res.append(item)
 

@@ -7156,8 +7156,13 @@ class TabAssets(QWidget):
                 added_count += 1
 
             elif ext in (".mp4", ".mov"):
-                target_sub = "overlays" if self.current_rail_tab == "overlay" else "memes"
-                target_dir = PosixPathAdapter.get_asset_path("broll_memes", target_sub)
+                lower_fp = fp.lower()
+                if self.current_rail_tab == "trans" or "trans" in lower_fp:
+                    target_dir = PosixPathAdapter.get_asset_path("templates", "transitions", "previews")
+                elif self.current_rail_tab == "overlay" or any(k in lower_fp for k in ["overlay", "light", "leak", "dust"]):
+                    target_dir = PosixPathAdapter.get_asset_path("broll_memes", "overlays")
+                else:
+                    target_dir = PosixPathAdapter.get_asset_path("broll_memes", "memes")
                 target_dir.mkdir(parents=True, exist_ok=True)
                 dest_local = str(target_dir / fname)
                 shutil.copy2(fp, dest_local)
