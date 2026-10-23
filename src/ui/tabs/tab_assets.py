@@ -3195,7 +3195,8 @@ class TabAssets(QWidget):
         self.headless = headless
 
         # Dữ liệu nạp sẵn (tận dụng Singleton Cache của AssetIndexer)
-        indexer = AssetIndexer()
+        self.indexer = AssetIndexer()
+        indexer = self.indexer
         
         # Helper to convert dicts to StudioAsset
         def dicts_to_assets(dicts, tab, category, sub, badge):
@@ -3325,7 +3326,8 @@ class TabAssets(QWidget):
             ("meme", "🎭\nMeme"),
             ("sfx", "🔊\nÂm thanh"),
             ("bgm", "🎵\nNhạc nền"),
-            ("fav", "❤️\nCủa tôi")
+            ("fav", "❤️\nCủa tôi"),
+            ("hub", "☁️\nKho Online")
         ]
 
         self.rail_btns = {}
@@ -3555,6 +3557,28 @@ class TabAssets(QWidget):
             }}
         """)
         mh_layout.addWidget(self.btn_import_assets)
+
+        # Nút mở Kho Online & Nối thư mục máy tính
+        self.btn_open_asset_hub = QPushButton("☁️ Kho Online & Nối Thư Mục")
+        self.btn_open_asset_hub.setToolTip("Mở Kho Gói Đám Mây Tuyển Chọn và Quản lý các thư mục ổ cứng ngoài")
+        self.btn_open_asset_hub.setCursor(Qt.PointingHandCursor)
+        self.btn_open_asset_hub.clicked.connect(lambda: self._filter_by_rail("hub"))
+        self.btn_open_asset_hub.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid #7c3aed;
+                border-radius: 6px;
+                padding: 5px 12px;
+                color: #c4b5fd;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                border-color: #8b5cf6;
+                background: rgba(124, 58, 237, 0.25);
+            }}
+        """)
+        mh_layout.addWidget(self.btn_open_asset_hub)
 
         self.txt_search = QLineEdit()
         self.txt_search.setPlaceholderText("🔍 Tìm kiếm đạo cụ...")
@@ -4550,8 +4574,18 @@ class TabAssets(QWidget):
         self.assets_splitter.setCollapsible(1, False)
         self.assets_splitter.setCollapsible(2, True)
 
+        from PySide6.QtWidgets import QStackedWidget
+        from src.ui.tabs.tab_asset_hub import AssetHubWidget
+
+        self.asset_hub_widget = AssetHubWidget(indexer=self.indexer, parent=self)
+        self.asset_hub_widget.assets_changed.connect(self._rescan_assets)
+
+        self.content_stack = QStackedWidget()
+        self.content_stack.addWidget(self.assets_splitter)   # Index 0: 4-column browser
+        self.content_stack.addWidget(self.asset_hub_widget)  # Index 1: Asset Hub
+
         main_layout.addWidget(self.rail)
-        main_layout.addWidget(self.assets_splitter, stretch=1)
+        main_layout.addWidget(self.content_stack, stretch=1)
 
     def _toggle_cats_visibility(self):
         visible = not self.cats.isVisible()
@@ -4627,6 +4661,14 @@ class TabAssets(QWidget):
         self.current_rail_tab = tab_id
         for tid, btn in self.rail_btns.items():
             btn.setChecked(tid == tab_id)
+
+        if tab_id == "hub":
+            if hasattr(self, "content_stack"):
+                self.content_stack.setCurrentIndex(1)
+            return
+
+        if hasattr(self, "content_stack"):
+            self.content_stack.setCurrentIndex(0)
 
         # Cập nhật danh mục con ở Cột 2
         self._rebuild_categories_column()

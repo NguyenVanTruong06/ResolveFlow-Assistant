@@ -128,6 +128,7 @@ class EdgeDockWindow(QWidget):
             self.dock_edge = "right"
 
         self._init_ui()
+        self.setAcceptDrops(True)
         self.setStyleSheet(get_luxury_dark_stylesheet())
         self.header.set_dock_edge(self.dock_edge)
 
@@ -883,6 +884,37 @@ class EdgeDockWindow(QWidget):
             return
 
         super().keyPressEvent(event)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                fn = url.toLocalFile().lower()
+                if fn.endswith(".rfpack") or fn.endswith(".zip"):
+                    event.acceptProposedAction()
+                    return
+        super().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        for url in event.mimeData().urls():
+            fn = url.toLocalFile()
+            if fn.lower().endswith(".rfpack") or fn.lower().endswith(".zip"):
+                from src.core.pack_manager import PackManager
+                from src.core.asset_indexer import AssetIndexer
+                from src.ui.lux.feedback.toast import ChunDVCToast
+                try:
+                    counts = PackManager.install_pack(fn)
+                    AssetIndexer.clear_cache()
+                    total = sum(counts.values())
+                    if not hasattr(self, "_toast") or self._toast is None:
+                        self._toast = ChunDVCToast(self)
+                    self._toast.show_success(f"Đã cài {total} đạo cụ từ {os.path.basename(fn)}!", timecode="")
+                except Exception as e:
+                    if not hasattr(self, "_toast") or self._toast is None:
+                        self._toast = ChunDVCToast(self)
+                    self._toast.show_error(f"Lỗi cài đặt pack: {e}")
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
 
     def closeEvent(self, event):
         if hasattr(self, "window_anchor") and self.window_anchor:
