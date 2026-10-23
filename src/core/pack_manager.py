@@ -58,6 +58,90 @@ CATEGORY_DIR_MAP = {
 class PackManager:
     """Bộ máy quản lý đóng gói & cài đặt gói tài nguyên ResolveFlow."""
 
+    INSTALLED_PACKS_FILE = Path("data") / "installed_packs.json"
+
+    @classmethod
+    def get_installed_packs(cls) -> Dict[str, Any]:
+        """Lấy danh sách các gói đã cài đặt trên máy từ data/installed_packs.json."""
+        if not cls.INSTALLED_PACKS_FILE.exists():
+            return {}
+        try:
+            with open(cls.INSTALLED_PACKS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    @classmethod
+    def is_pack_installed(cls, pack_id: str) -> bool:
+        """Kiểm tra một gói đã cài đặt vào máy hay chưa."""
+        installed = cls.get_installed_packs()
+        return pack_id in installed
+
+    @classmethod
+    def record_installed_pack(
+        cls,
+        manifest_or_id: Any,
+        folder_name: Optional[str] = None,
+        installed_paths: Optional[List[str]] = None
+    ) -> None:
+        """Ghi nhận một gói đã cài đặt thành công vào hệ thống."""
+        installed = cls.get_installed_packs()
+        if isinstance(manifest_or_id, PackManifest):
+            pack_id = manifest_or_id.id
+            entry = {
+                "id": pack_id,
+                "name": manifest_or_id.name,
+                "version": manifest_or_id.version,
+                "author": manifest_or_id.author,
+                "folder_name": folder_name or manifest_or_id.name,
+                "installed_paths": installed_paths or [],
+                "installed_at": datetime.datetime.now().isoformat()
+            }
+        else:
+            pack_id = str(manifest_or_id)
+            entry = {
+                "id": pack_id,
+                "name": folder_name or pack_id,
+                "version": "1.0.0",
+                "folder_name": folder_name or pack_id,
+                "installed_paths": installed_paths or [],
+                "installed_at": datetime.datetime.now().isoformat()
+            }
+        installed[pack_id] = entry
+        cls.INSTALLED_PACKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(cls.INSTALLED_PACKS_FILE, "w", encoding="utf-8") as f:
+                json.dump(installed, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    @classmethod
+    def uninstall_pack(cls, pack_id: str) -> bool:
+        """Gỡ bỏ toàn bộ tệp và thư mục của một gói đã cài đặt."""
+        installed = cls.get_installed_packs()
+        if pack_id not in installed:
+            return False
+        entry = installed[pack_id]
+        paths = entry.get("installed_paths", [])
+        for p in paths:
+            try:
+                p_obj = Path(p)
+                if p_obj.is_file():
+                    p_obj.unlink()
+                # Thử xóa thư mục cha nếu trống
+                parent_dir = p_obj.parent
+                if parent_dir.is_dir() and not any(parent_dir.iterdir()):
+                    parent_dir.rmdir()
+            except Exception:
+                pass
+        del installed[pack_id]
+        try:
+            with open(cls.INSTALLED_PACKS_FILE, "w", encoding="utf-8") as f:
+                json.dump(installed, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+        return True
+
     @staticmethod
     def create_pack(
         output_path: str,
@@ -118,12 +202,20 @@ class PackManager:
             manifest_dict = json.loads(manifest_bytes.decode("utf-8"))
             return PackManifest.model_validate(manifest_dict)
 
-    @staticmethod
-    def install_pack(pack_path: str, target_base_dir: str = "assets") -> Dict[str, int]:
+    @classmethod
+    def install_pack(
+        cls,
+        pack_path: str,
+        target_base_dir: str = "assets",
+        pack_manifest: Optional[PackManifest] = None,
+        isolate_pack_folder: bool = True
+    ) -> Dict[str, int]:
         """
         Giải nén và cài đặt gói .rfpack vào thư mục tài nguyên của ResolveFlow.
+        Tự động phân nhóm theo thư mục con riêng biệt của từng gói để chống lẫn lộn.
         Có cơ chế bảo vệ chống Zip-Slip (Path Traversal).
         """
+        import re
         pack = Path(pack_path)
         if not pack.is_file():
             raise FileNotFoundError(f"Không tìm thấy gói cài đặt: {pack_path}")
@@ -131,7 +223,18 @@ class PackManager:
         base_dest = Path(target_base_dir).resolve()
         base_dest.mkdir(parents=True, exist_ok=True)
 
+        manifest = pack_manifest
+        if manifest is None:
+            try:
+                manifest = cls.inspect_pack(pack_path)
+            except Exception:
+                manifest = None
+
+        pack_name = manifest.name if manifest else pack.stem
+        safe_pack_folder = re.sub(r'[\\/*?:"<>|]', "", pack_name).strip() if isolate_pack_folder else ""
+
         installed_counts: Dict[str, int] = {}
+        all_installed_files: List[str] = []
 
         with zipfile.ZipFile(pack, "r") as zf:
             # 1. Quét kiểm tra an toàn toàn bộ file trước khi giải nén (Anti Zip-Slip)
@@ -149,7 +252,7 @@ class PackManager:
                 except ValueError:
                     raise SecurityError(f"Đường dẫn vượt ngoài thư mục đích: {member.filename}")
 
-            # 2. Tiến hành giải nén an toàn theo danh mục
+            # 2. Tiến hành giải nén an toàn theo danh mục vào thư mục con riêng của gói
             for member in zf.infolist():
                 if member.is_dir() or member.filename == "manifest.json":
                     continue
@@ -200,9 +303,13 @@ class PackManager:
                     sub_dir = CATEGORY_DIR_MAP.get(cat_prefix, Path("broll_memes") / "memes")
                     cat_key = cat_prefix
 
-                dest_dir = base_dest / sub_dir
-                dest_dir.mkdir(parents=True, exist_ok=True)
+                # Phân lập thư mục theo gói
+                if safe_pack_folder:
+                    dest_dir = base_dest / sub_dir / safe_pack_folder
+                else:
+                    dest_dir = base_dest / sub_dir
 
+                dest_dir.mkdir(parents=True, exist_ok=True)
                 dest_file = dest_dir / filename
 
                 # Ghi nội dung tệp
@@ -210,6 +317,14 @@ class PackManager:
                     dst_file.write(src_file.read())
 
                 installed_counts[cat_key] = installed_counts.get(cat_key, 0) + 1
+                all_installed_files.append(str(dest_file))
+
+        # Ghi nhận trạng thái gói đã cài
+        cls.record_installed_pack(
+            manifest_or_id=manifest if manifest else pack.stem,
+            folder_name=safe_pack_folder or pack.stem,
+            installed_paths=all_installed_files
+        )
 
         return installed_counts
 

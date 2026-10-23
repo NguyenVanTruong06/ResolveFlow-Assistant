@@ -121,11 +121,28 @@ class CloudPackCard(QFrame):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
+        from src.core.pack_manager import PackManager
+        self.is_installed = PackManager.is_pack_installed(manifest.id)
+
         # Header: Tên gói & tác giả
         h_row = QHBoxLayout()
         lbl_title = QLabel(f"📦 {manifest.name}")
         lbl_title.setStyleSheet("color: #f4f4f5; font-size: 13px; font-weight: bold;")
         h_row.addWidget(lbl_title, stretch=1)
+
+        self.lbl_installed_badge = QLabel("✔ ĐÃ CÀI ĐẶT")
+        self.lbl_installed_badge.setStyleSheet("""
+            background-color: #064e3b;
+            color: #34d399;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #10b981;
+        """)
+        h_row.addWidget(self.lbl_installed_badge)
+        if not self.is_installed:
+            self.lbl_installed_badge.hide()
 
         size_str = f"{manifest.size_mb:.1f} MB" if manifest.size_mb else "Cloud"
         lbl_size = QLabel(f"{size_str} · {manifest.item_count} items")
@@ -168,33 +185,61 @@ class CloudPackCard(QFrame):
         lbl_author.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 10.5px;")
         act_row.addWidget(lbl_author, stretch=1)
 
-        self.btn_download = QPushButton(" Tải & Cài Đặt (1-Click)")
-        self.btn_download.setIcon(get_vector_icon("download", "#ffffff", 14))
-        self.btn_download.setIconSize(QSize(14, 14))
+        self.btn_download = QPushButton()
         self.btn_download.setFixedHeight(28)
         self.btn_download.setCursor(Qt.PointingHandCursor)
-        self.btn_download.setStyleSheet(f"""
-            QPushButton {{
-                background: {ThemeColors.PRIMARY};
-                color: #ffffff;
-                font-size: 11.5px;
-                font-weight: 600;
-                border: 1px solid {ThemeColors.PRIMARY_HOVER};
-                border-radius: 6px;
-                padding: 0 10px;
-            }}
-            QPushButton:hover {{
-                background: {ThemeColors.PRIMARY_HOVER};
-            }}
-            QPushButton:disabled {{
-                background: {ThemeColors.BG_INPUT};
-                color: {ThemeColors.TEXT_MUTED};
-                border-color: {ThemeColors.BORDER_DEFAULT};
-            }}
-        """)
+        self._update_download_button_state()
         self.btn_download.clicked.connect(lambda: self.install_requested.emit(self.manifest))
         act_row.addWidget(self.btn_download)
         layout.addLayout(act_row)
+
+    def _update_download_button_state(self):
+        if self.is_installed:
+            self.lbl_installed_badge.show()
+            self.btn_download.setText(" ✔ Đã Cài Đặt (Cài Lại)")
+            self.btn_download.setIcon(get_vector_icon("check", "#34d399", 14))
+            self.btn_download.setStyleSheet(f"""
+                QPushButton {{
+                    background: {ThemeColors.BG_CARD};
+                    color: #d1d5db;
+                    font-size: 11.5px;
+                    font-weight: 600;
+                    border: 1px solid #10b981;
+                    border-radius: 6px;
+                    padding: 0 10px;
+                }}
+                QPushButton:hover {{
+                    background: {ThemeColors.BG_INPUT};
+                    color: #ffffff;
+                }}
+            """)
+        else:
+            self.lbl_installed_badge.hide()
+            self.btn_download.setText(" Tải & Cài Đặt (1-Click)")
+            self.btn_download.setIcon(get_vector_icon("download", "#ffffff", 14))
+            self.btn_download.setStyleSheet(f"""
+                QPushButton {{
+                    background: {ThemeColors.PRIMARY};
+                    color: #ffffff;
+                    font-size: 11.5px;
+                    font-weight: 600;
+                    border: 1px solid {ThemeColors.PRIMARY_HOVER};
+                    border-radius: 6px;
+                    padding: 0 10px;
+                }}
+                QPushButton:hover {{
+                    background: {ThemeColors.PRIMARY_HOVER};
+                }}
+                QPushButton:disabled {{
+                    background: {ThemeColors.BG_INPUT};
+                    color: {ThemeColors.TEXT_MUTED};
+                    border-color: {ThemeColors.BORDER_DEFAULT};
+                }}
+            """)
+
+    def set_installed(self, installed: bool = True):
+        self.is_installed = installed
+        self._update_download_button_state()
 
     def set_downloading(self, percent: float, message: str):
         self.prog_bar.show()
@@ -210,8 +255,8 @@ class CloudPackCard(QFrame):
         if success:
             self.lbl_status.setStyleSheet("color: #34d399; font-size: 11px;")
             self.lbl_status.setText(f"✓ {message}")
-            self.btn_download.setText("✓ Đã cài đặt")
-            self.btn_download.setEnabled(False)
+            self.set_installed(True)
+            self.btn_download.setEnabled(True)
         else:
             self.lbl_status.setStyleSheet("color: #f87171; font-size: 11px;")
             self.lbl_status.setText(f"✕ {message}")

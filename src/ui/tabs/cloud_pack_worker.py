@@ -51,7 +51,9 @@ class CloudPackInstallWorker(QThread):
                 self.progress_signal.emit(50.0, "Đang giải nén và phân loại tài nguyên...")
                 counts = PackManager.install_pack(
                     self.direct_file_path,
-                    target_base_dir=self.target_assets_dir
+                    target_base_dir=self.target_assets_dir,
+                    pack_manifest=self.pack_manifest,
+                    isolate_pack_folder=True
                 )
                 self.progress_signal.emit(100.0, "Hoàn tất cài đặt!")
                 self.finished_signal.emit(True, "Cài đặt gói tài nguyên thành công!", counts)
@@ -100,7 +102,9 @@ class CloudPackInstallWorker(QThread):
             if zipfile_is_valid(downloaded_target):
                 counts = PackManager.install_pack(
                     downloaded_target,
-                    target_base_dir=self.target_assets_dir
+                    target_base_dir=self.target_assets_dir,
+                    pack_manifest=self.pack_manifest,
+                    isolate_pack_folder=True
                 )
             else:
                 counts = {"custom": 1}

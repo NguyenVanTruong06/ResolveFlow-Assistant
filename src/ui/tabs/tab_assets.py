@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QLineEdit, QPushButton, QCheckBox, QGroupBox, QFormLayout,
     QSlider, QFrame, QScrollArea, QGridLayout, QApplication, QMessageBox,
-    QSizePolicy, QFileDialog, QColorDialog, QSplitter, QStackedWidget
+    QSizePolicy, QFileDialog, QColorDialog, QSplitter, QStackedWidget,
+    QInputDialog, QMenu
 )
 from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF, QPoint, QEvent
 from PySide6.QtGui import (
@@ -35,6 +36,8 @@ from src.core.text_preset import TextStylePreset, BUILTIN_PRESETS, FusionSetting
 from src.core.transition_preset import TransitionStylePreset, BUILTIN_TRANSITIONS, TransitionMacroGenerator
 from src.core.resolve_api import ResolveAutomation
 from src.core.asset_indexer import AssetIndexer
+from src.core.pack_manager import PackManager
+from src.core.collections_manager import CollectionsManager
 from src.core.contextual_suggester import ContextualSuggester, SuggestedAsset
 from src.utils.path_utils import PosixPathAdapter
 
@@ -124,13 +127,15 @@ class StudioAsset:
         svg_path: str = "",
         native_preset: Any = None,
         file_path: str = "",
-        thumbnail_path: str = ""
+        thumbnail_path: str = "",
+        pack_name: str = ""
     ):
         self.id = id
         self.name = name
         self.tab = tab
         self.category = category
-        self.sub = sub
+        self.pack_name = pack_name
+        self.sub = pack_name if (pack_name and pack_name != "Mặc định") else sub
         self.badge_icon = badge_icon
         self.pal = pal or []
         self.duration = duration
@@ -3203,8 +3208,10 @@ class TabAssets(QWidget):
             return [
                 StudioAsset(
                     id=d["id"], name=d["name"], tab=tab, category=d.get("category", category),
-                    sub=sub, badge_icon=badge, file_path=d.get("file_path", ""),
-                    thumbnail_path=d.get("thumbnail_path", "")
+                    sub=d.get("sub_category") or d.get("pack_name") or sub, badge_icon=badge,
+                    file_path=d.get("file_path", ""),
+                    thumbnail_path=d.get("thumbnail_path", ""),
+                    pack_name=d.get("pack_name", "")
                 ) for d in dicts
             ]
         
@@ -3985,6 +3992,39 @@ class TabAssets(QWidget):
         self.insp_vbox.addWidget(self.lbl_insp_title)
         self.insp_vbox.addWidget(self.lbl_insp_sub)
 
+        # Cụm Thao tác Bộ sưu tập
+        coll_row = QHBoxLayout()
+        coll_row.setContentsMargins(0, 2, 0, 2)
+        coll_row.setSpacing(6)
+
+        self.btn_insp_collection = QPushButton("📁 + Bộ sưu tập")
+        self.btn_insp_collection.setCursor(Qt.PointingHandCursor)
+        self.btn_insp_collection.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                color: #a5b4fc;
+                font-size: 11px;
+                padding: 4px 8px;
+            }}
+            QPushButton:hover {{
+                border-color: #6366f1;
+                background-color: {ThemeColors.BG_CARD_ACTIVE};
+                color: #ffffff;
+            }}
+        """)
+        self.btn_insp_collection.clicked.connect(self._show_asset_collections_popup)
+        coll_row.addWidget(self.btn_insp_collection)
+
+        self.lbl_insp_collections = QLabel("")
+        self.lbl_insp_collections.setWordWrap(True)
+        self.lbl_insp_collections.setStyleSheet("font-size: 11px; color: #818cf8; font-weight: bold;")
+        self.lbl_insp_collections.hide()
+        coll_row.addWidget(self.lbl_insp_collections, 1)
+
+        self.insp_vbox.addLayout(coll_row)
+
         # 3. Kéo thả Master Box
         self.preview_lbl = DraggableAssetLabel()
         self.preview_lbl.setFixedHeight(44)
@@ -4679,10 +4719,126 @@ class TabAssets(QWidget):
         # Dọn sạch các nút cũ
         while self.cats_vbox.count():
             item = self.cats_vbox.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            w = item.widget()
+            if w:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
 
         tab = self.current_rail_tab
+
+        # 1. Trường hợp Tab "Của tôi / Yêu thích" (Custom Collections)
+        if tab == "fav":
+            self.lbl_cats_head.setText("Bộ sưu tập & Đã lưu")
+
+            # A. Nút tất cả yêu thích
+            fav_count = len(self.favorites)
+            btn_fav_all = QPushButton(f"  ⭐ Tất cả yêu thích ({fav_count})")
+            btn_fav_all.setProperty("sub_cat_id", "all")
+            btn_fav_all.setCheckable(True)
+            btn_fav_all.setFixedHeight(32)
+            btn_fav_all.setCursor(Qt.PointingHandCursor)
+            btn_fav_all.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: none;
+                    border-radius: 6px;
+                    color: {ThemeColors.TEXT_MUTED};
+                    font-size: 12px;
+                    text-align: left;
+                    padding-left: 6px;
+                }}
+                QPushButton:hover {{
+                    background: {ThemeColors.BG_CARD};
+                    color: {ThemeColors.TEXT_PRIMARY};
+                }}
+                QPushButton:checked {{
+                    background: {ThemeColors.BG_CARD_ACTIVE};
+                    color: #fbbf24;
+                    font-weight: bold;
+                }}
+            """)
+            btn_fav_all.clicked.connect(lambda: self._on_sub_category_clicked("all"))
+            self.cats_vbox.addWidget(btn_fav_all)
+
+            # B. Tiêu đề mục: BỘ SƯU TẬP CỦA TÔI
+            lbl_coll_hdr = QLabel("📁 BỘ SƯU TẬP CỦA TÔI")
+            lbl_coll_hdr.setStyleSheet(f"""
+                font-size: 10px;
+                font-weight: bold;
+                letter-spacing: 0.5px;
+                color: #a5b4fc;
+                padding-top: 10px;
+                padding-bottom: 2px;
+                padding-left: 6px;
+            """)
+            self.cats_vbox.addWidget(lbl_coll_hdr)
+
+            # C. Danh sách các bộ sưu tập tùy chỉnh
+            colls = CollectionsManager.get_collection_names()
+            for cname in colls:
+                items_in_coll = CollectionsManager.get_collection_assets(cname)
+                btn_c = QPushButton(f"  📁 {cname} ({len(items_in_coll)})")
+                btn_c.setProperty("sub_cat_id", f"coll:{cname}")
+                btn_c.setCheckable(True)
+                btn_c.setFixedHeight(32)
+                btn_c.setCursor(Qt.PointingHandCursor)
+                btn_c.setContextMenuPolicy(Qt.CustomContextMenu)
+                btn_c.customContextMenuRequested.connect(lambda pos, name=cname, b=btn_c: self._show_collection_context_menu(pos, name, b))
+                btn_c.setStyleSheet(f"""
+                    QPushButton {{
+                        background: transparent;
+                        border: none;
+                        border-radius: 6px;
+                        color: {ThemeColors.TEXT_MUTED};
+                        font-size: 12px;
+                        text-align: left;
+                        padding-left: 6px;
+                    }}
+                    QPushButton:hover {{
+                        background: {ThemeColors.BG_CARD};
+                        color: {ThemeColors.TEXT_PRIMARY};
+                    }}
+                    QPushButton:checked {{
+                        background: {ThemeColors.BG_CARD_ACTIVE};
+                        color: #818cf8;
+                        font-weight: bold;
+                    }}
+                """)
+                btn_c.clicked.connect(lambda _, x=f"coll:{cname}": self._on_sub_category_clicked(x))
+                self.cats_vbox.addWidget(btn_c)
+
+            # D. Nút Tạo Bộ Sưu Tập Mới
+            btn_new_coll = QPushButton("  ➕ Tạo Bộ Sưu Tập...")
+            btn_new_coll.setFixedHeight(30)
+            btn_new_coll.setCursor(Qt.PointingHandCursor)
+            btn_new_coll.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: 1px dashed {ThemeColors.BORDER_DEFAULT};
+                    border-radius: 6px;
+                    color: {ThemeColors.TEXT_MUTED};
+                    font-size: 11px;
+                    text-align: left;
+                    padding-left: 8px;
+                    margin-top: 6px;
+                }}
+                QPushButton:hover {{
+                    border-color: #6366f1;
+                    color: #a5b4fc;
+                    background: {ThemeColors.BG_CARD};
+                }}
+            """)
+            btn_new_coll.clicked.connect(self._prompt_create_collection)
+            self.cats_vbox.addWidget(btn_new_coll)
+
+            self.cats_vbox.addStretch()
+            # Kích hoạt trạng thái đang chọn hoặc mặc định 'all'
+            active_target = self.current_sub_cat if (self.current_sub_cat.startswith("coll:") or self.current_sub_cat == "all") else "all"
+            self._on_sub_category_clicked(active_target)
+            return
+
+        # 2. Trường hợp các Tab thông thường (text, lut, trans, icon, overlay, meme, sfx, bgm)
         headers_map = {
             "text": "Mẫu chữ Text+",
             "lut": "Bộ lọc màu LUT",
@@ -4692,11 +4848,10 @@ class TabAssets(QWidget):
             "meme": "Meme thịnh hành",
             "sfx": "Âm thanh SFX",
             "bgm": "🎵 Nhạc Nền (BGM)",
-            "fav": "Mẫu đã lưu"
         }
         self.lbl_cats_head.setText(headers_map.get(tab, "Danh mục"))
 
-        # Xác định nhóm con
+        # Xác định nhóm con mặc định
         sub_cats = [("all", "Tất cả")]
         if tab == "text":
             sub_cats.extend([
@@ -4758,6 +4913,7 @@ class TabAssets(QWidget):
 
         for cid, cname in sub_cats:
             btn = QPushButton(f"  {cname}")
+            btn.setProperty("sub_cat_id", cid)
             btn.setCheckable(True)
             btn.setFixedHeight(32)
             btn.setCursor(Qt.PointingHandCursor)
@@ -4784,13 +4940,117 @@ class TabAssets(QWidget):
             btn.clicked.connect(lambda _, x=cid: self._on_sub_category_clicked(x))
             self.cats_vbox.addWidget(btn)
 
+        # Quét các gói cài đặt (Packs) cho danh mục này
+        discovered_packs = []
+        seen = set()
+        for a in self.all_assets:
+            a_tab = "text" if isinstance(a, TextStylePreset) else "trans" if isinstance(a, TransitionStylePreset) else getattr(a, "tab", "")
+            if a_tab == tab:
+                p_name = getattr(a, "pack_name", None) or (a.get("pack_name") if isinstance(a, dict) else "")
+                if p_name and p_name not in ("Mặc định", "all", "") and p_name not in seen:
+                    seen.add(p_name)
+                    discovered_packs.append(p_name)
+
+        # Ghi nhận thêm từ PackManager
+        for pack_id, p_info in PackManager.get_installed_packs().items():
+            if not isinstance(p_info, dict):
+                continue
+            p_cat = (p_info.get("category") or "").lower()
+            p_name = p_info.get("name") or p_info.get("folder_name") or pack_id
+            cat_match = (
+                (tab == "lut" and p_cat in ("luts", "lut", "mau", "color")) or
+                (tab == "sfx" and p_cat in ("sfx", "sound", "am_thanh")) or
+                (tab == "trans" and p_cat in ("trans", "transition", "chuyen_canh")) or
+                (tab == "text" and p_cat in ("text", "title", "chu")) or
+                (tab == "meme" and p_cat in ("meme", "memes")) or
+                (tab == "overlay" and p_cat in ("overlay", "overlays")) or
+                (tab == "bgm" and p_cat in ("bgm", "music", "nhac_nen"))
+            )
+            if cat_match and p_name not in seen:
+                seen.add(p_name)
+                discovered_packs.append(p_name)
+
+        if discovered_packs:
+            lbl_packs_hdr = QLabel("📦 CÁC GÓI ĐÃ CÀI")
+            lbl_packs_hdr.setStyleSheet(f"""
+                font-size: 10px;
+                font-weight: bold;
+                letter-spacing: 0.5px;
+                color: {ThemeColors.CYAN_HI};
+                padding-top: 10px;
+                padding-bottom: 2px;
+                padding-left: 6px;
+            """)
+            self.cats_vbox.addWidget(lbl_packs_hdr)
+
+            for p_name in discovered_packs:
+                count = sum(1 for a in self.all_assets if (getattr(a, "pack_name", "") == p_name or (isinstance(a, dict) and a.get("pack_name") == p_name)))
+                cnt_str = f" ({count})" if count > 0 else ""
+                btn_pack = QPushButton(f"  📦 {p_name}{cnt_str}")
+                btn_pack.setProperty("sub_cat_id", f"pack:{p_name}")
+                btn_pack.setCheckable(True)
+                btn_pack.setFixedHeight(32)
+                btn_pack.setCursor(Qt.PointingHandCursor)
+                btn_pack.setStyleSheet(f"""
+                    QPushButton {{
+                        background: transparent;
+                        border: none;
+                        border-radius: 6px;
+                        color: {ThemeColors.TEXT_MUTED};
+                        font-size: 12px;
+                        text-align: left;
+                        padding-left: 6px;
+                    }}
+                    QPushButton:hover {{
+                        background: {ThemeColors.BG_CARD};
+                        color: {ThemeColors.TEXT_PRIMARY};
+                    }}
+                    QPushButton:checked {{
+                        background: {ThemeColors.BG_CARD_ACTIVE};
+                        color: {ThemeColors.CYAN_HI};
+                        font-weight: bold;
+                    }}
+                """)
+                btn_pack.clicked.connect(lambda _, x=f"pack:{p_name}": self._on_sub_category_clicked(x))
+                self.cats_vbox.addWidget(btn_pack)
+
         self.cats_vbox.addStretch()
-        self.current_sub_cat = "all"
-        # Bật nút 'Tất cả'
-        if self.cats_vbox.count() > 1:
-            first_btn = self.cats_vbox.itemAt(0).widget()
-            if isinstance(first_btn, QPushButton):
-                first_btn.setChecked(True)
+        active_target = self.current_sub_cat if (self.current_sub_cat.startswith("pack:") or any(cid == self.current_sub_cat for cid, _ in sub_cats)) else "all"
+        self._on_sub_category_clicked(active_target)
+
+    def _show_collection_context_menu(self, pos, name: str, btn: QPushButton):
+        menu = QMenu(self)
+        act_rename = menu.addAction("✏️ Đổi tên bộ sưu tập...")
+        act_delete = menu.addAction("🗑️ Xóa bộ sưu tập...")
+        action = menu.exec(btn.mapToGlobal(pos))
+        if action == act_rename:
+            new_name, ok = QInputDialog.getText(self, "Đổi tên bộ sưu tập", "Tên mới:", text=name)
+            if ok and new_name.strip() and new_name.strip() != name:
+                CollectionsManager.rename_collection(name, new_name.strip())
+                self._rebuild_categories_column()
+                self._on_sub_category_clicked(f"coll:{new_name.strip()}")
+        elif action == act_delete:
+            confirm = QMessageBox.question(
+                self, "Xóa bộ sưu tập",
+                f"Bạn có chắc muốn xóa bộ sưu tập '{name}' không?\n(Các tài nguyên bên trong sẽ không bị xóa khỏi máy)",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if confirm == QMessageBox.Yes:
+                CollectionsManager.delete_collection(name)
+                self._rebuild_categories_column()
+                self._on_sub_category_clicked("all")
+
+    def _prompt_create_collection(self):
+        name, ok = QInputDialog.getText(self, "Tạo bộ sưu tập mới", "Nhập tên bộ sưu tập (VD: Vlog Du Lịch, TikTok Trend...):")
+        if ok and name.strip():
+            clean = name.strip()
+            success = CollectionsManager.create_collection(clean)
+            if success:
+                self._rebuild_categories_column()
+                self._on_sub_category_clicked(f"coll:{clean}")
+                self._show_toast(f"✅ Đã tạo bộ sưu tập '{clean}'!")
+            else:
+                self._show_toast(f"⚠️ Bộ sưu tập '{clean}' đã tồn tại hoặc không hợp lệ!")
 
     def _on_sub_category_clicked(self, cid: str):
         self.current_sub_cat = cid
@@ -4798,7 +5058,8 @@ class TabAssets(QWidget):
             item = self.cats_vbox.itemAt(i)
             if item and isinstance(item.widget(), QPushButton):
                 btn = item.widget()
-                btn.setChecked(btn.text().strip() in cid or (cid == "all" and "Tất cả" in btn.text()))
+                btn_cid = btn.property("sub_cat_id")
+                btn.setChecked(btn_cid == cid or (cid in ("all", "fav:all") and btn_cid in ("all", "fav:all")))
         self._refresh_grid()
 
     def _on_category_pill_clicked(self, category_id: str):
@@ -4895,28 +5156,42 @@ class TabAssets(QWidget):
                 continue
 
             if tab == "fav":
-                if not i_fav:
+                if cat.startswith("coll:"):
+                    cname = cat[5:]
+                    coll_assets = set(CollectionsManager.get_collection_assets(cname))
+                    if i_id not in coll_assets:
+                        card.setVisible(False)
+                        continue
+                elif not i_fav:
                     card.setVisible(False)
                     continue
             elif i_tab != tab:
                 card.setVisible(False)
                 continue
 
-            if cat != "all":
-                cat_aliases = {
-                    "chuyen_canh": ["chuyen_canh", "trans"],
-                    "hai_huoc": ["hai_huoc", "fun"],
-                    "diem_nhan": ["diem_nhan", "accent"],
-                    "cong_nghe": ["cong_nghe", "tech"],
-                    "vietnam_viral": ["vietnam_viral", "trending"],
-                    "reaction": ["reaction"],
-                    "cham_hoi": ["cham_hoi"],
-                    "cay_cu": ["cay_cu"],
-                }
-                allowed = cat_aliases.get(cat, [cat])
-                if i_cat not in allowed and cat not in i_cat:
-                    card.setVisible(False)
-                    continue
+            if cat not in ("all", "fav:all", "Tất cả") and not cat.startswith("coll:"):
+                if cat.startswith("pack:"):
+                    target_pack = cat[5:]
+                    i_pack = getattr(item, "pack_name", "") or (item.get("pack_name") if isinstance(item, dict) else "")
+                    i_sub = getattr(item, "sub", "") or (item.get("sub") if isinstance(item, dict) else "")
+                    if i_pack != target_pack and i_sub != target_pack:
+                        card.setVisible(False)
+                        continue
+                else:
+                    cat_aliases = {
+                        "chuyen_canh": ["chuyen_canh", "trans"],
+                        "hai_huoc": ["hai_huoc", "fun"],
+                        "diem_nhan": ["diem_nhan", "accent"],
+                        "cong_nghe": ["cong_nghe", "tech"],
+                        "vietnam_viral": ["vietnam_viral", "trending"],
+                        "reaction": ["reaction"],
+                        "cham_hoi": ["cham_hoi"],
+                        "cay_cu": ["cay_cu"],
+                    }
+                    allowed = cat_aliases.get(cat, [cat])
+                    if i_cat not in allowed and cat not in i_cat:
+                        card.setVisible(False)
+                        continue
 
             if query:
                 from src.core.motion_analyzer import matches_query
@@ -5408,8 +5683,10 @@ class TabAssets(QWidget):
             return [
                 StudioAsset(
                     id=d["id"], name=d["name"], tab=tab, category=d.get("category", category),
-                    sub=sub, badge_icon=badge, file_path=d.get("file_path", ""),
-                    thumbnail_path=d.get("thumbnail_path", "")
+                    sub=d.get("sub_category") or d.get("pack_name") or sub, badge_icon=badge,
+                    file_path=d.get("file_path", ""),
+                    thumbnail_path=d.get("thumbnail_path", ""),
+                    pack_name=d.get("pack_name", "")
                 ) for d in dicts
             ]
         scanned_titles = indexer.scan_titles()
@@ -5459,6 +5736,7 @@ class TabAssets(QWidget):
             self._on_context_sentence_analyzed()
 
         self._populate_cards()
+        self._rebuild_categories_column()
         self._refresh_grid()
         self._show_toast("✅ Đã quét và cập nhật lại toàn bộ kho tài nguyên!")
 
@@ -5564,6 +5842,56 @@ class TabAssets(QWidget):
     def _on_inspector_sfx_playback_finished(self):
         self._stop_inspector_sfx_play()
 
+    def _show_asset_collections_popup(self):
+        if not self.selected_asset:
+            return
+        aid = getattr(self.selected_asset, "id", "") or (self.selected_asset.get("id") if isinstance(self.selected_asset, dict) else "")
+        if not aid:
+            return
+
+        menu = QMenu(self)
+        colls = CollectionsManager.get_collection_names()
+        current_colls = set(CollectionsManager.get_asset_collections(aid))
+
+        if colls:
+            for cname in colls:
+                in_coll = cname in current_colls
+                mark = "✔ " if in_coll else "   "
+                act = menu.addAction(f"{mark}📁 {cname}")
+                act.setData((cname, in_coll))
+            menu.addSeparator()
+
+        act_new = menu.addAction("➕ Tạo bộ sưu tập mới...")
+
+        pos = self.btn_insp_collection.mapToGlobal(QPoint(0, self.btn_insp_collection.height()))
+        selected_act = menu.exec(pos)
+        if not selected_act:
+            return
+
+        if selected_act == act_new:
+            name, ok = QInputDialog.getText(self, "Tạo bộ sưu tập mới", "Nhập tên bộ sưu tập:")
+            if ok and name.strip():
+                cname = name.strip()
+                CollectionsManager.create_collection(cname)
+                CollectionsManager.add_asset_to_collection(cname, aid)
+                self._update_inspector_details()
+                if self.current_rail_tab == "fav":
+                    self._rebuild_categories_column()
+                    self._refresh_grid()
+                self._show_toast(f"✅ Đã thêm vào bộ sưu tập '{cname}'!")
+        elif selected_act.data():
+            cname, in_coll = selected_act.data()
+            if in_coll:
+                CollectionsManager.remove_asset_from_collection(cname, aid)
+                self._show_toast(f"Đã bỏ khỏi bộ sưu tập '{cname}'")
+            else:
+                CollectionsManager.add_asset_to_collection(cname, aid)
+                self._show_toast(f"✅ Đã thêm vào bộ sưu tập '{cname}'!")
+            self._update_inspector_details()
+            if self.current_rail_tab == "fav":
+                self._rebuild_categories_column()
+                self._refresh_grid()
+
     def _update_inspector_details(self):
         if not self.selected_asset:
             return
@@ -5571,7 +5899,22 @@ class TabAssets(QWidget):
         name = getattr(self.selected_asset, "name", "")
         self.lbl_insp_title.setText(f"<b>{name}</b>")
         sub = getattr(self.selected_asset, "sub", "") or getattr(self.selected_asset, "description", "")
-        self.lbl_insp_sub.setText(sub)
+        pack_name = getattr(self.selected_asset, "pack_name", "") or (self.selected_asset.get("pack_name") if isinstance(self.selected_asset, dict) else "")
+        if pack_name and pack_name != "Mặc định":
+            sub_text = f"📦 {pack_name} · {sub}" if sub and sub != pack_name else f"📦 {pack_name}"
+            self.lbl_insp_sub.setText(sub_text)
+        else:
+            self.lbl_insp_sub.setText(sub)
+
+        aid = getattr(self.selected_asset, "id", "") or (self.selected_asset.get("id") if isinstance(self.selected_asset, dict) else "")
+        if hasattr(self, "lbl_insp_collections"):
+            asset_colls = CollectionsManager.get_asset_collections(aid)
+            if asset_colls:
+                self.lbl_insp_collections.setText(" ".join([f"[{c}]" for c in asset_colls]))
+                self.lbl_insp_collections.show()
+            else:
+                self.lbl_insp_collections.setText("")
+                self.lbl_insp_collections.hide()
 
         is_text = isinstance(self.selected_asset, TextStylePreset) or getattr(self.selected_asset, "tab", "") == "text"
         is_lut = getattr(self.selected_asset, "tab", "") == "lut"
@@ -6818,6 +7161,7 @@ class TabAssets(QWidget):
                     found += 1
 
         self._populate_cards()
+        self._rebuild_categories_column()
         self._refresh_grid()
         QMessageBox.information(self, "Quét hoàn tất", f"Đã nạp thành công {found} tài nguyên cá nhân vào Kho Đạo Cụ!")
 

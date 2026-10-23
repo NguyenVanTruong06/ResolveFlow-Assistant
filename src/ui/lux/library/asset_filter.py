@@ -11,8 +11,9 @@ from typing import Optional, List, Dict, Set, Any
 
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QModelIndex
 from src.ui.lux.library.asset_model import (
-    IdRole, CategoryRole, SubCategoryRole, IsFavRole, NameRole
+    IdRole, CategoryRole, SubCategoryRole, IsFavRole, NameRole, PackNameRole
 )
+from src.core.collections_manager import CollectionsManager
 from src.services.search_index import SearchIndex
 
 logger = logging.getLogger("ResolveFlow.AssetFilter")
@@ -112,6 +113,7 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
         is_fav = bool(src_model.data(idx, IsFavRole))
         cat = str(src_model.data(idx, CategoryRole) or "").lower()
         sub = str(src_model.data(idx, SubCategoryRole) or "")
+        pack = str(src_model.data(idx, PackNameRole) or "")
 
         # 1. Search Query Filter
         if self._search_query:
@@ -124,11 +126,19 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
                 if self._search_query.lower() not in name:
                     return False
 
-        # 2. Filter Mode (all / fav / recent)
-        if self._filter_mode == "fav" and not is_fav:
-            return False
-        if self._filter_mode == "recent" and asset_id not in self._recent_ids:
-            return False
+        # 2. Filter Mode (all / fav / recent) & Favorites/Custom Collections
+        if self._category == "fav" or self._filter_mode == "fav":
+            if self._sub_category and self._sub_category.startswith("coll:"):
+                coll_name = self._sub_category[5:]
+                coll_assets = set(CollectionsManager.get_collection_assets(coll_name))
+                if asset_id not in coll_assets:
+                    return False
+            else:
+                if not is_fav:
+                    return False
+        elif self._filter_mode == "recent":
+            if asset_id not in self._recent_ids:
+                return False
 
         # 3. Category Filter
         if self._category and self._category not in ("all", "fav", "recent"):
@@ -150,10 +160,15 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
             if cat not in allowed and self._category not in cat:
                 return False
 
-        # 4. Sub-category Filter
-        if self._sub_category and self._sub_category not in ("all", "Tất cả"):
-            if sub != self._sub_category:
-                return False
+        # 4. Sub-category & Pack Filter
+        if self._sub_category and self._sub_category not in ("all", "Tất cả", "fav:all"):
+            if self._sub_category.startswith("pack:"):
+                target_pack = self._sub_category[5:]
+                if pack != target_pack and sub != target_pack:
+                    return False
+            elif self._category != "fav":
+                if sub != self._sub_category and pack != self._sub_category:
+                    return False
 
         return True
 

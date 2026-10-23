@@ -154,6 +154,12 @@ class AssetIndexer:
             if not file_path.is_file():
                 continue
             if file_path.suffix.lower() in target_exts:
+                try:
+                    rel_parts = file_path.relative_to(directory).parts
+                    pack_name = rel_parts[0] if len(rel_parts) > 1 else "Mặc định"
+                except Exception:
+                    pack_name = "Mặc định"
+
                 item = {
                     "id": self._generate_id(file_path),
                     "name": file_path.stem,
@@ -161,7 +167,9 @@ class AssetIndexer:
                     "path": str(file_path),
                     "thumbnail_path": None,
                     "is_external": False,
-                    "source_folder": str(directory)
+                    "source_folder": str(directory),
+                    "pack_name": pack_name,
+                    "sub_category": pack_name,
                 }
                 if find_thumb:
                     item["thumbnail_path"] = self._find_thumbnail(file_path)

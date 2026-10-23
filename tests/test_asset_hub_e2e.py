@@ -70,5 +70,5 @@ def test_asset_hub_full_lifecycle(tmp_path: Path, qapp):
     counts = PackManager.install_pack(str(pack_file), target_base_dir=str(fresh_lib))
     assert counts.get("meme") == 1
     assert counts.get("sfx") == 1
-    assert (fresh_lib / "broll_memes" / "memes" / "pewpew_reaction.mp4").exists()
-    assert (fresh_lib / "sfx" / "whoosh_cinema.wav").exists()
+    assert (fresh_lib / "broll_memes" / "memes" / "Exported Test Pack" / "pewpew_reaction.mp4").exists()
+    assert (fresh_lib / "sfx" / "Exported Test Pack" / "whoosh_cinema.wav").exists()

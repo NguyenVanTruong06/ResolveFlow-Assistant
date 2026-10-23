@@ -40,7 +40,7 @@ def test_cloud_pack_worker_local_install(tmp_path: Path):
     ok, msg, counts = finished_result[0]
     assert ok is True
     assert counts.get("meme") == 1
-    assert (target_lib / "broll_memes" / "memes" / "funny.mp4").exists()
+    assert (target_lib / "broll_memes" / "memes" / "Test Cloud Pack" / "funny.mp4").exists()
 
 
 def test_cloud_pack_worker_cancellation(tmp_path: Path):

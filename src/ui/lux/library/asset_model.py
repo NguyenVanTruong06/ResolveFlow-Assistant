@@ -30,6 +30,7 @@ AssetObjRole = Qt.ItemDataRole.UserRole + 10
 MotionRole = Qt.ItemDataRole.UserRole + 11
 FilePathRole = Qt.ItemDataRole.UserRole + 12
 TagsRole = Qt.ItemDataRole.UserRole + 13
+PackNameRole = Qt.ItemDataRole.UserRole + 14
 
 
 def extract_asset_info(item: Any) -> Dict[str, Any]:
@@ -38,7 +39,10 @@ def extract_asset_info(item: Any) -> Dict[str, Any]:
         asset_id = str(item.get("id") or item.get("name") or "")
         name = str(item.get("name") or asset_id)
         cat = str(item.get("tab") or item.get("category") or "text").lower()
+        pack_name = str(item.get("pack_name") or "")
         sub = str(item.get("sub") or item.get("sub_category") or (item.get("category") if item.get("tab") else "Tất cả"))
+        if pack_name and pack_name != "Mặc định":
+            sub = pack_name
         dur = float(item.get("duration") or item.get("dur") or 0.0)
         file_path = str(item.get("file_path") or item.get("path") or "")
         preview_path = str(item.get("preview_path") or file_path)
@@ -47,6 +51,7 @@ def extract_asset_info(item: Any) -> Dict[str, Any]:
     else:
         asset_id = str(getattr(item, "id", "") or getattr(item, "name", ""))
         name = str(getattr(item, "name", "") or asset_id)
+        pack_name = str(getattr(item, "pack_name", "") or "")
         type_name = type(item).__name__
         if type_name == "TextStylePreset":
             cat = "text"
@@ -60,6 +65,8 @@ def extract_asset_info(item: Any) -> Dict[str, Any]:
         else:
             cat = str(getattr(item, "category", "text")).lower()
             sub = str(getattr(item, "sub", "") or getattr(item, "sub_category", "Tất cả"))
+        if pack_name and pack_name != "Mặc định":
+            sub = pack_name
 
         dur = float(getattr(item, "duration", 0.0) or getattr(item, "dur", 0.0))
         file_path = str(getattr(item, "file_path", "") or getattr(item, "path", ""))
@@ -97,6 +104,7 @@ def extract_asset_info(item: Any) -> Dict[str, Any]:
         "motion": motion,
         "tags": tags,
         "kind": kind,
+        "pack_name": pack_name,
         "obj": item
     }
 
@@ -172,6 +180,9 @@ class AssetListModel(QAbstractListModel):
 
         if role == TagsRole:
             return info["tags"]
+
+        if role == PackNameRole:
+            return info.get("pack_name", "")
 
         if role == AssetObjRole:
             return info["obj"]

@@ -77,9 +77,10 @@ def test_install_pack(tmp_path: Path):
     assert installed_counts.get("meme") == 1
     assert installed_counts.get("titles") == 1
 
-    # Verify extracted paths match ResolveFlow asset layout
-    assert (target_lib / "broll_memes" / "memes" / "funny.mp4").exists()
-    assert (target_lib / "templates" / "titles" / "kinetic.setting").exists()
+    # Verify extracted paths match ResolveFlow asset layout inside the isolated pack folder
+    assert (target_lib / "broll_memes" / "memes" / "Combo Pack" / "funny.mp4").exists()
+    assert (target_lib / "templates" / "titles" / "Combo Pack" / "kinetic.setting").exists()
+    assert PackManager.is_pack_installed("combo_pack") is True
 
 
 def test_zip_slip_prevention(tmp_path: Path):
