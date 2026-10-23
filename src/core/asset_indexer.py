@@ -19,7 +19,8 @@ class AssetIndexer:
             resolved_base = str(self.base_dir)
         return f"{resolved_base}_{category}"
 
-    def __init__(self, base_dir: str = "assets"):
+    def __init__(self, base_dir: str = "assets", settings_scope: str = "ResolveFlow"):
+        self.settings_scope = settings_scope
         self.base_dir = Path(base_dir)
         if (self.base_dir / "assets").is_dir():
             target_base = self.base_dir / "assets"
@@ -51,6 +52,53 @@ class AssetIndexer:
         ]
 
         self.ensure_dirs()
+
+    def get_linked_folders(self) -> List[str]:
+        """Lấy danh sách các thư mục ngoài đang được kết nối từ QSettings."""
+        from PySide6.QtCore import QSettings
+        settings = QSettings("ChunDVC", self.settings_scope)
+        raw = settings.value("library/linked_folders", [])
+        if isinstance(raw, str):
+            raw = [raw] if raw else []
+        elif not isinstance(raw, list):
+            raw = []
+        valid = []
+        for p in raw:
+            p_obj = Path(p)
+            if p_obj.is_dir():
+                norm = str(p_obj.resolve())
+                if norm not in valid:
+                    valid.append(norm)
+        return valid
+
+    def add_linked_folder(self, folder_path: str) -> bool:
+        """Thêm một thư mục máy tính ngoài vào danh sách quét."""
+        p = Path(folder_path).resolve()
+        if not p.is_dir():
+            return False
+        from PySide6.QtCore import QSettings
+        settings = QSettings("ChunDVC", self.settings_scope)
+        current = self.get_linked_folders()
+        norm = str(p)
+        if norm not in current:
+            current.append(norm)
+            settings.setValue("library/linked_folders", current)
+            self.clear_cache()
+            return True
+        return False
+
+    def remove_linked_folder(self, folder_path: str) -> bool:
+        """Gỡ bỏ thư mục máy tính ngoài khỏi danh sách quét."""
+        norm = str(Path(folder_path).resolve())
+        from PySide6.QtCore import QSettings
+        settings = QSettings("ChunDVC", self.settings_scope)
+        current = self.get_linked_folders()
+        if norm in current:
+            current.remove(norm)
+            settings.setValue("library/linked_folders", current)
+            self.clear_cache()
+            return True
+        return False
 
     def ensure_dirs(self):
         self.sfx_dir.mkdir(parents=True, exist_ok=True)
@@ -110,10 +158,30 @@ class AssetIndexer:
                     "id": self._generate_id(file_path),
                     "name": file_path.stem,
                     "file_path": str(file_path),
-                    "thumbnail_path": None
+                    "path": str(file_path),
+                    "thumbnail_path": None,
+                    "is_external": False,
+                    "source_folder": str(directory)
                 }
                 if find_thumb:
                     item["thumbnail_path"] = self._find_thumbnail(file_path)
+                results.append(item)
+        return results
+
+    def _scan_external_for_category(self, category: str, extensions: list[str], find_thumb: bool = False) -> list[dict]:
+        results = []
+        for ext_folder_str in self.get_linked_folders():
+            ext_dir = Path(ext_folder_str)
+            if not ext_dir.is_dir():
+                continue
+            for item in self._scan_dir(ext_dir, extensions, find_thumb=find_thumb):
+                item["is_external"] = True
+                item["source_folder"] = ext_folder_str
+                if category == "sfx":
+                    parent_hint = Path(item["file_path"]).parent.name
+                    item["category"] = self._detect_sfx_emotion(item["name"], parent_hint)
+                elif category == "memes":
+                    item["category"] = self._detect_meme_emotion(item["name"])
                 results.append(item)
         return results
 
@@ -248,6 +316,14 @@ class AssetIndexer:
                 item["category"] = self._detect_sfx_emotion(item["name"], parent_hint)
                 res.append(item)
 
+        # Quét bổ sung từ các thư mục máy tính ngoài được liên kết
+        ext_sfx = self._scan_external_for_category("sfx", ['.wav', '.mp3', '.ogg', '.flac', '.m4a', '.aac'])
+        for item in ext_sfx:
+            base_name = item["name"]
+            if base_name not in seen_names:
+                seen_names.add(base_name)
+                res.append(item)
+
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
@@ -256,6 +332,12 @@ class AssetIndexer:
         if not force_refresh and key in _GLOBAL_ASSET_CACHE:
             return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
         res = self._scan_dir(self.luts_dir, ['.cube'])
+        seen_names = {x["name"] for x in res}
+        ext_luts = self._scan_external_for_category("luts", ['.cube'])
+        for item in ext_luts:
+            if item["name"] not in seen_names:
+                seen_names.add(item["name"])
+                res.append(item)
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
@@ -266,6 +348,14 @@ class AssetIndexer:
         res = self._scan_dir(self.memes_dir, ['.mp4', '.mov'], find_thumb=True)
         for item in res:
             item["category"] = self._detect_meme_emotion(item["name"])
+
+        seen_names = {x["name"] for x in res}
+        ext_memes = self._scan_external_for_category("memes", ['.mp4', '.mov', '.webm', '.mkv'], find_thumb=True)
+        for item in ext_memes:
+            if item["name"] not in seen_names:
+                seen_names.add(item["name"])
+                res.append(item)
+
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
@@ -283,6 +373,13 @@ class AssetIndexer:
                 if item["name"] not in seen:
                     seen.add(item["name"])
                     res.append(item)
+
+        ext_ov = self._scan_external_for_category("overlays", ['.mp4', '.mov', '.png', '.setting', '.webm'], find_thumb=True)
+        for item in ext_ov:
+            if item["name"] not in seen:
+                seen.add(item["name"])
+                res.append(item)
+
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
@@ -300,6 +397,13 @@ class AssetIndexer:
                 if item["name"] not in seen:
                     seen.add(item["name"])
                     res.append(item)
+
+        ext_titles = self._scan_external_for_category("titles", ['.setting'], find_thumb=True)
+        for item in ext_titles:
+            if item["name"] not in seen:
+                seen.add(item["name"])
+                res.append(item)
+
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
@@ -317,6 +421,13 @@ class AssetIndexer:
                 if item["name"] not in seen:
                     seen.add(item["name"])
                     res.append(item)
+
+        ext_trans = self._scan_external_for_category("transitions", ['.setting'], find_thumb=True)
+        for item in ext_trans:
+            if item["name"] not in seen:
+                seen.add(item["name"])
+                res.append(item)
+
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
