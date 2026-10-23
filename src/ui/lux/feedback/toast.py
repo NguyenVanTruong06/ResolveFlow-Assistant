@@ -170,6 +170,75 @@ class ChunDVCToast(QWidget):
 
         self._popup()
 
+    def show_message(
+        self,
+        message: str,
+        icon: str = "✓",
+        level: str = "success",
+        duration_ms: int = 4000,
+        action_label: Optional[str] = None,
+        action_callback: Optional[Callable] = None,
+    ):
+        """Displays generic toast with custom message, icon, and styling."""
+        self._insert_result = None
+        self._undo_callback = action_callback
+
+        self.lbl_icon.setText(icon)
+        self.lbl_msg.setText(message)
+
+        if level == "error":
+            self.lbl_icon.setStyleSheet("color: #f87171; font-weight: bold; font-size: 13px;")
+            self.lbl_msg.setStyleSheet("color: #fca5a5; font-size: 12px; font-weight: 500;")
+            self.setStyleSheet("""
+                ChunDVCToast {
+                    background: #201215;
+                    border: 1px solid #ef4444;
+                    border-radius: 8px;
+                }
+            """)
+        elif level == "warning":
+            self.lbl_icon.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 13px;")
+            self.lbl_msg.setStyleSheet("color: #fde68a; font-size: 12px; font-weight: 500;")
+            self.setStyleSheet("""
+                ChunDVCToast {
+                    background: #1c1917;
+                    border: 1px solid #f59e0b;
+                    border-radius: 8px;
+                }
+            """)
+        elif level == "info":
+            self.lbl_icon.setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 13px;")
+            self.lbl_msg.setStyleSheet("color: #e0f2fe; font-size: 12px; font-weight: 500;")
+            self.setStyleSheet("""
+                ChunDVCToast {
+                    background: #0f172a;
+                    border: 1px solid #0284c7;
+                    border-radius: 8px;
+                }
+            """)
+        else: # success
+            self.lbl_icon.setStyleSheet("color: #34d399; font-weight: bold; font-size: 13px;")
+            self.lbl_msg.setStyleSheet("color: #f4f4f5; font-size: 12px; font-weight: 500;")
+            self.setStyleSheet("""
+                ChunDVCToast {
+                    background: #18181b;
+                    border: 1px solid #10b981;
+                    border-radius: 8px;
+                }
+            """)
+
+        if action_label and action_callback:
+            self.btn_action.setText(action_label)
+            self.btn_action.show()
+        else:
+            self.btn_action.hide()
+
+        self._popup()
+        if duration_ms > 0:
+            self._dismiss_timer.start(duration_ms)
+        else:
+            self._dismiss_timer.stop()
+
     def show_error(
         self,
         reason: str,
@@ -224,6 +293,15 @@ class ChunDVCToast(QWidget):
         self._opacity_effect.setOpacity(0.0)
         self.show()
 
+    def paintEvent(self, event):
+        from PySide6.QtWidgets import QStyleOption, QStyle
+        from PySide6.QtGui import QPainter
+        opt = QStyleOption()
+        opt.initFrom(self)
+        painter = QPainter(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, painter, self)
+        super().paintEvent(event)
+
         # Fade in 150ms
         self._anim.setDuration(150)
         self._anim.setStartValue(0.0)
@@ -266,7 +344,11 @@ class ChunDVCToast(QWidget):
             self.btn_action.hide()
             self._dismiss_timer.start(1500)
         else:
-            # Error action button
+            if self._undo_callback:
+                try:
+                    self._undo_callback()
+                except Exception as ex:
+                    logger.error("Error executing toast action callback: %s", ex)
             self.action_requested.emit("action")
             self.dismiss()
 

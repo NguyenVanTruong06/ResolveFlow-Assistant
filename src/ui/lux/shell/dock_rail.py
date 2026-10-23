@@ -15,6 +15,7 @@ class DockRailWidget(QWidget):
     """
     category_selected = pyqtSignal(str)
     open_dock_requested = pyqtSignal()
+    instant_autocut_clicked = pyqtSignal()
     palette_requested = pyqtSignal()
     director_requested = pyqtSignal()
     settings_requested = pyqtSignal()
@@ -92,6 +93,28 @@ class DockRailWidget(QWidget):
             self._cat_buttons[cat_id] = btn
 
         layout.addStretch(1)
+
+        # 2.8. AutoCut 1-Click button
+        self.btn_instant_autocut = QPushButton()
+        self.btn_instant_autocut.setIcon(get_vector_icon("autocut", "#f59e0b", 18))
+        self.btn_instant_autocut.setIconSize(QSize(18, 18))
+        self.btn_instant_autocut.setFixedSize(34, 34)
+        self.btn_instant_autocut.setToolTip("⚡ AutoCut 1-Click: Cắt khoảng lặng trên Timeline đang mở & co sát clip (0.3s)")
+        self.btn_instant_autocut.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_instant_autocut.setCursor(Qt.PointingHandCursor)
+        self.btn_instant_autocut.setStyleSheet("""
+            QPushButton {
+                background: rgba(245, 158, 11, 0.12);
+                border: 1px solid rgba(245, 158, 11, 0.35);
+                border-radius: 7px;
+            }
+            QPushButton:hover {
+                background: rgba(245, 158, 11, 0.25);
+                border-color: #f59e0b;
+            }
+        """)
+        self.btn_instant_autocut.clicked.connect(self.instant_autocut_clicked.emit)
+        layout.addWidget(self.btn_instant_autocut)
 
         # 3. Palette HUD button
         self.btn_palette = QPushButton()

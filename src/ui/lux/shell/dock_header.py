@@ -43,6 +43,7 @@ class DockHeaderWidget(QWidget):
     page_clicked = pyqtSignal()
     pending_chip_clicked = pyqtSignal()
     profile_lock_selected = pyqtSignal(str)
+    instant_autocut_clicked = pyqtSignal()
     director_clicked = pyqtSignal()
     settings_clicked = pyqtSignal()
     audio_preview_toggled = pyqtSignal(bool)
@@ -137,6 +138,28 @@ class DockHeaderWidget(QWidget):
         self.txt_search.return_pressed_signal.connect(self.search_submitted.emit)
         self.txt_search.escape_pressed.connect(self.escape_requested.emit)
         layout.addWidget(self.txt_search, stretch=1)
+
+        # 2.3. Instant AutoCut 1-Click button (Sub-second silence cut & ripple assembly)
+        self.btn_instant_autocut = QPushButton()
+        self.btn_instant_autocut.setIcon(get_vector_icon("autocut", "#f59e0b", 16))
+        self.btn_instant_autocut.setIconSize(QSize(16, 16))
+        self.btn_instant_autocut.setFixedSize(28, 28)
+        self.btn_instant_autocut.setToolTip("⚡ AutoCut 1-Click: Cắt khoảng lặng trên Timeline đang mở & co sát clip (0.3s)")
+        self.btn_instant_autocut.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_instant_autocut.setCursor(Qt.PointingHandCursor)
+        self.btn_instant_autocut.setStyleSheet("""
+            QPushButton {
+                background: rgba(245, 158, 11, 0.12);
+                border: 1px solid rgba(245, 158, 11, 0.35);
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background: rgba(245, 158, 11, 0.25);
+                border-color: #f59e0b;
+            }
+        """)
+        self.btn_instant_autocut.clicked.connect(self.instant_autocut_clicked.emit)
+        layout.addWidget(self.btn_instant_autocut)
 
         # 2.4. Director Mode button (ChunDVC Director: AI AutoCut, Subtitles, Prompt JSON)
         self.btn_director = QPushButton()

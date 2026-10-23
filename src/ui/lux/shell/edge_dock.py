@@ -209,6 +209,7 @@ class EdgeDockWindow(QWidget):
         self.rail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         self.rail.open_dock_requested.connect(self.open_dock)
         self.rail.category_selected.connect(self._on_rail_category_selected)
+        self.rail.instant_autocut_clicked.connect(self.run_instant_autocut)
         self.rail.palette_requested.connect(self.palette_requested.emit)
         self.rail.director_requested.connect(self.director_requested.emit)
         self.rail.settings_requested.connect(self.open_settings)
@@ -231,6 +232,7 @@ class EdgeDockWindow(QWidget):
         self.header.pin_toggled.connect(self._on_toggle_pin)
         self.header.collapse_clicked.connect(self.collapse_dock)
         self.header.restore_standard_window_clicked.connect(self.restore_standard_window_requested.emit)
+        self.header.instant_autocut_clicked.connect(self.run_instant_autocut)
         self.header.director_clicked.connect(self.director_requested.emit)
         self.header.settings_clicked.connect(self.open_settings)
         self.header.audio_preview_toggled.connect(self._on_hover_audio_changed)
@@ -371,10 +373,83 @@ class EdgeDockWindow(QWidget):
     def _on_palette_command_executed(self, cmd_id: str):
         if cmd_id in ("cmd_director", "cmd_autocut"):
             self.open_director()
+        elif cmd_id == "cmd_instant_autocut":
+            self.run_instant_autocut()
         elif cmd_id == "cmd_pin_dock":
             self.header.btn_pin.click()
         elif cmd_id == "cmd_settings":
             self.open_settings()
+
+    def _get_toast(self):
+        if not hasattr(self, "_toast") or self._toast is None:
+            from src.ui.lux.feedback.toast import ChunDVCToast
+            self._toast = ChunDVCToast(self)
+        if self._anchor_rect:
+            self._toast.set_anchor_rect(self._anchor_rect)
+        return self._toast
+
+    def run_instant_autocut(self):
+        """
+        Kích hoạt 1-Click Instant AutoCut: Nhận diện clip trên Timeline đang mở,
+        phân tích khoảng lặng và co sát các đoạn thoại lại với nhau trên DaVinci Resolve.
+        """
+        if hasattr(self, "_autocut_worker") and self._autocut_worker and self._autocut_worker.isRunning():
+            toast = self._get_toast()
+            toast.show_message("⚡ Đang trong tiến trình AutoCut, vui lòng đợi...", icon="⏳", level="warning")
+            return
+
+        from src.services.autocut_worker import AutoCutWorker
+        from src.core.resolve_api import ResolveAutomation
+
+        automation = None
+        if self._insert_service and hasattr(self._insert_service, "_gateway") and self._insert_service._gateway:
+            worker = getattr(self._insert_service._gateway, "_worker", None)
+            if worker and hasattr(worker, "get_automation"):
+                automation = worker.get_automation()
+        if not automation:
+            automation = ResolveAutomation()
+
+        if not automation.is_connected():
+            connected = automation.connect()
+            if not connected:
+                toast = self._get_toast()
+                toast.show_message("Chưa mở DaVinci Resolve. Hãy mở DaVinci và thử lại!", icon="⚠", level="warning")
+                return
+
+        toast = self._get_toast()
+        toast.show_message("⚡ Đang đọc Timeline & phân tích khoảng lặng...", icon="⚡", level="info", duration_ms=6000)
+        if hasattr(self, "status_bar") and self.status_bar:
+            self.status_bar.set_timeline("⚡ Đang AutoCut...")
+
+        self._autocut_worker = AutoCutWorker(
+            resolve_automation=automation,
+            silence_threshold_db=-38.0,
+            min_silence_duration_ms=600,
+            padding_ms=80,
+            parent=self,
+        )
+        self._autocut_worker.progress_changed.connect(self._on_autocut_progress)
+        self._autocut_worker.finished_result.connect(self._on_autocut_finished)
+        self._autocut_worker.start()
+
+    def _on_autocut_progress(self, pct: int, msg: str):
+        if hasattr(self, "status_bar") and self.status_bar:
+            self.status_bar.set_timeline(f"⚡ AutoCut: {msg} ({pct}%)")
+
+    def _on_autocut_finished(self, result):
+        toast = self._get_toast()
+        if result.ok:
+            mins = int(result.duration_saved_sec // 60)
+            secs = int(result.duration_saved_sec % 60)
+            saved_str = f"{mins}p{secs:02d}s" if mins > 0 else f"{result.duration_saved_sec:.1f}s"
+            msg = f"🎉 AutoCut thành công! {result.cuts_count} khoảng lặng đã cắt, rút ngắn {saved_str}."
+            toast.show_message(msg, icon="🎉", level="success", duration_ms=5000)
+            if hasattr(self, "status_bar") and self.status_bar:
+                self.status_bar.set_timeline(result.new_timeline_name)
+        else:
+            toast.show_message(f"AutoCut: {result.message}", icon="⚠", level="warning", duration_ms=5000)
+            if hasattr(self, "status_bar") and self.status_bar:
+                self.status_bar.set_timeline("AutoCut dừng lại")
 
     def set_dock_edge(self, edge: str):
         """

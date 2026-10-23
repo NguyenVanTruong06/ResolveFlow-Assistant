@@ -25,8 +25,8 @@ def test_studio_window_rail_tabs(studio_window):
     win = studio_window
     tab_assets = win.tab_assets
 
-    # 1. Kiểm tra đủ 9 nút điều hướng trên Rail (đã thêm tab Nhạc BGM)
-    assert len(tab_assets.rail_btns) == 9
+    # 1. Kiểm tra đủ 10 nút điều hướng trên Rail (đã thêm tab Nhạc BGM và Kho Online)
+    assert len(tab_assets.rail_btns) == 10
     assert "text" in tab_assets.rail_btns
     assert "lut" in tab_assets.rail_btns
     assert "trans" in tab_assets.rail_btns
@@ -34,6 +34,7 @@ def test_studio_window_rail_tabs(studio_window):
     assert "sfx" in tab_assets.rail_btns
     assert "bgm" in tab_assets.rail_btns
     assert "fav" in tab_assets.rail_btns
+    assert "hub" in tab_assets.rail_btns
 
     # 2. Chuyển sang tab Màu (LUT)
     tab_assets._filter_by_rail("lut")

@@ -3468,8 +3468,8 @@ class TabAssets(QWidget):
             }}
         """)
         mh_layout = QHBoxLayout(main_head)
-        mh_layout.setContentsMargins(16, 8, 16, 8)
-        mh_layout.setSpacing(10)
+        mh_layout.setContentsMargins(12, 6, 12, 6)
+        mh_layout.setSpacing(6)
 
         # Nút thu gọn / mở rộng cột Nhóm
         self.btn_toggle_cats = QPushButton("☰ Nhóm")
@@ -3481,7 +3481,7 @@ class TabAssets(QWidget):
                 background: {ThemeColors.BG_CARD};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-radius: 6px;
-                padding: 5px 10px;
+                padding: 4px 8px;
                 color: {ThemeColors.TEXT_MUTED};
                 font-size: 11px;
             }}
@@ -3493,17 +3493,40 @@ class TabAssets(QWidget):
         mh_layout.addWidget(self.btn_toggle_cats)
 
         self.lbl_main_cat = QLabel("Chữ chuyển động")
-        self.lbl_main_cat.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {ThemeColors.TEXT_PRIMARY};")
+        self.lbl_main_cat.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {ThemeColors.TEXT_PRIMARY};")
         mh_layout.addWidget(self.lbl_main_cat)
 
         self.lbl_count_badge = QLabel("14 mẫu")
-        self.lbl_count_badge.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 12px;")
+        self.lbl_count_badge.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
         mh_layout.addWidget(self.lbl_count_badge)
 
         mh_layout.addStretch()
 
+        # Nút AutoCut 1-Click trực tiếp từ Timeline đang mở
+        self.btn_autocut = QPushButton("⚡ AutoCut")
+        self.btn_autocut.setToolTip("⚡ AutoCut 1-Click: Cắt bỏ khoảng lặng trên Timeline đang mở & tự động co sát các đoạn thoại lại (0.3s)")
+        self.btn_autocut.setCursor(Qt.PointingHandCursor)
+        self.btn_autocut.clicked.connect(self._run_instant_autocut)
+        self.btn_autocut.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(245, 158, 11, 0.15);
+                border: 1px solid #f59e0b;
+                border-radius: 6px;
+                padding: 4px 10px;
+                color: #fbbf24;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #f59e0b;
+                color: #000000;
+            }
+        """)
+        mh_layout.addWidget(self.btn_autocut)
+
         # Nút trạng thái DaVinci Resolve
-        self.btn_resolve_status = QPushButton("⚪ Kiểm tra DaVinci")
+        self.btn_resolve_status = QPushButton("⚪ DaVinci")
+        self.btn_resolve_status.setToolTip("Kiểm tra kết nối DaVinci Resolve API")
         self.btn_resolve_status.setCursor(Qt.PointingHandCursor)
         self.btn_resolve_status.clicked.connect(self._check_resolve_connection)
         self.btn_resolve_status.setStyleSheet(f"""
@@ -3511,7 +3534,7 @@ class TabAssets(QWidget):
                 background: {ThemeColors.BG_CARD};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-radius: 6px;
-                padding: 5px 10px;
+                padding: 4px 8px;
                 color: {ThemeColors.TEXT_MUTED};
                 font-size: 11px;
             }}
@@ -3523,7 +3546,8 @@ class TabAssets(QWidget):
         mh_layout.addWidget(self.btn_resolve_status)
 
         # Nút quét lại kho tài nguyên
-        self.btn_rescan = QPushButton("🔄 Quét lại kho")
+        self.btn_rescan = QPushButton("🔄 Quét")
+        self.btn_rescan.setToolTip("Quét lại toàn bộ kho đạo cụ cục bộ")
         self.btn_rescan.setCursor(Qt.PointingHandCursor)
         self.btn_rescan.clicked.connect(self._rescan_assets)
         self.btn_rescan.setStyleSheet(f"""
@@ -3531,7 +3555,7 @@ class TabAssets(QWidget):
                 background: {ThemeColors.BG_CARD};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-radius: 6px;
-                padding: 5px 10px;
+                padding: 4px 8px;
                 color: {ThemeColors.TEXT_PRIMARY};
                 font-size: 11px;
                 font-weight: bold;
@@ -3544,7 +3568,7 @@ class TabAssets(QWidget):
         mh_layout.addWidget(self.btn_rescan)
 
         # Nút nhập file/thư mục tự động liên kết DaVinci
-        self.btn_import_assets = QPushButton("➕ Nhập tệp...")
+        self.btn_import_assets = QPushButton("➕ Nhập")
         self.btn_import_assets.setToolTip("Thêm mẫu chữ .setting, video meme, SFX, LUTs (Tự động liên kết vào DaVinci Resolve)")
         self.btn_import_assets.setCursor(Qt.PointingHandCursor)
         self.btn_import_assets.clicked.connect(lambda: self._import_files_or_folders())
@@ -3553,7 +3577,7 @@ class TabAssets(QWidget):
                 background: {ThemeColors.BG_CARD};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-radius: 6px;
-                padding: 5px 10px;
+                padding: 4px 8px;
                 color: #c4b5fd;
                 font-size: 11px;
                 font-weight: bold;
@@ -3566,7 +3590,7 @@ class TabAssets(QWidget):
         mh_layout.addWidget(self.btn_import_assets)
 
         # Nút mở Kho Online & Nối thư mục máy tính
-        self.btn_open_asset_hub = QPushButton("☁️ Kho Online & Nối Thư Mục")
+        self.btn_open_asset_hub = QPushButton("☁️ Kho Online")
         self.btn_open_asset_hub.setToolTip("Mở Kho Gói Đám Mây Tuyển Chọn và Quản lý các thư mục ổ cứng ngoài")
         self.btn_open_asset_hub.setCursor(Qt.PointingHandCursor)
         self.btn_open_asset_hub.clicked.connect(lambda: self._filter_by_rail("hub"))
@@ -3575,7 +3599,7 @@ class TabAssets(QWidget):
                 background: {ThemeColors.BG_CARD};
                 border: 1px solid #7c3aed;
                 border-radius: 6px;
-                padding: 5px 12px;
+                padding: 4px 10px;
                 color: #c4b5fd;
                 font-size: 11px;
                 font-weight: bold;
@@ -3588,8 +3612,8 @@ class TabAssets(QWidget):
         mh_layout.addWidget(self.btn_open_asset_hub)
 
         self.txt_search = QLineEdit()
-        self.txt_search.setPlaceholderText("🔍 Tìm kiếm đạo cụ...")
-        self.txt_search.setFixedWidth(220)
+        self.txt_search.setPlaceholderText("🔍 Tìm đạo cụ...")
+        self.txt_search.setFixedWidth(160)
         self.txt_search.textChanged.connect(self._refresh_grid)
         self.txt_search.setStyleSheet(f"""
             QLineEdit {{
@@ -5649,13 +5673,13 @@ class TabAssets(QWidget):
             connected = False
 
         if connected:
-            self.btn_resolve_status.setText("🟢 DaVinci: Đã kết nối")
+            self.btn_resolve_status.setText("🟢 DaVinci")
             self.btn_resolve_status.setStyleSheet(f"""
                 QPushButton {{
                     background: rgba(34, 197, 94, 0.15);
                     border: 1px solid #22c55e;
                     border-radius: 6px;
-                    padding: 5px 10px;
+                    padding: 4px 8px;
                     color: #86efac;
                     font-size: 11px;
                     font-weight: bold;
@@ -5663,18 +5687,57 @@ class TabAssets(QWidget):
             """)
             self._show_toast("DaVinci Resolve đang hoạt động và đã kết nối thành công!")
         else:
-            self.btn_resolve_status.setText("⚪ DaVinci: Chưa kết nối")
+            self.btn_resolve_status.setText("⚪ DaVinci")
             self.btn_resolve_status.setStyleSheet(f"""
                 QPushButton {{
                     background: {ThemeColors.BG_CARD};
                     border: 1px solid {ThemeColors.BORDER_DEFAULT};
                     border-radius: 6px;
-                    padding: 5px 10px;
+                    padding: 4px 8px;
                     color: {ThemeColors.TEXT_MUTED};
                     font-size: 11px;
                 }}
             """)
             self._show_toast("Chưa tìm thấy DaVinci Resolve đang mở. Vui lòng mở DaVinci!")
+
+    def _run_instant_autocut(self):
+        if hasattr(self, "_autocut_worker") and self._autocut_worker and self._autocut_worker.isRunning():
+            self._show_toast("⚡ Đang trong tiến trình AutoCut, vui lòng đợi...")
+            return
+
+        from src.core.resolve_api import ResolveAutomation
+        from src.services.autocut_worker import AutoCutWorker
+
+        auto = ResolveAutomation()
+        if not auto.is_connected():
+            connected = auto.connect()
+            if not connected:
+                self._show_toast("⚠ Chưa mở DaVinci Resolve hoặc chưa kết nối API!")
+                return
+
+        self._show_toast("⚡ Đang đọc Timeline & phân tích khoảng lặng...")
+
+        self._autocut_worker = AutoCutWorker(
+            resolve_automation=auto,
+            silence_threshold_db=-38.0,
+            min_silence_duration_ms=600,
+            padding_ms=80,
+            parent=self,
+        )
+        self._autocut_worker.progress_changed.connect(
+            lambda pct, msg: self._show_toast(f"⚡ AutoCut: {msg} ({pct}%)")
+        )
+        self._autocut_worker.finished_result.connect(self._on_autocut_studio_finished)
+        self._autocut_worker.start()
+
+    def _on_autocut_studio_finished(self, result):
+        if result.ok:
+            mins = int(result.duration_saved_sec // 60)
+            secs = int(result.duration_saved_sec % 60)
+            saved_str = f"{mins}p{secs:02d}s" if mins > 0 else f"{result.duration_saved_sec:.1f}s"
+            self._show_toast(f"🎉 AutoCut thành công! {result.cuts_count} khoảng lặng đã cắt, tiết kiệm {saved_str}")
+        else:
+            self._show_toast(f"⚠ AutoCut: {result.message}")
 
     def _rescan_assets(self):
         AssetIndexer.clear_cache()

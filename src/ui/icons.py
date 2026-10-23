@@ -442,6 +442,17 @@ def create_vector_icon(icon_type: str, color_hex: str = ThemeColors.TEXT_PRIMARY
         painter.drawLine(QPointF(14, 8), QPointF(20, 16))
         painter.drawLine(QPointF(20, 8), QPointF(14, 16))
 
+    elif icon_type in ("scissors", "cut", "autocut"):
+        # Cây kéo cắt / AutoCut
+        # 2 khuyên cầm
+        painter.drawEllipse(QRectF(4, 14, 5.5, 5.5))
+        painter.drawEllipse(QRectF(14.5, 14, 5.5, 5.5))
+        # 2 lưỡi cắt chéo nhau
+        painter.drawLine(QPointF(8.5, 15), QPointF(17.5, 4.5))
+        painter.drawLine(QPointF(15.5, 15), QPointF(6.5, 4.5))
+        # Khớp ốc nối ở giữa
+        painter.drawEllipse(QRectF(11, 10, 2, 2))
+
     else:
         # Fallback: Vòng tròn chấm tâm
         painter.drawEllipse(QRectF(5, 5, 14, 14))

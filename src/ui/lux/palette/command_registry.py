@@ -66,8 +66,13 @@ class CommandRegistry:
     def _register_default_commands(self):
         defaults = [
             CommandItem(
+                id="cmd_instant_autocut",
+                name=">cắt khoảng lặng 1-click",
+                meta="⚡ AutoCut tức thì: Cắt khoảng lặng trên Timeline đang mở & co sát clip (0.3s)",
+            ),
+            CommandItem(
                 id="cmd_autocut",
-                name=">cắt khoảng lặng",
+                name=">cắt khoảng lặng (director)",
                 meta="Mở Director: tách thoại Whisper & cắt khoảng lặng (AutoCut)",
             ),
             CommandItem(
