@@ -173,6 +173,35 @@ class PackManager:
 
         return installed_counts
 
+    @staticmethod
+    def fetch_community_catalog(remote_url: Optional[str] = None) -> List[PackManifest]:
+        """
+        Tải danh mục gói mới nhất từ máy chủ từ xa (GitHub/Cloud).
+        Nếu mất kết nối mạng hoặc chưa cấu hình URL, tự động dùng danh mục tích hợp sẵn.
+        """
+        import urllib.request
+        from PySide6.QtCore import QSettings
+
+        settings = QSettings("ChunDVC", "ResolveFlow")
+        url = remote_url or str(settings.value(
+            "hub/catalog_url",
+            "https://raw.githubusercontent.com/chundvc/resolveflow-packs/main/catalog.json"
+        ))
+
+        if url and url.startswith("http"):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "ResolveFlow/1.0"})
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        packs_list = data if isinstance(data, list) else data.get("packs", [])
+                        if packs_list:
+                            return [PackManifest.model_validate(item) for item in packs_list]
+            except Exception:
+                pass  # Tự động fallback danh mục cục bộ
+
+        return [p.model_copy() for p in COMMUNITY_PACKS_CATALOG]
+
 
 # Danh mục các bộ Starter Pack cộng đồng tuyển chọn
 COMMUNITY_PACKS_CATALOG: List[PackManifest] = [

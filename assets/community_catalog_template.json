@@ -1,0 +1,54 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-10-23T12:00:00Z",
+  "packs": [
+    {
+      "id": "tiktok_viral_memes_2025",
+      "name": "Gói Meme TikTok Hot Trend 2025",
+      "version": "2.0.0",
+      "author": "ChunDVC Community",
+      "description": "Tổng hợp hơn 150 clip meme cắt sẵn, chuẩn âm thanh, hài hước viral nhất TikTok & Facebook Reels.",
+      "categories": ["meme", "sfx"],
+      "item_count": 165,
+      "size_mb": 128.5,
+      "download_url": "https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID/view?usp=sharing",
+      "tags": ["tiktok", "viral", "meme", "hai_huoc"]
+    },
+    {
+      "id": "youtube_vlog_sfx_essentials",
+      "name": "Gói Âm Hiệu SFX Vlogger & Cinema",
+      "version": "1.5.0",
+      "author": "Audio Lab Pro",
+      "description": "Bộ 80 âm thanh Whoosh, Pop, Click chuột, Ting chuông, Cảnh báo đỏ chuẩn truyền hình điện ảnh.",
+      "categories": ["sfx"],
+      "item_count": 82,
+      "size_mb": 45.2,
+      "download_url": "https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID_2/view?usp=sharing",
+      "tags": ["sfx", "vlog", "whoosh", "ting"]
+    },
+    {
+      "id": "kinetic_titles_hormozi",
+      "name": "Gói Chữ Động Kinetic Kiểu Alex Hormozi & MrBeast",
+      "version": "1.0.0",
+      "author": "DaVinci Fusion Lab",
+      "description": "25 preset Fusion Text+ Kinetic tự động nảy chữ, đổi màu từ khóa, viền neon, hiệu ứng gõ phím.",
+      "categories": ["titles"],
+      "item_count": 25,
+      "size_mb": 12.0,
+      "download_url": "https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID_3/view?usp=sharing",
+      "tags": ["kinetic", "subtitle", "fusion", "mrbeast"]
+    },
+    {
+      "id": "cinematic_vintage_luts",
+      "name": "Gói Bảng Màu Điện Ảnh (Cinematic LUTs)",
+      "version": "1.0.0",
+      "author": "Colorist Hub",
+      "description": "20 Cube LUTs tông màu phim nhựa Kodak, Cyberpunk Neon, Teal & Orange chuẩn điện ảnh.",
+      "categories": ["luts"],
+      "item_count": 20,
+      "size_mb": 18.4,
+      "download_url": "https://drive.google.com/file/d/YOUR_GOOGLE_DRIVE_FILE_ID_4/view?usp=sharing",
+      "tags": ["lut", "color", "kodak", "cinema"]
+    }
+  ]
+}
