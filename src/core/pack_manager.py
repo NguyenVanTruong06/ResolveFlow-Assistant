@@ -40,6 +40,9 @@ CATEGORY_DIR_MAP = {
     "titles": Path("templates") / "titles",
     "title": Path("templates") / "titles",
     "text": Path("templates") / "titles",
+    "macros": Path("templates") / "titles",
+    "macro": Path("templates") / "titles",
+    "generators": Path("templates") / "Generators",
     "transitions": Path("templates") / "transitions",
     "transition": Path("templates") / "transitions",
     "trans": Path("templates") / "transitions",
@@ -157,9 +160,46 @@ class PackManager:
 
                 cat_prefix = parts[0].lower()
                 filename = parts[-1]
+                ext = Path(filename).suffix.lower()
 
-                # Ánh xạ danh mục
-                sub_dir = CATEGORY_DIR_MAP.get(cat_prefix, Path("broll_memes") / "memes")
+                # Ánh xạ danh mục thông minh:
+                # 1) Nếu cat_prefix khớp danh mục chuẩn ResolveFlow
+                if cat_prefix in CATEGORY_DIR_MAP:
+                    sub_dir = CATEGORY_DIR_MAP[cat_prefix]
+                    cat_key = cat_prefix
+                # 2) Nhận diện theo định dạng tệp chuẩn DaVinci / Media:
+                elif ext in [".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac"]:
+                    sub_dir = Path("sfx")
+                    cat_key = "sfx"
+                elif ext in [".cube"]:
+                    sub_dir = Path("luts")
+                    cat_key = "luts"
+                elif ext in [".drx", ".dpx"]:
+                    sub_dir = Path("luts") / "powergrades"
+                    cat_key = "luts"
+                elif ext in [".drfx", ".setting"]:
+                    lower_name = member.filename.lower()
+                    if "trans" in lower_name:
+                        sub_dir = Path("templates") / "transitions"
+                        cat_key = "transitions"
+                    else:
+                        sub_dir = Path("templates") / "titles"
+                        cat_key = "titles"
+                elif ext in [".mp4", ".mov", ".webm", ".avi", ".wmv"]:
+                    lower_name = member.filename.lower()
+                    if any(k in lower_name for k in ["overlay", "light", "leak", "dust"]):
+                        sub_dir = Path("broll_memes") / "overlays"
+                        cat_key = "overlays"
+                    else:
+                        sub_dir = Path("broll_memes") / "memes"
+                        cat_key = "memes"
+                elif ext in [".png", ".jpg", ".jpeg"]:
+                    sub_dir = Path("broll_memes") / "overlays"
+                    cat_key = "overlays"
+                else:
+                    sub_dir = CATEGORY_DIR_MAP.get(cat_prefix, Path("broll_memes") / "memes")
+                    cat_key = cat_prefix
+
                 dest_dir = base_dest / sub_dir
                 dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -169,7 +209,7 @@ class PackManager:
                 with zf.open(member) as src_file, open(dest_file, "wb") as dst_file:
                     dst_file.write(src_file.read())
 
-                installed_counts[cat_prefix] = installed_counts.get(cat_prefix, 0) + 1
+                installed_counts[cat_key] = installed_counts.get(cat_key, 0) + 1
 
         return installed_counts
 
@@ -203,50 +243,114 @@ class PackManager:
         return [p.model_copy() for p in COMMUNITY_PACKS_CATALOG]
 
 
-# Danh mục các bộ Starter Pack cộng đồng tuyển chọn
+# Danh mục các bộ Pack cộng đồng tuyển chọn trực tiếp từ Google Drive Kho ChunnDVC
 COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
     PackManifest(
-        id="tiktok_viral_memes_2025",
-        name="Gói Meme TikTok Hot Trend 2025",
-        version="2.0.0",
-        author="ChunDVC Community",
-        description="Tổng hợp hơn 150 clip meme cắt sẵn, chuẩn âm thanh, hài hước viral nhất TikTok & Facebook Reels.",
-        categories=["meme", "sfx"],
-        item_count=165,
-        size_mb=128.5,
-        tags=["tiktok", "viral", "meme", "hai_huoc"]
-    ),
-    PackManifest(
-        id="youtube_vlog_sfx_essentials",
-        name="Gói Âm Hiệu SFX Vlogger & Cinema",
-        version="1.5.0",
-        author="Audio Lab Pro",
-        description="Bộ 80 âm thanh Whoosh, Pop, Click chuột, Ting chuông, Cảnh báo đỏ chuẩn truyền hình điện ảnh.",
+        id="acidbite_elements_sfx",
+        name="Kho Âm Hiệu Điện Ảnh AcidBite Elements SFX",
+        version="1.0.0",
+        author="ChunnDVC Vault",
+        description="147 âm thanh Whoosh, Hit, Impact, Cinematic sound 24-bit WAV cao cấp chuẩn phòng thu điện ảnh.",
         categories=["sfx"],
-        item_count=82,
-        size_mb=45.2,
-        tags=["sfx", "vlog", "whoosh", "ting"]
+        item_count=147,
+        size_mb=962.3,
+        download_url="https://drive.google.com/file/d/1kva0qYbZF1tOJ7P_DObbkP7b_HPN-7V1/view?usp=sharing",
+        tags=["sfx", "whoosh", "cinematic", "impact", "wav"]
     ),
     PackManifest(
-        id="kinetic_titles_hormozi",
-        name="Gói Chữ Động Kinetic Kiểu Alex Hormozi & MrBeast",
+        id="davinci_speed_ramp_transitions",
+        name="Gói Chuyển Cảnh Speed Ramp Seamless Transitions",
         version="1.0.0",
-        author="DaVinci Fusion Lab",
-        description="25 preset Fusion Text+ Kinetic tự động nảy chữ, đổi màu từ khóa, viền neon, hiệu ứng gõ phím.",
+        author="ChunnDVC Vault",
+        description="Bộ chuyển cảnh mượt mà Speed Ramp chuẩn DaVinci Resolve (.drfx) cài 1-click tự nhận diện.",
+        categories=["transitions"],
+        item_count=12,
+        size_mb=97.5,
+        download_url="https://drive.google.com/file/d/16zqeF1TClWTAC-53MaTtrYu3odfeb18K/view?usp=sharing",
+        tags=["transitions", "drfx", "speedramp", "seamless", "davinci"]
+    ),
+    PackManifest(
+        id="davinci_gr44_seamless_transitions",
+        name="Gói Chuyển Cảnh GR-44 v1.4 & Sound FX",
+        version="1.4.0",
+        author="ChunnDVC Vault",
+        description="Bộ chuyển cảnh chuyển động GR-44 cho DaVinci Resolve Studio & Free kèm 119 file âm thanh SFX.",
+        categories=["transitions", "sfx"],
+        item_count=1130,
+        size_mb=288.1,
+        download_url="https://drive.google.com/file/d/12mouRJ7wbsJIe4bhABnoxo-MhOHw6wU9/view?usp=sharing",
+        tags=["transitions", "gr44", "sfx", "motion", "davinci"]
+    ),
+    PackManifest(
+        id="fusion_skin_retouching_macros",
+        name="Gói Macro Tút Da Mịn Mặt DaVinci (Skin Retouching)",
+        version="1.0.0",
+        author="ChunnDVC Vault",
+        description="Macro Fusion chuyên dụng làm mịn da, xóa mụn tự động trực tiếp trên DaVinci Resolve (.setting, .drfx).",
         categories=["titles"],
-        item_count=25,
-        size_mb=12.0,
-        tags=["kinetic", "subtitle", "fusion", "mrbeast"]
+        item_count=6,
+        size_mb=0.9,
+        download_url="https://drive.google.com/file/d/11Sk70Y_kfhpb1uU14kp_EJsDL3NzW-12/view?usp=sharing",
+        tags=["fusion", "macro", "skin", "retouch", "beauty"]
     ),
     PackManifest(
-        id="cinematic_vintage_luts",
-        name="Gói Bảng Màu Điện Ảnh (Cinematic LUTs)",
+        id="davinci_unfold_paper_animator",
+        name="Hiệu Ứng Lật Mở Giấy Unfold Paper Animator",
         version="1.0.0",
-        author="Colorist Hub",
-        description="20 Cube LUTs tông màu phim nhựa Kodak, Cyberpunk Neon, Teal & Orange chuẩn điện ảnh.",
+        author="ChunnDVC Vault",
+        description="Hiệu ứng xếp giấy, lật mở giấy Stop-motion hoạt họa độc đáo cho DaVinci Resolve kèm 70 texture giấy thực.",
+        categories=["transitions", "overlays"],
+        item_count=74,
+        size_mb=17.1,
+        download_url="https://drive.google.com/file/d/1Tkr6b0yaNrF9e-jpAIN3pIgC7J8F1Mg5/view?usp=sharing",
+        tags=["paper", "stopmotion", "texture", "drfx", "davinci"]
+    ),
+    PackManifest(
+        id="secret_sauce_cinema_luts",
+        name="Bộ Bảng Màu Điện Ảnh Secret Sauce LUTs",
+        version="1.0.0",
+        author="ChunnDVC Vault",
+        description="8 bảng màu điện ảnh cao cấp: Ferrari Red, HongKong Blue, Amsterdam Silver... chuẩn .cube 33x.",
         categories=["luts"],
-        item_count=20,
-        size_mb=18.4,
-        tags=["lut", "color", "kodak", "cinema"]
+        item_count=8,
+        size_mb=21.2,
+        download_url="https://drive.google.com/file/d/15S4dumr_su0OJGY7nuf-MQ4RB3FwIRwC/view?usp=sharing",
+        tags=["luts", "color", "cinema", "ferrari", "cube"]
+    ),
+    PackManifest(
+        id="iphone_cinematic_luts",
+        name="Bộ LUTs Quay iPhone & Apple Log",
+        version="1.0.0",
+        author="ChunnDVC Vault",
+        description="8 bảng màu tối ưu chuẩn xác cho video quay bằng iPhone và hệ màu Apple Log.",
+        categories=["luts"],
+        item_count=8,
+        size_mb=9.7,
+        download_url="https://drive.google.com/file/d/17Nl7vS-KcPrrMJquAg2Rs11_oXDfuUtZ/view?usp=sharing",
+        tags=["iphone", "applelog", "lut", "mobile", "cube"]
+    ),
+    PackManifest(
+        id="green_screen_memes_109",
+        name="Kho 109 Video Meme Phông Xanh (Green Screen)",
+        version="1.0.0",
+        author="ChunnDVC Vault",
+        description="109 video phông xanh hài hước, countdown, meme trend... Dễ dàng tách nền 1-click với 3D Keyer.",
+        categories=["memes"],
+        item_count=109,
+        size_mb=307.7,
+        download_url="https://drive.google.com/file/d/1D7ay6vf6c1GOg4JTxuRMoCesg-GQCmbB/view?usp=sharing",
+        tags=["meme", "greenscreen", "countdown", "viral", "keyer"]
+    ),
+    PackManifest(
+        id="dehancer_pro_ofx_plugin",
+        name="Plugin Giả Lập Phim Nhựa Dehancer Pro OFX",
+        version="7.2.1",
+        author="ChunnDVC Vault",
+        description="Plugin mô phỏng màu film nhựa Kodak & Fuji 35mm đỉnh cao chuyên dụng cho DaVinci Resolve (Win & Mac).",
+        categories=["luts"],
+        item_count=2,
+        size_mb=661.7,
+        download_url="https://drive.google.com/file/d/17Ysow6gRJITEOEbgnkU-xHk9cVDLn_ad/view?usp=sharing",
+        tags=["dehancer", "ofx", "plugin", "film", "grain"]
     )
 ]
