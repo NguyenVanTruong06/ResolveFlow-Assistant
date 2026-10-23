@@ -443,18 +443,111 @@ class AssetIndexer:
         seen = set()
         res = []
         target_dirs = getattr(self, "transitions_dirs", [self.transitions_dir])
+
+        import zipfile
+        previews_base = self.transitions_dir / "previews"
+        installed_base = self.transitions_dir / "installed"
+        installed_base.mkdir(parents=True, exist_ok=True)
+
+        # 1. Unpack any .drfx bundles into installed/<pack_name>/ if not already unpacked
         for tdir in target_dirs:
             if not tdir.exists():
                 continue
-            for item in self._scan_dir(tdir, ['.setting'], find_thumb=True):
-                if item["name"] not in seen:
-                    seen.add(item["name"])
-                    res.append(item)
+            for root, dirs, files in os.walk(tdir):
+                if "previews" in root or "installed" in root:
+                    continue
+                for f in files:
+                    if f.endswith(".drfx"):
+                        drfx_file = Path(root) / f
+                        pack_name = drfx_file.stem
+                        dest_pack = installed_base / pack_name
+                        needs_unpack = True
+                        if dest_pack.exists() and any(dest_pack.rglob("*.setting")):
+                            needs_unpack = False
+                        if needs_unpack:
+                            try:
+                                with zipfile.ZipFile(drfx_file, "r") as z:
+                                    for m in z.namelist():
+                                        if m.endswith(".setting") or m.endswith(".png"):
+                                            z.extract(m, dest_pack)
+                            except Exception as exc:
+                                logger.warning("Could not unpack drfx %s: %s", drfx_file, exc)
 
-        ext_trans = self._scan_external_for_category("transitions", ['.setting'], find_thumb=True)
+        # 2. Scan all .setting files
+        for tdir in target_dirs:
+            if not tdir.exists():
+                continue
+            for file_path in tdir.rglob("*.setting"):
+                if not file_path.is_file():
+                    continue
+                parts = file_path.parts
+                stem = file_path.stem
+
+                if "installed" in parts:
+                    idx = parts.index("installed")
+                    pack_name = parts[idx + 1] if len(parts) > idx + 1 else "Transitions"
+                    category = parts[-3] if len(parts) >= 3 else pack_name
+                    sub_category = parts[-2] if len(parts) >= 2 else pack_name
+                else:
+                    try:
+                        rel_parts = file_path.relative_to(tdir).parts
+                        pack_name = rel_parts[0] if len(rel_parts) > 1 else "Mặc định"
+                    except Exception:
+                        pack_name = "Mặc định"
+                    category = "Mặc định"
+                    sub_category = pack_name
+
+                # Unique key: pack_name + stem
+                item_key = f"{pack_name}_{stem}"
+                if item_key in seen:
+                    continue
+                seen.add(item_key)
+
+                # Thumbnail lookup
+                thumb = self._find_thumbnail(file_path)
+                if not thumb and previews_base.exists():
+                    p_png = previews_base / pack_name / f"{stem}.png"
+                    if p_png.exists():
+                        thumb = str(p_png)
+                    else:
+                        p_flat_png = previews_base / f"{stem}.png"
+                        if p_flat_png.exists():
+                            thumb = str(p_flat_png)
+
+                # Preview video lookup (.mp4)
+                preview_video = None
+                if previews_base.exists():
+                    p_mp4 = previews_base / pack_name / f"{stem}.mp4"
+                    if p_mp4.exists():
+                        preview_video = str(p_mp4)
+                    else:
+                        p_flat_mp4 = previews_base / f"{stem}.mp4"
+                        if p_flat_mp4.exists():
+                            preview_video = str(p_flat_mp4)
+
+                item = {
+                    "id": self._generate_id(file_path),
+                    "name": stem,
+                    "tab": "trans",
+                    "category": category,
+                    "sub_category": sub_category,
+                    "pack_name": pack_name,
+                    "file_path": str(file_path),
+                    "path": str(file_path),
+                    "thumbnail_path": thumb,
+                    "preview_path": preview_video or str(file_path),
+                    "duration": 0.8,
+                    "is_external": False,
+                    "source_folder": str(file_path.parent),
+                }
+                res.append(item)
+
+        # 3. External folders
+        ext_trans = self._scan_external_for_category("transitions", [".setting"], find_thumb=True)
         for item in ext_trans:
-            if item["name"] not in seen:
-                seen.add(item["name"])
+            item_key = f"ext_{item['name']}"
+            if item_key not in seen:
+                seen.add(item_key)
                 res.append(item)
 
         _GLOBAL_ASSET_CACHE[key] = res

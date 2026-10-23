@@ -228,15 +228,21 @@ class TransitionMacroGenerator:
 
         os.makedirs(target_dir, exist_ok=True)
 
-        # Cài đặt các mẫu Transition Fusion Macro chuẩn (.setting)
+        # Cài đặt các mẫu Transition Fusion Macro chuẩn (.setting và .drfx)
         import shutil
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         for cand_name in ("transitions", "Transitions"):
             templates_dir = os.path.join(project_root, "assets", "templates", cand_name)
             if os.path.exists(templates_dir):
-                for fn in os.listdir(templates_dir):
-                    if fn.endswith(".setting"):
-                        shutil.copy2(os.path.join(templates_dir, fn), os.path.join(target_dir, fn))
+                for root, dirs, files in os.walk(templates_dir):
+                    if "previews" in root:
+                        continue
+                    for fn in files:
+                        if fn.endswith((".setting", ".drfx")):
+                            try:
+                                shutil.copy2(os.path.join(root, fn), os.path.join(target_dir, fn))
+                            except Exception:
+                                pass
 
         installed_count = 0
         for p in presets:

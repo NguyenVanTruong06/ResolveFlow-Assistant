@@ -128,7 +128,8 @@ class StudioAsset:
         native_preset: Any = None,
         file_path: str = "",
         thumbnail_path: str = "",
-        pack_name: str = ""
+        pack_name: str = "",
+        preview_path: str = ""
     ):
         self.id = id
         self.name = name
@@ -145,6 +146,7 @@ class StudioAsset:
         self.native_preset = native_preset
         self.file_path = file_path
         self.thumbnail_path = thumbnail_path
+        self.preview_path = preview_path or file_path
 
 
 # Danh sách LUTs điện ảnh chuẩn từ mockup
@@ -1948,6 +1950,9 @@ class AssetCard(QFrame):
 
     def __init__(self, preset: Any, is_fav: bool = False, sample_text_func=None, parent=None):
         super().__init__(parent)
+        if parent is None:
+            self.setAttribute(Qt.WA_DontShowOnScreen, True)
+            self.hide()
         self.preset = preset
         self.is_fav = is_fav
         self.sample_text_func = sample_text_func
@@ -3211,6 +3216,7 @@ class TabAssets(QWidget):
                     sub=d.get("sub_category") or d.get("pack_name") or sub, badge_icon=badge,
                     file_path=d.get("file_path", ""),
                     thumbnail_path=d.get("thumbnail_path", ""),
+                    preview_path=d.get("preview_path", ""),
                     pack_name=d.get("pack_name", "")
                 ) for d in dicts
             ]
@@ -3765,7 +3771,8 @@ class TabAssets(QWidget):
 
         # Legacy backward-compatibility wrappers
         self.scroll_grid = self.asset_grid
-        self.grid_container = QWidget()
+        self.grid_container = QWidget(self)
+        self.grid_container.hide()
         self.grid = QGridLayout(self.grid_container)
 
         main_sec_layout.addWidget(main_head)
@@ -5110,11 +5117,12 @@ class TabAssets(QWidget):
 
     def _create_legacy_card_widgets(self) -> List[AssetCard]:
         cards = []
+        parent_container = getattr(self, "grid_container", None) or self
         for item in self.all_assets:
             pid = getattr(item, "id", "")
             is_fav = pid in self.favorites
             sample_fn = lambda: self.txt_single_title.text().strip() if hasattr(self, "txt_single_title") else ""
-            card = AssetCard(preset=item, is_fav=is_fav, sample_text_func=sample_fn)
+            card = AssetCard(preset=item, is_fav=is_fav, sample_text_func=sample_fn, parent=parent_container)
             card.selected_signal.connect(self._on_card_selected)
             card.favorite_toggled.connect(self._on_favorite_toggled)
             card.add_requested.connect(self._on_card_add_requested)
@@ -5316,33 +5324,42 @@ class TabAssets(QWidget):
         self._stop_inspector_sfx_play()
         RecentManager.add(preset_id)
 
-        # Highlight card
-        tab = getattr(self, "current_rail_tab", "")
-        matched_card = None
-        for c in self.card_widgets:
-            item = c.preset
-            i_tab = "text" if isinstance(item, TextStylePreset) else "trans" if isinstance(item, TransitionStylePreset) else getattr(item, "tab", "")
-            is_match = (getattr(item, "id", "") == preset_id)
-            if is_match:
-                if matched_card is None:
-                    matched_card = c
-                elif (tab and tab != "fav" and i_tab == tab) or c.isVisible():
-                    matched_card = c
-            c.set_selected(False)
+        # 1. Tìm asset trực tiếp từ danh sách dữ liệu (không cần tạo card QWidget)
+        matched_item = None
+        for item in self.all_assets:
+            i_id = getattr(item, "id", "") if not isinstance(item, dict) else item.get("id", "")
+            if i_id == preset_id:
+                matched_item = item
+                break
 
-        if matched_card:
-            # Nếu card thuộc tab khác, tự chuyển sang tab đó để người dùng thấy rõ
-            target_tab = "text" if isinstance(matched_card.preset, TextStylePreset) else "trans" if isinstance(matched_card.preset, TransitionStylePreset) else getattr(matched_card.preset, "tab", "")
-            if target_tab and target_tab != getattr(self, "current_rail_tab", ""):
-                if hasattr(self, "_filter_by_rail"):
-                    self._filter_by_rail(target_tab)
-                elif hasattr(self, "_on_rail_tab_clicked"):
-                    self._on_rail_tab_clicked(target_tab)
+        if matched_item:
+            self.selected_asset = matched_item
 
-            matched_card.set_selected(True)
-            self.selected_asset = matched_card.preset
-            if hasattr(self, "scroll_area"):
-                self.scroll_area.ensureWidgetVisible(matched_card)
+        # 2. Đồng bộ highlight cho legacy card_widgets nếu test suite đang kích hoạt cache
+        if getattr(self, "_card_widgets_cache", None) is not None:
+            matched_card = None
+            tab = getattr(self, "current_rail_tab", "")
+            for c in self._card_widgets_cache:
+                item = c.preset
+                i_tab = "text" if isinstance(item, TextStylePreset) else "trans" if isinstance(item, TransitionStylePreset) else getattr(item, "tab", "")
+                is_match = (getattr(item, "id", "") == preset_id)
+                if is_match:
+                    if matched_card is None:
+                        matched_card = c
+                    elif (tab and tab != "fav" and i_tab == tab) or c.isVisible():
+                        matched_card = c
+                c.set_selected(False)
+
+            if matched_card:
+                target_tab = "text" if isinstance(matched_card.preset, TextStylePreset) else "trans" if isinstance(matched_card.preset, TransitionStylePreset) else getattr(matched_card.preset, "tab", "")
+                if target_tab and target_tab != getattr(self, "current_rail_tab", ""):
+                    if hasattr(self, "_filter_by_rail"):
+                        self._filter_by_rail(target_tab)
+                    elif hasattr(self, "_on_rail_tab_clicked"):
+                        self._on_rail_tab_clicked(target_tab)
+                matched_card.set_selected(True)
+                if hasattr(self, "scroll_area"):
+                    self.scroll_area.ensureWidgetVisible(matched_card)
 
         # Cập nhật Inspector
         self._update_inspector_details()
@@ -5659,9 +5676,10 @@ class TabAssets(QWidget):
 
         self._update_grid_size_button_styles()
 
-        # Co giãn kích thước thẻ linh hoạt theo số cột
-        for card in self.card_widgets:
-            card.set_card_scale(val)
+        # Co giãn kích thước thẻ linh hoạt theo số cột nếu legacy card cache đang mở
+        if getattr(self, "_card_widgets_cache", None) is not None:
+            for card in self._card_widgets_cache:
+                card.set_card_scale(val)
 
         self._refresh_grid()
 
