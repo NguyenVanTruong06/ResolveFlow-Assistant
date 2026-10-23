@@ -801,12 +801,19 @@ class ResolveAutomation:
         import shutil
         try:
             lut_base_dir = self.get_resolve_lut_dir()
-            target_dir = os.path.join(lut_base_dir, "ResolveFlow")
+            if os.path.basename(lut_base_dir).lower() == "resolveflow":
+                target_dir = lut_base_dir
+                rel_dir = "ResolveFlow"
+            else:
+                target_dir = os.path.join(lut_base_dir, "ResolveFlow")
+                rel_dir = "ResolveFlow"
             os.makedirs(target_dir, exist_ok=True)
-            shutil.copy2(lut_path, os.path.join(target_dir, os.path.basename(lut_path)))
+            dest_file = os.path.join(target_dir, os.path.basename(lut_path))
+            shutil.copy2(lut_path, dest_file)
             if self.current_project:
                 self.current_project.RefreshLUTList()
-            return bool(graph.SetLUT(1, os.path.join("ResolveFlow", os.path.basename(lut_path))))
+            rel_path = os.path.join(rel_dir, os.path.basename(lut_path))
+            return bool(graph.SetLUT(1, rel_path) or graph.SetLUT(1, dest_file))
         except Exception:
             return False
 
