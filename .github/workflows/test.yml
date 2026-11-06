@@ -29,7 +29,7 @@ jobs:
     - name: Install System Dependencies & FFmpeg
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg libxcb-cursor0
+        sudo apt-get install -y ffmpeg libxcb-cursor0 libegl1 libgl1 libxkbcommon-x11-0
 
     - name: Install Python Dependencies
       run: |
