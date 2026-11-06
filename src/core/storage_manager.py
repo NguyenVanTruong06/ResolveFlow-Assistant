@@ -443,19 +443,23 @@ class StorageManager:
             target = str(pack_id).strip().lower()
             matching_packs = [
                 p for p in packs
-                if str(p.get('pack_id', '')).lower() == target
+                if str(p.get('id', '')).lower() == target
+                or str(p.get('pack_id', '')).lower() == target
                 or str(p.get('name', '')).lower() == target
+                or target in str(p.get('id', '')).lower()
                 or target in str(p.get('pack_id', '')).lower()
             ]
 
             kept_assets = []
             for a in assets:
                 a_pid = str(a.get('pack_id', '')).lower()
-                if a_pid == target or any(a_pid == str(p.get('pack_id', '')).lower() for p in matching_packs):
-                    p_str = a.get('path')
+                if a_pid == target or any(a_pid == str(p.get('id', p.get('pack_id', ''))).lower() for p in matching_packs):
+                    p_str = a.get('path') or a.get('library_path')
                     if p_str:
                         try:
                             p_path = Path(p_str)
+                            if not p_path.is_absolute():
+                                p_path = self.root / p_path
                             if p_path.is_file() and str(self.root) in str(p_path):
                                 p_path.unlink(missing_ok=True)
                         except Exception:
@@ -463,17 +467,32 @@ class StorageManager:
                 else:
                     kept_assets.append(a)
 
-            pack_dir = self.root / '02_cloud_downloads' / 'packs' / pack_id
-            if pack_dir.exists() and pack_dir.is_dir():
-                shutil.rmtree(pack_dir, ignore_errors=True)
+            # Xóa các thư mục pack tương ứng trên đĩa
+            packs_root = self.root / '02_cloud_downloads' / 'packs'
+            candidate_dirs = [
+                packs_root / pack_id,
+            ]
             for p in matching_packs:
-                p_folder = p.get('folder_name') or p.get('pack_id')
-                if p_folder:
-                    p_path = self.root / '02_cloud_downloads' / 'packs' / p_folder
-                    if p_path.exists() and p_path.is_dir():
-                        shutil.rmtree(p_path, ignore_errors=True)
+                fld = p.get('folder') or p.get('folder_name') or p.get('id') or p.get('pack_id')
+                if fld:
+                    candidate_dirs.append(self.root / fld if not Path(fld).is_absolute() else Path(fld))
+                    candidate_dirs.append(packs_root / Path(fld).name)
 
-            reg['packs'] = [p for p in packs if str(p.get('pack_id', '')).lower() != target and p not in matching_packs]
+            # Quét thêm mọi thư mục con trong packs có tên chứa hoặc kết thúc bằng target
+            if packs_root.is_dir():
+                for sub in packs_root.iterdir():
+                    if sub.is_dir() and (sub.name.lower().endswith(f"_{target}") or target in sub.name.lower()):
+                        candidate_dirs.append(sub)
+
+            for p_path in candidate_dirs:
+                if p_path.exists() and p_path.is_dir():
+                    shutil.rmtree(p_path, ignore_errors=True)
+
+            reg['packs'] = [
+                p for p in packs
+                if str(p.get('id', p.get('pack_id', ''))).lower() != target
+                and p not in matching_packs
+            ]
             reg['assets'] = kept_assets
             atomic_json(self.meta / 'registry.json', reg)
             self.snapshot()

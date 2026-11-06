@@ -671,7 +671,7 @@ class PackIngestService:
         with sm.lock():
             check_identity()
             if folder.exists():
-                raise ValueError('Pack đã được nhập.')
+                shutil.rmtree(folder, ignore_errors=True)
             tax_path = sm.meta / 'taxonomy.json'
             if drafts:
                 if tax_path.is_symlink():
@@ -691,6 +691,15 @@ class PackIngestService:
                     raise ValueError('Danh mục chưa đăng ký: ' + str(item['category']))
 
             registry = sm.registry()
+            target_pid = str(job['pack_id']).strip().lower()
+            registry['packs'] = [
+                p for p in registry.get('packs', [])
+                if str(p.get('id', p.get('pack_id', ''))).lower() != target_pid
+            ]
+            registry['assets'] = [
+                a for a in registry.get('assets', [])
+                if str(a.get('pack_id', '')).lower() != target_pid
+            ]
             for item in chosen:
                 item_up = {
                     'pack_id': job['pack_id'],

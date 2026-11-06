@@ -535,7 +535,10 @@ class PackIngestWizard(QDialog):
             self.job = None; self.library_changed.emit(); super().accept(); return
         else:
             self._reset_warnings()
-            self.lbl_status.setText(str(result))
+            err_msg = str(result)
+            self.lbl_status.setText(err_msg)
+            if self._kind == 'commit':
+                QMessageBox.warning(self, "Không thể nhập vào kho", f"Lỗi khi nhập gói: {err_msg}")
         self._update_buttons()
 
     def accept(self):

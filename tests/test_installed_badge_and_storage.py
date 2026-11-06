@@ -130,3 +130,79 @@ def test_storage_settings_dialog_has_confirm_button(qapp, tmp_path):
     assert len(emitted) >= 1
     assert dialog.result() == 1
     dialog.deleteLater()
+
+
+def test_remove_pack_and_recommit_overwrite(tmp_path: Path):
+    """Xác nhận việc xóa gói dọn dẹp sạch thư mục và cho phép nhập đè lại thành công."""
+    config_dir = tmp_path / "config"
+    lib_dir = tmp_path / "lib"
+    sm = StorageManager(config_dir=config_dir)
+    sm.configure(lib_dir)
+
+    service = PackIngestService(sm)
+
+    # 1. Tạo và commit gói lần 1
+    staging = sm.new_staging()
+    payload = staging / "payload"
+    payload.mkdir(parents=True, exist_ok=True)
+    (payload / "whoosh.wav").write_text("audio1")
+
+    job = {
+        "job_dir": str(staging),
+        "pack_id": "davinci_gr44_seamless_transitions",
+        "name": "Gói Chuyển Cảnh GR-44 v1.4 & Sound FX",
+        "version": "1.0",
+        "assets": [
+            {
+                "id": "item1",
+                "relative_path": "whoosh.wav",
+                "category": "templates",
+                "sub_group": "",
+                "tags": ["transition"],
+                "chosen": True,
+                "size_bytes": 6,
+                "media_type": "audio"
+            }
+        ]
+    }
+    service.commit(job)
+
+    # Kiểm tra folder đã tạo
+    pack_dir = lib_dir / "02_cloud_downloads" / "packs" / "Goi_Chuyen_Canh_GR_44_v1_4_Sound_FX_1_0_davinci_gr44_seamless_transitions"
+    # Hoặc folder tương ứng theo slug
+    folders = list((lib_dir / "02_cloud_downloads" / "packs").iterdir())
+    assert len(folders) == 1
+
+    # 2. Xóa gói qua remove_pack
+    assert sm.remove_pack("davinci_gr44_seamless_transitions") is True
+    # Thư mục trên đĩa phải được dọn dẹp sạch
+    remaining_folders = [f for f in (lib_dir / "02_cloud_downloads" / "packs").iterdir() if f.is_dir()]
+    assert len(remaining_folders) == 0
+
+    # 3. Commit lại lần 2 (người dùng tải lại và nhập vào kho)
+    staging2 = sm.new_staging()
+    payload2 = staging2 / "payload"
+    payload2.mkdir(parents=True, exist_ok=True)
+    (payload2 / "whoosh.wav").write_text("audio2")
+
+    job2 = {
+        "job_dir": str(staging2),
+        "pack_id": "davinci_gr44_seamless_transitions",
+        "name": "Gói Chuyển Cảnh GR-44 v1.4 & Sound FX",
+        "version": "1.0",
+        "assets": [
+            {
+                "id": "item1",
+                "relative_path": "whoosh.wav",
+                "category": "templates",
+                "sub_group": "",
+                "tags": ["transition"],
+                "chosen": True,
+                "size_bytes": 6,
+                "media_type": "audio"
+            }
+        ]
+    }
+    # Phải thành công mượt mà, không quăng lỗi 'Pack đã được nhập'
+    res2 = service.commit(job2)
+    assert res2["pack_id"] == "davinci_gr44_seamless_transitions"
