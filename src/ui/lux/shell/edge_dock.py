@@ -188,7 +188,9 @@ class EdgeDockWindow(QWidget):
         if self._resolve_state:
             self._resolve_state.state_changed.connect(self._on_resolve_state_changed)
             self._resolve_state.state_changed.connect(
-                lambda s: self.bubble.set_davinci_connected(bool(s.get("connected")))
+                lambda connected, *args: self.bubble.set_davinci_connected(
+                    bool(connected.get("connected") if isinstance(connected, dict) else connected)
+                )
             )
 
         # Resolve Window Anchor (Dynamic tracking)

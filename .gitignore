@@ -84,3 +84,4 @@ task/
 *.bak_original
 reports/
 .superpowers/
+assets/templates/transitions/installed/

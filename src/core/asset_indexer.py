@@ -442,7 +442,16 @@ class AssetIndexer:
             return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
         seen = set()
         res = []
-        target_dirs = getattr(self, "transitions_dirs", [self.transitions_dir])
+        target_dirs = list(getattr(self, "transitions_dirs", [self.transitions_dir]))
+        try:
+            from src.core.storage_manager import StorageManager
+            sm = StorageManager()
+            if sm.online:
+                packs_dir = sm.root / "02_cloud_downloads" / "packs"
+                if packs_dir.exists() and packs_dir not in target_dirs:
+                    target_dirs.append(packs_dir)
+        except Exception:
+            pass
 
         import zipfile
         previews_base = self.transitions_dir / "previews"
@@ -482,6 +491,8 @@ class AssetIndexer:
                     continue
                 parts = file_path.parts
                 stem = file_path.stem
+                if stem.startswith("._"):
+                    continue
 
                 if "installed" in parts:
                     idx = parts.index("installed")
@@ -565,9 +576,14 @@ class AssetIndexer:
                 if not v_path.is_file():
                     continue
                 v_stem = v_path.stem
+                if v_stem.startswith("._"):
+                    continue
+                v_posix = v_path.as_posix().lower()
+                if not any(k in v_posix for k in ("transition", "chuyển cảnh", "preview transitions")):
+                    continue
                 if any(v_stem.lower() in s.lower() for s in seen):
                     continue
-                if any(k in v_stem.lower() for k in ["tutorial", "readme", "instruction", "install"]):
+                if any(k in v_stem.lower() for k in ["tutorial", "readme", "instruction", "install", "how-to", "how_to"]):
                     continue
                 v_parts = v_path.parts
                 v_pack = "Transitions"
