@@ -191,30 +191,41 @@ class PackManager:
 
     @classmethod
     def uninstall_pack(cls, pack_id: str) -> bool:
-        """Gỡ bỏ toàn bộ tệp và thư mục của một gói đã cài đặt."""
+        """Gỡ bỏ toàn bộ tệp và thư mục của một gói đã cài đặt (cả trong local registry và StorageManager)."""
+        removed_any = False
         installed = cls.get_installed_packs()
-        if pack_id not in installed:
-            return False
-        entry = installed[pack_id]
-        paths = entry.get("installed_paths", [])
-        for p in paths:
+        if pack_id in installed:
+            entry = installed[pack_id]
+            paths = entry.get("installed_paths", [])
+            for p in paths:
+                try:
+                    p_obj = Path(p)
+                    if p_obj.is_file():
+                        p_obj.unlink()
+                    parent_dir = p_obj.parent
+                    if parent_dir.is_dir() and not any(parent_dir.iterdir()):
+                        parent_dir.rmdir()
+                except Exception:
+                    pass
+            del installed[pack_id]
             try:
-                p_obj = Path(p)
-                if p_obj.is_file():
-                    p_obj.unlink()
-                # Thử xóa thư mục cha nếu trống
-                parent_dir = p_obj.parent
-                if parent_dir.is_dir() and not any(parent_dir.iterdir()):
-                    parent_dir.rmdir()
+                with open(cls.INSTALLED_PACKS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(installed, f, ensure_ascii=False, indent=2)
             except Exception:
                 pass
-        del installed[pack_id]
+            removed_any = True
+
+        # Gỡ thêm từ StorageManager nếu có
         try:
-            with open(cls.INSTALLED_PACKS_FILE, "w", encoding="utf-8") as f:
-                json.dump(installed, f, ensure_ascii=False, indent=2)
+            from src.core.storage_manager import StorageManager
+            sm = StorageManager()
+            if sm.online:
+                if sm.remove_pack(pack_id):
+                    removed_any = True
         except Exception:
             pass
-        return True
+
+        return removed_any
 
     @staticmethod
     def create_pack(

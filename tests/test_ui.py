@@ -1210,6 +1210,7 @@ def test_auto_window_story_review_state_and_pipeline_launch(qapp, monkeypatch):
     # Giả lập có video hợp lệ
     window.selected_files = ["D:/fake/path/video.mp4"]
     monkeypatch.setattr("os.path.exists", lambda p: True)
+    monkeypatch.setattr("src.core.transcriber.is_model_on_disk", lambda m: True)
 
     # Kích hoạt qua nút bấm / _toggle_pipeline_execution
     window._toggle_pipeline_execution()

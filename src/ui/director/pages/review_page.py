@@ -762,7 +762,7 @@ class ReviewPage(QWidget):
         lbl_step1.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
         pw_lay.addWidget(lbl_step1)
 
-        row_copy_btns = QHBoxLayout()
+        row_copy_btns = QGridLayout()
         row_copy_btns.setSpacing(6)
 
         self.btn_copy_video_prompt = QPushButton("📋 1. Prompt Dựng Video (V1)")
@@ -782,7 +782,7 @@ class ReviewPage(QWidget):
             }
         """)
         self.btn_copy_video_prompt.clicked.connect(self._copy_video_prompt)
-        row_copy_btns.addWidget(self.btn_copy_video_prompt, stretch=1)
+        row_copy_btns.addWidget(self.btn_copy_video_prompt, 0, 0)
 
         self.btn_copy_final_transcript = QPushButton("✂ 2. Copy Transcript Bản Dựng")
         self.btn_copy_final_transcript.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -802,7 +802,7 @@ class ReviewPage(QWidget):
         """)
         self.btn_copy_final_transcript.setToolTip("Trích xuất chỉ riêng các câu thoại thuộc Bản Dựng Cuối (Final Cut) đã lọc sạch ảo giác, đánh số [0]..[N-1] liên tục không tốn token")
         self.btn_copy_final_transcript.clicked.connect(self._copy_final_cut_transcript)
-        row_copy_btns.addWidget(self.btn_copy_final_transcript, stretch=1)
+        row_copy_btns.addWidget(self.btn_copy_final_transcript, 0, 1)
 
         self.btn_copy_kinetic_prompt = QPushButton("✨ 3. Prompt Chữ Kinetic (V2)")
         self.btn_copy_kinetic_prompt.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -822,7 +822,7 @@ class ReviewPage(QWidget):
             }
         """)
         self.btn_copy_kinetic_prompt.clicked.connect(self._copy_kinetic_prompt)
-        row_copy_btns.addWidget(self.btn_copy_kinetic_prompt, stretch=1)
+        row_copy_btns.addWidget(self.btn_copy_kinetic_prompt, 1, 0, 1, 2)
 
         pw_lay.addLayout(row_copy_btns)
 
@@ -841,14 +841,13 @@ class ReviewPage(QWidget):
         lay_batch.setContentsMargins(4, 3, 4, 3)
         lay_batch.setSpacing(4)
 
-        h_batch_top = QHBoxLayout()
         self.btn_prepare_batches = QPushButton("📦 4. Phân Lô Kịch Bản (Batch Planner)")
         self.btn_prepare_batches.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_prepare_batches.setStyleSheet("""
             QPushButton {
                 background-color: #d94f3d;
                 color: #ffffff;
-                padding: 5px 8px;
+                padding: 6px 10px;
                 border-radius: 4px;
                 font-weight: bold;
                 font-size: 11px;
@@ -863,7 +862,10 @@ class ReviewPage(QWidget):
             }
         """)
         self.btn_prepare_batches.clicked.connect(self._on_prepare_batches_clicked)
-        h_batch_top.addWidget(self.btn_prepare_batches)
+        lay_batch.addWidget(self.btn_prepare_batches)
+
+        h_batch_top = QHBoxLayout()
+        h_batch_top.setSpacing(6)
 
         self.cbo_batch_selector = QComboBox()
         self.cbo_batch_selector.setStyleSheet("""

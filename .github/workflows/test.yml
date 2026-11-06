@@ -39,7 +39,7 @@ jobs:
 
     - name: Run Core Test Suite with Pytest
       run: |
-        python -m pytest tests/test_cloud_item_cache.py tests/test_pack_manager.py tests/test_tab_assets_packs_and_collections.py tests/test_asset_hub_e2e.py tests/test_lux_effects.py tests/test_floating_bubble.py -v
+        python -m pytest tests/test_cloud_item_cache.py tests/test_pack_manager.py tests/test_tab_assets_packs_and_collections.py tests/test_asset_hub_e2e.py tests/test_lux_effects.py tests/test_floating_bubble.py tests/test_auto_update_system.py tests/test_installed_badge_and_storage.py tests/test_studio_window.py -v
 
     - name: Verify Standalone Imports
       run: |

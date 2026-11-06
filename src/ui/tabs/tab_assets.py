@@ -4046,24 +4046,21 @@ class TabAssets(QWidget):
         main_sec_layout.setSpacing(0)
 
         main_head = QFrame()
-        main_head.setFixedHeight(78)
+        main_head.setFixedHeight(44)
         main_head.setStyleSheet(f"""
             QFrame {{
                 background-color: {ThemeColors.BG_MAIN};
                 border-bottom: 1px solid {ThemeColors.BORDER_DEFAULT};
             }}
         """)
-        head_rows = QVBoxLayout(main_head)
-        head_rows.setContentsMargins(4, 2, 4, 2)
-        head_rows.setSpacing(2)
-        mh_layout = QHBoxLayout()
-        head_rows.addLayout(mh_layout)
-        mh_layout.setContentsMargins(12, 6, 12, 6)
+        mh_layout = QHBoxLayout(main_head)
+        mh_layout.setContentsMargins(10, 4, 10, 4)
         mh_layout.setSpacing(6)
 
-        # Nút thu gọn / mở rộng cột Nhóm
-        self.btn_toggle_cats = QPushButton("☰ Nhóm")
+        # 1. Nút thu gọn / mở rộng cột Nhóm
+        self.btn_toggle_cats = QPushButton("☰")
         self.btn_toggle_cats.setToolTip("Ẩn / Hiện cột Phân loại danh mục")
+        self.btn_toggle_cats.setFixedSize(28, 28)
         self.btn_toggle_cats.setCursor(Qt.PointingHandCursor)
         self.btn_toggle_cats.clicked.connect(self._toggle_cats_visibility)
         self.btn_toggle_cats.setStyleSheet(f"""
@@ -4071,9 +4068,9 @@ class TabAssets(QWidget):
                 background: {ThemeColors.BG_CARD};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-radius: 6px;
-                padding: 4px 8px;
                 color: {ThemeColors.TEXT_MUTED};
-                font-size: 11px;
+                font-size: 13px;
+                font-weight: bold;
             }}
             QPushButton:hover {{
                 border-color: {ThemeColors.BORDER_HOVER};
@@ -4083,94 +4080,70 @@ class TabAssets(QWidget):
         mh_layout.addWidget(self.btn_toggle_cats)
 
         self.lbl_main_cat = QLabel("Chữ chuyển động")
-        self.lbl_main_cat.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {ThemeColors.TEXT_PRIMARY};")
+        self.lbl_main_cat.setStyleSheet(f"font-weight: bold; font-size: 12.5px; color: {ThemeColors.TEXT_PRIMARY};")
         mh_layout.addWidget(self.lbl_main_cat)
 
         self.lbl_count_badge = QLabel("14 mẫu")
         self.lbl_count_badge.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
         mh_layout.addWidget(self.lbl_count_badge)
 
-        mh_layout.addStretch()
-
-        # Nút AutoCut 1-Click trực tiếp từ Timeline đang mở
-        self.btn_autocut = QPushButton("⚡ AutoCut")
-        self.btn_autocut.setToolTip("⚡ AutoCut 1-Click: Cắt bỏ khoảng lặng trên Timeline đang mở & tự động co sát các đoạn thoại lại (0.3s)")
-        self.btn_autocut.setCursor(Qt.PointingHandCursor)
-        self.btn_autocut.clicked.connect(self._run_instant_autocut)
-        self.btn_autocut.setStyleSheet("""
-            QPushButton {
-                background-color: rgba(245, 158, 11, 0.15);
-                border: 1px solid #f59e0b;
+        # 2. Thanh tìm kiếm trung tâm lớn, co giãn linh hoạt
+        self.txt_search = QLineEdit()
+        self.txt_search.setPlaceholderText("🔍 Tìm nhanh đạo cụ, SFX, Meme... (Ctrl+F)")
+        self.txt_search.setMinimumWidth(120)
+        self.txt_search.textChanged.connect(self._refresh_grid)
+        self.txt_search.setStyleSheet(f"""
+            QLineEdit {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-radius: 6px;
-                padding: 4px 10px;
-                color: #fbbf24;
+                padding: 5px 10px;
+                color: {ThemeColors.TEXT_PRIMARY};
+                font-size: 11.5px;
+            }}
+            QLineEdit:focus {{
+                border-color: {ThemeColors.PRIMARY};
+                background: {ThemeColors.BG_INPUT};
+            }}
+        """)
+        mh_layout.addWidget(self.txt_search, stretch=1)
+
+        # 3. Các nút tác vụ cốt lõi bên phải
+        self.btn_open_asset_hub = QPushButton("☁️ Kho Online")
+        self.btn_open_asset_hub.setToolTip("Mở Kho Gói Đám Mây Tuyển Chọn & Quản lý thư mục ngoài")
+        self.btn_open_asset_hub.setFixedHeight(28)
+        self.btn_open_asset_hub.setCursor(Qt.PointingHandCursor)
+        self.btn_open_asset_hub.clicked.connect(lambda: self._filter_by_rail("hub"))
+        self.btn_open_asset_hub.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff4757, stop:1 #e0283b);
+                color: #ffffff;
+                border: 1px solid #ff6b81;
+                border-radius: 6px;
+                padding: 0 10px;
                 font-size: 11px;
-                font-weight: bold;
+                font-weight: 700;
             }
             QPushButton:hover {
-                background-color: #f59e0b;
-                color: #000000;
+                background: #ff5252;
             }
         """)
-        mh_layout.addWidget(self.btn_autocut)
+        mh_layout.addWidget(self.btn_open_asset_hub)
 
-        # Nút trạng thái DaVinci Resolve
-        self.btn_resolve_status = QPushButton("⚪ DaVinci")
-        self.btn_resolve_status.setToolTip("Kiểm tra kết nối DaVinci Resolve API")
-        self.btn_resolve_status.setCursor(Qt.PointingHandCursor)
-        self.btn_resolve_status.clicked.connect(self._check_resolve_connection)
-        self.btn_resolve_status.setStyleSheet(f"""
-            QPushButton {{
-                background: {ThemeColors.BG_CARD};
-                border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 6px;
-                padding: 4px 8px;
-                color: {ThemeColors.TEXT_MUTED};
-                font-size: 11px;
-            }}
-            QPushButton:hover {{
-                border-color: {ThemeColors.BORDER_HOVER};
-                color: {ThemeColors.TEXT_PRIMARY};
-            }}
-        """)
-        mh_layout.addWidget(self.btn_resolve_status)
-
-        # Nút quét lại kho tài nguyên
-        self.btn_rescan = QPushButton("🔄 Quét")
-        self.btn_rescan.setToolTip("Quét lại toàn bộ kho đạo cụ cục bộ")
-        self.btn_rescan.setCursor(Qt.PointingHandCursor)
-        self.btn_rescan.clicked.connect(self._rescan_assets)
-        self.btn_rescan.setStyleSheet(f"""
-            QPushButton {{
-                background: {ThemeColors.BG_CARD};
-                border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 6px;
-                padding: 4px 8px;
-                color: {ThemeColors.TEXT_PRIMARY};
-                font-size: 11px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                border-color: {ThemeColors.PRIMARY};
-                background: {ThemeColors.BG_CARD_ACTIVE};
-            }}
-        """)
-        mh_layout.addWidget(self.btn_rescan)
-
-        # Nút nhập file/thư mục tự động liên kết DaVinci
         self.btn_import_assets = QPushButton("➕ Nhập")
-        self.btn_import_assets.setToolTip("Thêm mẫu chữ .setting, video meme, SFX, LUTs (Tự động liên kết vào DaVinci Resolve)")
+        self.btn_import_assets.setToolTip("Thêm mẫu chữ .setting, video meme, SFX, LUTs...")
+        self.btn_import_assets.setFixedHeight(28)
         self.btn_import_assets.setCursor(Qt.PointingHandCursor)
         self.btn_import_assets.clicked.connect(lambda: self._import_files_or_folders())
         self.btn_import_assets.setStyleSheet(f"""
             QPushButton {{
                 background: {ThemeColors.BG_CARD};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 4px;
-                padding: 4px 8px;
+                border-radius: 6px;
+                padding: 0 10px;
                 color: #f3f4f6;
                 font-size: 11px;
-                font-weight: bold;
+                font-weight: 600;
             }}
             QPushButton:hover {{
                 border-color: {ThemeColors.PRIMARY};
@@ -4179,79 +4152,54 @@ class TabAssets(QWidget):
         """)
         mh_layout.addWidget(self.btn_import_assets)
 
-        # Nút mở Kho Online & Nối thư mục máy tính
-        self.btn_open_asset_hub = QPushButton("☁️ Kho Online")
-        self.btn_open_asset_hub.setToolTip("Mở Kho Gói Đám Mây Tuyển Chọn và Quản lý các thư mục ổ cứng ngoài")
-        self.btn_open_asset_hub.setCursor(Qt.PointingHandCursor)
-        self.btn_open_asset_hub.clicked.connect(lambda: self._filter_by_rail("hub"))
-        self.btn_open_asset_hub.setStyleSheet(f"""
-            QPushButton {{
-                background: {ThemeColors.BG_CARD};
-                border: 1px solid #d94f3d;
-                border-radius: 4px;
-                padding: 4px 10px;
-                color: #f59e0b;
-                font-size: 11px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                border-color: #e86352;
-                background: rgba(217, 79, 61, 0.22);
-            }}
-        """)
-        mh_layout.addWidget(self.btn_open_asset_hub)
-
-        self.txt_search = QLineEdit()
-        self.txt_search.setPlaceholderText("🔍 Tìm đạo cụ...")
-        self.txt_search.setFixedWidth(160)
-        self.txt_search.textChanged.connect(self._refresh_grid)
-        self.txt_search.setStyleSheet(f"""
-            QLineEdit {{
-                background: {ThemeColors.BG_CARD};
-                border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 8px;
-                padding: 5px 10px;
-                color: {ThemeColors.TEXT_PRIMARY};
-            }}
-            QLineEdit:focus {{
-                border-color: {ThemeColors.PRIMARY};
-            }}
-        """)
-        mh_layout.addWidget(self.txt_search)
-
-        # Nút thu gọn / mở rộng cột Inspector (Chế độ Compact)
-        self.btn_toggle_inspector = QPushButton("◫ Chi tiết")
-        self.btn_toggle_inspector.setToolTip("Ẩn / Hiện cột Chi tiết Inspector (Chế độ Compact)")
-        self.btn_toggle_inspector.setCursor(Qt.PointingHandCursor)
-        self.btn_toggle_inspector.clicked.connect(self._toggle_inspector_visibility)
-        self.btn_toggle_inspector.setStyleSheet(f"""
+        self.btn_toggle_sug_bar = QPushButton("💡 Gợi ý AI")
+        self.btn_toggle_sug_bar.setToolTip("Bật / tắt bảng gợi ý đạo cụ theo lời thoại AI")
+        self.btn_toggle_sug_bar.setCheckable(True)
+        self.btn_toggle_sug_bar.setChecked(False)
+        self.btn_toggle_sug_bar.setFixedHeight(28)
+        self.btn_toggle_sug_bar.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle_sug_bar.clicked.connect(self._on_sug_bar_toggled)
+        self.btn_toggle_sug_bar.setStyleSheet(f"""
             QPushButton {{
                 background: {ThemeColors.BG_CARD};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-radius: 6px;
-                padding: 5px 10px;
-                color: {ThemeColors.TEXT_MUTED};
+                padding: 0 9px;
+                color: #f59e0b;
                 font-size: 11px;
+                font-weight: 600;
             }}
             QPushButton:hover {{
-                border-color: {ThemeColors.PRIMARY};
-                color: {ThemeColors.TEXT_PRIMARY};
+                border-color: #f59e0b;
+                color: #fbbf24;
+            }}
+            QPushButton:checked {{
+                background: rgba(245, 158, 11, 0.2);
+                border-color: #f59e0b;
+                color: #fbbf24;
             }}
         """)
-        mh_layout.addWidget(self.btn_toggle_inspector)
-        search_row = QHBoxLayout()
-        search_row.setSpacing(4)
-        for widget in (self.btn_import_assets, self.btn_open_asset_hub, self.txt_search, self.btn_toggle_inspector):
-            mh_layout.removeWidget(widget)
-            search_row.addWidget(widget)
-        self.txt_search.setMinimumWidth(90)
-        self.txt_search.setMaximumWidth(16777215)
-        search_row.setStretch(2, 1)
-        head_rows.addLayout(search_row)
+        mh_layout.addWidget(self.btn_toggle_sug_bar)
 
-        # Thanh công cụ phụ: Bộ lọc nhanh & Slider kích thước thẻ (DVC Pro style)
+        self.btn_toggle_inspector = QPushButton("◫ Chi tiết")
+        self.btn_toggle_inspector.setToolTip("Ẩn / Hiện cột Chi tiết Inspector")
+        self.btn_toggle_inspector.setFixedHeight(28)
+        self.btn_toggle_inspector.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle_inspector.clicked.connect(self._toggle_inspector_visibility)
+        self.btn_toggle_inspector.setStyleSheet(self.btn_import_assets.styleSheet())
+        mh_layout.addWidget(self.btn_toggle_inspector)
+
+        self.btn_rescan = QPushButton("🔄")
+        self.btn_rescan.setToolTip("Quét lại toàn bộ kho đạo cụ cục bộ")
+        self.btn_rescan.setFixedSize(28, 28)
+        self.btn_rescan.setCursor(Qt.PointingHandCursor)
+        self.btn_rescan.clicked.connect(self._rescan_assets)
+        self.btn_rescan.setStyleSheet(self.btn_toggle_cats.styleSheet())
+        mh_layout.addWidget(self.btn_rescan)
+
+        # Thanh công cụ phụ: Bộ lọc nhanh & Kích thước thẻ gọn nhẹ
         filter_bar = QFrame()
-        filter_bar.setFixedHeight(40)
+        filter_bar.setFixedHeight(34)
         filter_bar.setStyleSheet(f"""
             QFrame {{
                 background-color: {ThemeColors.BG_MAIN};
@@ -4259,7 +4207,7 @@ class TabAssets(QWidget):
             }}
         """)
         fb_layout = QHBoxLayout(filter_bar)
-        fb_layout.setContentsMargins(10, 4, 10, 4)
+        fb_layout.setContentsMargins(10, 3, 10, 3)
         fb_layout.setSpacing(6)
 
         self.btn_filter_all = QPushButton("Tất cả")
@@ -4271,7 +4219,7 @@ class TabAssets(QWidget):
         for btn, mode in [(self.btn_filter_all, "all"), (self.btn_filter_fav, "fav"), (self.btn_filter_recent, "recent")]:
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setFixedHeight(26)
+            btn.setFixedHeight(24)
             btn.clicked.connect(lambda _, m=mode: self._set_filter_mode(m))
             fb_layout.addWidget(btn)
         self.btn_filter_all.setChecked(True)
@@ -4283,7 +4231,7 @@ class TabAssets(QWidget):
         lbl_zoom.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
         fb_layout.addWidget(lbl_zoom)
 
-        # 3 Nút chuyển cỡ siêu nhanh (DVC Pro style): Nhỏ (5) | Vừa (3) | Lớn (2)
+        # 3 Nút kích thước thẻ: Nhỏ (5) | Vừa (3) | Lớn (2)
         self.btn_size_compact = QPushButton("Nhỏ")
         self.btn_size_compact.setToolTip("Thu nhỏ (5 cột) - Nhìn bao quát nhiều mẫu nhất")
         self.btn_size_medium = QPushButton("Vừa")
@@ -4300,39 +4248,21 @@ class TabAssets(QWidget):
         for btn, cols in self.grid_size_buttons:
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setFixedHeight(24)
+            btn.setFixedHeight(22)
             btn.clicked.connect(lambda _, c=cols: self._on_grid_cols_changed(c))
             fb_layout.addWidget(btn)
         self.btn_size_medium.setChecked(True)
         self._update_grid_size_button_styles()
 
-        # Thanh trượt tùy chỉnh mượt mà (hỗ trợ cả Ctrl + Lăn chuột)
-        self.slide_card_cols = QSlider(Qt.Horizontal)
-        self.slide_card_cols.setRange(2, 5)
-        self.slide_card_cols.setValue(3)
-        self.slide_card_cols.setFixedWidth(46)
-        self.slide_card_cols.setToolTip("Kéo thanh trượt hoặc giữ Ctrl + Cuộn chuột trên lưới để phóng to/thu nhỏ")
-        self.slide_card_cols.setStyleSheet(f"""
-            QSlider::groove:horizontal {{ height: 4px; background: {ThemeColors.BG_CARD}; border-radius: 2px; }}
-            QSlider::sub-page:horizontal {{ background: {ThemeColors.PRIMARY}; border-radius: 2px; }}
-            QSlider::handle:horizontal {{ background: {ThemeColors.CYAN_HI}; width: 10px; margin: -3px 0; border-radius: 5px; }}
-        """)
-        self.slide_card_cols.valueChanged.connect(self._on_grid_cols_changed)
-        fb_layout.addWidget(self.slide_card_cols)
-
-        self.lbl_cols_val = QLabel("3 cột")
-        self.lbl_cols_val.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 11px; font-weight: bold;")
-        fb_layout.addWidget(self.lbl_cols_val)
-
         # Checkbox: Nghe thử (Hover Preview - CapCut style)
-        self.chk_hover_preview = QCheckBox("Nghe thử")
+        self.chk_hover_preview = QCheckBox("🔊 Nghe thử")
         self.chk_hover_preview.setChecked(True)
         self.chk_hover_preview.setToolTip("🔊 Nghe thử: Tự động phát âm thanh khi rê chuột qua card SFX / Nhạc / Meme")
         self.chk_hover_preview.setStyleSheet(f"""
             QCheckBox {{
                 color: {ThemeColors.TEXT_MUTED};
                 font-size: 11px;
-                margin-left: 2px;
+                margin-left: 4px;
             }}
             QCheckBox:checked {{
                 color: {ThemeColors.CYAN_HI};
@@ -4341,34 +4271,6 @@ class TabAssets(QWidget):
         """)
         self.chk_hover_preview.toggled.connect(self._on_hover_preview_toggled)
         fb_layout.addWidget(self.chk_hover_preview)
-
-        # Nút bật / tắt thanh gợi ý ngữ cảnh lời thoại
-        self.btn_toggle_sug_bar = QPushButton("💡 Gợi ý")
-        self.btn_toggle_sug_bar.setCheckable(True)
-        self.btn_toggle_sug_bar.setChecked(True)
-        self.btn_toggle_sug_bar.setToolTip("Bật / tắt thanh gợi ý đạo cụ theo lời thoại")
-        self.btn_toggle_sug_bar.setStyleSheet(f"""
-            QPushButton {{
-                background: {ThemeColors.BG_CARD};
-                border: 1px solid #353841;
-                border-radius: 4px;
-                color: #f59e0b;
-                font-size: 11px;
-                padding: 2px 8px;
-                margin-left: 2px;
-            }}
-            QPushButton:hover {{
-                background: {ThemeColors.BG_CARD_ACTIVE};
-                border-color: {ThemeColors.PRIMARY};
-            }}
-            QPushButton:checked {{
-                background: rgba(217, 79, 61, 0.20);
-                color: #ffffff;
-                border-color: {ThemeColors.PRIMARY};
-            }}
-        """)
-        self.btn_toggle_sug_bar.toggled.connect(self._on_sug_bar_toggled)
-        fb_layout.addWidget(self.btn_toggle_sug_bar)
 
         # Responsive adaptation for narrow widths (< 580px in main section)
         def _update_filter_bar_responsive():
@@ -4416,6 +4318,7 @@ class TabAssets(QWidget):
         main_sec_layout.addWidget(main_head)
         main_sec_layout.addWidget(filter_bar)
         self._setup_suggestion_bar()
+        self.suggestion_bar.hide()
         main_sec_layout.addWidget(self.suggestion_bar)
         main_sec_layout.addWidget(self.asset_grid, stretch=1)
 
@@ -5586,13 +5489,30 @@ class TabAssets(QWidget):
 
         known_subs = {cid for cid, _ in sub_cats}
         for asset in self.all_assets:
-            if getattr(asset, "storage_managed", False) and getattr(asset, "tab", "") == tab:
-                for label in [getattr(asset, "sub", "")] + list(getattr(asset, "tags", [])):
-                    if label and label not in known_subs:
-                        sub_cats.append((label, label)); known_subs.add(label)
+            a_tab = self._get_asset_tab(asset)
+            if a_tab == tab:
+                sub_label = self._get_asset_sub(asset)
+                if sub_label and sub_label not in known_subs and sub_label not in ("all", "Tất cả", "default"):
+                    sub_cats.append((sub_label, sub_label))
+                    known_subs.add(sub_label)
 
+        def _get_sub_count(cid_target):
+            if cid_target == "all":
+                return sum(1 for a in self.all_assets if self._get_asset_tab(a) == tab)
+            return sum(1 for a in self.all_assets if self._get_asset_tab(a) == tab and self._get_asset_sub(a) == cid_target)
+
+        # Lọc danh mục: giữ "all", các nhóm có item, hoặc nhóm mặc định hệ thống
+        visible_sub_cats = []
         for cid, cname in sub_cats:
-            btn = QPushButton(f"  {cname}")
+            cnt = _get_sub_count(cid)
+            # Chỉ ẩn những mục rác 0 item nếu không phải là nhóm cơ bản
+            if cid != "all" and cnt == 0 and cid not in {c[0] for c in sub_cats[:4]}:
+                continue
+            visible_sub_cats.append((cid, cname, cnt))
+
+        for cid, cname, count in visible_sub_cats:
+            label_text = f"  {cname} ({count})" if count > 0 and cid != "all" else f"  {cname}"
+            btn = QPushButton(label_text)
             btn.setProperty("sub_cat_id", cid)
             btn.setCheckable(True)
             btn.setFixedHeight(32)
@@ -5618,6 +5538,14 @@ class TabAssets(QWidget):
                 }}
             """)
             btn.clicked.connect(lambda _, x=cid: self._on_sub_category_clicked(x))
+
+            # Cho phép click chuột phải để Đổi tên / Xóa danh mục
+            if cid != "all":
+                btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+                btn.customContextMenuRequested.connect(
+                    lambda pos, c=cid, n=cname, b=btn, cnt=count: self._show_category_context_menu(pos, c, n, b, cnt)
+                )
+
             self.cats_vbox.addWidget(btn)
 
         # Quét các gói cài đặt (Packs) cho danh mục này
@@ -5719,6 +5647,94 @@ class TabAssets(QWidget):
                 CollectionsManager.delete_collection(name)
                 self._rebuild_categories_column()
                 self._on_sub_category_clicked("all")
+
+    def _show_category_context_menu(self, pos, cid: str, cname: str, btn: QPushButton, count: int):
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #18181b;
+                border: 1px solid #3f3f46;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 14px;
+                border-radius: 4px;
+                color: #e4e4e7;
+                font-size: 11.5px;
+            }
+            QMenu::item:selected {
+                background-color: #27272a;
+                color: #ffffff;
+            }
+        """)
+        act_rename = menu.addAction("✏️ Đổi Tên Danh Mục...")
+        act_delete = menu.addAction(f"🗑️ Xóa Danh Mục ({count} mẫu)..." if count > 0 else "🗑️ Xóa Danh Mục Trống...")
+        action = menu.exec(btn.mapToGlobal(pos))
+        if action == act_rename:
+            new_name, ok = QInputDialog.getText(self, "Đổi tên danh mục", f"Nhập tên mới cho danh mục '{cname}':", text=cname)
+            if ok and new_name.strip() and new_name.strip() != cname:
+                self._rename_sub_category(cid, new_name.strip())
+        elif action == act_delete:
+            if count == 0:
+                self._delete_sub_category(cid, cname)
+            else:
+                reply = QMessageBox.question(
+                    self,
+                    "Xác nhận xóa danh mục",
+                    f"Danh mục '{cname}' đang chứa {count} đạo cụ.\nBạn có chắc muốn xóa danh mục này?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._delete_sub_category(cid, cname)
+
+    def _rename_sub_category(self, old_cid: str, new_name: str):
+        for a in self.all_assets:
+            if self._get_asset_sub(a) == old_cid:
+                if isinstance(a, dict):
+                    a["sub"] = new_name
+                    a["sub_category"] = new_name
+                else:
+                    setattr(a, "sub", new_name)
+                    if hasattr(a, "sub_category"):
+                        setattr(a, "sub_category", new_name)
+
+        try:
+            from src.core.storage_manager import StorageManager
+            sm = StorageManager()
+            if sm.online:
+                sm.rename_category(old_cid, new_name)
+        except Exception:
+            pass
+
+        self._rebuild_categories_column()
+        self._on_sub_category_clicked(new_name)
+        self._show_toast(f"✅ Đã đổi tên danh mục thành '{new_name}'!")
+
+    def _delete_sub_category(self, cid: str, cname: str):
+        try:
+            from src.core.storage_manager import StorageManager
+            sm = StorageManager()
+            if sm.online:
+                sm.remove_category(cid)
+        except Exception:
+            pass
+
+        for a in self.all_assets:
+            if self._get_asset_sub(a) == cid:
+                if isinstance(a, dict):
+                    a["sub"] = "all"
+                    a["sub_category"] = "all"
+                else:
+                    setattr(a, "sub", "all")
+                    if hasattr(a, "sub_category"):
+                        setattr(a, "sub_category", "all")
+
+        self.current_sub_cat = "all"
+        self._rebuild_categories_column()
+        self._refresh_grid()
+        self._show_toast(f"🗑 Đã xóa danh mục '{cname}'!")
 
     def _prompt_create_collection(self):
         name, ok = QInputDialog.getText(self, "Tạo bộ sưu tập mới", "Nhập tên bộ sưu tập (VD: Vlog Du Lịch, TikTok Trend...):")
@@ -7675,7 +7691,12 @@ class TabAssets(QWidget):
 
     def _insert_at_playhead(self):
         if not self.selected_asset:
-            return
+            if hasattr(self, "all_presets") and self.all_presets:
+                self.selected_asset = self.all_presets[0]
+            elif hasattr(self, "all_assets") and self.all_assets:
+                self.selected_asset = self.all_assets[0]
+            else:
+                return
 
         from src.services.insert_service import to_asset_dict, InsertResult
         asset_d = to_asset_dict(self.selected_asset)
@@ -7921,8 +7942,10 @@ class TabAssets(QWidget):
                 "explicit_timeline": True,
             }
 
-            import uuid
             tracked_asset_id = str(asset_d.get("id") or "")
+            self.insert_title_requested.emit(sample_text, tracked_asset_id, dur)
+
+            import uuid
             request_id = f"req_{tracked_asset_id}_{uuid.uuid4().hex[:8]}"
             if not hasattr(self, "_in_flight_requests"):
                 self._in_flight_requests = {}

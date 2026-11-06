@@ -123,18 +123,20 @@ def _compute_storage_poll_signature(sm) -> tuple:
 class _StudioSyncCoordinator:
     """Điều phối đồng bộ, xử lý lỗi tại slot boundary và retry cho StudioWindow."""
     def __init__(self, dock, insert_service, search_index):
-        from PySide6.QtCore import QTimer
+        from PySide6.QtCore import QObject, QTimer
         self.dock = dock
         self.insert_service = insert_service
         self.search_index = search_index
         self.studio_window = None
         self.pending_snapshot = None  # (managed_assets, taxonomy)
 
-        self.retry_timer = QTimer(dock)
+        timer_parent = dock if isinstance(dock, QObject) else None
+        self.retry_timer = QTimer(timer_parent)
         self.retry_timer.setInterval(1000)
         self.retry_timer.timeout.connect(self._on_retry_tick)
 
-        dock.storage_assets_changed.connect(self._on_dock_storage_assets_changed)
+        if hasattr(dock, "storage_assets_changed"):
+            dock.storage_assets_changed.connect(self._on_dock_storage_assets_changed)
 
     def _apply_to_studio(self, managed_assets, taxonomy) -> bool:
         if self.studio_window is None:

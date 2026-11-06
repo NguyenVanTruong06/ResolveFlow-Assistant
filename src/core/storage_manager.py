@@ -405,6 +405,80 @@ class StorageManager:
             tax = self.taxonomy(); tax[category_id] = str(label).strip()[:100] or category_id
             atomic_json(self.meta / 'taxonomy.json', tax); self.snapshot()
 
+    def remove_category(self, category_id: str) -> bool:
+        """Xóa danh mục khỏi taxonomy và kho lưu trữ."""
+        if category_id in {'all','fav','recent','mine','hub','text','trans','lut','meme','overlay','icon'}:
+            raise ValueError('Không thể xóa danh mục mặc định của hệ thống.')
+        if not self.online:
+            return False
+        with self.lock():
+            tax = self.taxonomy()
+            if category_id in tax:
+                del tax[category_id]
+                atomic_json(self.meta / 'taxonomy.json', tax)
+                self.snapshot()
+                return True
+        return False
+
+    def rename_category(self, category_id: str, new_label: str) -> bool:
+        """Đổi tên nhãn hiển thị của danh mục trong taxonomy."""
+        if not self.online:
+            return False
+        with self.lock():
+            tax = self.taxonomy()
+            tax[category_id] = str(new_label).strip()[:100] or category_id
+            atomic_json(self.meta / 'taxonomy.json', tax)
+            self.snapshot()
+            return True
+
+    def remove_pack(self, pack_id: str) -> bool:
+        """Xóa hoàn toàn một pack khỏi kho lưu trữ, dọn dẹp các tệp media và cập nhật registry."""
+        if not self.online:
+            return False
+        with self.lock():
+            reg = self.registry()
+            packs = reg.get('packs', [])
+            assets = reg.get('assets', [])
+
+            target = str(pack_id).strip().lower()
+            matching_packs = [
+                p for p in packs
+                if str(p.get('pack_id', '')).lower() == target
+                or str(p.get('name', '')).lower() == target
+                or target in str(p.get('pack_id', '')).lower()
+            ]
+
+            kept_assets = []
+            for a in assets:
+                a_pid = str(a.get('pack_id', '')).lower()
+                if a_pid == target or any(a_pid == str(p.get('pack_id', '')).lower() for p in matching_packs):
+                    p_str = a.get('path')
+                    if p_str:
+                        try:
+                            p_path = Path(p_str)
+                            if p_path.is_file() and str(self.root) in str(p_path):
+                                p_path.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                else:
+                    kept_assets.append(a)
+
+            pack_dir = self.root / '02_cloud_downloads' / 'packs' / pack_id
+            if pack_dir.exists() and pack_dir.is_dir():
+                shutil.rmtree(pack_dir, ignore_errors=True)
+            for p in matching_packs:
+                p_folder = p.get('folder_name') or p.get('pack_id')
+                if p_folder:
+                    p_path = self.root / '02_cloud_downloads' / 'packs' / p_folder
+                    if p_path.exists() and p_path.is_dir():
+                        shutil.rmtree(p_path, ignore_errors=True)
+
+            reg['packs'] = [p for p in packs if str(p.get('pack_id', '')).lower() != target and p not in matching_packs]
+            reg['assets'] = kept_assets
+            atomic_json(self.meta / 'registry.json', reg)
+            self.snapshot()
+            return True
+
     def assets(self, *, raise_on_error: bool = False):
         from src.core.contracts.asset_dto import is_safe_relative_path
 

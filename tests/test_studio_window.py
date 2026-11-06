@@ -25,8 +25,8 @@ def test_studio_window_rail_tabs(studio_window):
     win = studio_window
     tab_assets = win.tab_assets
 
-    # 1. Kiểm tra đủ 10 nút điều hướng trên Rail (đã thêm tab Nhạc BGM và Kho Online)
-    assert len(tab_assets.rail_btns) == 10
+    # 1. Kiểm tra đủ 11 nút điều hướng trên Rail (đã thêm tab Nhạc BGM và Kho Online)
+    assert len(tab_assets.rail_btns) == 11
     assert "text" in tab_assets.rail_btns
     assert "lut" in tab_assets.rail_btns
     assert "trans" in tab_assets.rail_btns

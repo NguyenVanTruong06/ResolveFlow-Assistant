@@ -99,6 +99,7 @@ class RfPackDropZone(QFrame):
 class CloudPackCard(QFrame):
     """Thẻ hiển thị thông tin và nút tải của 1 gói Starter Pack."""
     install_requested = Signal(object)  # PackManifest
+    uninstall_requested = Signal(object)  # PackManifest
 
     def __init__(self, manifest: PackManifest, parent=None):
         super().__init__(parent)
@@ -181,6 +182,7 @@ class CloudPackCard(QFrame):
 
         # Action row
         act_row = QHBoxLayout()
+        act_row.setSpacing(6)
         lbl_author = QLabel(f"Bởi: {manifest.author}")
         lbl_author.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 10.5px;")
         act_row.addWidget(lbl_author, stretch=1)
@@ -188,16 +190,62 @@ class CloudPackCard(QFrame):
         self.btn_download = QPushButton()
         self.btn_download.setFixedHeight(28)
         self.btn_download.setCursor(Qt.PointingHandCursor)
-        self._update_download_button_state()
-        self.btn_download.clicked.connect(lambda: self.install_requested.emit(self.manifest))
+        self.btn_download.clicked.connect(self._on_download_clicked)
         act_row.addWidget(self.btn_download)
+
+        self.btn_uninstall = QPushButton("🗑 Xóa Gói")
+        self.btn_uninstall.setFixedHeight(28)
+        self.btn_uninstall.setCursor(Qt.PointingHandCursor)
+        self.btn_uninstall.setToolTip(f"Xóa bỏ gói {manifest.name} khỏi máy để giải phóng dung lượng đĩa")
+        self.btn_uninstall.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #f87171;
+                font-size: 11px;
+                font-weight: 600;
+                border: 1px solid rgba(248, 113, 113, 0.4);
+                border-radius: 6px;
+                padding: 0 8px;
+            }
+            QPushButton:hover {
+                background: rgba(239, 68, 68, 0.15);
+                border-color: #ef4444;
+                color: #fca5a5;
+            }
+        """)
+        self.btn_uninstall.clicked.connect(self._on_uninstall_clicked)
+        act_row.addWidget(self.btn_uninstall)
+
+        self._update_download_button_state()
         layout.addLayout(act_row)
+
+    def _on_download_clicked(self):
+        if self.is_installed:
+            reply = QMessageBox.question(
+                self,
+                "Cài đặt lại gói đạo cụ",
+                f"Gói '{self.manifest.name}' đã được cài đặt trong máy tính.\n\nBạn có muốn tải lại và cài đặt ghi đè không?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        self.install_requested.emit(self.manifest)
+
+    def _on_uninstall_clicked(self):
+        reply = QMessageBox.question(
+            self,
+            "Xác nhận xóa gói đạo cụ",
+            f"Bạn có chắc muốn xóa gói '{self.manifest.name}' khỏi máy tính?\n\nHành động này sẽ gỡ bỏ các tệp media của gói trong kho lưu trữ để giải phóng dung lượng ổ cứng.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.uninstall_requested.emit(self.manifest)
 
     def _update_download_button_state(self):
         if self.is_installed:
             self.lbl_installed_badge.show()
-            self.btn_download.setText(" ✔ Đã Cài Đặt (Cài Lại)")
-            self.btn_download.setIcon(get_vector_icon("check", "#34d399", 14))
+            self.btn_download.setText(" 🔄 Cài Lại")
+            self.btn_download.setIcon(get_vector_icon("rotate", "#34d399", 14))
             self.btn_download.setStyleSheet(f"""
                 QPushButton {{
                     background: {ThemeColors.BG_CARD};
@@ -213,6 +261,7 @@ class CloudPackCard(QFrame):
                     color: #ffffff;
                 }}
             """)
+            self.btn_uninstall.show()
         else:
             self.lbl_installed_badge.hide()
             self.btn_download.setText(" Tải & Cài Đặt (1-Click)")
@@ -236,6 +285,7 @@ class CloudPackCard(QFrame):
                     border-color: {ThemeColors.BORDER_DEFAULT};
                 }}
             """)
+            self.btn_uninstall.hide()
 
     def set_installed(self, installed: bool = True):
         self.is_installed = installed
@@ -315,6 +365,7 @@ class AssetHubWidget(QWidget):
         for idx, manifest in enumerate(COMMUNITY_PACKS_CATALOG):
             card = CloudPackCard(manifest)
             card.install_requested.connect(self._on_install_pack_requested)
+            card.uninstall_requested.connect(self._on_uninstall_pack_requested)
             self._pack_cards[manifest.id] = card
             row = idx // 2
             col = idx % 2
@@ -602,6 +653,35 @@ class AssetHubWidget(QWidget):
 
     def _on_install_pack_requested(self, manifest: PackManifest):
         self._review_pack(url=manifest.download_url, auto_prepare=True, manifest=manifest)
+
+    def _on_uninstall_pack_requested(self, manifest: PackManifest):
+        from src.core.pack_manager import PackManager
+        from src.core.storage_manager import StorageManager
+
+        # 1. Gỡ trong PackManager
+        PackManager.uninstall_pack(manifest.id)
+
+        # 2. Gỡ trong StorageManager nếu online
+        try:
+            sm = StorageManager()
+            if sm.online:
+                sm.remove_pack(manifest.id)
+        except Exception as exc:
+            pass
+
+        # 3. Cập nhật card
+        if manifest.id in self._pack_cards:
+            self._pack_cards[manifest.id].set_installed(False)
+            self._pack_cards[manifest.id].lbl_status.setText("Đã gỡ bỏ gói khỏi kho.")
+            self._pack_cards[manifest.id].lbl_status.show()
+
+        # 4. Quét lại kho đạo cụ
+        self._library_refreshed()
+        QMessageBox.information(
+            self,
+            "Đã gỡ bỏ gói",
+            f"Đã gỡ bỏ gói '{manifest.name}' khỏi kho lưu trữ thành công!"
+        )
 
     def _on_custom_drive_download(self):
         url = self.txt_drive_url.text().strip()

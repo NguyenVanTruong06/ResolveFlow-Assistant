@@ -28,6 +28,9 @@ def qapp():
 def test_parse_version_tuple():
     assert parse_version_tuple("v1.0.0") == (1, 0, 0)
     assert parse_version_tuple("v1.0.4") == (1, 0, 4)
+    assert parse_version_tuple("v1.0.4.1") == (1, 0, 4, 1)
+    assert parse_version_tuple("v1.0.4.2") > parse_version_tuple("v1.0.4.1")
+    assert parse_version_tuple("v1.0.4.1") > parse_version_tuple("v1.0.4")
     assert parse_version_tuple("1.2.3") == (1, 2, 3)
     assert parse_version_tuple("v2.0.0-beta1") == (2, 0, 0)
     assert parse_version_tuple("v1.0.5") > parse_version_tuple("v1.0.4")

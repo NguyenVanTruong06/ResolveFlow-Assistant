@@ -244,12 +244,9 @@ class StudioWindow(QMainWindow):
         h_layout.addWidget(lbl_logo)
 
         lbl_title = QLabel("<b>CHUNDVC STUDIO</b>")
-        lbl_title.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 12.5px; letter-spacing: 0.6px;")
+        lbl_title.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 13px; font-weight: 700; letter-spacing: 0.6px;")
         lbl_title.setToolTip(STUDIO_WINDOW_TITLE)
         h_layout.addWidget(lbl_title)
-
-        badge = create_brand_badge(compact=True)
-        h_layout.addWidget(badge)
 
         h_layout.addStretch(1)
 
