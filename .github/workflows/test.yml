@@ -66,6 +66,13 @@ jobs:
     - name: Set up FFmpeg
       uses: FedericoCarboni/setup-ffmpeg@v3
       id: setup-ffmpeg
+      continue-on-error: true
+
+    - name: Fallback FFmpeg (if setup-ffmpeg failed)
+      if: steps.setup-ffmpeg.outcome != 'success'
+      shell: pwsh
+      run: |
+        choco install ffmpeg --no-progress || echo "FFmpeg setup skipped"
 
     - name: Install Python Dependencies
       run: |
