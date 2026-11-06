@@ -77,7 +77,10 @@ assets/starter_pack/
 # File Bridge
 .bridge/
 auto_relay.py
+# Internal Workorders and State
 task.md
 task/
 *.bak
 *.bak_original
+reports/
+.superpowers/
