@@ -91,8 +91,35 @@ class PackManager:
     @classmethod
     def is_pack_installed(cls, pack_id: str) -> bool:
         """Kiểm tra một gói đã cài đặt vào máy và tệp vẫn còn tồn tại trên ổ đĩa hay chưa."""
+        if not pack_id:
+            return False
         installed = cls.get_installed_packs(verify_files=True)
-        return pack_id in installed
+        if pack_id in installed:
+            return True
+        target = str(pack_id).strip().lower()
+        for installed_id, entry in installed.items():
+            if target == str(installed_id).strip().lower():
+                return True
+            entry_name = str(entry.get("name", "")).strip().lower()
+            if target == entry_name:
+                return True
+
+        # Dự phòng: Kiểm tra thêm trong StorageManager (registry packs)
+        try:
+            from src.core.storage_manager import StorageManager
+            sm = StorageManager()
+            if sm.online:
+                reg = sm.registry()
+                for p in reg.get('packs', []):
+                    pid = str(p.get('id', '')).strip().lower()
+                    pname = str(p.get('name', '')).strip().lower()
+                    if target == pid or target in pid or pid in target or target == pname or target in pname:
+                        folder_rel = p.get('folder', '')
+                        if folder_rel and (sm.root / folder_rel).exists():
+                            return True
+        except Exception:
+            pass
+        return False
 
     @classmethod
     def record_installed_pack(

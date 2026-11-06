@@ -13,12 +13,15 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QRadioButton, QButtonGroup, QCheckBox,
-    QFrame, QGridLayout, QSlider, QScrollArea
+    QFrame, QGridLayout, QSlider, QScrollArea, QMessageBox
 )
-from PySide6.QtCore import Qt, Signal as pyqtSignal, QSettings, QSize
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt, Signal as pyqtSignal, QSettings, QSize, QUrl
 from src.ui.icons import get_vector_icon
 from src.ui.theme import ThemeColors
 from src.services.multi_screen_service import get_multi_screen_service
+from src.core.storage_manager import StorageManager
+from src.services.update_service import UpdateCheckWorker, CURRENT_VERSION, GITHUB_REPO
 
 
 class DockSettingsDialog(QDialog):
@@ -33,6 +36,7 @@ class DockSettingsDialog(QDialog):
     hover_volume_changed = pyqtSignal(float)
     auto_secondary_studio_changed = pyqtSignal(bool)
     dock_screen_changed = pyqtSignal(int)
+    library_changed = pyqtSignal()
 
     def __init__(self, current_edge: str = "right", parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -314,16 +318,122 @@ class DockSettingsDialog(QDialog):
         lbl_sec3_hint.setWordWrap(True)
         sec3_mon_layout.addWidget(lbl_sec3_hint)
 
-        # 5. Section 4: Phím tắt nhanh
-        sec4_frame = QFrame()
-        sec4_frame.setObjectName("card_frame")
-        sec4_layout = QVBoxLayout(sec4_frame)
-        sec4_layout.setContentsMargins(14, 12, 14, 14)
-        sec4_layout.setSpacing(8)
+        # 5. Section 4: Cấu hình Kho Đạo Cụ & Thư Viện Lưu Trữ
+        sec4_storage_frame = QFrame()
+        sec4_storage_frame.setObjectName("card_frame")
+        sec4_stor_layout = QVBoxLayout(sec4_storage_frame)
+        sec4_stor_layout.setContentsMargins(14, 12, 14, 14)
+        sec4_stor_layout.setSpacing(10)
 
-        lbl_sec4 = QLabel("⌨️ PHÍM TẮT NHANH (GLOBAL HOTKEYS)")
-        lbl_sec4.setStyleSheet(f"font-size: 11px; font-weight: 700; color: {ThemeColors.TEXT_ACCENT}; letter-spacing: 0.5px;")
-        sec4_layout.addWidget(lbl_sec4)
+        lbl_sec4_stor = QLabel("💾 KHO ĐẠO CỤ & THƯ VIỆN LƯU TRỮ (LIBRARY STORAGE)")
+        lbl_sec4_stor.setStyleSheet(f"font-size: 11px; font-weight: 700; color: {ThemeColors.TEXT_ACCENT}; letter-spacing: 0.5px;")
+        sec4_stor_layout.addWidget(lbl_sec4_stor)
+
+        self.lbl_storage_path = QLabel()
+        self.lbl_storage_path.setWordWrap(True)
+        self.lbl_storage_path.setStyleSheet("font-size: 12px; color: #ededf0;")
+        sec4_stor_layout.addWidget(self.lbl_storage_path)
+
+        self.lbl_storage_status = QLabel()
+        self.lbl_storage_status.setStyleSheet("font-size: 11.5px; color: #a1a1aa;")
+        sec4_stor_layout.addWidget(self.lbl_storage_status)
+
+        stor_btn_row = QHBoxLayout()
+        stor_btn_row.setSpacing(10)
+
+        btn_change_storage = QPushButton("📁 Đổi Thư Mục Kho (Di dời sang Ổ D / SSD ngoài)...")
+        btn_change_storage.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_change_storage.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_INPUT};
+                color: #ffffff;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 11.5px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {ThemeColors.BG_CARD_ACTIVE};
+                border-color: {ThemeColors.PRIMARY_HOVER};
+            }}
+        """)
+        btn_change_storage.clicked.connect(self._open_storage_settings)
+        stor_btn_row.addWidget(btn_change_storage)
+
+        btn_reset_storage = QPushButton("⚡ Khôi Phục Về Kho Mặc Định")
+        btn_reset_storage.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_reset_storage.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {ThemeColors.TEXT_MUTED};
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 11.5px;
+            }}
+            QPushButton:hover {{
+                background: {ThemeColors.BG_INPUT};
+                color: {ThemeColors.TEXT_PRIMARY};
+            }}
+        """)
+        btn_reset_storage.clicked.connect(self._reset_to_default_storage)
+        stor_btn_row.addWidget(btn_reset_storage)
+        stor_btn_row.addStretch(1)
+        sec4_stor_layout.addLayout(stor_btn_row)
+
+        # 6. Section 5: Cập Nhật Phiên Bản (Auto-Update)
+        sec5_update_frame = QFrame()
+        sec5_update_frame.setObjectName("card_frame")
+        sec5_up_layout = QVBoxLayout(sec5_update_frame)
+        sec5_up_layout.setContentsMargins(14, 12, 14, 14)
+        sec5_up_layout.setSpacing(10)
+
+        lbl_sec5_up = QLabel("🚀 CẬP NHẬT PHIÊN BẢN (AUTO-UPDATE)")
+        lbl_sec5_up.setStyleSheet(f"font-size: 11px; font-weight: 700; color: {ThemeColors.TEXT_ACCENT}; letter-spacing: 0.5px;")
+        sec5_up_layout.addWidget(lbl_sec5_up)
+
+        lbl_cur_ver = QLabel(f"Phiên bản hiện tại: <b>v{CURRENT_VERSION}</b> (Bản dựng độc lập chính thức)")
+        lbl_cur_ver.setStyleSheet("font-size: 12px; color: #ededf0;")
+        sec5_up_layout.addWidget(lbl_cur_ver)
+
+        self.lbl_update_status = QLabel("Kiểm tra bản cập nhật mới nhất từ GitHub Releases.")
+        self.lbl_update_status.setStyleSheet("font-size: 11.5px; color: #a1a1aa;")
+        sec5_up_layout.addWidget(self.lbl_update_status)
+
+        self.btn_check_update = QPushButton("🔄 Kiểm Tra Bản Cập Nhật Mới...")
+        self.btn_check_update.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_check_update.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.PRIMARY};
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 11.5px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {ThemeColors.PRIMARY_HOVER};
+            }}
+            QPushButton:disabled {{
+                background: {ThemeColors.BG_INPUT};
+                color: {ThemeColors.TEXT_MUTED};
+            }}
+        """)
+        self.btn_check_update.clicked.connect(self._check_for_updates)
+        sec5_up_layout.addWidget(self.btn_check_update)
+
+        # 7. Section 6: Phím tắt nhanh
+        sec6_frame = QFrame()
+        sec6_frame.setObjectName("card_frame")
+        sec6_layout = QVBoxLayout(sec6_frame)
+        sec6_layout.setContentsMargins(14, 12, 14, 14)
+        sec6_layout.setSpacing(8)
+
+        lbl_sec6 = QLabel("⌨️ PHÍM TẮT NHANH (GLOBAL HOTKEYS)")
+        lbl_sec6.setStyleSheet(f"font-size: 11px; font-weight: 700; color: {ThemeColors.TEXT_ACCENT}; letter-spacing: 0.5px;")
+        sec6_layout.addWidget(lbl_sec6)
 
         grid = QGridLayout()
         grid.setSpacing(6)
@@ -352,7 +462,7 @@ class DockSettingsDialog(QDialog):
             grid.addWidget(lbl_k, row, 0)
             grid.addWidget(lbl_d, row, 1)
 
-        sec4_layout.addLayout(grid)
+        sec6_layout.addLayout(grid)
 
         # Cuộn mượt mà các Card
         scroll = QScrollArea(self)
@@ -391,7 +501,9 @@ class DockSettingsDialog(QDialog):
         content_layout.addWidget(sec1_frame)
         content_layout.addWidget(sec2_frame)
         content_layout.addWidget(sec3_monitor_frame)
-        content_layout.addWidget(sec4_frame)
+        content_layout.addWidget(sec4_storage_frame)
+        content_layout.addWidget(sec5_update_frame)
+        content_layout.addWidget(sec6_frame)
         content_layout.addStretch(1)
 
         scroll.setWidget(scroll_content)
@@ -474,6 +586,104 @@ class DockSettingsDialog(QDialog):
             self.rad_dock_scr2.setChecked(True)
         elif hasattr(self, "rad_dock_scr1"):
             self.rad_dock_scr1.setChecked(True)
+
+        self._update_storage_ui()
+
+    def _update_storage_ui(self):
+        sm = StorageManager()
+        if not sm.online:
+            # Tự động kích hoạt kho mặc định nếu chưa có
+            try:
+                default_dir = (sm.config_dir.parent / "Library").resolve()
+                default_dir.mkdir(parents=True, exist_ok=True)
+                sm.reserve_bytes = 0
+                sm.configure(default_dir)
+            except Exception:
+                pass
+
+        if sm.online:
+            root_str = str(sm.root)
+            self.lbl_storage_path.setText(f"<b>Thư mục kho:</b> <span style='font-family:monospace; color:#38bdf8;'>{root_str}</span>")
+            try:
+                import shutil
+                free_gb = shutil.disk_usage(sm.root).free / (1024**3)
+                self.lbl_storage_status.setText(f"<b>Trạng thái:</b> 🟢 Hoạt động (Trống khả dụng: {free_gb:.1f} GB)")
+            except Exception:
+                self.lbl_storage_status.setText("<b>Trạng thái:</b> 🟢 Hoạt động (Online)")
+        else:
+            self.lbl_storage_path.setText("<b>Thư mục kho:</b> <span style='color:#f87171;'>Chưa kết nối</span>")
+            self.lbl_storage_status.setText("<b>Trạng thái:</b> ⚪ Ngoại tuyến (Chưa chọn kho)")
+
+    def _open_storage_settings(self):
+        from src.ui.widgets.pack_ingest_wizard import StorageSettingsDialog
+        dlg = StorageSettingsDialog(parent=self)
+        dlg.library_changed.connect(self._on_storage_changed)
+        dlg.exec()
+        self._update_storage_ui()
+
+    def _on_storage_changed(self):
+        self._update_storage_ui()
+        self.library_changed.emit()
+
+    def _reset_to_default_storage(self):
+        reply = QMessageBox.question(
+            self,
+            "Khôi phục kho mặc định",
+            "Bạn có chắc muốn đặt lại thư viện lưu trữ về thư mục mặc định của máy tính?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            sm = StorageManager()
+            try:
+                default_dir = (sm.config_dir.parent / "Library").resolve()
+                default_dir.mkdir(parents=True, exist_ok=True)
+                sm.reserve_bytes = 0
+                sm.configure(default_dir)
+                self._update_storage_ui()
+                self.library_changed.emit()
+                QMessageBox.information(self, "Thông báo", f"Đã chuyển về kho mặc định:\n{default_dir}")
+            except Exception as exc:
+                QMessageBox.warning(self, "Lỗi", f"Không thể khôi phục kho mặc định: {exc}")
+
+    def _check_for_updates(self):
+        self.btn_check_update.setEnabled(False)
+        self.btn_check_update.setText("⏳ Đang kiểm tra GitHub...")
+        self.lbl_update_status.setText("Đang kết nối tới máy chủ GitHub Releases...")
+
+        self._update_worker = UpdateCheckWorker(self)
+        self._update_worker.update_found.connect(self._on_update_found)
+        self._update_worker.up_to_date.connect(self._on_up_to_date)
+        self._update_worker.check_failed.connect(self._on_update_failed)
+        self._update_worker.finished.connect(lambda: self.btn_check_update.setEnabled(True))
+        self._update_worker.start()
+
+    def _on_update_found(self, info: dict):
+        self.btn_check_update.setText("🎉 Có Bản Mới!")
+        latest = info.get("latest_version")
+        url = info.get("html_url")
+        self.lbl_update_status.setText(f"🟢 <b>Đã có bản phát hành mới: v{latest}!</b>")
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Bản Cập Nhật Mới!")
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setText(f"<h3>🎉 Phiên bản mới v{latest} đã sẵn sàng!</h3>")
+        body_text = info.get("body", "")
+        if body_text:
+            msg.setInformativeText(f"<b>Nội dung cập nhật:</b>\n{body_text[:300]}...")
+        btn_download = msg.addButton("⬇️ Tải Ngay (Mở GitHub)", QMessageBox.ButtonRole.AcceptRole)
+        msg.addButton("Đóng", QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+
+        if msg.clickedButton() == btn_download and url:
+            QDesktopServices.openUrl(QUrl(url))
+
+    def _on_up_to_date(self, msg: str):
+        self.btn_check_update.setText("✔ Đang Ở Bản Mới Nhất")
+        self.lbl_update_status.setText(f"✓ {msg}")
+
+    def _on_update_failed(self, err: str):
+        self.btn_check_update.setText("🔄 Kiểm Tra Lại")
+        self.lbl_update_status.setText(f"⚠️ {err}")
 
     def _on_edge_radio_toggled(self):
         new_edge = "left" if self.rad_left.isChecked() else "right"

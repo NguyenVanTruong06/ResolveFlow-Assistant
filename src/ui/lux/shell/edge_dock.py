@@ -934,6 +934,8 @@ class EdgeDockWindow(QWidget):
         dlg.hover_volume_changed.connect(self.grid.hover_controller.set_volume)
         if hasattr(dlg, "dock_screen_changed"):
             dlg.dock_screen_changed.connect(self.set_dock_screen_index)
+        if hasattr(dlg, "library_changed"):
+            dlg.library_changed.connect(self.refresh_storage_assets)
         dlg.exec()
 
     def set_dock_screen_index(self, index: int):

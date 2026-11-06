@@ -307,10 +307,6 @@ class AssetHubWidget(QWidget):
         sec1_header.addStretch(1)
         layout.addLayout(sec1_header)
 
-        storage_button = QPushButton("💾 Kho Chính / Ổ ngoài / Liên kết")
-        storage_button.clicked.connect(self._open_storage_settings)
-        layout.addWidget(storage_button)
-
         # Grid hiển thị các gói starter pack
         grid_packs = QGridLayout()
         grid_packs.setSpacing(12)
@@ -562,18 +558,37 @@ class AssetHubWidget(QWidget):
         self.indexer.clear_cache()
         self.assets_changed.emit()
         self._render_linked_folders()
-
-    def _review_pack(self, source=None, url=None, auto_prepare=False):
-        from src.ui.widgets.pack_ingest_wizard import PackIngestWizard
         try:
-            dialog = PackIngestWizard(parent=self, source=source, url=url, auto_prepare=auto_prepare)
+            from src.core.pack_manager import PackManager
+            for pid, card in self._pack_cards.items():
+                card.set_installed(PackManager.is_pack_installed(pid))
+        except Exception:
+            pass
+
+    def _review_pack(self, source=None, url=None, auto_prepare=False, manifest: Optional[PackManifest] = None):
+        from src.ui.widgets.pack_ingest_wizard import PackIngestWizard
+        pack_id = manifest.id if manifest else None
+        pack_name = manifest.name if manifest else None
+        try:
+            dialog = PackIngestWizard(
+                parent=self, source=source, url=url, auto_prepare=auto_prepare,
+                pack_id=pack_id, pack_name=pack_name
+            )
         except TypeError:
-            dialog = PackIngestWizard(parent=self, source=source, url=url)
+            try:
+                dialog = PackIngestWizard(parent=self, source=source, url=url, auto_prepare=auto_prepare)
+            except TypeError:
+                dialog = PackIngestWizard(parent=self, source=source, url=url)
         dialog.library_changed.connect(self._library_refreshed)
         committed_payload = []
 
         def _on_committed(meta):
             committed_payload.append(meta if isinstance(meta, dict) else {})
+            pid = (meta.get("pack_id") if isinstance(meta, dict) else None) or pack_id
+            if pid and pid in self._pack_cards:
+                self._pack_cards[pid].set_installed(True)
+            elif manifest and manifest.id in self._pack_cards:
+                self._pack_cards[manifest.id].set_installed(True)
 
         dialog.pack_committed.connect(_on_committed)
         dialog.exec()
@@ -585,7 +600,7 @@ class AssetHubWidget(QWidget):
             )
 
     def _on_install_pack_requested(self, manifest: PackManifest):
-        self._review_pack(url=manifest.download_url, auto_prepare=True)
+        self._review_pack(url=manifest.download_url, auto_prepare=True, manifest=manifest)
 
     def _on_custom_drive_download(self):
         url = self.txt_drive_url.text().strip()

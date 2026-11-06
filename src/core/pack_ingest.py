@@ -123,7 +123,7 @@ def inspect_tree(root: Path, source_id: str, cancel=lambda: False):
 class PackIngestService:
     def __init__(self, storage: StorageManager): self.storage = storage
 
-    def prepare(self, source, cancel=lambda: False, progress=lambda text: None):
+    def prepare(self, source, cancel=lambda: False, progress=lambda text: None, pack_id=None, pack_name=None):
         self.storage.require_online()
         job_dir = self.storage.new_staging()
         payload = job_dir / 'payload'; payload.mkdir()
@@ -147,7 +147,7 @@ class PackIngestService:
             elif source.is_file():
                 self.storage.copy_file(source, payload / source.name, cancel, progress)
             else: raise FileNotFoundError('Nguồn nhập không tồn tại.')
-            return self.inspect_job(job_dir, source.stem, cancel)
+            return self.inspect_job(job_dir, pack_name or source.stem, cancel, pack_id=pack_id)
         except Exception:
             if self.storage.online: shutil.rmtree(job_dir, ignore_errors=True)
             raise
@@ -195,9 +195,9 @@ class PackIngestService:
                 if written != entry.file_size: raise ValueError('Kích thước giải nén không khớp.')
                 progress(entry.filename)
 
-    def inspect_job(self, directory, name='Pack', cancel=lambda: False):
+    def inspect_job(self, directory, name='Pack', cancel=lambda: False, pack_id=None):
         directory = Path(directory); payload = directory / 'payload'
-        pack_id = uuid.uuid4().hex
+        pack_id = str(pack_id).strip() if pack_id else uuid.uuid4().hex
         records = inspect_tree(payload, pack_id, cancel)
         if not records:
             raise ValueError('Gói không có file để kiểm duyệt.')
@@ -725,6 +725,16 @@ class PackIngestService:
                 warnings.append(f'Pack đã nhập vào kho nhưng bộ đệm offline chưa được đồng bộ: {exc}')
         shutil.rmtree(directory, ignore_errors=True)
         progress('Đã nhập pack và cập nhật chỉ mục.')
+        try:
+            from src.core.pack_manager import PackManager
+            installed_paths = [str(folder / item['relative_path']) for item in chosen]
+            PackManager.record_installed_pack(
+                job.get('pack_id'),
+                folder_name=folder.name,
+                installed_paths=installed_paths
+            )
+        except Exception as exc:
+            logger.warning("Không thể ghi nhận installed_pack trong commit: %s", exc)
         return {'pack_id': job['pack_id'], 'count': len(chosen),
                 'snapshot_synced': snapshot_synced, 'warnings': warnings}
 
@@ -733,7 +743,7 @@ class PackIngestService:
         path = Path(job['job_dir'])
         if path.parent == self.storage.meta / 'staging' and not path.is_symlink(): shutil.rmtree(path, ignore_errors=True)
 
-    def download(self, url, cancel=lambda: False, progress=lambda text: None):
+    def download(self, url, cancel=lambda: False, progress=lambda text: None, pack_id=None, pack_name=None):
         from src.core.cloud_downloader import GoogleDriveDownloader, parse_google_drive_url, TransferBudget, sanitize_filename
         info = parse_google_drive_url(url)
         from urllib.parse import urlparse, unquote
@@ -838,7 +848,7 @@ class PackIngestService:
                     if has_declared_len and written != declared_len:
                         raise ValueError(f"Dữ liệu tải về không đầy đủ (đã tải {written}/{declared_len} bytes).")
 
-                return self._inspect_downloaded(directory, target, cancel, progress)
+                return self._inspect_downloaded(directory, target, cancel, progress, pack_id=pack_id, pack_name=pack_name)
             if info.resource_type == 'folder':
                 if cancel(): raise InterruptedError('Đã hủy tải.')
                 import gdown
@@ -905,15 +915,15 @@ class PackIngestService:
                 (directory / 'payload').mkdir()
                 # Thư mục tải đã nằm trên cùng volume: không copy thêm footage.
                 shutil.rmtree(directory / 'payload'); os.rename(download, directory / 'payload')
-                return self.inspect_job(directory, 'Google Drive', cancel)
+                return self.inspect_job(directory, pack_name or 'Google Drive', cancel, pack_id=pack_id)
             path = GoogleDriveDownloader.download_file(info.resource_id, str(download), cancel_checker=cancel,
                 progress_callback=lambda p: progress(f'{p.filename}: {p.percent:.0f}%'), write_guard=guard, budget=budget)
-            return self._inspect_downloaded(directory, Path(path), cancel, progress)
+            return self._inspect_downloaded(directory, Path(path), cancel, progress, pack_id=pack_id, pack_name=pack_name)
         except Exception:
             if self.storage.online: shutil.rmtree(directory, ignore_errors=True)
             raise
 
-    def _inspect_downloaded(self, directory, path, cancel, progress):
+    def _inspect_downloaded(self, directory, path, cancel, progress, pack_id=None, pack_name=None):
         payload = directory / 'payload'; payload.mkdir()
         if zipfile.is_zipfile(path):
             self._extract(path, payload, cancel, progress)
@@ -921,4 +931,4 @@ class PackIngestService:
         else:
             self.storage.require_online()
             os.rename(path, payload / path.name)
-        return self.inspect_job(directory, path.stem, cancel)
+        return self.inspect_job(directory, pack_name or path.stem, cancel, pack_id=pack_id)

@@ -95,10 +95,12 @@ class PackIngestWizard(QDialog):
     pack_committed = Signal(object)
     library_changed = Signal()
 
-    def __init__(self, storage=None, parent=None, source=None, url=None, auto_prepare=False, prepare_factory=None):
+    def __init__(self, storage=None, parent=None, source=None, url=None, auto_prepare=False, prepare_factory=None, pack_id=None, pack_name=None):
         if prepare_factory is not None and not callable(prepare_factory):
             raise TypeError("prepare_factory phải là một callable(cancel, progress) -> job dict.")
         super().__init__(parent); self.storage = storage or StorageManager()
+        self._pack_id = pack_id
+        self._pack_name = pack_name
         self.service = PackIngestService(self.storage); self.job = None; self.worker = None
         self._terminal = False; self._closing = False; self._outcome = None; self._pack_committed = False
         self._prepare_factory = prepare_factory
@@ -106,20 +108,44 @@ class PackIngestWizard(QDialog):
         self._prepare_timer = QTimer(self)
         self._prepare_timer.setSingleShot(True)
         self._prepare_timer.timeout.connect(self._prepare)
+
+        # Silent Default Storage: Tự động liên kết và kích hoạt kho lưu trữ mặc định
+        if not self.storage.online:
+            try:
+                default_dir = (self.storage.config_dir.parent / "Library").resolve()
+                default_dir.mkdir(parents=True, exist_ok=True)
+                self.storage.reserve_bytes = 0
+                self.storage.configure(default_dir)
+            except Exception as exc:
+                logger.warning("Không thể tự động kích hoạt kho mặc định: %s", exc)
+
         self.setWindowTitle('ChunDVC · Kiểm duyệt nhập kho'); self.resize(1000, 620); self.setStyleSheet(STYLE)
         layout = QVBoxLayout(self)
-        self.lbl_status = QLabel('Online · ' + str(self.storage.root) if self.storage.online else 'Offline · Chọn/kết nối kho trước khi tải. Chỉ duyệt metadata đã lưu.')
-        self.lbl_status.setWordWrap(True); layout.addWidget(self.lbl_status)
-        storage_row = QHBoxLayout()
-        self.btn_storage = QPushButton('💾 Chọn kho / Ổ ngoài / Liên kết')
+
+        # Thanh trạng thái kho lưu trữ tinh gọn
+        storage_bar = QHBoxLayout()
+        root_disp = str(self.storage.root) if self.storage.online else "Kho mặc định máy tính"
+        self.lbl_status = QLabel(f"📁 Thư viện lưu trữ: <b style='color:#38bdf8;'>{root_disp}</b>")
+        self.lbl_status.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
+        self.lbl_status.setWordWrap(True)
+        storage_bar.addWidget(self.lbl_status, stretch=1)
+
+        self.btn_storage = QPushButton('⚙️ Cài Đặt Kho...')
+        self.btn_storage.setToolTip('Đổi thư mục lưu trữ hoặc di dời sang ổ đĩa ngoài')
+        self.btn_storage.setStyleSheet(
+            "QPushButton { background: transparent; color: #a1a1aa; border: 1px solid #3f3f46; "
+            "border-radius: 4px; padding: 3px 8px; font-size: 11px; } "
+            "QPushButton:hover { background: #27272a; color: #ffffff; border-color: #71717a; }"
+        )
         self.btn_storage.clicked.connect(self._storage_settings)
-        storage_row.addWidget(self.btn_storage)
-        self.btn_quick_local_storage = QPushButton('⚡ Dùng Kho Mặc Định Trên Máy (1-Click)')
-        self.btn_quick_local_storage.setStyleSheet('QPushButton {background:#d94f3d;color:#ffffff;border:1px solid #e86352;border-radius:4px;padding:6px 12px;font-weight:700} QPushButton:hover {background:#e86352}')
+        storage_bar.addWidget(self.btn_storage)
+
+        self.btn_quick_local_storage = QPushButton('⚡ Kho Mặc Định')
         self.btn_quick_local_storage.clicked.connect(self._use_default_local_storage)
         self.btn_quick_local_storage.setVisible(not self.storage.online)
-        storage_row.addWidget(self.btn_quick_local_storage)
-        layout.addLayout(storage_row)
+        storage_bar.addWidget(self.btn_quick_local_storage)
+        layout.addLayout(storage_bar)
+
         row = QHBoxLayout(); self.input_source = QLineEdit(source or url or '')
         placeholder = 'Gói sinh tự động: Starter Pack (SFX & LUTs)' if prepare_factory is not None and not (source or url) else 'File ZIP/.rfpack, thư mục hoặc liên kết Google Drive'
         self.input_source.setPlaceholderText(placeholder)
@@ -146,7 +172,7 @@ class PackIngestWizard(QDialog):
         self.warning_widget.setVisible(False)
         layout.addWidget(self.warning_widget)
 
-        names = QHBoxLayout(); self.name = QLineEdit('Pack'); self.version = QLineEdit('1.0'); self.version.setMaximumWidth(100)
+        names = QHBoxLayout(); self.name = QLineEdit(pack_name or 'Pack'); self.version = QLineEdit('1.0'); self.version.setMaximumWidth(100)
         names.addWidget(QLabel('Tên pack')); names.addWidget(self.name, 1); names.addWidget(QLabel('Phiên bản')); names.addWidget(self.version)
         layout.addLayout(names)
         self.model = IngestReviewModel(); self.table = QTableView(); self.table.setModel(self.model)
@@ -438,14 +464,20 @@ class PackIngestWizard(QDialog):
             self._run(lambda cancel, progress: self._prepare_factory(cancel, progress), 'prepare')
             return
         value = self.input_source.text().strip()
-        operation = self.service.download if value.startswith(('https://', 'http://')) else self.service.prepare
-        self._run(lambda cancel, progress: operation(value, cancel, progress), 'prepare')
+        pid = self._pack_id
+        pname = self._pack_name or (self.name.text().strip() or 'Pack')
+        if value.startswith(('https://', 'http://')):
+            self._run(lambda cancel, progress: self.service.download(value, cancel, progress, pack_id=pid, pack_name=pname), 'prepare')
+        else:
+            self._run(lambda cancel, progress: self.service.prepare(value, cancel, progress, pack_id=pid, pack_name=pname), 'prepare')
 
     def _commit(self):
         if self._terminal or self._closing or not self.job or self.worker is not None:
             return
         self.table.setFocus()  # commit editor before copying metadata
         self.job.update(name=self.name.text().strip() or 'Pack', version=self.version.text().strip() or '1.0')
+        if self._pack_id:
+            self.job['pack_id'] = self._pack_id
         job = copy.deepcopy(self.job)
         job['draft_taxonomy'] = dict(self._draft_taxonomy)
         self._run(lambda cancel, progress: self.service.commit(job, cancel, progress), 'commit')
@@ -480,8 +512,16 @@ class PackIngestWizard(QDialog):
             return
 
         if ok and self._kind == 'prepare':
-            self.job = result; self.model.beginResetModel(); self.model.assets = result['assets']; self.model.endResetModel()
-            self.name.setText(result['name']); self.version.setText(result['version'])
+            self.job = result
+            if self._pack_id:
+                self.job['pack_id'] = self._pack_id
+            if self._pack_name:
+                self.job['name'] = self._pack_name
+            self.model.beginResetModel()
+            self.model.assets = result['assets']
+            self.model.endResetModel()
+            self.name.setText(self.job['name'])
+            self.version.setText(result['version'])
             self.lbl_status.setText(f'Kiểm duyệt {len(result["assets"])} file trước khi nhập kho.')
             self._update_warnings_presentation(result)
         elif self._kind == 'discard':
