@@ -1,5 +1,18 @@
 import sys
 import pytest
+
+# Windows compatibility shim for POSIX-only fcntl module
+if sys.platform == "win32" and "fcntl" not in sys.modules:
+    import types
+    dummy_fcntl = types.ModuleType("fcntl")
+    dummy_fcntl.LOCK_EX = 2
+    dummy_fcntl.LOCK_SH = 1
+    dummy_fcntl.LOCK_NB = 4
+    dummy_fcntl.LOCK_UN = 8
+    dummy_fcntl.flock = lambda *args, **kwargs: None
+    dummy_fcntl.fcntl = lambda *args, **kwargs: 0
+    sys.modules["fcntl"] = dummy_fcntl
+
 from PySide6.QtWidgets import QApplication
 
 @pytest.fixture(scope="session", autouse=True)
