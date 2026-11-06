@@ -257,7 +257,16 @@ def poll_storage_status(sm=None, dock=None, storage_signature: Optional[list] = 
 
 def start_app():
     app = QApplication(sys.argv)
+    app.setApplicationName("ChunDVC")
+    app.setApplicationDisplayName("ChunDVC")
+    app.setDesktopFileName("chundvc.desktop")
     app.setQuitOnLastWindowClosed(False)
+
+    from src.ui.icons import get_app_icon
+    app_icon = get_app_icon()
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
+
     from src.services.source_shutdown import SourceShutdownGuard
     source_shutdown = SourceShutdownGuard(app)
 

@@ -504,28 +504,41 @@ exec "${{SCRIPT_DIR}}/{APP_NAME}" "$@"
         except Exception:
             pass
 
-        desktop_file = os.path.join(dist_app_dir, "resolveflow-assistant.desktop")
-        desktop_content = f"""[Desktop Entry]
+        # Sao chép icon vào dist
+        icon_src = os.path.join(PROJECT_ROOT, "assets", "branding", "chundvc_512.png")
+        if os.path.exists(icon_src):
+            shutil.copy2(icon_src, os.path.join(dist_app_dir, "chundvc.png"))
+            shutil.copy2(icon_src, os.path.join(dist_app_dir, "icon.png"))
+
+        desktop_file = os.path.join(dist_app_dir, "chundvc.desktop")
+        desktop_content = """[Desktop Entry]
 Type=Application
-Name={APP_NAME}
-Comment=AI-Powered Rough Cut & Asset Studio for DaVinci Resolve
-Exec=bash -c "cd $(dirname %k) && ./launch_resolveflow.sh"
-Icon=video-x-generic
+Name=ChunDVC
+GenericName=Trợ lý Dựng Phim DaVinci Resolve AI
+Comment=ChunDVC - Trợ lý Dựng Phim AI & Kho Đạo Cụ cho DaVinci Resolve
+Exec=bash -c "cd \\$(dirname %k) && ./launch_resolveflow.sh"
+Icon=chundvc
 Terminal=false
 Categories=AudioVideo;Video;AudioVideoEditing;
+StartupWMClass=ChunDVC
 """
         with open(desktop_file, "w", encoding="utf-8") as f:
+            f.write(desktop_content)
+        # Bản sao resolveflow-assistant.desktop tương thích ngược
+        with open(os.path.join(dist_app_dir, "resolveflow-assistant.desktop"), "w", encoding="utf-8") as f:
             f.write(desktop_content)
 
     # 3. Windows launcher
     elif sys.platform.startswith("win"):
-        bat_file = os.path.join(dist_app_dir, "Launch_ResolveFlow.bat")
+        bat_file = os.path.join(dist_app_dir, "Launch_ChunDVC.bat")
         bat_content = f"""@echo off
-title {APP_NAME} v{APP_VERSION}
+title ChunDVC v{APP_VERSION}
 cd /d "%~dp0"
 start "" "%~dp0{APP_NAME}.exe" %*
 """
         with open(bat_file, "w", encoding="utf-8") as f:
+            f.write(bat_content)
+        with open(os.path.join(dist_app_dir, "Launch_ResolveFlow.bat"), "w", encoding="utf-8") as f:
             f.write(bat_content)
 
 def run_dry_run() -> bool:

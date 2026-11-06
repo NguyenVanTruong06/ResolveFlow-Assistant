@@ -472,3 +472,23 @@ def create_vector_icon(icon_type: str, color_hex: str = ThemeColors.TEXT_PRIMARY
 def get_vector_icon(icon_type: str, color_hex: str = ThemeColors.TEXT_PRIMARY, size: int = 20) -> QIcon:
     """Trả về đối tượng QIcon tiện lợi cho QPushButton hoặc QAction."""
     return QIcon(create_vector_icon(icon_type, color_hex, size))
+
+
+def get_app_icon() -> QIcon:
+    """Trả về biểu tượng chính thức của ứng dụng ChunDVC với đầy đủ độ phân giải."""
+    from pathlib import Path
+    icon = QIcon()
+    base_dir = Path(__file__).resolve().parent.parent.parent
+    branding_dir = base_dir / "assets" / "branding"
+
+    for sz in [512, 256, 128, 64, 48, 32, 16]:
+        p = branding_dir / f"chundvc_{sz}.png"
+        if p.exists():
+            icon.addFile(str(p))
+
+    if icon.isNull():
+        fallback_png = base_dir / "assets" / "icon.png"
+        if fallback_png.exists():
+            icon.addFile(str(fallback_png))
+
+    return icon

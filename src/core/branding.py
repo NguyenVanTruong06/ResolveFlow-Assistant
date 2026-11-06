@@ -7,8 +7,8 @@ from typing import Optional
 from PySide6.QtWidgets import QLabel
 
 APP_BRAND = "ChunDVC"
-APP_NAME = "ChunDVC Studio"
-APP_VERSION = "v1.0"
+APP_NAME = "ChunDVC"
+APP_VERSION = "v1.0.3"
 APP_AUTHOR = "By Truong"
 
 # Badge chuẩn: "ChunDVC Studio v1.0 • By Truong"

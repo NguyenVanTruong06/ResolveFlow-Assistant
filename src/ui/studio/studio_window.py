@@ -179,6 +179,8 @@ class StudioWindow(QMainWindow):
         super().__init__(parent)
         self._insert_service = insert_service
         self.setWindowTitle(STUDIO_WINDOW_TITLE)
+        from src.ui.icons import get_app_icon
+        self.setWindowIcon(get_app_icon())
         self.resize(1180, 760)
         self.setMinimumSize(980, 620)
         self.setStyleSheet(get_application_stylesheet())

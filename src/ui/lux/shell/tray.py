@@ -15,7 +15,15 @@ USE_NEW_EDGE_DOCK = True
 
 
 def create_tray_pixmap() -> QPixmap:
-    """Generates a high-DPI 32x32 ChunDVC bolt icon for the tray."""
+    """Generates a high-DPI 32x32 ChunDVC icon for the tray."""
+    try:
+        from src.ui.icons import get_app_icon
+        icon = get_app_icon()
+        if not icon.isNull():
+            return icon.pixmap(32, 32)
+    except Exception:
+        pass
+
     pm = QPixmap(32, 32)
     pm.fill(QColor(0, 0, 0, 0))
 

@@ -68,6 +68,8 @@ class DirectorWindow(QMainWindow):
         self._dispatched_run_ai_request_ids: set = set()
 
         self.setWindowTitle(DIRECTOR_WINDOW_TITLE)
+        from src.ui.icons import get_app_icon
+        self.setWindowIcon(get_app_icon())
         self.setMinimumSize(QSize(1024, 640))
         self.resize(1100, 720)
 

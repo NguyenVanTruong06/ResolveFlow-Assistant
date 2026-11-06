@@ -67,7 +67,7 @@ jobs:
         files: |
           ResolveFlow-Assistant-${{ github.ref_name }}-windows-x64.zip
           dist/SHA256SUMS
-        name: "ResolveFlow Assistant ${{ github.ref_name }}"
+        name: "ChunDVC ${{ github.ref_name }}"
         generate_release_notes: true
         draft: false
         prerelease: false
@@ -130,7 +130,7 @@ jobs:
           ResolveFlow-Assistant-${{ github.ref_name }}-linux-x64.tar.gz
           dist/*.deb
           dist/SHA256SUMS
-        name: "ResolveFlow Assistant ${{ github.ref_name }}"
+        name: "ChunDVC ${{ github.ref_name }}"
         generate_release_notes: true
         draft: false
         prerelease: false

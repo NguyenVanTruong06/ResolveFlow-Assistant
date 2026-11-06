@@ -107,6 +107,8 @@ class EdgeDockWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setWindowTitle(DOCK_WINDOW_TITLE)
+        from src.ui.icons import get_app_icon
+        self.setWindowIcon(get_app_icon())
 
         self._edge_side = edge_side
         self._insert_service = insert_service

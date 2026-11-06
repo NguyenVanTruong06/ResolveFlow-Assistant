@@ -38,6 +38,8 @@ rm -rf "$PKG_DIR"
 mkdir -p "${PKG_DIR}/opt/resolveflow-assistant"
 mkdir -p "${PKG_DIR}/usr/local/bin"
 mkdir -p "${PKG_DIR}/usr/share/applications"
+mkdir -p "${PKG_DIR}/usr/share/icons/hicolor/512x512/apps"
+mkdir -p "${PKG_DIR}/usr/share/pixmaps"
 mkdir -p "${PKG_DIR}/DEBIAN"
 mkdir -p "${SCRIPT_DIR}/dist"
 
@@ -45,31 +47,46 @@ mkdir -p "${SCRIPT_DIR}/dist"
 echo "📁 Đang sao chép tệp chương trình vào cấu trúc gói..."
 cp -r "${DIST_DIR}"/* "${PKG_DIR}/opt/resolveflow-assistant/"
 
+# Sao chép icon ứng dụng chính thức của ChunDVC
+if [ -f "${SCRIPT_DIR}/assets/branding/chundvc_512.png" ]; then
+    cp "${SCRIPT_DIR}/assets/branding/chundvc_512.png" "${PKG_DIR}/usr/share/icons/hicolor/512x512/apps/chundvc.png"
+    cp "${SCRIPT_DIR}/assets/branding/chundvc_512.png" "${PKG_DIR}/usr/share/pixmaps/chundvc.png"
+    cp "${SCRIPT_DIR}/assets/branding/chundvc_512.png" "${PKG_DIR}/opt/resolveflow-assistant/chundvc.png"
+fi
+
 # Đảm bảo launcher có quyền thực thi
 chmod +x "${PKG_DIR}/opt/resolveflow-assistant/launch_resolveflow.sh" || true
 chmod +x "${PKG_DIR}/opt/resolveflow-assistant/ResolveFlow-Assistant" || true
 
-# 4. Tạo wrapper script trong /usr/local/bin/resolveflow-assistant
+# 4. Tạo wrapper script trong /usr/local/bin
+cat << 'EOF' > "${PKG_DIR}/usr/local/bin/chundvc"
+#!/usr/bin/env bash
+exec /opt/resolveflow-assistant/launch_resolveflow.sh "$@"
+EOF
+chmod +x "${PKG_DIR}/usr/local/bin/chundvc"
+
 cat << 'EOF' > "${PKG_DIR}/usr/local/bin/resolveflow-assistant"
 #!/usr/bin/env bash
 exec /opt/resolveflow-assistant/launch_resolveflow.sh "$@"
 EOF
 chmod +x "${PKG_DIR}/usr/local/bin/resolveflow-assistant"
 
-# 5. Tạo Desktop Entry
-cat << EOF > "${PKG_DIR}/usr/share/applications/resolveflow-assistant.desktop"
+# 5. Tạo Desktop Entry chính thức mang tên ChunDVC và icon sắc nét
+cat << EOF > "${PKG_DIR}/usr/share/applications/chundvc.desktop"
 [Desktop Entry]
 Type=Application
-Name=ResolveFlow Assistant
-GenericName=AI Video Rough Cut & Asset Studio
-Comment=AI-Powered Rough Cut & Asset Studio for DaVinci Resolve
-Exec=/usr/local/bin/resolveflow-assistant
-Icon=video-x-generic
+Name=ChunDVC
+GenericName=Trợ lý Dựng Phim DaVinci Resolve AI
+Comment=ChunDVC - Trợ lý Dựng Phim AI & Kho Đạo Cụ cho DaVinci Resolve
+Exec=/usr/local/bin/chundvc
+Icon=chundvc
 Terminal=false
 Categories=AudioVideo;Video;AudioVideoEditing;
-Keywords=davinci;resolve;video;editing;ai;cut;
+Keywords=chundvc;davinci;resolve;video;editing;ai;cut;roughcut;studio;
+StartupWMClass=ChunDVC
 EOF
-chmod 644 "${PKG_DIR}/usr/share/applications/resolveflow-assistant.desktop"
+chmod 644 "${PKG_DIR}/usr/share/applications/chundvc.desktop"
+cp -f "${PKG_DIR}/usr/share/applications/chundvc.desktop" "${PKG_DIR}/usr/share/applications/resolveflow-assistant.desktop"
 
 # 6. Tạo file điều khiển DEBIAN/control
 cat << EOF > "${PKG_DIR}/DEBIAN/control"
