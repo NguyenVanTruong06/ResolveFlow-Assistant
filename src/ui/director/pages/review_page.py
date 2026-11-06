@@ -19,13 +19,13 @@ import dataclasses
 from fractions import Fraction
 from typing import Any, Dict, List, Optional, Tuple, Callable, Union, Mapping
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QApplication, QStackedWidget,
     QPlainTextEdit, QLineEdit, QComboBox, QButtonGroup,
     QMessageBox, QSplitter, QTableView, QHeaderView, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QThread, QSettings, QAbstractTableModel, QModelIndex
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtGui import QKeyEvent, QColor
 from src.core.review_state import ReviewState
 from src.ui.director.director_state import (
     BATCH_DRAFT_REJECT_MSG,
