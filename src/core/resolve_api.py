@@ -1262,12 +1262,36 @@ class ResolveAutomation:
         ext = os.path.splitext(media_path)[1].lower()
         is_still = total_frames <= 1 or ext in (".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".webp", ".svg")
 
-        # 5. Đảm bảo track video tồn tại
+        # Kiểm tra xem tệp video có chứa luồng âm thanh hay không
+        has_audio = False
+        if not is_still:
+            try:
+                ch = target_item.GetClipProperty("Audio Channels") or target_item.GetClipProperty("Audio Tracks")
+                if ch and str(ch).strip() not in ("0", ""):
+                    has_audio = True
+            except Exception:
+                pass
+            if not has_audio and os.path.isfile(media_path):
+                try:
+                    import subprocess
+                    cmd = ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", media_path]
+                    out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2)
+                    if out.stdout.strip():
+                        has_audio = True
+                except Exception:
+                    pass
+
+        # 5. Đảm bảo track video (và track audio nếu có) tồn tại
         try:
             current_tracks = timeline.GetTrackCount("video")
             if target_track > current_tracks:
                 for _ in range(current_tracks, target_track):
                     timeline.AddTrack("video")
+            if has_audio:
+                current_audio_tracks = timeline.GetTrackCount("audio")
+                if current_audio_tracks < 2:
+                    for _ in range(current_audio_tracks, 2):
+                        timeline.AddTrack("audio")
         except Exception:
             pass
 
@@ -1285,17 +1309,43 @@ class ResolveAutomation:
                     dur_frames = min(total_frames, max(1, int(round(duration_sec * fps))))
                 else:
                     dur_frames = total_frames
+
                 append_spec = {
                     "mediaPoolItem": target_item,
                     "startFrame": 0,
                     "endFrame": dur_frames,
                     "recordFrame": rec_frame,
                     "trackIndex": target_track,
-                    "mediaType": 1,
                 }
+                # Nếu không có audio thì chỉ định mediaType = 1 (chỉ video)
+                if not has_audio:
+                    append_spec["mediaType"] = 1
 
             placed = media_pool.AppendToTimeline([append_spec])
             if placed:
+                # Đảm bảo âm thanh đi cùng video nếu video có âm thanh mà Resolve chưa tự chèn
+                if has_audio:
+                    try:
+                        has_audio_placed = any(
+                            getattr(item, "GetMediaType", lambda: 0)() == 2
+                            for item in placed
+                            if item is not None
+                        )
+                        if not has_audio_placed:
+                            audio_target = 2 if timeline.GetTrackCount("audio") >= 2 else 1
+                            audio_spec = {
+                                "mediaPoolItem": target_item,
+                                "startFrame": 0,
+                                "endFrame": dur_frames,
+                                "recordFrame": rec_frame,
+                                "trackIndex": audio_target,
+                                "mediaType": 2,
+                            }
+                            media_pool.AppendToTimeline([audio_spec])
+                            log(f" ✔ Đã chèn đồng bộ âm thanh của '{os.path.basename(media_path)}' vào Audio Track A{audio_target}!")
+                    except Exception as e:
+                        log(f" ℹ Bổ sung audio track: {e}")
+
                 log(f" ✔ Đã chèn '{os.path.basename(media_path)}' tại Playhead lên Track V{target_track}!")
                 return True
         except Exception as e:

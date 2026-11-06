@@ -264,7 +264,7 @@ class CloudPackCard(QFrame):
             self.btn_uninstall.show()
         else:
             self.lbl_installed_badge.hide()
-            self.btn_download.setText(" Tải & Cài Đặt (1-Click)")
+            self.btn_download.setText(" Tải && Cài Đặt (1-Click)")
             self.btn_download.setIcon(get_vector_icon("download", "#ffffff", 14))
             self.btn_download.setStyleSheet(f"""
                 QPushButton {{
@@ -408,7 +408,7 @@ class AssetHubWidget(QWidget):
         """)
         drive_layout.addWidget(self.txt_drive_url, stretch=1)
 
-        self.btn_download_drive = QPushButton(" Tải & Cài Đặt")
+        self.btn_download_drive = QPushButton(" Tải && Cài Đặt")
         self.btn_download_drive.setIcon(get_vector_icon("download", "#ffffff", 14))
         self.btn_download_drive.setFixedHeight(30)
         self.btn_download_drive.setCursor(Qt.PointingHandCursor)
@@ -606,16 +606,24 @@ class AssetHubWidget(QWidget):
         dialog.library_changed.connect(self._library_refreshed)
         dialog.exec()
 
-    def _library_refreshed(self):
-        self.indexer.clear_cache()
-        self.assets_changed.emit()
-        self._render_linked_folders()
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_cards()
+
+    def refresh_cards(self):
+        """Cập nhật trạng thái đã cài đặt của toàn bộ các thẻ gói trên UI."""
         try:
             from src.core.pack_manager import PackManager
             for pid, card in self._pack_cards.items():
                 card.set_installed(PackManager.is_pack_installed(pid))
         except Exception:
             pass
+
+    def _library_refreshed(self):
+        self.indexer.clear_cache()
+        self.assets_changed.emit()
+        self._render_linked_folders()
+        self.refresh_cards()
 
     def _review_pack(self, source=None, url=None, auto_prepare=False, manifest: Optional[PackManifest] = None):
         from src.ui.widgets.pack_ingest_wizard import PackIngestWizard
@@ -692,7 +700,7 @@ class AssetHubWidget(QWidget):
 
     def _on_custom_drive_finished(self, success: bool, message: str):
         self.btn_download_drive.setEnabled(True)
-        self.btn_download_drive.setText(" Tải & Cài Đặt")
+        self.btn_download_drive.setText(" Tải && Cài Đặt")
         if success:
             self.txt_drive_url.clear()
             self.indexer.clear_cache()

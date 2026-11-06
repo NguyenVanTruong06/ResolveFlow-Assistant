@@ -86,14 +86,14 @@ def guess(path: Path):
     category = 'broll'; excluded = False
     parts_lower = {p.lower() for p in path.parts}
     if parts_lower & {'previews', 'thumbnails'}:
-        category, excluded = 'templates', True
+        category, excluded = 'templates', False
     elif parts_lower & {'tutorials', 'docs'}:
         category, excluded = 'docs', True
     elif ext == '.cube': category = 'luts'
     elif ext in {'.setting', '.drfx', '.comp'}: category = 'templates'
     elif ext in AUDIO: category = 'bgm' if any(s in name for s in ('bgm', 'music', 'nhạc', 'chill', 'lofi')) else 'sfx'
     elif ext in VIDEO | IMAGES:
-        if any(s in name for s in ('transition', 'chuyển cảnh')): category, excluded = 'templates', True
+        if any(s in name for s in ('transition', 'chuyển cảnh')): category, excluded = 'templates', False
         elif any(s in name for s in ('meme', 'reaction')): category = 'memes'
         elif any(s in name for s in ('overlay', 'grain', 'light_leak', 'light leak', 'vhs', 'dust')): category = 'overlays'
     else: excluded = True
@@ -544,6 +544,48 @@ class PackIngestService:
                         if referenced_companions:
                             records = [r for r in records if r['relative_path'] not in referenced_companions]
 
+        # Tự động dò tìm và liên kết video / ảnh minh họa (companion preview) cho các template (.setting, .drfx)
+        # Giúp bảo toàn video minh họa chuyển cảnh cho các gói zip cộng đồng không có manifest.json
+        candidate_previews: Dict[str, str] = {}
+        candidate_thumbs: Dict[str, str] = {}
+        for r in records:
+            p_rel = r['relative_path']
+            ext_l = Path(p_rel).suffix.lower()
+            stem_l = Path(p_rel).stem.lower().strip()
+            if ext_l in VIDEO:
+                candidate_previews[stem_l] = p_rel
+            elif ext_l in IMAGES:
+                candidate_thumbs[stem_l] = p_rel
+
+        auto_matched_companions = set()
+        for r in records:
+            if r.get('category') == 'templates':
+                stem_l = Path(r['relative_path']).stem.lower().strip()
+                if not r.get('preview_relative_path'):
+                    if stem_l in candidate_previews:
+                        r['preview_relative_path'] = candidate_previews[stem_l]
+                        auto_matched_companions.add(candidate_previews[stem_l])
+                    else:
+                        for c_stem, c_rel in candidate_previews.items():
+                            if stem_l in c_stem or c_stem in stem_l:
+                                r['preview_relative_path'] = c_rel
+                                auto_matched_companions.add(c_rel)
+                                break
+                if not r.get('thumbnail_relative_path'):
+                    if stem_l in candidate_thumbs:
+                        r['thumbnail_relative_path'] = candidate_thumbs[stem_l]
+                        auto_matched_companions.add(candidate_thumbs[stem_l])
+                    else:
+                        for c_stem, c_rel in candidate_thumbs.items():
+                            if stem_l in c_stem or c_stem in stem_l:
+                                r['thumbnail_relative_path'] = c_rel
+                                auto_matched_companions.add(c_rel)
+                                break
+
+        if auto_matched_companions:
+            # Loại bỏ các file companion đã được master tham chiếu để tránh lặp card
+            records = [r for r in records if r['relative_path'] not in auto_matched_companions]
+
         # Kiểm tra gói trùng lặp theo cặp (name, version) trong registry của kho
         try:
             reg = self.storage.registry()
@@ -678,8 +720,14 @@ class PackIngestService:
             # Loại file bị exclude khỏi payload trước commit, giữ các master đã chọn VÀ companions của chúng
             keep = {safe_relative(a['relative_path']).as_posix() for a in chosen} | {safe_relative(c).as_posix() for c in referenced_companions} | {'pack_manifest.json'}
             for path in payload.rglob('*'):
-                if path.is_file() and path.relative_to(payload).as_posix() not in keep:
-                    path.unlink()
+                if path.is_file():
+                    p_posix = path.relative_to(payload).as_posix()
+                    # Bảo vệ toàn diện: Tuyệt đối không xóa bất kỳ video hay hình ảnh minh họa preview nào trong gói!
+                    is_visual_preview = path.suffix.lower() in (VIDEO | IMAGES) and any(
+                        k in p_posix.lower() for k in ('preview', 'thumb', 'trans', 'demo', 'sample')
+                    )
+                    if p_posix not in keep and not is_visual_preview:
+                        path.unlink()
             check_identity()
             renamed = False
             tax_written = False

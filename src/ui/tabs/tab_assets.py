@@ -2608,7 +2608,28 @@ class AssetCard(QFrame):
             elif getattr(self.preset, "tab", "") == "lut":
                 self._render_lut_thumbnail()
             elif isinstance(self.preset, TransitionStylePreset) or getattr(self.preset, "tab", "") == "trans":
-                self._render_transition_thumbnail()
+                thumb_p = getattr(self.preset, "thumbnail_path", "")
+                prev_p = getattr(self.preset, "preview_path", "")
+                f_p = getattr(self.preset, "file_path", "")
+                has_visual = False
+                if thumb_p and os.path.isfile(thumb_p) and not thumb_p.endswith((".setting", ".drfx")):
+                    if thumb_p.lower().endswith(('.mp4', '.mov', '.webm')):
+                        from src.core.asset_cache import request_thumbnail_async
+                        request_thumbnail_async(thumb_p, self._on_async_thumb_ready)
+                    else:
+                        self._render_image_thumbnail(thumb_p)
+                    has_visual = True
+                elif prev_p and os.path.isfile(prev_p) and prev_p.lower().endswith(('.mp4', '.mov', '.webm', '.png', '.jpg', '.jpeg', '.webp')):
+                    from src.core.asset_cache import request_thumbnail_async
+                    request_thumbnail_async(prev_p, self._on_async_thumb_ready)
+                    has_visual = True
+                elif f_p and os.path.isfile(f_p) and f_p.lower().endswith(('.mp4', '.mov', '.webm')):
+                    from src.core.asset_cache import request_thumbnail_async
+                    request_thumbnail_async(f_p, self._on_async_thumb_ready)
+                    has_visual = True
+
+                if not has_visual:
+                    self._render_transition_thumbnail()
             elif getattr(self.preset, "tab", "") in ("icon", "meme", "overlay") or hasattr(self.preset, "badge_icon"):
                 self._render_icon_thumbnail()
             else:
@@ -2718,7 +2739,7 @@ class AssetCard(QFrame):
         layout.addWidget(lbl)
 
         tab_type = getattr(self.preset, "tab", "")
-        if tab_type in ("meme", "overlay"):
+        if tab_type in ("meme", "overlay", "trans"):
             overlay_container = QWidget(lbl)
             overlay_container.setGeometry(4, 4, 152, 26)
             h_over = QHBoxLayout(overlay_container)
@@ -2745,7 +2766,13 @@ class AssetCard(QFrame):
             """)
             self.btn_quick_play.clicked.connect(self._on_quick_play_meme_clicked)
             h_over.addWidget(self.btn_quick_play)
-            lbl_tag = QLabel("🎬 MEME" if tab_type == "meme" else "✨ OVERLAY", overlay_container)
+            if tab_type == "meme":
+                tag_label = "🎬 MEME"
+            elif tab_type == "overlay":
+                tag_label = "✨ OVERLAY"
+            else:
+                tag_label = "⚡ TRANS"
+            lbl_tag = QLabel(tag_label, overlay_container)
             lbl_tag.setStyleSheet("color: #FFFFFF; background-color: rgba(0,0,0,0.6); border-radius: 4px; padding: 2px 4px; font-size: 9px; font-weight: bold;")
             h_over.addWidget(lbl_tag)
             h_over.addStretch()
@@ -5260,6 +5287,8 @@ class TabAssets(QWidget):
         if tab_id == "hub":
             if hasattr(self, "content_stack"):
                 self.content_stack.setCurrentIndex(1)
+                if hasattr(self, "asset_hub_widget"):
+                    self.asset_hub_widget.refresh_cards()
             return
 
         if hasattr(self, "content_stack"):
@@ -6833,6 +6862,7 @@ class TabAssets(QWidget):
                     sub=d.get("sub_category") or d.get("pack_name") or sub, badge_icon=badge,
                     file_path=d.get("file_path", ""),
                     thumbnail_path=d.get("thumbnail_path", ""),
+                    preview_path=d.get("preview_path", ""),
                     pack_name=d.get("pack_name", "")
                 ) for d in dicts
             ]
@@ -7401,7 +7431,7 @@ class TabAssets(QWidget):
         if not self.selected_asset:
             return
         tab_type = getattr(self.selected_asset, "tab", "")
-        if tab_type in ("meme", "overlay"):
+        if tab_type in ("meme", "overlay", "trans"):
             if hasattr(self, "icon_meme_widget"):
                 self.icon_meme_widget._start_playback()
 

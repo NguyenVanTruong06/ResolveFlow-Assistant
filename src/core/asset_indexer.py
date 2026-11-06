@@ -503,7 +503,7 @@ class AssetIndexer:
                     continue
                 seen.add(item_key)
 
-                # Thumbnail lookup
+                # Thumbnail lookup (hỗ trợ cả tìm sâu trong thư mục con)
                 thumb = self._find_thumbnail(file_path)
                 if not thumb and previews_base.exists():
                     p_png = previews_base / pack_name / f"{stem}.png"
@@ -513,8 +513,12 @@ class AssetIndexer:
                         p_flat_png = previews_base / f"{stem}.png"
                         if p_flat_png.exists():
                             thumb = str(p_flat_png)
+                        else:
+                            cand_pngs = list((previews_base / pack_name).glob(f"**/{stem}.png")) if (previews_base / pack_name).exists() else []
+                            if cand_pngs:
+                                thumb = str(cand_pngs[0])
 
-                # Preview video lookup (.mp4)
+                # Preview video lookup (.mp4) (hỗ trợ cả tìm sâu trong thư mục con)
                 preview_video = None
                 if previews_base.exists():
                     p_mp4 = previews_base / pack_name / f"{stem}.mp4"
@@ -524,6 +528,17 @@ class AssetIndexer:
                         p_flat_mp4 = previews_base / f"{stem}.mp4"
                         if p_flat_mp4.exists():
                             preview_video = str(p_flat_mp4)
+                        else:
+                            cand_mp4s = list((previews_base / pack_name).glob(f"**/{stem}.mp4")) if (previews_base / pack_name).exists() else []
+                            if cand_mp4s:
+                                preview_video = str(cand_mp4s[0])
+                            else:
+                                cand_flat = list(previews_base.glob(f"**/{stem}.mp4"))
+                                if cand_flat:
+                                    preview_video = str(cand_flat[0])
+
+                if not thumb and preview_video:
+                    thumb = preview_video
 
                 item = {
                     "id": self._generate_id(file_path),
@@ -541,6 +556,46 @@ class AssetIndexer:
                     "source_folder": str(file_path.parent),
                 }
                 res.append(item)
+
+        # 2b. Quét các video minh họa chuyển cảnh độc lập (.mp4 / .mov)
+        for tdir in target_dirs:
+            if not tdir.exists():
+                continue
+            for v_path in tdir.rglob("*.mp4"):
+                if not v_path.is_file():
+                    continue
+                v_stem = v_path.stem
+                if any(v_stem.lower() in s.lower() for s in seen):
+                    continue
+                if any(k in v_stem.lower() for k in ["tutorial", "readme", "instruction", "install"]):
+                    continue
+                v_parts = v_path.parts
+                v_pack = "Transitions"
+                if "previews" in v_parts:
+                    idx = v_parts.index("previews")
+                    if len(v_parts) > idx + 1:
+                        v_pack = v_parts[idx + 1]
+                v_cat = v_parts[-2] if len(v_parts) >= 2 else "Chuyển cảnh"
+                item_key = f"{v_pack}_{v_stem}"
+                if item_key in seen:
+                    continue
+                seen.add(item_key)
+                thumb_v = self._find_thumbnail(v_path) or str(v_path)
+                res.append({
+                    "id": self._generate_id(v_path),
+                    "name": v_stem,
+                    "tab": "trans",
+                    "category": v_cat,
+                    "sub_category": v_cat,
+                    "pack_name": v_pack,
+                    "file_path": str(v_path),
+                    "path": str(v_path),
+                    "thumbnail_path": thumb_v,
+                    "preview_path": str(v_path),
+                    "duration": 0.8,
+                    "is_external": False,
+                    "source_folder": str(v_path.parent),
+                })
 
         # 3. External folders
         ext_trans = self._scan_external_for_category("transitions", [".setting"], find_thumb=True)
