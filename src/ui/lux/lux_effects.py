@@ -210,17 +210,17 @@ def get_luxury_dark_stylesheet() -> str:
       - Text: #E6EDF3 (Primary), #8B949E (Muted)
     """
     return """
-    /* Luxury Dark Glassmorphism Theme for ChunDVC */
+    /* Luxury Dark Glassmorphism Theme for ChunDVC (NLE Obsidian Studio) */
     QWidget {
-        font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+        font-family: 'Geist', 'Inter', 'Outfit', 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
         color: #E6EDF3;
         font-size: 12px;
     }
 
     /* Container Frames */
     QFrame#lux_drawer_panel, QFrame.lux_card {
-        background-color: rgba(14, 17, 22, 0.95);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background-color: rgba(16, 17, 22, 0.96);
+        border: 1px solid rgba(255, 255, 255, 0.09);
         border-radius: 10px;
     }
 

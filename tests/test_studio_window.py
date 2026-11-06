@@ -115,3 +115,43 @@ def test_cross_window_navigation_signals(qapp):
     studio_win.close()
     studio_win.deleteLater()
     qapp.processEvents()
+
+
+def test_main_open_studio_wiring_to_director(qapp):
+    """Kiểm tra wiring thực tế từ src.main:create_studio_manager().
+    
+    Gọi trực tiếp code production:
+    - Khi studio_window phát signal open_auto_requested (qua btn_switch_auto),
+      dock.open_director phải được gọi đúng 1 lần.
+    - Mở Studio lần 2 và click tiếp chỉ tăng thêm 1 lần (không nối đúp signal).
+    """
+    from unittest.mock import MagicMock
+    from src.main import create_studio_manager
+
+    mock_dock = MagicMock()
+    mock_insert_service = MagicMock()
+    mock_search_index = MagicMock()
+
+    # Gọi chính xác hàm helper production từ src/main.py
+    open_studio = create_studio_manager(mock_dock, mock_insert_service, mock_search_index)
+
+    # 1. Mở Studio lần 1
+    studio_win_1 = open_studio()
+    assert studio_win_1 is not None
+
+    # 2. Click nút chuyển sang AI Director
+    studio_win_1.btn_switch_auto.click()
+    assert mock_dock.open_director.call_count == 1
+
+    # 3. Mở Studio lần 2 -> tái sử dụng instance, không kết nối signal đúp
+    studio_win_2 = open_studio()
+    assert studio_win_2 is studio_win_1
+
+    studio_win_2.btn_switch_auto.click()
+    assert mock_dock.open_director.call_count == 2
+
+    studio_win_1.close()
+    studio_win_1.deleteLater()
+    qapp.processEvents()
+
+

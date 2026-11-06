@@ -11,10 +11,15 @@ import os
 import re
 import json
 import uuid
+import time
 import tempfile
 import math
 from pathlib import Path
 from typing import Optional, Callable, List, Dict, Any, Tuple
+from collections.abc import Mapping
+import logging
+
+logger = logging.getLogger("ChunDVC.TabAssets")
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
@@ -23,7 +28,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QFileDialog, QColorDialog, QSplitter, QStackedWidget,
     QInputDialog, QMenu
 )
-from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF, QPoint, QEvent
+from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF, QPoint, QEvent, QMetaObject, QObject
 from PySide6.QtGui import (
     QDrag, QPixmap, QCursor, QMovie, QPainter, QColor, QPen, QBrush,
     QFont, QPainterPath, QLinearGradient, QFontMetrics, QDesktopServices
@@ -40,6 +45,13 @@ from src.core.pack_manager import PackManager
 from src.core.collections_manager import CollectionsManager
 from src.core.contextual_suggester import ContextualSuggester, SuggestedAsset
 from src.utils.path_utils import PosixPathAdapter
+from src.ui.lux.library.hover_preview import _normalize_preview_payload
+from src.core.action_guard import check_action_availability
+
+VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
+AUDIO_EXTS = {".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a", ".aif", ".aiff"}
+MAX_FUSION_SETTING_BYTES = 5 * 1024 * 1024  # 5 MiB giới hạn tối đa cho file .setting xuất vào clipboard
+
 
 
 # =========================================================================
@@ -149,98 +161,12 @@ class StudioAsset:
         self.preview_path = preview_path or file_path
 
 
-# Danh sách LUTs điện ảnh chuẩn từ mockup
-MOCKUP_LUTS: List[StudioAsset] = [
-    StudioAsset("clean_rec709", "Clean Rec.709", "lut", "natural", sub="Tự nhiên, trung tính", badge_icon="🌿", pal=["#1f2937", "#64748b", "#cbd5e1", "#f8fafc"]),
-    StudioAsset("warm_vlog", "Warm Vlog", "lut", "natural", sub="Ấm áp đời thường", badge_icon="☕", pal=["#3b2416", "#a16207", "#f59e0b", "#fde68a"]),
-    StudioAsset("golden_hour", "Golden Hour", "lut", "natural", sub="Nắng chiều vàng", badge_icon="🌅", pal=["#431407", "#c2410c", "#fb923c", "#fef3c7"]),
-    StudioAsset("cinematic_teal_orange", "Teal & Orange", "lut", "cinema", sub="Điện ảnh Hollywood", badge_icon="🎬", pal=["#042f2e", "#0f766e", "#f97316", "#fed7aa"]),
-    StudioAsset("moody_dark", "Moody Dark", "lut", "cinema", sub="Tối, trầm", badge_icon="🌑", pal=["#09090b", "#1e293b", "#475569", "#94a3b8"]),
-    StudioAsset("vintage_film_kodak", "Kodak 2383", "lut", "cinema", sub="Phim nhựa cổ điển", badge_icon="🎞️", pal=["#1c1917", "#78350f", "#d6a35c", "#f5e6c8"]),
-    StudioAsset("high_contrast_bw", "Noir B&W", "lut", "cinema", sub="Đen trắng tương phản", badge_icon="⬛", pal=["#000000", "#3f3f46", "#a1a1aa", "#ffffff"]),
-    StudioAsset("korean_pastel", "Korean Pastel", "lut", "style", sub="Mềm, sáng, nhẹ", badge_icon="🌸", pal=["#fbcfe8", "#ddd6fe", "#bae6fd", "#fef9c3"]),
-    StudioAsset("cyberpunk_neon", "Cyberpunk Neon", "lut", "style", sub="Tím hồng đêm", badge_icon="🌆", pal=["#1e1b4b", "#7c3aed", "#ec4899", "#22d3ee"]),
-    StudioAsset("anime_vibrant", "Anime Vibrant", "lut", "style", sub="Rực rỡ hoạt hình", badge_icon="🎨", pal=["#1d4ed8", "#22c55e", "#facc15", "#f0f9ff"])
-]
-
-# Danh sách Sticker vector chuẩn từ mockup
-MOCKUP_ICONS: List[StudioAsset] = [
-    StudioAsset("arrow_right", "Mũi tên thẳng", "icon", "arrow", sub="Chỉ hướng", badge_icon="➡️", color_hex="#facc15"),
-    StudioAsset("arrow_curve", "Mũi tên cong", "icon", "arrow", sub="Nhấn mạnh", badge_icon="↪️", color_hex="#facc15"),
-    StudioAsset("circle_mark", "Khoanh tròn", "icon", "arrow", sub="Khoanh vùng", badge_icon="⭕", color_hex="#ef4444"),
-    StudioAsset("underline_mark", "Gạch chân", "icon", "arrow", sub="Gạch dưới từ", badge_icon="〰️", color_hex="#facc15"),
-    StudioAsset("location_pin", "Ghim địa điểm", "icon", "place", sub="Đánh dấu tọa độ", badge_icon="📍", color_hex="#f43f5e"),
-    StudioAsset("flag_red", "Lá cờ đích", "icon", "place", sub="Cột mốc", badge_icon="🚩", color_hex="#ef4444"),
-    StudioAsset("heart_icon", "Trái tim", "icon", "emo", sub="Yêu thích", badge_icon="❤️", color_hex="#fb7185"),
-    StudioAsset("fire_icon", "Ngọn lửa", "icon", "emo", sub="Nóng bỏng, viral", badge_icon="🔥", color_hex="#fb923c"),
-    StudioAsset("sparkle_icon", "Lấp lánh", "icon", "emo", sub="Nổi bật", badge_icon="✨", color_hex="#fde047"),
-    StudioAsset("star_icon", "Ngôi sao", "icon", "emo", sub="Đánh giá", badge_icon="⭐", color_hex="#facc15"),
-    StudioAsset("thumb_up", "Nút Thích", "icon", "emo", sub="Like video", badge_icon="👍", color_hex="#60a5fa"),
-    StudioAsset("warn_icon", "Cảnh báo", "icon", "alert", sub="Chú ý quan trọng", badge_icon="⚠️", color_hex="#facc15"),
-    StudioAsset("check_icon", "Dấu tích", "icon", "alert", sub="Hoàn thành", badge_icon="✅", color_hex="#22c55e"),
-    StudioAsset("cross_icon", "Dấu X đỏ", "icon", "alert", sub="Sai, hủy bỏ", badge_icon="❌", color_hex="#ef4444"),
-    StudioAsset("speech_bubble", "Bong bóng thoại", "icon", "talk", sub="Lời nói", badge_icon="💬", color_hex="#e4e4e7"),
-    StudioAsset("bell_sub", "Chuông thông báo", "icon", "talk", sub="Đăng ký kênh", badge_icon="🔔", color_hex="#facc15"),
-    StudioAsset("play_btn", "Nút phát", "icon", "talk", sub="Video play", badge_icon="▶️", color_hex="#ef4444")
-]
-
-# Danh sách Lớp phủ (Overlay)
-MOCKUP_OVERLAYS: List[StudioAsset] = [
-    StudioAsset("cinematic_light_leak", "Light Leak điện ảnh", "overlay", "cinematic", sub="Vệt sáng phim", badge_icon="✨"),
-    StudioAsset("sub_bell_noti", "Nút Subscribe & Chuông", "overlay", "green_screen", sub="Phông xanh", badge_icon="🟩"),
-    StudioAsset("countdown_321", "Đếm ngược 3-2-1", "overlay", "green_screen", sub="Phông xanh", badge_icon="⏱️"),
-    StudioAsset("breaking_news", "Breaking News Banner", "overlay", "green_screen", sub="Phông xanh", badge_icon="📺"),
-    StudioAsset("censored_bar", "Thanh che Censored", "overlay", "green_screen", sub="Phông xanh", badge_icon="⬛")
-]
-
-# Danh sách Meme reaction
-MOCKUP_MEMES: List[StudioAsset] = [
-    StudioAsset(
-        "meme_meo_khoc_banana",
-        "Mèo chuối khóc",
-        "meme",
-        "reaction",
-        sub="Reaction",
-        badge_icon="😿",
-        file_path="assets/broll_memes/memes/meme_meo_khoc_banana.mp4",
-        thumbnail_path="assets/broll_memes/memes/meme_meo_khoc_banana.png"
-    ),
-    StudioAsset(
-        "meme_blue_screen",
-        "Màn hình xanh lỗi",
-        "meme",
-        "reaction",
-        sub="Reaction",
-        badge_icon="💻",
-        file_path="assets/broll_memes/memes/meme_blue_screen.mp4",
-        thumbnail_path="assets/broll_memes/memes/meme_blue_screen.png"
-    ),
-    StudioAsset("meme_wow", "Wow bất ngờ", "meme", "reaction", sub="Reaction", badge_icon="😮"),
-    StudioAsset("meme_facepalm", "Facepalm toang", "meme", "reaction", sub="Reaction", badge_icon="🤦"),
-    StudioAsset("meme_question", "Chấm hỏi ngơ ngác", "meme", "reaction", sub="Reaction", badge_icon="❓"),
-    StudioAsset("meme_cat_vibe", "Mèo gật gù", "meme", "trending", sub="Trending", badge_icon="🐱"),
-    StudioAsset("meme_cai_nit", "Còn đúng cái nịt", "meme", "trending", sub="Trending", badge_icon="💸"),
-    StudioAsset("meme_ao_that_day", "Ảo thật đấy", "meme", "trending", sub="Trending", badge_icon="🤯"),
-    StudioAsset("meme_cat_cry", "Mèo chuối khóc (Audio)", "meme", "reaction", sub="Reaction", badge_icon="😿", file_path="assets/broll_memes/memes/meme_meo_khoc_banana.mp4"),
-    StudioAsset("meme_khaby", "Nhún vai bất lực", "meme", "reaction", sub="Reaction", badge_icon="🤷"),
-    StudioAsset("meme_xach_balo", "Xách balo lên và đi", "meme", "trending", sub="Trending", badge_icon="🎒")
-]
-
-
-# Danh sách SFX âm thanh
-MOCKUP_SFX: List[StudioAsset] = [
-    StudioAsset("sfx_whoosh", "Whoosh lướt nhanh", "sfx", "trans", sub="Chuyển cảnh", badge_icon="💨"),
-    StudioAsset("sfx_swoosh_sub", "Swoosh trầm", "sfx", "trans", sub="Chuyển cảnh", badge_icon="🌊"),
-    StudioAsset("sfx_riser", "Riser kịch tính", "sfx", "trans", sub="Tăng tiến độ", badge_icon="📈"),
-    StudioAsset("sfx_pop", "Pop nảy chữ", "sfx", "accent", sub="Xuất hiện text", badge_icon="🎈"),
-    StudioAsset("sfx_ding", "Ding điểm nhấn", "sfx", "accent", sub="Điểm nhấn", badge_icon="🔔"),
-    StudioAsset("sfx_click", "Click chuột", "sfx", "accent", sub="Tương tác", badge_icon="🖱️"),
-    StudioAsset("sfx_shutter", "Camera Shutter", "sfx", "accent", sub="Chụp ảnh", badge_icon="📸"),
-    StudioAsset("sfx_laugh", "Tiếng cười mỉa", "sfx", "fun", sub="Hài hước", badge_icon="😂"),
-    StudioAsset("sfx_horn", "Tiếng còi xe", "sfx", "fun", sub="Hài hước", badge_icon="📢"),
-    StudioAsset("sfx_glitch", "Glitch số", "sfx", "tech", sub="Lỗi tín hiệu", badge_icon="⚡"),
-    StudioAsset("sfx_beep", "Beep kiểm duyệt", "sfx", "tech", sub="Kiểm duyệt", badge_icon="🛑")
-]
+# Danh sách LUTs, Sticker, Overlay, Meme, SFX mockup mặc định rỗng (toàn bộ definitions đã lưu trữ tại kho xuất bản riêng)
+MOCKUP_LUTS: List[StudioAsset] = []
+MOCKUP_ICONS: List[StudioAsset] = []
+MOCKUP_OVERLAYS: List[StudioAsset] = []
+MOCKUP_MEMES: List[StudioAsset] = []
+MOCKUP_SFX: List[StudioAsset] = []
 
 
 # =========================================================================
@@ -305,37 +231,35 @@ class DraggableAssetLabel(QLabel):
         if (event.pos() - self.drag_start_pos).manhattanLength() < 8:
             return
 
+        # Clear gesture ngay sau khi vượt ngưỡng threshold để tránh lặp drag trong cùng một gesture
+        self.drag_start_pos = None
+
         preset = self.preset_getter() if callable(self.preset_getter) else None
         if not preset:
             return
 
-        drag = QDrag(self)
         if callable(self.mime_data_generator):
             mime_data = self.mime_data_generator(preset)
         else:
-            mime_data = QMimeData()
-            if isinstance(preset, LocalAsset):
-                mime_data.setUrls([QUrl.fromLocalFile(preset.file_path)])
-            elif isinstance(preset, TextStylePreset):
-                temp_setting = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{preset.id}_{uuid.uuid4().hex[:6]}.setting")
-                sample_txt = self.sample_text_getter() if callable(self.sample_text_getter) else preset.name
-                FusionSettingGenerator.export_setting_file(preset, temp_setting, sample_text=sample_txt)
-                mime_data.setUrls([QUrl.fromLocalFile(temp_setting)])
-            elif isinstance(preset, TransitionStylePreset):
-                temp_setting = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{preset.id}_{uuid.uuid4().hex[:6]}.setting")
-                TransitionMacroGenerator.export_setting_file(preset, temp_setting)
-                mime_data.setUrls([QUrl.fromLocalFile(temp_setting)])
-            else:
-                # StudioAsset ảo
-                temp_path = os.path.join(tempfile.gettempdir(), f"ResolveFlow_{getattr(preset, 'id', 'item')}.txt")
-                with open(temp_path, "w", encoding="utf-8") as f:
-                    f.write(getattr(preset, "name", "ResolveFlow Asset"))
-                mime_data.setUrls([QUrl.fromLocalFile(temp_path)])
+            # Fallback dùng shared helper có guard với sampletext, không tự sinh macro/dummy text
+            from src.ui.lux.library.asset_grid import create_asset_mime_data
+            sample_txt = self.sample_text_getter() if callable(self.sample_text_getter) else ""
+            mime_data = create_asset_mime_data(preset, sample_text=sample_txt)
 
-        if mime_data:
-            drag.setMimeData(mime_data)
+        # Gate hasUrls và local URLs không rỗng trước khi tạo QDrag / exec
+        if not mime_data or not mime_data.hasUrls():
             self.setCursor(Qt.OpenHandCursor)
-            drag.exec(Qt.DropAction.CopyAction)
+            return
+
+        local_urls = [u for u in mime_data.urls() if u.isLocalFile()]
+        if not local_urls:
+            self.setCursor(Qt.OpenHandCursor)
+            return
+
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+        self.setCursor(Qt.OpenHandCursor)
+        drag.exec(Qt.DropAction.CopyAction)
 
 
 class DraggableActionButton(QPushButton):
@@ -356,26 +280,38 @@ class DraggableActionButton(QPushButton):
             return
         if (event.pos() - self._drag_start_pos).manhattanLength() < 8:
             return
-        if callable(self.mime_data_getter):
-            mime_data = self.mime_data_getter()
-            if mime_data and mime_data.hasUrls():
-                drag = QDrag(self)
-                drag.setMimeData(mime_data)
-                try:
-                    pixmap = self.grab()
-                    if not pixmap.isNull():
-                        ghost = pixmap.scaledToWidth(180, Qt.SmoothTransformation) if pixmap.width() > 180 else pixmap
-                        transparent_pix = QPixmap(ghost.size())
-                        transparent_pix.fill(Qt.transparent)
-                        painter = QPainter(transparent_pix)
-                        painter.setOpacity(0.85)
-                        painter.drawPixmap(0, 0, ghost)
-                        painter.end()
-                        drag.setPixmap(transparent_pix)
-                        drag.setHotSpot(QPoint(ghost.width() // 2, ghost.height() // 2))
-                except Exception:
-                    pass
-                drag.exec(Qt.DropAction.CopyAction)
+
+        # Clear gesture ngay sau khi vượt ngưỡng threshold
+        self._drag_start_pos = None
+
+        if not callable(self.mime_data_getter):
+            return
+
+        mime_data = self.mime_data_getter()
+        if not mime_data or not mime_data.hasUrls():
+            return
+
+        local_urls = [u for u in mime_data.urls() if u.isLocalFile()]
+        if not local_urls:
+            return
+
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+        try:
+            pixmap = self.grab()
+            if not pixmap.isNull():
+                ghost = pixmap.scaledToWidth(180, Qt.SmoothTransformation) if pixmap.width() > 180 else pixmap
+                transparent_pix = QPixmap(ghost.size())
+                transparent_pix.fill(Qt.transparent)
+                painter = QPainter(transparent_pix)
+                painter.setOpacity(0.85)
+                painter.drawPixmap(0, 0, ghost)
+                painter.end()
+                drag.setPixmap(transparent_pix)
+                drag.setHotSpot(QPoint(ghost.width() // 2, ghost.height() // 2))
+        except Exception:
+            pass
+        drag.exec(Qt.DropAction.CopyAction)
 
 
 
@@ -383,18 +319,31 @@ class DraggableActionButton(QPushButton):
 # 5. WAVEFORM CANVAS & ASSET CARD (Bộ hiển thị đạo cụ trực quan)
 # =========================================================================
 class WaveformCanvas(QWidget):
-    """Canvas vẽ dạng sóng (waveform) phong bì âm thanh (envelope bars)."""
+    """
+    Canvas vẽ dạng sóng (waveform) phong bì âm thanh (envelope bars).
+    LƯU Ý KIẾN TRÚC: Đây là phong bì trang trí (decorative envelope bars) được tạo ra từ
+    thuật toán băm xác định theo preset_id, KHÔNG PHẢI phân tích PCM/FFT thời gian thực.
+    """
     def __init__(self, preset_id: str = "sfx", bars: Optional[List[float]] = None, parent=None, num_bars: int = 18, height: int = 30):
         super().__init__(parent)
         self.preset_id = preset_id
         self.bars = bars if bars is not None else self._generate_envelope_bars(preset_id, num_bars=num_bars)
         self.is_playing = False
+        self.progress_fraction: float = 0.0
         self.setFixedHeight(height)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def set_preset_id(self, preset_id: str, num_bars: int = 18):
         self.preset_id = preset_id
         self.bars = self._generate_envelope_bars(preset_id, num_bars=num_bars)
+        self.update()
+
+    def set_playback_progress(self, pos_ms: int, dur_ms: int):
+        """Cập nhật tỷ lệ tiến trình phát trên thanh sóng (clamp [0.0, 1.0], an toàn khi duration=0/unknown)."""
+        if dur_ms is None or dur_ms <= 0:
+            self.progress_fraction = 0.0
+        else:
+            self.progress_fraction = max(0.0, min(1.0, float(pos_ms) / float(dur_ms)))
         self.update()
 
     @staticmethod
@@ -462,6 +411,12 @@ class WaveformCanvas(QWidget):
             x = i * (bar_w + gap)
             y = (h - bar_h) / 2.0
             painter.drawRoundedRect(QRectF(x, y, bar_w, bar_h), 1.0, 1.0)
+
+        # Vẽ vạch playhead mảnh theo tiến trình thực khi đang phát
+        if self.is_playing and self.progress_fraction > 0.0:
+            playhead_x = int(self.progress_fraction * (w - 1))
+            painter.setPen(QPen(QColor(ThemeColors.CYAN_HI), 1.5))
+            painter.drawLine(playhead_x, 2, playhead_x, h - 2)
 
 
 class LutSplitWidget(QWidget):
@@ -1294,9 +1249,15 @@ class TransitionLoopWidget(QWidget):
 
 
 class IconMemePreviewWidget(QWidget):
-    """Widget xem trước Icon vector hoặc Meme video reaction có trình phát video thực tế & chế độ mô phỏng sống động."""
+    """Widget xem trước Icon vector hoặc Meme video reaction có trình phát video thực tế được bảo vệ qua ActionGuard."""
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._current_asset: Any = None
+        self._playback_epoch: int = 0
+        self._is_active_playback: bool = False
+        self._player_conns: list = []
+        self._last_guard_reason: str = ""
+
         self.item_name = ""
         self.item_type = "icon"
         self.badge_icon = "✨"
@@ -1308,13 +1269,7 @@ class IconMemePreviewWidget(QWidget):
         self._pixmap = None
         self._duration_ms = 0
         self._position_ms = 0
-
-        # Vòng lặp mô phỏng xem trước khi chưa có video local
-        self._sim_timer = QTimer(self)
-        self._sim_timer.setInterval(33)
-        self._sim_timer.timeout.connect(self._on_sim_tick)
-        self._sim_progress = 0.0
-        self._is_simulating = False
+        self._bundled_root = None
 
         self.setFixedHeight(175)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -1355,7 +1310,7 @@ class IconMemePreviewWidget(QWidget):
         ctrl_layout.setContentsMargins(4, 2, 4, 2)
         ctrl_layout.setSpacing(6)
 
-        self.btn_play = QPushButton("▶ Xem thử", self.control_bar)
+        self.btn_play = QPushButton("▶ Phát video", self.control_bar)
         self.btn_play.setFixedHeight(26)
         self.btn_play.setCursor(Qt.PointingHandCursor)
         self.btn_play.setStyleSheet(f"""
@@ -1371,6 +1326,11 @@ class IconMemePreviewWidget(QWidget):
             QPushButton:hover {{
                 background-color: {ThemeColors.CYAN};
                 color: #05252c;
+            }}
+            QPushButton:disabled {{
+                background-color: rgba(255, 255, 255, 0.04);
+                border-color: rgba(255, 255, 255, 0.1);
+                color: rgba(255, 255, 255, 0.3);
             }}
         """)
         self.btn_play.clicked.connect(self._toggle_playback)
@@ -1391,29 +1351,22 @@ class IconMemePreviewWidget(QWidget):
                 border-color: {ThemeColors.PRIMARY};
                 color: {ThemeColors.PRIMARY};
             }}
+            QPushButton:disabled {{
+                background-color: rgba(255, 255, 255, 0.04);
+                border-color: rgba(255, 255, 255, 0.1);
+                color: rgba(255, 255, 255, 0.3);
+            }}
         """)
         self.btn_replay.clicked.connect(self._replay)
 
-        self.lbl_time = QLabel("00:00 / 00:04", self.control_bar)
+        self.lbl_time = QLabel("00:00 / 00:00", self.control_bar)
         self.lbl_time.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
 
         self.btn_browse = QPushButton("📂", self.control_bar)
         self.btn_browse.setFixedSize(26, 26)
-        self.btn_browse.setCursor(Qt.PointingHandCursor)
-        self.btn_browse.setToolTip("Liên kết tệp video MP4/MOV từ máy tính")
-        self.btn_browse.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 4px;
-                color: {ThemeColors.TEXT_MUTED};
-                font-size: 11px;
-            }}
-            QPushButton:hover {{
-                color: #FFFFFF;
-                border-color: {ThemeColors.CYAN_HI};
-            }}
-        """)
+        self.btn_browse.setToolTip("Tính năng liên kết tệp tạm thời vô hiệu hóa; vui lòng quản lý qua Thư viện")
+        self.btn_browse.setEnabled(False)
+        self.btn_browse.hide()
         self.btn_browse.clicked.connect(self._browse_file)
 
         self.btn_open_external = QPushButton("↗ Mở ngoài", self.control_bar)
@@ -1433,6 +1386,10 @@ class IconMemePreviewWidget(QWidget):
                 color: #FFFFFF;
                 border-color: {ThemeColors.BORDER_HOVER};
             }}
+            QPushButton:disabled {{
+                color: rgba(255, 255, 255, 0.2);
+                border-color: rgba(255, 255, 255, 0.08);
+            }}
         """)
         self.btn_open_external.clicked.connect(self._open_external)
 
@@ -1445,92 +1402,202 @@ class IconMemePreviewWidget(QWidget):
 
         main_vbox.addWidget(self.control_bar)
 
-        # Player setup
+        self._player = None
+        self._audio_output = None
+
+    def _ensure_player(self):
+        if self._player is not None:
+            return
         self._player = QMediaPlayer(self)
         self._audio_output = QAudioOutput(self)
+        from src.services.audio_router import get_audio_router
+        get_audio_router().register(self._audio_output)
         self._audio_output.setVolume(0.9)
         self._player.setAudioOutput(self._audio_output)
         self._player.setVideoOutput(self.video_widget)
 
-        self._player.playbackStateChanged.connect(self._on_playback_state_changed)
-        self._player.positionChanged.connect(self._on_position_changed)
-        self._player.durationChanged.connect(self._on_duration_changed)
+    def _disconnect_session(self):
+        """Ngắt toàn bộ kết nối signal của session trước mà widget sở hữu."""
+        if self._player is not None and self._player_conns:
+            for conn in list(self._player_conns):
+                try:
+                    if hasattr(QObject, "disconnect") and isinstance(conn, QMetaObject.Connection):
+                        QObject.disconnect(conn)
+                    elif hasattr(self._player, "disconnect"):
+                        self._player.disconnect(conn)
+                except Exception:
+                    pass
+            self._player_conns.clear()
+
+    def _start_session(self, reset_pos: bool = False):
+        """Khởi tạo phiên phát mới có gắn epoch/token độc quyền, loại trừ callback cũ."""
+        self._disconnect_session()
+        self._playback_epoch += 1
+        epoch = self._playback_epoch
+        self._is_active_playback = True
+
+        def on_pos(pos: int):
+            if epoch != self._playback_epoch or not self._is_active_playback:
+                return
+            self._on_position_changed(pos, epoch=epoch)
+
+        def on_dur(dur: int):
+            if epoch != self._playback_epoch or not self._is_active_playback:
+                return
+            self._on_duration_changed(dur, epoch=epoch)
+
+        def on_state(state):
+            if epoch != self._playback_epoch or not self._is_active_playback:
+                return
+            self._on_playback_state_changed(state, epoch=epoch)
+
+        def on_err(err, err_str=""):
+            if epoch != self._playback_epoch or not self._is_active_playback:
+                return
+            self._on_player_error(err, err_str, epoch=epoch)
+
+        if hasattr(self._player, "positionChanged"):
+            c1 = self._player.positionChanged.connect(on_pos)
+            self._player_conns.append(c1)
+        if hasattr(self._player, "durationChanged"):
+            c2 = self._player.durationChanged.connect(on_dur)
+            self._player_conns.append(c2)
+        if hasattr(self._player, "playbackStateChanged"):
+            c3 = self._player.playbackStateChanged.connect(on_state)
+            self._player_conns.append(c3)
         if hasattr(self._player, "errorOccurred"):
-            self._player.errorOccurred.connect(self._on_player_error)
+            c4 = self._player.errorOccurred.connect(on_err)
+            self._player_conns.append(c4)
 
-    def _on_player_error(self, error, error_string=""):
-        """Fallback to interactive simulation if local video decoder/codec is unavailable."""
-        self.display_container.setCurrentWidget(self.canvas_widget)
-        self._is_simulating = True
-        self._sim_progress = 0.0
-        self._sim_timer.start()
-        self.btn_play.setText("⏸ Dừng xem thử")
-        self.canvas_widget.update()
+        source = QUrl.fromLocalFile(self.resolved_file_path)
+        if self._player.source() != source:
+            self._player.setSource(source)
+        if reset_pos:
+            self._player.setPosition(0)
+            self._position_ms = 0
+            self._update_time_label()
 
-    def _resolve_file_path(self, fpath: str, name: str, item_type: str, asset_id: str = "") -> str:
-        candidates = []
-        if fpath:
-            candidates.append(fpath)
-            candidates.append(os.path.abspath(fpath))
-        clean_name = name.split("(")[0].strip()
-        candidates.extend([
-            str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{name}.mp4")),
-            str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{clean_name}.mp4")),
-            str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{name}.mov")),
-            str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{clean_name}.mov")),
-            str(PosixPathAdapter.get_asset_path("broll_memes", "overlays", f"{name}.mp4")),
-            str(PosixPathAdapter.get_asset_path("broll_memes", "overlays", f"{clean_name}.mp4")),
-            str(PosixPathAdapter.get_asset_path("broll_memes", f"{name}.mp4")),
-            str(PosixPathAdapter.get_asset_path("broll_memes", f"{clean_name}.mp4")),
-        ])
-        if asset_id:
-            candidates.extend([
-                str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{asset_id}.mp4")),
-                str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{asset_id}.mov")),
-                str(PosixPathAdapter.get_asset_path("broll_memes", "overlays", f"{asset_id}.mp4")),
-                str(PosixPathAdapter.get_asset_path("broll_memes", f"{asset_id}.mp4")),
-                str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{asset_id.replace('meme_', '')}.mp4")),
-            ])
-            alias_map = {
-                "meme_cat_cry": ["meme_meo_khoc_banana.mp4", "meme_meo_khoc_banana.mov"],
-                "meme_meo_khoc_banana": ["meme_meo_khoc_banana.mp4", "meme_meo_khoc_banana.mov"],
-                "meme_blue_screen": ["meme_blue_screen.mp4", "meme_blue_screen.mov"],
-            }
-            if asset_id in alias_map:
-                for a in alias_map[asset_id]:
-                    candidates.append(str(PosixPathAdapter.get_asset_path("broll_memes", "memes", a)))
+        self.display_container.setCurrentWidget(self.video_container)
+        self._player.play()
+        self.btn_play.setText("⏸ Dừng phát")
+        self.btn_play.setToolTip("Dừng phát video")
 
-        for c in candidates:
-            if c and os.path.isfile(c):
-                return os.path.abspath(c)
-        return ""
-
-    def set_item(self, name: str, item_type: str, badge: str, color_hex: str, sub: str, thumbnail_path: str = "", file_path: str = "", asset_id: str = ""):
+    def hideEvent(self, event):
         self.stop_playback()
-        self.item_name = name
-        self.item_type = item_type
-        self.badge_icon = badge or "✨"
-        self.color_hex = color_hex or "#facc15"
-        self.sub_text = sub
-        self.thumbnail_path = thumbnail_path
-        self.file_path = file_path
-        self.resolved_file_path = self._resolve_file_path(file_path, name, item_type, asset_id=asset_id)
+        if event is not None:
+            super().hideEvent(event)
 
-        if not self.thumbnail_path and asset_id:
-            # Check for candidate png thumbnails
-            thumb_cands = [
-                str(PosixPathAdapter.get_asset_path("broll_memes", "memes", f"{asset_id}.png")),
-                str(PosixPathAdapter.get_asset_path("broll_memes", "memes", "meme_meo_khoc_banana.png" if "cat" in asset_id else "")),
-            ]
-            for tc in thumb_cands:
-                if tc and os.path.isfile(tc):
-                    self.thumbnail_path = os.path.abspath(tc)
-                    break
+    def closeEvent(self, event):
+        self.stop_playback()
+        if event is not None:
+            super().closeEvent(event)
 
-        if self.thumbnail_path and os.path.isfile(self.thumbnail_path):
-            self._pixmap = QPixmap(self.thumbnail_path)
+    def _recheck_action_time_guard(self) -> bool:
+        """Thẩm định lại quyền hạn nguồn tại thời điểm thực hiện thao tác (Action-Time Guard Recheck)."""
+        if self._current_asset is None:
+            self.resolved_file_path = ""
+            self.stop_playback()
+            self._last_guard_reason = "Chưa chọn tài nguyên."
+            self.btn_play.setEnabled(False)
+            self.btn_replay.setEnabled(False)
+            self.btn_open_external.setEnabled(False)
+            self.btn_play.setText("⚠️ Không khả dụng")
+            self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+            self.lbl_time.setText("--:-- / --:--")
+            return False
+
+        payload = _normalize_preview_payload(self._current_asset)
+        guard_res = check_action_availability(payload, intent="preview", bundled_root=getattr(self, "_bundled_root", None))
+        if not guard_res.allowed or not guard_res.resolved_path:
+            self.resolved_file_path = ""
+            self.stop_playback()
+            self._last_guard_reason = guard_res.reason or "Tài nguyên không khả dụng."
+            self.btn_play.setEnabled(False)
+            self.btn_replay.setEnabled(False)
+            self.btn_open_external.setEnabled(False)
+            self.btn_play.setText("⚠️ Không khả dụng")
+            self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+            self.lbl_time.setText("--:-- / --:--")
+            return False
+
+        ext = os.path.splitext(guard_res.resolved_path)[1].lower()
+        if ext not in VIDEO_EXTS:
+            self.resolved_file_path = ""
+            self.stop_playback()
+            self._last_guard_reason = "Định dạng tệp không được hỗ trợ để phát video."
+            self.btn_play.setEnabled(False)
+            self.btn_replay.setEnabled(False)
+            self.btn_open_external.setEnabled(False)
+            self.btn_play.setText("⚠️ Không khả dụng")
+            self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+            self.lbl_time.setText("--:-- / --:--")
+            return False
+
+        self.resolved_file_path = guard_res.resolved_path
+        return True
+
+    def set_asset(self, asset: Any, sub: str = ""):
+        """Nạp tài nguyên vào Inspector với đầy đủ thẩm định ActionGuard."""
+        self.stop_playback()
+        self._current_asset = asset
+        self._position_ms = 0
+        self._duration_ms = 0
+        self._last_guard_reason = ""
+
+        if isinstance(asset, Mapping):
+            self.item_name = str(asset.get("name") or asset.get("id") or "")
+            self.item_type = str(asset.get("tab") or asset.get("category") or "icon")
+            self.badge_icon = str(asset.get("badge_icon") or "✨")
+            self.color_hex = str(asset.get("color_hex") or "#facc15")
+            self.sub_text = str(sub or asset.get("sub") or "")
+            thumb_path = str(asset.get("thumbnail_path") or "")
+            self.file_path = str(asset.get("file_path") or "")
+        else:
+            self.item_name = str(getattr(asset, "name", "") or getattr(asset, "id", ""))
+            self.item_type = str(getattr(asset, "tab", "") or getattr(asset, "category", "icon"))
+            self.badge_icon = str(getattr(asset, "badge_icon", "✨") or "✨")
+            self.color_hex = str(getattr(asset, "color_hex", "#facc15") or "#facc15")
+            self.sub_text = str(sub or getattr(asset, "sub", ""))
+            thumb_path = str(getattr(asset, "thumbnail_path", "") or "")
+            self.file_path = str(getattr(asset, "file_path", "") or "")
+
+        self.thumbnail_path = thumb_path
+        if thumb_path and os.path.isfile(thumb_path):
+            self._pixmap = QPixmap(thumb_path)
         else:
             self._pixmap = None
+
+        payload = _normalize_preview_payload(asset)
+        guard_res = check_action_availability(payload, intent="preview", bundled_root=getattr(self, "_bundled_root", None))
+
+        if guard_res.allowed and guard_res.resolved_path:
+            ext = os.path.splitext(guard_res.resolved_path)[1].lower()
+            if ext in VIDEO_EXTS:
+                self.resolved_file_path = guard_res.resolved_path
+                self.btn_play.setEnabled(True)
+                self.btn_replay.setEnabled(True)
+                self.btn_open_external.setEnabled(True)
+                self.btn_play.setText("▶ Phát video")
+                self.btn_play.setToolTip("Phát video preview")
+                self.lbl_time.setText("00:00 / 00:00")
+            else:
+                self.resolved_file_path = ""
+                self.btn_play.setEnabled(False)
+                self.btn_replay.setEnabled(False)
+                self.btn_open_external.setEnabled(False)
+                self._last_guard_reason = "Định dạng tệp không được hỗ trợ để phát video."
+                self.btn_play.setText("⚠️ Không khả dụng")
+                self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+                self.lbl_time.setText("--:-- / --:--")
+        else:
+            self.resolved_file_path = ""
+            self.btn_play.setEnabled(False)
+            self.btn_replay.setEnabled(False)
+            self.btn_open_external.setEnabled(False)
+            self._last_guard_reason = guard_res.reason or "Tài nguyên không khả dụng."
+            self.btn_play.setText("⚠️ Không khả dụng")
+            self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+            self.lbl_time.setText("--:-- / --:--")
 
         if self.item_type == "icon":
             self.display_container.setCurrentWidget(self.canvas_widget)
@@ -1540,109 +1607,121 @@ class IconMemePreviewWidget(QWidget):
             self.control_bar.show()
             self.setFixedHeight(175)
             self.display_container.setCurrentWidget(self.canvas_widget)
-            if self.resolved_file_path:
-                self._player.setSource(QUrl.fromLocalFile(self.resolved_file_path))
-                self.btn_play.setEnabled(True)
-                self.btn_replay.setEnabled(True)
-                self.btn_open_external.setEnabled(True)
-                self.btn_play.setText("▶ Phát video")
-            else:
-                self.btn_play.setEnabled(True)
-                self.btn_replay.setEnabled(True)
-                self.btn_open_external.setEnabled(False)
-                self.btn_play.setText("▶ Xem thử")
-                self.lbl_time.setText("00:00 / 00:04")
+
         self.canvas_widget.update()
         self.update()
 
+    def set_item(self, name: str, item_type: str, badge: str, color_hex: str, sub: str, thumbnail_path: str = "", file_path: str = "", asset_id: str = ""):
+        """Wrapper tương thích ngược cho các unit test và callsite scalar cũ."""
+        legacy_asset = {
+            "id": asset_id or name,
+            "name": name,
+            "tab": item_type,
+            "category": item_type,
+            "badge_icon": badge or "✨",
+            "color_hex": color_hex or "#facc15",
+            "thumbnail_path": thumbnail_path,
+            "file_path": file_path,
+            "preview_path": file_path,
+        }
+        self.set_asset(legacy_asset, sub=sub)
+
     def _browse_file(self):
-        fpath, _ = QFileDialog.getOpenFileName(self, "Chọn video meme/overlay", "", "Video Files (*.mp4 *.mov *.avi *.mkv *.webm)")
-        if fpath and os.path.isfile(fpath):
-            self.file_path = fpath
-            self.resolved_file_path = os.path.abspath(fpath)
-            self._player.setSource(QUrl.fromLocalFile(self.resolved_file_path))
-            self.btn_play.setEnabled(True)
-            self.btn_replay.setEnabled(True)
-            self.btn_open_external.setEnabled(True)
-            self.btn_play.setText("▶ Phát video")
-            self._toggle_playback()
+        """Safe no-op: Tính năng liên kết tệp trực tiếp tạm thời vô hiệu hóa."""
+        pass
 
     def _toggle_playback(self):
         if self.resolved_file_path:
+            if not self._recheck_action_time_guard():
+                return
+            self._ensure_player()
             if self._player.playbackState() == QMediaPlayer.PlayingState:
                 self._player.pause()
-                self.btn_play.setText("▶ Phát video")
+                self.btn_play.setText("▶ Tiếp tục")
+                self.btn_play.setToolTip("Tiếp tục phát video")
             else:
-                self.display_container.setCurrentWidget(self.video_container)
-                self._player.play()
-                self.btn_play.setText("⏸ Dừng phát")
+                self._start_session(reset_pos=False)
         else:
-            if self._is_simulating:
-                self.stop_playback()
-            else:
-                self._is_simulating = True
-                self._sim_progress = 0.0
-                self._sim_timer.start()
-                self.btn_play.setText("⏸ Dừng xem thử")
-                self.canvas_widget.update()
+            self.stop_playback()
 
     def _start_playback(self):
         if self.resolved_file_path:
-            self.display_container.setCurrentWidget(self.video_container)
-            self._player.play()
-            self.btn_play.setText("⏸ Dừng phát")
+            if not self._recheck_action_time_guard():
+                return
+            self._ensure_player()
+            self._start_session(reset_pos=False)
         else:
-            self._is_simulating = True
-            self._sim_progress = 0.0
-            self._sim_timer.start()
-            self.btn_play.setText("⏸ Dừng xem thử")
-            self.canvas_widget.update()
+            self.stop_playback()
 
     def _replay(self):
         if self.resolved_file_path:
-            self._player.setPosition(0)
-            self.display_container.setCurrentWidget(self.video_container)
-            self._player.play()
-            self.btn_play.setText("⏸ Dừng phát")
-
+            if not self._recheck_action_time_guard():
+                return
+            self._ensure_player()
+            self._start_session(reset_pos=True)
         else:
-            self._is_simulating = True
-            self._sim_progress = 0.0
-            self._sim_timer.start()
-            self.btn_play.setText("⏸ Dừng xem thử")
-            self.canvas_widget.update()
+            self.stop_playback()
 
     def stop_playback(self):
-        try:
-            if self._player.playbackState() != QMediaPlayer.StoppedState:
+        """Dừng phát video an toàn: tăng epoch trước, dọn connections và clear player source."""
+        self._playback_epoch += 1
+        self._is_active_playback = False
+        self._disconnect_session()
+
+        if self._player is not None:
+            try:
                 self._player.stop()
-        except Exception:
-            pass
-        if hasattr(self, "_sim_timer"):
-            self._sim_timer.stop()
-        self._is_simulating = False
+                self._player.setSource(QUrl())
+            except Exception:
+                pass
+
         self.display_container.setCurrentWidget(self.canvas_widget)
-        self.btn_play.setText("▶ Phát video" if self.resolved_file_path else "▶ Xem thử")
+        if self.resolved_file_path:
+            self.btn_play.setText("▶ Phát video")
+            self.btn_play.setEnabled(True)
+            self.btn_replay.setEnabled(True)
+            self.btn_play.setToolTip("Phát video preview")
+        else:
+            self.btn_play.setText("⚠️ Không khả dụng")
+            self.btn_play.setEnabled(False)
+            self.btn_replay.setEnabled(False)
+            if self._last_guard_reason:
+                self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+            else:
+                self.btn_play.setToolTip("Tài nguyên không khả dụng.")
         self.canvas_widget.update()
 
-    def _on_sim_tick(self):
-        self._sim_progress += 0.02
-        if self._sim_progress > 1.0:
-            self._sim_progress = 0.0
-        p_sec = int(self._sim_progress * 4.0)
-        self.lbl_time.setText(f"00:{p_sec:02d} / 00:04")
+    def _on_player_error(self, error, error_string="", epoch: Optional[int] = None):
+        """Xử lý lỗi giải mã video: dừng phát và hiển thị lỗi trung thực, không giả lập simulation."""
+        if epoch is not None and epoch != self._playback_epoch:
+            return
+        if not self._is_active_playback:
+            return
+        self.stop_playback()
+        self.display_container.setCurrentWidget(self.canvas_widget)
+        err_msg = f"Lỗi giải mã: {error_string}" if error_string else "Lỗi phát video."
+        self.btn_play.setText("⚠️ Lỗi phát video")
+        self.btn_play.setToolTip(f"Không thể phát: {err_msg}")
+        self.btn_play.setEnabled(False)
+        self.btn_replay.setEnabled(False)
+        self.lbl_time.setText("--:-- / --:--")
         self.canvas_widget.update()
 
     def _open_external(self):
-        if self.resolved_file_path and os.path.exists(self.resolved_file_path):
+        if not self._recheck_action_time_guard():
+            return
+        if self.resolved_file_path and os.path.isfile(self.resolved_file_path):
             abs_p = os.path.abspath(self.resolved_file_path)
-            try:
-                if sys.platform == "win32":
-                    os.startfile(abs_p)
-                else:
+            ext = os.path.splitext(abs_p)[1].lower()
+            if ext in VIDEO_EXTS:
+                try:
+                    import sys
+                    if sys.platform == "win32":
+                        os.startfile(abs_p)
+                    else:
+                        QDesktopServices.openUrl(QUrl.fromLocalFile(abs_p))
+                except Exception:
                     QDesktopServices.openUrl(QUrl.fromLocalFile(abs_p))
-            except Exception:
-                QDesktopServices.openUrl(QUrl.fromLocalFile(abs_p))
 
     def _on_canvas_clicked(self, event):
         if event.button() == Qt.LeftButton:
@@ -1655,20 +1734,46 @@ class IconMemePreviewWidget(QWidget):
         self._on_canvas_clicked(event)
         super().mousePressEvent(event)
 
-    def _on_playback_state_changed(self, state):
+    def _on_playback_state_changed(self, state, epoch: Optional[int] = None):
+        if epoch is not None and epoch != self._playback_epoch:
+            return
+        if not self._is_active_playback:
+            if state == QMediaPlayer.StoppedState:
+                self.display_container.setCurrentWidget(self.canvas_widget)
+                if self.resolved_file_path:
+                    self.btn_play.setText("▶ Phát video")
+                    self.btn_play.setToolTip("Phát video preview")
+                else:
+                    self.btn_play.setText("⚠️ Không khả dụng")
+                    if self._last_guard_reason:
+                        self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+            return
+
         if state == QMediaPlayer.PlayingState:
             self.btn_play.setText("⏸ Tạm dừng")
+            self.btn_play.setToolTip("Tạm dừng phát video")
         elif state == QMediaPlayer.PausedState:
             self.btn_play.setText("▶ Tiếp tục")
+            self.btn_play.setToolTip("Tiếp tục phát video")
         else:
+            self._is_active_playback = False
             self.btn_play.setText("▶ Phát lại")
+            self.btn_play.setToolTip("Phát lại video từ đầu")
             self.display_container.setCurrentWidget(self.canvas_widget)
 
-    def _on_position_changed(self, pos_ms: int):
+    def _on_position_changed(self, pos_ms: int, epoch: Optional[int] = None):
+        if epoch is not None and epoch != self._playback_epoch:
+            return
+        if not self._is_active_playback:
+            return
         self._position_ms = pos_ms
         self._update_time_label()
 
-    def _on_duration_changed(self, dur_ms: int):
+    def _on_duration_changed(self, dur_ms: int, epoch: Optional[int] = None):
+        if epoch is not None and epoch != self._playback_epoch:
+            return
+        if not self._is_active_playback:
+            return
         self._duration_ms = dur_ms
         self._update_time_label()
 
@@ -1710,44 +1815,8 @@ class IconMemePreviewWidget(QWidget):
             painter.setPen(QPen(QColor(self.color_hex)))
             painter.drawText(QRectF(8, 8, 48, 18), Qt.AlignCenter, "STICKER")
         else:
-            # Video Meme hoặc Overlay
-            if self._is_simulating:
-                grad = QLinearGradient(0, 0, w, h)
-                grad.setColorAt(0.0, QColor("#13112c"))
-                grad.setColorAt(1.0, QColor("#09090b"))
-                painter.fillRect(0, 0, w, h, grad)
-
-                # Animated reaction wave rings
-                r1 = int(24 + (self._sim_progress * 50))
-                alpha1 = max(0, int((1.0 - self._sim_progress) * 160))
-                painter.setBrush(Qt.NoBrush)
-                painter.setPen(QPen(QColor(6, 182, 212, alpha1), 1.5))
-                painter.drawEllipse(QPointF(w / 2.0, h / 2.0 - 10), r1, r1)
-
-                # Bouncy reaction scale
-                scale = 1.0 + 0.16 * math.sin(self._sim_progress * math.pi * 3.0)
-                painter.save()
-                painter.translate(w / 2.0, h / 2.0 - 10)
-                painter.scale(scale, scale)
-
-                if self._pixmap and not self._pixmap.isNull():
-                    scaled_pix = self._pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    painter.drawPixmap(-scaled_pix.width() // 2, -scaled_pix.height() // 2, scaled_pix)
-                else:
-                    painter.setFont(QFont("Segoe UI Emoji", 36))
-                    painter.setPen(QColor("#ffffff"))
-                    painter.drawText(QRectF(-40, -40, 80, 80), Qt.AlignCenter, self.badge_icon)
-                painter.restore()
-
-                # Top-left LIVE PREVIEW badge
-                painter.setPen(Qt.NoPen)
-                painter.setBrush(QBrush(QColor(0, 0, 0, 190)))
-                painter.drawRoundedRect(QRectF(8, 8, 76, 18), 4, 4)
-                painter.setPen(QPen(QColor("#ef4444")))
-                painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
-                painter.drawText(QRectF(8, 8, 76, 18), Qt.AlignCenter, "🔴 LIVE")
-
-            elif self._pixmap and not self._pixmap.isNull():
+            # Video Meme, Overlay hoặc Transition Demo
+            if self._pixmap and not self._pixmap.isNull():
                 scaled_pix = self._pixmap.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
                 px = (w - scaled_pix.width()) // 2
                 py = (h - scaled_pix.height()) // 2
@@ -1756,13 +1825,13 @@ class IconMemePreviewWidget(QWidget):
 
                 # Nút Play ở giữa
                 painter.setBrush(QBrush(QColor(0, 0, 0, 160)))
-                painter.setPen(QPen(QColor(ThemeColors.CYAN_HI), 1.5))
+                painter.setPen(QPen(QColor(ThemeColors.CYAN_HI) if self.resolved_file_path else QColor("#ef4444"), 1.5))
                 play_btn_rect = QRectF((w - 110) / 2, (h - 28) / 2, 110, 28)
                 painter.drawRoundedRect(play_btn_rect, 14, 14)
 
                 painter.setFont(QFont("Segoe UI", 9, QFont.Bold))
                 painter.setPen(QColor("#ffffff"))
-                btn_txt = "▶ Xem video" if self.resolved_file_path else "▶ Xem thử"
+                btn_txt = "▶ Xem video" if self.resolved_file_path else "⚠️ Không khả dụng"
                 painter.drawText(play_btn_rect, Qt.AlignCenter, btn_txt)
             else:
                 grad = QLinearGradient(0, 0, w, h)
@@ -1774,18 +1843,19 @@ class IconMemePreviewWidget(QWidget):
                 painter.setPen(QColor("#ffffff"))
                 painter.drawText(QRectF(0, 6, w, h - 34), Qt.AlignCenter, self.badge_icon)
 
-                # Nút Play ở giữa
+                # Nút Play hoặc cảnh báo ở giữa
                 painter.setBrush(QBrush(QColor(0, 0, 0, 160)))
-                painter.setPen(QPen(QColor(ThemeColors.CYAN_HI), 1.5))
-                play_btn_rect = QRectF((w - 100) / 2, (h - 26) / 2 + 10, 100, 26)
+                painter.setPen(QPen(QColor(ThemeColors.CYAN_HI) if self.resolved_file_path else QColor("#ef4444"), 1.5))
+                play_btn_rect = QRectF((w - 120) / 2, (h - 26) / 2 + 10, 120, 26)
                 painter.drawRoundedRect(play_btn_rect, 13, 13)
 
                 painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
                 painter.setPen(QColor("#ffffff"))
-                painter.drawText(play_btn_rect, Qt.AlignCenter, "▶ Xem thử")
+                btn_txt = "▶ Xem video" if self.resolved_file_path else "⚠️ Không khả dụng"
+                painter.drawText(play_btn_rect, Qt.AlignCenter, btn_txt)
 
             # Badge định dạng video
-            tag = "OVERLAY" if self.item_type == "overlay" else "▶ MP4"
+            tag = "OVERLAY" if self.item_type == "overlay" else "TRANS" if self.item_type == "trans" else "▶ MP4"
             painter.setFont(QFont("Segoe UI", 8, QFont.Bold))
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(QColor(6, 182, 212, 200)))
@@ -1934,6 +2004,498 @@ def format_text_preset_html(
             f"{display}"
             "</div>"
         )
+
+
+class AudioInspectorWidget(QWidget):
+    """
+    Widget hiển thị và nghe thử âm thanh SFX / BGM thực tế trong Inspector.
+    Tích hợp ActionGuard, AudioDeviceRouter, và bảo vệ session token chống stale callbacks.
+    """
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._current_asset: Any = None
+        self._playback_epoch: int = 0
+        self._is_active_playback: bool = False
+        self._player_conns: list = []
+        self._last_guard_reason: str = ""
+        self._stop_hover_callback: Optional[Callable[[], None]] = None
+
+        self._volume: float = self._load_initial_volume()
+        self.resolved_file_path: str = ""
+        self._duration_ms: int = 0
+        self._position_ms: int = 0
+        self._player: Optional[QMediaPlayer] = None
+        self._audio_output: Optional[QAudioOutput] = None
+        self._bundled_root = None
+        self._session_loading: bool = False
+        self._session_has_error: bool = False
+
+        self._init_ui()
+
+    def _load_initial_volume(self) -> float:
+        """Đọc âm lượng nghe thử từ QSettings với fallback an toàn chống crash."""
+        try:
+            settings = QSettings("ChunDVC", "ResolveFlow")
+            raw_vol = settings.value("library/inspector_audio_volume", 0.85)
+            if raw_vol is None or isinstance(raw_vol, bool):
+                return 0.85
+            val = float(raw_vol)
+            if math.isnan(val) or math.isinf(val):
+                return 0.85
+            return max(0.0, min(1.0, val))
+        except Exception:
+            return 0.85
+
+    @property
+    def volume(self) -> float:
+        return self._volume
+
+    def set_volume(self, val: float):
+        """Thiết lập âm lượng nghe thử (clamp [0.0, 1.0]), lưu vào QSettings và áp vào QAudioOutput."""
+        try:
+            if val is None or isinstance(val, bool):
+                val = 0.85
+            v = float(val)
+            if math.isnan(v) or math.isinf(v):
+                v = 0.85
+            self._volume = max(0.0, min(1.0, v))
+        except Exception:
+            self._volume = 0.85
+
+        try:
+            settings = QSettings("ChunDVC", "ResolveFlow")
+            settings.setValue("library/inspector_audio_volume", self._volume)
+        except Exception:
+            pass
+
+        if self._audio_output is not None:
+            try:
+                self._audio_output.setVolume(self._volume)
+            except Exception:
+                pass
+
+    def _init_ui(self):
+        vbox = QVBoxLayout(self)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(6)
+
+        h_ctrl = QHBoxLayout()
+        h_ctrl.setContentsMargins(0, 0, 0, 0)
+        h_ctrl.setSpacing(8)
+
+        self.btn_play = QPushButton("▶ Nghe thử", self)
+        self.btn_play.setCursor(Qt.PointingHandCursor)
+        self.btn_play.setFixedHeight(26)
+        self.btn_play.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {ThemeColors.BG_CARD};
+                border: 1px solid {ThemeColors.CYAN};
+                border-radius: 6px;
+                color: {ThemeColors.CYAN_HI};
+                font-size: 11px;
+                font-weight: bold;
+                padding: 4px 10px;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.CYAN};
+                color: #05252c;
+            }}
+            QPushButton:disabled {{
+                background-color: rgba(255, 255, 255, 0.04);
+                border-color: rgba(255, 255, 255, 0.1);
+                color: rgba(255, 255, 255, 0.3);
+            }}
+        """)
+        self.btn_play.clicked.connect(self.toggle_playback)
+        h_ctrl.addWidget(self.btn_play)
+
+        self.lbl_time = QLabel("00:00 / 00:00", self)
+        self.lbl_time.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {ThemeColors.TEXT_PRIMARY};")
+        h_ctrl.addWidget(self.lbl_time)
+
+        h_ctrl.addStretch()
+
+        self.lbl_hint = QLabel("", self)
+        self.lbl_hint.setStyleSheet(f"font-size: 11px; color: {ThemeColors.TEXT_MUTED};")
+        h_ctrl.addWidget(self.lbl_hint)
+
+        vbox.addLayout(h_ctrl)
+
+        self.waveform_canvas = WaveformCanvas(preset_id="sfx", num_bars=32, height=56, parent=self)
+        self.waveform_canvas.setStyleSheet(f"""
+            background-color: {ThemeColors.BG_CARD};
+            border: 1px solid {ThemeColors.BORDER_DEFAULT};
+            border-radius: 8px;
+            padding: 4px;
+        """)
+        vbox.addWidget(self.waveform_canvas)
+
+        # Aliases phục vụ tương thích với callers/tests cũ
+        self.sfx_play_btn = self.btn_play
+        self.sfx_time_lbl = self.lbl_time
+        self.sfx_hint_lbl = self.lbl_hint
+        self.sfx_waveform_canvas = self.waveform_canvas
+
+    def set_stop_hover_callback(self, cb: Optional[Callable[[], None]]) -> None:
+        """Thiết lập callback để dừng hover preview của grid khi Inspector bắt đầu phát."""
+        self._stop_hover_callback = cb
+
+    def _ensure_player(self):
+        if self._player is not None:
+            return
+        self._player = QMediaPlayer(self)
+        self._audio_output = QAudioOutput(self)
+        from src.services.audio_router import get_audio_router
+        get_audio_router().register(self._audio_output)
+        self._audio_output.setVolume(self._volume)
+        self._player.setAudioOutput(self._audio_output)
+
+    def _disconnect_session(self):
+        """Ngắt toàn bộ kết nối signal của session trước mà widget sở hữu."""
+        if self._player is not None and self._player_conns:
+            for conn in list(self._player_conns):
+                try:
+                    if hasattr(QObject, "disconnect") and isinstance(conn, QMetaObject.Connection):
+                        QObject.disconnect(conn)
+                    elif hasattr(self._player, "disconnect"):
+                        self._player.disconnect(conn)
+                except Exception:
+                    pass
+            self._player_conns.clear()
+
+    @staticmethod
+    def _safe_parse_duration_ms(raw: Any) -> int:
+        if raw is None or isinstance(raw, bool):
+            return 0
+        try:
+            val = float(raw)
+            if math.isnan(val) or math.isinf(val) or val <= 0:
+                return 0
+            clamped_sec = min(86400.0, val)
+            return int(clamped_sec * 1000)
+        except (ValueError, TypeError, OverflowError):
+            return 0
+
+    def set_asset(self, asset: Any):
+        """Nạp tài nguyên âm thanh vào Inspector với đầy đủ thẩm định ActionGuard (0 autoplay)."""
+        self.stop_playback()
+        self._current_asset = asset
+        self._position_ms = 0
+        self._duration_ms = 0
+        self._last_guard_reason = ""
+        self._session_has_error = False
+
+        # Trích xuất metadata an toàn tuyệt đối
+        if isinstance(asset, Mapping):
+            pid = str(asset.get("id") or asset.get("name") or "sfx")
+            raw_dur = asset.get("duration")
+            real_file = str(asset.get("file_path") or "")
+        else:
+            pid = str(getattr(asset, "id", "") or getattr(asset, "name", "") or "sfx")
+            raw_dur = getattr(asset, "duration", None)
+            real_file = str(getattr(asset, "file_path", "") or "")
+
+        self._duration_ms = self._safe_parse_duration_ms(raw_dur)
+
+        self.waveform_canvas.set_preset_id(pid, num_bars=32)
+        self.waveform_canvas.set_playback_progress(0, self._duration_ms)
+        self.lbl_hint.setText(os.path.basename(real_file) if real_file else f"{pid}.wav")
+
+        payload = _normalize_preview_payload(asset)
+        guard_res = check_action_availability(payload, intent="preview", bundled_root=getattr(self, "_bundled_root", None))
+
+        if guard_res.allowed and guard_res.resolved_path:
+            ext = os.path.splitext(guard_res.resolved_path)[1].lower()
+            if ext in AUDIO_EXTS:
+                self.resolved_file_path = guard_res.resolved_path
+                self.btn_play.setEnabled(True)
+                self.btn_play.setText("▶ Nghe thử")
+                self.btn_play.setToolTip("Nghe thử âm thanh")
+                self._update_time_label()
+            else:
+                self.resolved_file_path = ""
+                self.btn_play.setEnabled(False)
+                self._last_guard_reason = "Định dạng tệp không được hỗ trợ để phát âm thanh."
+                self.btn_play.setText("⚠️ Không khả dụng")
+                self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+                self.lbl_time.setText("--:-- / --:--")
+        else:
+            self.resolved_file_path = ""
+            self.btn_play.setEnabled(False)
+            self._last_guard_reason = guard_res.reason or "Tài nguyên không khả dụng."
+            self.btn_play.setText("⚠️ Không khả dụng")
+            self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+            self.lbl_time.setText("--:-- / --:--")
+
+    def _recheck_action_time_guard(self) -> bool:
+        """Thẩm định lại quyền hạn nguồn tại thời điểm bấm nút."""
+        if self._current_asset is None:
+            self.resolved_file_path = ""
+            self.stop_playback()
+            self._last_guard_reason = "Chưa chọn tài nguyên."
+            self.btn_play.setEnabled(False)
+            self.btn_play.setText("⚠️ Không khả dụng")
+            self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+            self.lbl_time.setText("--:-- / --:--")
+            return False
+
+        payload = _normalize_preview_payload(self._current_asset)
+        guard_res = check_action_availability(payload, intent="preview", bundled_root=getattr(self, "_bundled_root", None))
+        if not guard_res.allowed or not guard_res.resolved_path:
+            self.resolved_file_path = ""
+            self.stop_playback()
+            self._last_guard_reason = guard_res.reason or "Tài nguyên không khả dụng."
+            self.btn_play.setEnabled(False)
+            self.btn_play.setText("⚠️ Không khả dụng")
+            self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+            self.lbl_time.setText("--:-- / --:--")
+            return False
+
+        ext = os.path.splitext(guard_res.resolved_path)[1].lower()
+        if ext not in AUDIO_EXTS:
+            self.resolved_file_path = ""
+            self.stop_playback()
+            self._last_guard_reason = "Định dạng tệp không được hỗ trợ để phát âm thanh."
+            self.btn_play.setEnabled(False)
+            self.btn_play.setText("⚠️ Không khả dụng")
+            self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+            self.lbl_time.setText("--:-- / --:--")
+            return False
+
+        self.resolved_file_path = guard_res.resolved_path
+        return True
+
+    def _start_session(self, reset_pos: bool = False):
+        """Khởi tạo phiên phát mới có gắn epoch/token độc quyền, loại trừ callback cũ."""
+        if self._stop_hover_callback is not None:
+            try:
+                self._stop_hover_callback()
+            except Exception:
+                pass
+
+        self._disconnect_session()
+        self._playback_epoch += 1
+        epoch = self._playback_epoch
+        self._is_active_playback = True
+        self._session_loading = True
+        self._session_has_error = False
+
+        def on_pos(pos: int):
+            if epoch != self._playback_epoch or not self._is_active_playback:
+                return
+            self._on_position_changed(pos, epoch=epoch)
+
+        def on_dur(dur: int):
+            if epoch != self._playback_epoch or not self._is_active_playback:
+                return
+            self._on_duration_changed(dur, epoch=epoch)
+
+        def on_state(state):
+            if epoch != self._playback_epoch:
+                return
+            if self._session_loading and state == QMediaPlayer.StoppedState:
+                return
+            self._on_playback_state_changed(state, epoch=epoch)
+
+        def on_err(err, err_str=""):
+            if epoch != self._playback_epoch:
+                return
+            self._session_has_error = True
+            self._on_player_error(err, err_str, epoch=epoch)
+
+        def on_status(status):
+            if epoch != self._playback_epoch:
+                return
+            self._on_media_status_changed(status, epoch=epoch)
+
+        if hasattr(self._player, "positionChanged"):
+            c1 = self._player.positionChanged.connect(on_pos)
+            self._player_conns.append(c1)
+        if hasattr(self._player, "durationChanged"):
+            c2 = self._player.durationChanged.connect(on_dur)
+            self._player_conns.append(c2)
+        if hasattr(self._player, "playbackStateChanged"):
+            c3 = self._player.playbackStateChanged.connect(on_state)
+            self._player_conns.append(c3)
+        if hasattr(self._player, "errorOccurred"):
+            c4 = self._player.errorOccurred.connect(on_err)
+            self._player_conns.append(c4)
+        if hasattr(self._player, "mediaStatusChanged"):
+            c5 = self._player.mediaStatusChanged.connect(on_status)
+            self._player_conns.append(c5)
+
+        source = QUrl.fromLocalFile(self.resolved_file_path)
+        if self._player.source() != source:
+            self._player.setSource(source)
+
+        self._session_loading = False
+
+        if self._session_has_error:
+            return
+
+        if reset_pos:
+            self._player.setPosition(0)
+            self._position_ms = 0
+            self._update_time_label()
+
+        self._player.play()
+
+        # Cập nhật UI strictly theo actual state của player (không ép playing khi chưa nhận PlayingState)
+        if self._player.playbackState() == QMediaPlayer.PlayingState:
+            self._on_playback_state_changed(QMediaPlayer.PlayingState, epoch=epoch)
+
+    def toggle_playback(self):
+        if self.resolved_file_path:
+            if not self._recheck_action_time_guard():
+                return
+            self._ensure_player()
+            if self._player.playbackState() == QMediaPlayer.PlayingState:
+                self._player.pause()
+                self.btn_play.setText("▶ Tiếp tục")
+                self.btn_play.setToolTip("Tiếp tục nghe thử")
+                self.waveform_canvas.is_playing = False
+                self.waveform_canvas.update()
+            else:
+                self._start_session(reset_pos=False)
+        else:
+            self.stop_playback()
+
+    def start_playback(self):
+        if self.resolved_file_path:
+            if not self._recheck_action_time_guard():
+                return
+            self._ensure_player()
+            self._start_session(reset_pos=True)
+        else:
+            self.stop_playback()
+
+    def stop_playback(self):
+        """Dừng phát âm thanh an toàn: tăng epoch trước, dọn connections và clear player source."""
+        self._playback_epoch += 1
+        self._is_active_playback = False
+        self._session_has_error = False
+        self._session_loading = False
+        self._disconnect_session()
+
+        if self._player is not None:
+            try:
+                self._player.stop()
+                self._player.setSource(QUrl())
+            except Exception:
+                pass
+
+        self._position_ms = 0
+        self.waveform_canvas.is_playing = False
+        self.waveform_canvas.set_playback_progress(0, self._duration_ms)
+
+        if self.resolved_file_path:
+            self.btn_play.setText("▶ Nghe thử")
+            self.btn_play.setEnabled(True)
+            self.btn_play.setToolTip("Nghe thử âm thanh")
+            self._update_time_label()
+        else:
+            self.btn_play.setText("⚠️ Không khả dụng")
+            self.btn_play.setEnabled(False)
+            if self._last_guard_reason:
+                self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+            else:
+                self.btn_play.setToolTip("Tài nguyên không khả dụng.")
+            self.lbl_time.setText("--:-- / --:--")
+
+    def _on_playback_state_changed(self, state, epoch: Optional[int] = None):
+        if epoch is not None and epoch != self._playback_epoch:
+            return
+        if self._session_has_error:
+            return
+
+        if state == QMediaPlayer.PlayingState:
+            self._is_active_playback = True
+            self.btn_play.setText("⏸ Dừng")
+            self.btn_play.setToolTip("Dừng nghe thử âm thanh")
+            self.waveform_canvas.is_playing = True
+            self.waveform_canvas.update()
+        elif state == QMediaPlayer.PausedState:
+            self.btn_play.setText("▶ Tiếp tục")
+            self.btn_play.setToolTip("Tiếp tục nghe thử")
+            self.waveform_canvas.is_playing = False
+            self.waveform_canvas.update()
+        elif state == QMediaPlayer.StoppedState:
+            self.waveform_canvas.is_playing = False
+            self.waveform_canvas.update()
+            if self._is_active_playback:
+                self._is_active_playback = False
+                self._position_ms = 0
+                self._update_time_label()
+                self.waveform_canvas.set_playback_progress(0, self._duration_ms)
+            if self.resolved_file_path:
+                self.btn_play.setText("▶ Nghe thử")
+                self.btn_play.setEnabled(True)
+                self.btn_play.setToolTip("Nghe thử âm thanh")
+            else:
+                self.btn_play.setText("⚠️ Không khả dụng")
+                self.btn_play.setEnabled(False)
+                if self._last_guard_reason:
+                    self.btn_play.setToolTip(f"Không khả dụng: {self._last_guard_reason}")
+
+    def _on_media_status_changed(self, status, epoch: Optional[int] = None):
+        if epoch is not None and epoch != self._playback_epoch:
+            return
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            self.stop_playback()
+
+    def _on_player_error(self, error, error_string="", epoch: Optional[int] = None):
+        if epoch is not None and epoch != self._playback_epoch:
+            return
+        self._session_has_error = True
+        self._is_active_playback = False
+        self.waveform_canvas.is_playing = False
+        self.waveform_canvas.update()
+        self._position_ms = 0
+        err_msg = f"Lỗi giải mã: {error_string}" if error_string else "Lỗi phát âm thanh."
+        self.btn_play.setText("⚠️ Lỗi phát âm thanh")
+        self.btn_play.setToolTip(f"Không thể phát: {err_msg}")
+        self.btn_play.setEnabled(False)
+        self.lbl_time.setText("--:-- / --:--")
+
+    def _on_position_changed(self, pos_ms: int, epoch: Optional[int] = None):
+        if epoch is not None and epoch != self._playback_epoch:
+            return
+        if not self._is_active_playback:
+            return
+        self._position_ms = pos_ms
+        self._update_time_label()
+        self.waveform_canvas.set_playback_progress(self._position_ms, self._duration_ms)
+
+    def _on_duration_changed(self, dur_ms: int, epoch: Optional[int] = None):
+        if epoch is not None and epoch != self._playback_epoch:
+            return
+        if not self._is_active_playback:
+            return
+        if dur_ms > 0:
+            self._duration_ms = dur_ms
+            self._update_time_label()
+            self.waveform_canvas.set_playback_progress(self._position_ms, self._duration_ms)
+
+    def _update_time_label(self):
+        if not self.resolved_file_path:
+            self.lbl_time.setText("--:-- / --:--")
+            return
+        p_sec = max(0, int(self._position_ms // 1000))
+        if self._duration_ms > 0:
+            d_sec = max(0, int(self._duration_ms // 1000))
+            self.lbl_time.setText(f"{p_sec//60:02d}:{p_sec%60:02d} / {d_sec//60:02d}:{d_sec%60:02d}")
+        else:
+            self.lbl_time.setText(f"{p_sec//60:02d}:{p_sec%60:02d} / --:--")
+
+    def hideEvent(self, event):
+        self.stop_playback()
+        if event is not None:
+            super().hideEvent(event)
+
+    def closeEvent(self, event):
+        self.stop_playback()
+        if event is not None:
+            super().closeEvent(event)
 
 
 class AssetCard(QFrame):
@@ -2632,8 +3194,8 @@ class AssetCard(QFrame):
         self.badge_frames = QLabel(f"{frames}f", self.thumb)
         self.badge_frames.setStyleSheet(f"""
             QLabel {{
-                background-color: rgba(24, 24, 27, 0.85);
-                color: #c4b5fd;
+                background-color: rgba(17, 18, 20, 0.88);
+                color: #f59e0b;
                 font-size: 10px;
                 font-weight: bold;
                 padding: 2px 6px;
@@ -2798,6 +3360,11 @@ class AssetCard(QFrame):
                 if AssetCard._shared_player is None:
                     AssetCard._shared_player = QMediaPlayer()
                     AssetCard._shared_audio_output = QAudioOutput()
+                    try:
+                        from src.services.audio_router import get_audio_router
+                        get_audio_router().register(AssetCard._shared_audio_output)
+                    except Exception:
+                        pass
                     AssetCard._shared_player.setAudioOutput(AssetCard._shared_audio_output)
                     AssetCard._shared_player.playbackStateChanged.connect(AssetCard._on_shared_player_state_changed)
                 self._player = AssetCard._shared_player
@@ -3045,36 +3612,36 @@ class SuggestionChip(QFrame):
         self.suggested = suggested_asset
         self.asset = getattr(suggested_asset, "asset", suggested_asset)
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(34)
-        self.setMinimumWidth(150)
-        self.setMaximumWidth(220)
+        self.setFixedHeight(28)
+        self.setMinimumWidth(130)
+        self.setMaximumWidth(210)
         self._init_ui()
 
     def _init_ui(self):
         self.setStyleSheet("""
             QFrame {
-                background-color: #181826;
-                border: 1px solid rgba(139, 92, 246, 0.35);
-                border-radius: 6px;
+                background-color: #1c1d21;
+                border: 1px solid #353841;
+                border-radius: 5px;
             }
             QFrame:hover {
-                background-color: #232338;
-                border-color: #8b5cf6;
+                background-color: #23252a;
+                border-color: #d94f3d;
             }
         """)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setContentsMargins(6, 1, 6, 1)
         layout.setSpacing(5)
 
         # Icon
         badge = getattr(self.asset, "badge_icon", "✨")
         lbl_icon = QLabel(badge)
-        lbl_icon.setFixedSize(22, 22)
+        lbl_icon.setFixedSize(20, 20)
         lbl_icon.setAlignment(Qt.AlignCenter)
         lbl_icon.setStyleSheet("""
-            background: rgba(139, 92, 246, 0.2);
+            background: rgba(217, 79, 61, 0.16);
             border-radius: 4px;
-            font-size: 12px;
+            font-size: 11px;
         """)
         layout.addWidget(lbl_icon)
 
@@ -3088,7 +3655,7 @@ class SuggestionChip(QFrame):
         self.lbl_name = QLabel(short_name)
         self.lbl_name.setToolTip(name)
         self.lbl_name.setStyleSheet("""
-            font-size: 10.5px;
+            font-size: 10px;
             font-weight: bold;
             color: #ffffff;
         """)
@@ -3097,7 +3664,7 @@ class SuggestionChip(QFrame):
         reason = getattr(self.suggested, "reason", "⚡ Đề xuất AI")
         self.lbl_reason = QLabel(reason)
         self.lbl_reason.setStyleSheet("""
-            font-size: 8.5px;
+            font-size: 9px;
             color: #38bdf8;
             font-weight: 500;
         """)
@@ -3106,14 +3673,14 @@ class SuggestionChip(QFrame):
 
         # Quick Add Button
         self.btn_add = QPushButton("➕")
-        self.btn_add.setFixedSize(20, 20)
+        self.btn_add.setFixedSize(18, 18)
         self.btn_add.setCursor(Qt.PointingHandCursor)
         self.btn_add.setToolTip("Chèn nhanh vào DaVinci Resolve tại Playhead (1-Click)")
         self.btn_add.setStyleSheet("""
             QPushButton {
                 background: rgba(6, 182, 212, 0.15);
                 border: 1px solid rgba(6, 182, 212, 0.5);
-                border-radius: 10px;
+                border-radius: 9px;
                 color: #22d3ee;
                 font-size: 9px;
                 font-weight: bold;
@@ -3176,6 +3743,11 @@ class SuggestionChip(QFrame):
                 if AssetCard._shared_player is None:
                     AssetCard._shared_player = QMediaPlayer()
                     AssetCard._shared_audio_output = QAudioOutput()
+                    try:
+                        from src.services.audio_router import get_audio_router
+                        get_audio_router().register(AssetCard._shared_audio_output)
+                    except Exception:
+                        pass
                     AssetCard._shared_player.setAudioOutput(AssetCard._shared_audio_output)
                     AssetCard._shared_audio_output.setVolume(0.8)
                 AssetCard._shared_player.setSource(QUrl.fromLocalFile(sound_path))
@@ -3188,6 +3760,7 @@ class SuggestionChip(QFrame):
 # 6. TAB ASSETS - GIAO DIỆN 4 CỘT CHUẨN KHO ĐẠO CỤ
 # =========================================================================
 class TabAssets(QWidget):
+    library_assets_changed = pyqtSignal(list)
     """
     Kho Đạo Cụ 4 Cột:
     Rail (78px) | Categories (204px) | Main Grid (flex 1) | Inspector (336px)
@@ -3203,6 +3776,7 @@ class TabAssets(QWidget):
         self._current_preset_callback = None
         self.favorites = FavoritesManager.load()
         self.headless = headless
+        self._last_storage_sig = None
 
         # Dữ liệu nạp sẵn (tận dụng Singleton Cache của AssetIndexer)
         self.indexer = AssetIndexer()
@@ -3233,17 +3807,17 @@ class TabAssets(QWidget):
         )
 
         scanned_luts = indexer.scan_luts()
-        self.all_luts = MOCKUP_LUTS.copy() + (dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else [])
+        self.all_luts = dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else []
         
         scanned_memes = indexer.scan_memes()
-        self.all_memes = dicts_to_assets(scanned_memes, "meme", "trending", "Meme", "🎭") if scanned_memes else MOCKUP_MEMES.copy()
+        self.all_memes = dicts_to_assets(scanned_memes, "meme", "trending", "Meme", "🎭") if scanned_memes else []
         
         scanned_sfx = indexer.scan_sfx()
-        self.all_sfx = dicts_to_assets(scanned_sfx, "sfx", "accent", "Âm thanh", "🔊") if scanned_sfx else MOCKUP_SFX.copy()
+        self.all_sfx = dicts_to_assets(scanned_sfx, "sfx", "accent", "Âm thanh", "🔊") if scanned_sfx else []
         
         scanned_overlays = indexer.scan_overlays()
-        self.all_overlays = dicts_to_assets(scanned_overlays, "overlay", "cinematic", "Lớp phủ", "✨") if scanned_overlays else MOCKUP_OVERLAYS.copy()
-        self.all_icons = MOCKUP_ICONS.copy()
+        self.all_overlays = dicts_to_assets(scanned_overlays, "overlay", "cinematic", "Lớp phủ", "✨") if scanned_overlays else []
+        self.all_icons = []
 
         music_data = indexer.scan_music_assets()
         scanned_bgm = []
@@ -3276,6 +3850,7 @@ class TabAssets(QWidget):
         self.all_assets.extend(self.all_memes)
         self.all_assets.extend(self.all_sfx)
         self.all_assets.extend(self.all_bgm)
+        self._merge_storage_assets()
 
         self.current_rail_tab = "text"
         self.current_sub_cat = "all"
@@ -3293,8 +3868,7 @@ class TabAssets(QWidget):
             self.scroll_grid.setAcceptDrops(True)
             self.scroll_grid.viewport().installEventFilter(self)
 
-        self.sfx_playback_timer = QTimer(self)
-        self.sfx_playback_timer.timeout.connect(self._on_inspector_sfx_playback_finished)
+        # sfx_playback_timer đã được thay thế hoàn toàn bằng QMediaPlayer trong AudioInspectorWidget
         self.toast_timer = QTimer(self)
         self.toast_timer.setSingleShot(True)
         self.toast_timer.timeout.connect(lambda: self.lbl_toast.hide() if hasattr(self, "lbl_toast") else None)
@@ -3343,6 +3917,12 @@ class TabAssets(QWidget):
             ("hub", "☁️\nKho Online")
         ]
 
+        if any(getattr(a, "tab", "") == "broll" for a in self.all_assets):
+            tabs_data.insert(6, ("broll", "🎥\nCảnh"))
+        from src.core.storage_manager import StorageManager
+        for cid, label in StorageManager().taxonomy().items():
+            if cid not in ("broll", "sfx", "bgm", "overlays", "memes", "luts", "templates"):
+                tabs_data.append((cid, "📁\n" + label))
         self.rail_btns = {}
         for tid, tname in tabs_data:
             btn = QPushButton(tname)
@@ -3365,8 +3945,8 @@ class TabAssets(QWidget):
                     background: {ThemeColors.BG_CARD};
                 }}
                 QPushButton:checked {{
-                    color: #c4b5fd;
-                    background: {ThemeColors.VIOLET_LO};
+                    color: #f3f4f6;
+                    background: #23252a;
                     border-left: 3px solid {ThemeColors.PRIMARY};
                     font-weight: bold;
                 }}
@@ -3413,9 +3993,9 @@ class TabAssets(QWidget):
         scroll_cats.setWidget(self.cats_container)
         cats_layout.addWidget(scroll_cats, stretch=1)
 
-        self.btn_starter_pack = QPushButton("📦 Gói Starter Pack")
+        self.btn_starter_pack = QPushButton("📦 Gói Starter Pack (SFX & LUTs)")
         self.btn_starter_pack.setCursor(Qt.PointingHandCursor)
-        self.btn_starter_pack.setToolTip("Nạp trọn bộ 75+ SFX, Memes, LUTs và Nhạc nền Hot Trend chuẩn CapCut")
+        self.btn_starter_pack.setToolTip("Nạp bộ âm thanh hiệu ứng SFX chuẩn 48kHz và 16 Cinema 3D LUTs vào Kho qua kiểm duyệt (BGM/Overlay/Meme để lát cắt sau)")
         self.btn_starter_pack.clicked.connect(self._on_starter_pack_clicked)
         self.btn_starter_pack.setStyleSheet(f"""
             QPushButton {{
@@ -3466,14 +4046,18 @@ class TabAssets(QWidget):
         main_sec_layout.setSpacing(0)
 
         main_head = QFrame()
-        main_head.setFixedHeight(52)
+        main_head.setFixedHeight(78)
         main_head.setStyleSheet(f"""
             QFrame {{
                 background-color: {ThemeColors.BG_MAIN};
                 border-bottom: 1px solid {ThemeColors.BORDER_DEFAULT};
             }}
         """)
-        mh_layout = QHBoxLayout(main_head)
+        head_rows = QVBoxLayout(main_head)
+        head_rows.setContentsMargins(4, 2, 4, 2)
+        head_rows.setSpacing(2)
+        mh_layout = QHBoxLayout()
+        head_rows.addLayout(mh_layout)
         mh_layout.setContentsMargins(12, 6, 12, 6)
         mh_layout.setSpacing(6)
 
@@ -3582,9 +4166,9 @@ class TabAssets(QWidget):
             QPushButton {{
                 background: {ThemeColors.BG_CARD};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 6px;
+                border-radius: 4px;
                 padding: 4px 8px;
-                color: #c4b5fd;
+                color: #f3f4f6;
                 font-size: 11px;
                 font-weight: bold;
             }}
@@ -3603,16 +4187,16 @@ class TabAssets(QWidget):
         self.btn_open_asset_hub.setStyleSheet(f"""
             QPushButton {{
                 background: {ThemeColors.BG_CARD};
-                border: 1px solid #7c3aed;
-                border-radius: 6px;
+                border: 1px solid #d94f3d;
+                border-radius: 4px;
                 padding: 4px 10px;
-                color: #c4b5fd;
+                color: #f59e0b;
                 font-size: 11px;
                 font-weight: bold;
             }}
             QPushButton:hover {{
-                border-color: #8b5cf6;
-                background: rgba(124, 58, 237, 0.25);
+                border-color: #e86352;
+                background: rgba(217, 79, 61, 0.22);
             }}
         """)
         mh_layout.addWidget(self.btn_open_asset_hub)
@@ -3655,6 +4239,15 @@ class TabAssets(QWidget):
             }}
         """)
         mh_layout.addWidget(self.btn_toggle_inspector)
+        search_row = QHBoxLayout()
+        search_row.setSpacing(4)
+        for widget in (self.btn_import_assets, self.btn_open_asset_hub, self.txt_search, self.btn_toggle_inspector):
+            mh_layout.removeWidget(widget)
+            search_row.addWidget(widget)
+        self.txt_search.setMinimumWidth(90)
+        self.txt_search.setMaximumWidth(16777215)
+        search_row.setStretch(2, 1)
+        head_rows.addLayout(search_row)
 
         # Thanh công cụ phụ: Bộ lọc nhanh & Slider kích thước thẻ (DVC Pro style)
         filter_bar = QFrame()
@@ -3666,12 +4259,13 @@ class TabAssets(QWidget):
             }}
         """)
         fb_layout = QHBoxLayout(filter_bar)
-        fb_layout.setContentsMargins(16, 4, 16, 4)
-        fb_layout.setSpacing(8)
+        fb_layout.setContentsMargins(10, 4, 10, 4)
+        fb_layout.setSpacing(6)
 
         self.btn_filter_all = QPushButton("Tất cả")
         self.btn_filter_fav = QPushButton("⭐ Yêu thích")
-        self.btn_filter_recent = QPushButton("🕒 Đã dùng gần đây")
+        self.btn_filter_recent = QPushButton("🕒 Gần đây")
+        self.btn_filter_recent.setToolTip("Đã dùng gần đây")
         self.filter_buttons = [self.btn_filter_all, self.btn_filter_fav, self.btn_filter_recent]
 
         for btn, mode in [(self.btn_filter_all, "all"), (self.btn_filter_fav, "fav"), (self.btn_filter_recent, "recent")]:
@@ -3685,7 +4279,7 @@ class TabAssets(QWidget):
 
         fb_layout.addStretch()
 
-        lbl_zoom = QLabel("🖼️ Cỡ:")
+        lbl_zoom = QLabel("Cỡ:")
         lbl_zoom.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
         fb_layout.addWidget(lbl_zoom)
 
@@ -3716,7 +4310,7 @@ class TabAssets(QWidget):
         self.slide_card_cols = QSlider(Qt.Horizontal)
         self.slide_card_cols.setRange(2, 5)
         self.slide_card_cols.setValue(3)
-        self.slide_card_cols.setFixedWidth(70)
+        self.slide_card_cols.setFixedWidth(46)
         self.slide_card_cols.setToolTip("Kéo thanh trượt hoặc giữ Ctrl + Cuộn chuột trên lưới để phóng to/thu nhỏ")
         self.slide_card_cols.setStyleSheet(f"""
             QSlider::groove:horizontal {{ height: 4px; background: {ThemeColors.BG_CARD}; border-radius: 2px; }}
@@ -3730,15 +4324,15 @@ class TabAssets(QWidget):
         self.lbl_cols_val.setStyleSheet(f"color: {ThemeColors.CYAN_HI}; font-size: 11px; font-weight: bold;")
         fb_layout.addWidget(self.lbl_cols_val)
 
-        # Checkbox: Rê chuột nghe thử (Hover Preview - CapCut style)
-        self.chk_hover_preview = QCheckBox("🔊 Rê chuột nghe thử")
+        # Checkbox: Nghe thử (Hover Preview - CapCut style)
+        self.chk_hover_preview = QCheckBox("Nghe thử")
         self.chk_hover_preview.setChecked(True)
-        self.chk_hover_preview.setToolTip("Tự động phát âm thanh khi rê chuột qua card SFX / Nhạc (Chuẩn CapCut)")
+        self.chk_hover_preview.setToolTip("🔊 Nghe thử: Tự động phát âm thanh khi rê chuột qua card SFX / Nhạc / Meme")
         self.chk_hover_preview.setStyleSheet(f"""
             QCheckBox {{
                 color: {ThemeColors.TEXT_MUTED};
                 font-size: 11px;
-                margin-left: 12px;
+                margin-left: 2px;
             }}
             QCheckBox:checked {{
                 color: {ThemeColors.CYAN_HI};
@@ -3747,6 +4341,50 @@ class TabAssets(QWidget):
         """)
         self.chk_hover_preview.toggled.connect(self._on_hover_preview_toggled)
         fb_layout.addWidget(self.chk_hover_preview)
+
+        # Nút bật / tắt thanh gợi ý ngữ cảnh lời thoại
+        self.btn_toggle_sug_bar = QPushButton("💡 Gợi ý")
+        self.btn_toggle_sug_bar.setCheckable(True)
+        self.btn_toggle_sug_bar.setChecked(True)
+        self.btn_toggle_sug_bar.setToolTip("Bật / tắt thanh gợi ý đạo cụ theo lời thoại")
+        self.btn_toggle_sug_bar.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_CARD};
+                border: 1px solid #353841;
+                border-radius: 4px;
+                color: #f59e0b;
+                font-size: 11px;
+                padding: 2px 8px;
+                margin-left: 2px;
+            }}
+            QPushButton:hover {{
+                background: {ThemeColors.BG_CARD_ACTIVE};
+                border-color: {ThemeColors.PRIMARY};
+            }}
+            QPushButton:checked {{
+                background: rgba(217, 79, 61, 0.20);
+                color: #ffffff;
+                border-color: {ThemeColors.PRIMARY};
+            }}
+        """)
+        self.btn_toggle_sug_bar.toggled.connect(self._on_sug_bar_toggled)
+        fb_layout.addWidget(self.btn_toggle_sug_bar)
+
+        # Responsive adaptation for narrow widths (< 580px in main section)
+        def _update_filter_bar_responsive():
+            w = filter_bar.width()
+            if w > 0 and w < 580:
+                self.chk_hover_preview.setText("")
+                self.chk_hover_preview.setToolTip("🔊 Nghe thử (Tự động phát khi rê chuột qua card SFX / Nhạc / Meme)")
+                self.btn_toggle_sug_bar.setText("💡")
+                self.btn_toggle_sug_bar.setToolTip("💡 Gợi ý (Bật / tắt thanh gợi ý đạo cụ theo lời thoại)")
+            elif w >= 580:
+                self.chk_hover_preview.setText("Nghe thử")
+                self.chk_hover_preview.setToolTip("🔊 Nghe thử: Tự động phát âm thanh khi rê chuột qua card SFX / Nhạc / Meme")
+                self.btn_toggle_sug_bar.setText("💡 Gợi ý")
+                self.btn_toggle_sug_bar.setToolTip("Bật / tắt thanh gợi ý đạo cụ theo lời thoại")
+
+        filter_bar.resizeEvent = lambda event: (_update_filter_bar_responsive(), QFrame.resizeEvent(filter_bar, event))
 
         # =====================================================================
         # CỘT 3: LƯỚI ĐẠO CỤ ẢO HÓA (AssetGridView Model/View Akitt Pro UX)
@@ -3913,55 +4551,32 @@ class TabAssets(QWidget):
         lut_v_layout.addWidget(self.lut_split_slider)
         self.insp_vbox.addWidget(self.inspector_lut_viewport)
 
-        # 4. Viewport 3: SFX Waveform Visualizer & Playback Controller
+        # 4. Viewport 3: SFX Waveform Visualizer & Playback Controller (Audio Inspector thật)
         self.inspector_sfx_viewport = QWidget()
         sfx_v_layout = QVBoxLayout(self.inspector_sfx_viewport)
         sfx_v_layout.setContentsMargins(0, 0, 0, 0)
         sfx_v_layout.setSpacing(6)
 
-        h_ctrl = QHBoxLayout()
-        h_ctrl.setContentsMargins(0, 0, 0, 0)
-        h_ctrl.setSpacing(8)
+        self.audio_inspector_widget = AudioInspectorWidget(self.inspector_sfx_viewport)
+        self.audio_inspector_widget.set_stop_hover_callback(
+            lambda: self.asset_grid.hover_controller.stop()
+            if hasattr(self, "asset_grid") and self.asset_grid and hasattr(self.asset_grid, "hover_controller") and self.asset_grid.hover_controller
+            else None
+        )
+        if hasattr(self, "asset_grid") and self.asset_grid and hasattr(self.asset_grid, "hover_controller") and self.asset_grid.hover_controller:
+            try:
+                self.asset_grid.hover_controller.audio_preview_starting.connect(self.audio_inspector_widget.stop_playback)
+            except Exception:
+                pass
 
-        self.sfx_play_btn = QPushButton("▶ Nghe thử", self.inspector_sfx_viewport)
-        self.sfx_play_btn.setCursor(Qt.PointingHandCursor)
-        self.sfx_play_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {ThemeColors.BG_CARD};
-                border: 1px solid {ThemeColors.CYAN};
-                border-radius: 6px;
-                color: {ThemeColors.CYAN_HI};
-                font-size: 11px;
-                font-weight: bold;
-                padding: 4px 10px;
-            }}
-            QPushButton:hover {{
-                background-color: {ThemeColors.CYAN};
-                color: #05252c;
-            }}
-        """)
-        self.sfx_play_btn.clicked.connect(self._toggle_inspector_sfx_play)
-        h_ctrl.addWidget(self.sfx_play_btn)
+        sfx_v_layout.addWidget(self.audio_inspector_widget)
 
-        self.sfx_time_lbl = QLabel("0:02", self.inspector_sfx_viewport)
-        self.sfx_time_lbl.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {ThemeColors.TEXT_PRIMARY};")
-        h_ctrl.addWidget(self.sfx_time_lbl)
+        # Aliases phục vụ tương thích ngược với callers / tests cũ
+        self.sfx_play_btn = self.audio_inspector_widget.btn_play
+        self.sfx_time_lbl = self.audio_inspector_widget.lbl_time
+        self.sfx_hint_lbl = self.audio_inspector_widget.lbl_hint
+        self.sfx_waveform_canvas = self.audio_inspector_widget.waveform_canvas
 
-        h_ctrl.addStretch()
-
-        self.sfx_hint_lbl = QLabel("assets/sfx/whoosh.wav", self.inspector_sfx_viewport)
-        self.sfx_hint_lbl.setStyleSheet(f"font-size: 11px; color: {ThemeColors.TEXT_MUTED};")
-        h_ctrl.addWidget(self.sfx_hint_lbl)
-        sfx_v_layout.addLayout(h_ctrl)
-
-        self.sfx_waveform_canvas = WaveformCanvas(preset_id="sfx", num_bars=32, height=56, parent=self.inspector_sfx_viewport)
-        self.sfx_waveform_canvas.setStyleSheet(f"""
-            background-color: {ThemeColors.BG_CARD};
-            border: 1px solid {ThemeColors.BORDER_DEFAULT};
-            border-radius: 8px;
-            padding: 4px;
-        """)
-        sfx_v_layout.addWidget(self.sfx_waveform_canvas)
         self.insp_vbox.addWidget(self.inspector_sfx_viewport)
 
         # 5. Viewport 4: Transition Visual Loop Preview
@@ -4062,9 +4677,9 @@ class TabAssets(QWidget):
         self.preview_lbl.setText("🖱️ Giữ chuột và kéo vào Timeline")
         self.preview_lbl.setStyleSheet(f"""
             background-color: {ThemeColors.BG_CARD};
-            border: 2px dashed {ThemeColors.PRIMARY};
-            border-radius: 6px;
-            color: #c4b5fd;
+            border: 1px dashed {ThemeColors.PRIMARY};
+            border-radius: 4px;
+            color: #f59e0b;
             font-size: 11px;
         """)
         self.preview_lbl.preset_getter = lambda: self.selected_asset
@@ -4487,21 +5102,25 @@ class TabAssets(QWidget):
         self.lbl_toast.hide()
         acts_vbox.addWidget(self.lbl_toast)
 
-        self.btn_insert_title_playhead = QPushButton("🚀 Chèn tại Playhead (V2)")
+        self.btn_insert_title_playhead = QPushButton("🚀 Chèn Text cơ bản")
+        self.btn_insert_title_playhead.setToolTip(
+            "Chèn tiêu đề cơ bản lên Timeline (phông, cỡ, kiểu, màu). Lưu ý: Timeline comp chưa hỗ trợ viền (stroke) và đường cong (curve) tùy biến; để giữ trọn vẹn mọi hiệu ứng, vui lòng dùng 'Sao chép mã Fusion'."
+        )
         self.btn_insert_playhead = self.btn_insert_title_playhead
         self.btn_insert_title_playhead.setCursor(Qt.PointingHandCursor)
         self.btn_insert_title_playhead.setStyleSheet(f"""
             QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8b5cf6, stop:1 #7c3aed);
+                background-color: #d94f3d;
                 color: #ffffff;
                 font-weight: bold;
-                font-size: 13px;
-                padding: 10px;
-                border-radius: 8px;
-                border: none;
+                font-size: 12.5px;
+                padding: 9px;
+                border-radius: 4px;
+                border: 1px solid #e86352;
             }}
             QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #a78bfa, stop:1 #8b5cf6);
+                background-color: #e86352;
+                border-color: #f28273;
             }}
         """)
         self.btn_insert_title_playhead.clicked.connect(self._insert_at_playhead)
@@ -4533,6 +5152,7 @@ class TabAssets(QWidget):
 
         self.btn_copy_fusion = QPushButton("📋 Copy Fusion")
         self.btn_copy_fusion.setCursor(Qt.PointingHandCursor)
+        self.btn_copy_fusion.setToolTip("Sao chép mã Fusion node vào bộ nhớ đệm (Clipboard)")
         self.btn_copy_fusion.clicked.connect(self._on_copy_fusion_clicked)
         self.btn_copy_fusion.setStyleSheet(f"""
             QPushButton {{
@@ -4729,6 +5349,7 @@ class TabAssets(QWidget):
     # =========================================================================
     def _filter_by_rail(self, tab_id: str):
         self._stop_inspector_sfx_play()
+        self.icon_meme_widget.stop_playback()
         self.current_rail_tab = tab_id
         for tid, btn in self.rail_btns.items():
             btn.setChecked(tid == tab_id)
@@ -4744,6 +5365,27 @@ class TabAssets(QWidget):
         # Cập nhật danh mục con ở Cột 2
         self._rebuild_categories_column()
         self._refresh_grid()
+
+        from src.ui.lux.library.asset_model import AssetObjRole
+        index = self.asset_filter.index(0, 0)
+        self.selected_asset = index.data(AssetObjRole) if index.isValid() else None
+        self.asset_grid.setCurrentIndex(index)
+        if self.selected_asset is not None:
+            self.inspector.setEnabled(True)
+            self._update_inspector_details()
+        else:
+            if not hasattr(self, "_empty_inspector_label"):
+                self._empty_inspector_label = QLabel("Chưa có mẫu trong danh mục này.\nChọn danh mục khác hoặc xóa bộ lọc.")
+                self._empty_inspector_label.setWordWrap(True)
+                self.insp_vbox.insertWidget(0, self._empty_inspector_label)
+            if not getattr(self, "_inspector_hidden_widgets", None):
+                self._inspector_hidden_widgets = []
+                for i in range(self.insp_vbox.count()):
+                    widget = self.insp_vbox.itemAt(i).widget()
+                    if widget is not None and widget is not self._empty_inspector_label:
+                        self._inspector_hidden_widgets.append((widget, widget.isHidden()))
+                        widget.hide()
+            self._empty_inspector_label.show()
 
 
     def _rebuild_categories_column(self):
@@ -4942,6 +5584,13 @@ class TabAssets(QWidget):
                 ("trending", "🔥 Thịnh hành")
             ])
 
+        known_subs = {cid for cid, _ in sub_cats}
+        for asset in self.all_assets:
+            if getattr(asset, "storage_managed", False) and getattr(asset, "tab", "") == tab:
+                for label in [getattr(asset, "sub", "")] + list(getattr(asset, "tags", [])):
+                    if label and label not in known_subs:
+                        sub_cats.append((label, label)); known_subs.add(label)
+
         for cid, cname in sub_cats:
             btn = QPushButton(f"  {cname}")
             btn.setProperty("sub_cat_id", cid)
@@ -5084,6 +5733,9 @@ class TabAssets(QWidget):
                 self._show_toast(f"⚠️ Bộ sưu tập '{clean}' đã tồn tại hoặc không hợp lệ!")
 
     def _on_sub_category_clicked(self, cid: str):
+        self._stop_inspector_sfx_play()
+        if hasattr(self, "icon_meme_widget"):
+            self.icon_meme_widget.stop_playback()
         self.current_sub_cat = cid
         for i in range(self.cats_vbox.count()):
             item = self.cats_vbox.itemAt(i)
@@ -5157,6 +5809,18 @@ class TabAssets(QWidget):
 
             count = self.asset_filter.rowCount()
             self.lbl_count_badge.setText(f"{count} mẫu")
+
+            # Đồng bộ bỏ chọn nếu tài nguyên đang chọn bị lọc mất hoặc không còn kết quả
+            if count == 0:
+                self.selected_asset = None
+                self._update_inspector_details()
+            elif self.selected_asset is not None:
+                sel_id = getattr(self.selected_asset, "id", "") if not isinstance(self.selected_asset, dict) else self.selected_asset.get("id", "")
+                from src.ui.lux.library.asset_model import IdRole
+                still_visible = any(self.asset_filter.index(r, 0).data(IdRole) == sel_id for r in range(count))
+                if not still_visible:
+                    self.selected_asset = None
+                    self._update_inspector_details()
 
         # 2. Đồng bộ hóa card_widgets cũ nếu test đang truy cập
         if getattr(self, "_card_widgets_cache", None) is not None:
@@ -5250,10 +5914,23 @@ class TabAssets(QWidget):
         self._insert_at_playhead()
 
     def _on_lux_fusion_paste(self, asset: Any):
-        pid = getattr(asset, "id", "") if not isinstance(asset, dict) else asset.get("id", "")
-        self._on_card_selected(pid)
+        pid = self._get_asset_id(asset)
+        if not pid:
+            self._show_toast("⚠️ Tài nguyên không hợp lệ hoặc thiếu ID.")
+            return
+
+        # Kiểm tra sự tồn tại trong danh mục hiện tại (stale ID check)
+        matched_item = next((a for a in self.all_assets if self._get_asset_id(a) == pid), None)
+        if matched_item is None:
+            self._show_toast(f"⚠️ Tài nguyên '{pid}' không còn tồn tại trong kho!")
+            return
+
+        self._on_card_selected(pid, record_recent=False)
+        self.selected_asset = matched_item
         if hasattr(self, "btn_copy_fusion") and self.btn_copy_fusion:
             self.btn_copy_fusion.click()
+        else:
+            self._on_copy_fusion_clicked()
 
     def _on_card_add_requested(self, preset: Any):
         pid = getattr(preset, "id", "")
@@ -5266,27 +5943,65 @@ class TabAssets(QWidget):
             AssetCard.stop_all_audio()
 
     def _on_starter_pack_clicked(self):
-        from src.core.starter_pack_downloader import StarterPackWorker
-        self.btn_starter_pack.setEnabled(False)
-        self.btn_starter_pack.setText("⏳ Đang nạp gói...")
-        self._show_toast("Đang nạp gói đạo cụ Starter Pack vào hệ thống...")
+        if getattr(self, "_ingest_in_progress", False):
+            return
 
-        self._starter_worker = StarterPackWorker(self)
-        self._starter_worker.progress_updated.connect(lambda pct, msg: self._show_toast(f"[{pct}%] {msg}"))
-        self._starter_worker.download_completed.connect(self._on_starter_pack_completed)
-        self._starter_worker.error_occurred.connect(self._on_starter_pack_error)
-        self._starter_worker.start()
+        from src.core.starter_pack_downloader import StarterPackProducer
+        from src.ui.widgets.pack_ingest_wizard import PackIngestWizard
+
+        storage = getattr(self, "storage", None)
+        if storage is None:
+            from src.core.storage_manager import StorageManager
+            storage = StorageManager()
+            self.storage = storage
+
+        if not storage.online:
+            self._show_toast("⚠️ Kho lưu trữ chưa kết nối hoặc chưa được cấu hình. Vui lòng kết nối Kho Chính trước.")
+            return
+
+        self._ingest_in_progress = True
+        self.btn_starter_pack.setEnabled(False)
+        self.btn_starter_pack.setText("⏳ Đang chuẩn bị gói...")
+
+        wizard = None
+        try:
+            factory = lambda cancel, progress: StarterPackProducer.produce_to_staging(storage, cancel, progress)
+
+            wizard = PackIngestWizard(
+                storage=storage,
+                parent=self,
+                auto_prepare=True,
+                prepare_factory=factory,
+            )
+            self._active_ingest_wizard = wizard
+
+            def _on_committed(payload):
+                self._rescan_assets()
+                count = payload.get("count", 0) if isinstance(payload, dict) else 0
+                synced = payload.get("snapshot_synced") if isinstance(payload, dict) else None
+                if synced is False:
+                    self._show_toast(f"✅ Đã nhập thành công {count} đạo cụ Starter Pack (SFX & LUTs) vào Kho! (⚠️ Bộ đệm offline chưa đồng bộ).")
+                else:
+                    self._show_toast(f"✅ Đã nhập thành công {count} đạo cụ Starter Pack (SFX & LUTs) vào Kho!")
+
+            wizard.pack_committed.connect(_on_committed)
+            wizard.exec()
+        finally:
+            self._ingest_in_progress = False
+            self._active_ingest_wizard = None
+            self.btn_starter_pack.setEnabled(True)
+            self.btn_starter_pack.setText("📦 Gói Starter Pack (SFX & LUTs)")
 
     def _on_starter_pack_completed(self, summary: dict):
         self.btn_starter_pack.setEnabled(True)
-        self.btn_starter_pack.setText("📦 Nạp Gói Starter Pack (Hot Trend)")
+        self.btn_starter_pack.setText("📦 Gói Starter Pack (SFX & LUTs)")
         self._rescan_assets()
         total = sum(summary.values())
         self._show_toast(f"✅ Đã nạp thành công {total} đạo cụ Starter Pack vào Kho!")
 
     def _on_starter_pack_error(self, err_msg: str):
         self.btn_starter_pack.setEnabled(True)
-        self.btn_starter_pack.setText("📦 Nạp Gói Starter Pack (Hot Trend)")
+        self.btn_starter_pack.setText("📦 Gói Starter Pack (SFX & LUTs)")
         self._show_toast(f"❌ Lỗi nạp đạo cụ: {err_msg}")
 
     def _on_smart_cutout_clicked(self):
@@ -5320,9 +6035,9 @@ class TabAssets(QWidget):
         except Exception as e:
             self._show_toast(f"❌ Lỗi tách nền: {e}")
 
-    def _on_card_selected(self, preset_id: str):
+    def _on_card_selected(self, preset_id: str, record_recent: bool = True):
+        self.inspector.setEnabled(True)
         self._stop_inspector_sfx_play()
-        RecentManager.add(preset_id)
 
         # 1. Tìm asset trực tiếp từ danh sách dữ liệu (không cần tạo card QWidget)
         matched_item = None
@@ -5332,10 +6047,69 @@ class TabAssets(QWidget):
                 matched_item = item
                 break
 
-        if matched_item:
+        if not matched_item:
+            self._show_toast(f"⚠️ Tài nguyên '{preset_id}' không còn tồn tại trong kho!")
+            return
+
+        self.selected_asset = matched_item
+
+        if record_recent:
+            RecentManager.add(preset_id)
+
+        # 2. Đổi category/tab nếu cần và giải phóng đúng filter đang che asset
+        target_tab = "text" if isinstance(matched_item, TextStylePreset) else "trans" if isinstance(matched_item, TransitionStylePreset) else getattr(matched_item, "tab", "") or getattr(matched_item, "type", "") or getattr(matched_item, "category", "")
+        if target_tab and target_tab != getattr(self, "current_rail_tab", ""):
+            if hasattr(self, "_filter_by_rail"):
+                self._filter_by_rail(target_tab)
+            elif hasattr(self, "_on_rail_tab_clicked"):
+                self._on_rail_tab_clicked(target_tab)
+
+        need_refresh = False
+        if hasattr(self, "txt_search") and self.txt_search.text().strip():
+            q = self.txt_search.text().strip().lower()
+            name = getattr(matched_item, "name", "") if not isinstance(matched_item, dict) else matched_item.get("name", "")
+            if q not in name.lower() and q not in preset_id.lower():
+                self.txt_search.blockSignals(True)
+                self.txt_search.clear()
+                self.txt_search.blockSignals(False)
+                need_refresh = True
+
+        if getattr(self, "current_sub_cat", "all") != "all":
+            sub = getattr(matched_item, "sub", "") if not isinstance(matched_item, dict) else matched_item.get("subcategory", "")
+            if sub and sub != self.current_sub_cat:
+                self.current_sub_cat = "all"
+                need_refresh = True
+
+        if getattr(self, "filter_mode", "all") != "all":
+            self.filter_mode = "all"
+            need_refresh = True
+
+        if need_refresh:
+            self._refresh_grid()
+
+        # 3. Đồng bộ selection & scrollTo trên AssetGridView qua ProxyModel
+        if hasattr(self, "asset_model") and hasattr(self, "asset_filter") and hasattr(self, "asset_grid"):
+            src_idx = self.asset_model.index_of_asset_id(preset_id)
+            if src_idx.isValid():
+                proxy_idx = self.asset_filter.mapFromSource(src_idx)
+                if proxy_idx.isValid() and proxy_idx.row() >= 0:
+                    self.selected_asset = matched_item
+                    self.asset_grid.setCurrentIndex(proxy_idx)
+                    self.asset_grid.scrollTo(proxy_idx)
+                else:
+                    return
+            else:
+                return
+        else:
             self.selected_asset = matched_item
 
-        # 2. Đồng bộ highlight cho legacy card_widgets nếu test suite đang kích hoạt cache
+        # 4. Tải metadata vào audio inspector mà KHÔNG tự động phát âm thanh
+        cat_lower = (target_tab or "").lower()
+        if cat_lower in ("sfx", "audio", "bgm", "sound"):
+            if hasattr(self, "audio_inspector_widget"):
+                self.audio_inspector_widget.set_asset(matched_item)
+
+        # 5. Đồng bộ highlight cho legacy card_widgets nếu test suite đang kích hoạt cache
         if getattr(self, "_card_widgets_cache", None) is not None:
             matched_card = None
             tab = getattr(self, "current_rail_tab", "")
@@ -5361,44 +6135,41 @@ class TabAssets(QWidget):
                 if hasattr(self, "scroll_area"):
                     self.scroll_area.ensureWidgetVisible(matched_card)
 
-        # Cập nhật Inspector
+        # 6. Cập nhật Inspector
         self._update_inspector_details()
 
     def _setup_suggestion_bar(self):
-        """Khởi tạo thanh gợi ý AI theo ngữ cảnh lời thoại (CapCut-style Suggestion Bar)."""
+        """Khởi tạo thanh gợi ý AI theo ngữ cảnh lời thoại (CapCut-style Suggestion Bar một hàng gọn)."""
         self.suggestion_bar = QFrame()
         self.suggestion_bar.setObjectName("suggestion_bar")
+        self.suggestion_bar.setFixedHeight(38)
         self.suggestion_bar.setStyleSheet(f"""
             QFrame#suggestion_bar {{
-                background-color: rgba(139, 92, 246, 0.08);
-                border-bottom: 1px solid rgba(139, 92, 246, 0.25);
+                background-color: #16171a;
+                border-bottom: 1px solid #2e3138;
             }}
         """)
-        sug_layout = QVBoxLayout(self.suggestion_bar)
-        sug_layout.setContentsMargins(12, 3, 12, 3)
-        sug_layout.setSpacing(4)
+        sug_layout = QHBoxLayout(self.suggestion_bar)
+        sug_layout.setContentsMargins(10, 2, 10, 2)
+        sug_layout.setSpacing(6)
 
-        # Header Row: Tiêu đề + Input/Combobox + Nút Gợi ý + Nút Thu gọn
-        sug_header = QHBoxLayout()
-        sug_header.setSpacing(6)
-
-        lbl_sug_title = QLabel("💡 Gợi ý AI theo lời thoại:")
-        lbl_sug_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #c4b5fd;")
-        sug_header.addWidget(lbl_sug_title)
+        lbl_sug_title = QLabel("💡 Gợi ý AI:")
+        lbl_sug_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #f59e0b;")
+        sug_layout.addWidget(lbl_sug_title)
 
         self.combo_context_sentence = QComboBox()
         self.combo_context_sentence.setEditable(True)
-        self.combo_context_sentence.lineEdit().setPlaceholderText("Nhập hoặc chọn câu thoại (VD: 'Thật không thể tin nổi!')...")
-        self.combo_context_sentence.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.combo_context_sentence.lineEdit().setPlaceholderText("Nhập hoặc chọn câu thoại...")
+        self.combo_context_sentence.setFixedWidth(200)
         self.combo_context_sentence.setFixedHeight(24)
         self.combo_context_sentence.setStyleSheet(f"""
             QComboBox {{
                 background: {ThemeColors.BG_CARD};
-                border: 1px solid rgba(139, 92, 246, 0.3);
+                border: 1px solid #353841;
                 border-radius: 4px;
                 padding: 1px 6px;
                 color: {ThemeColors.TEXT_PRIMARY};
-                font-size: 10.5px;
+                font-size: 11px;
             }}
             QComboBox:focus {{
                 border-color: {ThemeColors.PRIMARY};
@@ -5406,7 +6177,7 @@ class TabAssets(QWidget):
         """)
         self.combo_context_sentence.lineEdit().returnPressed.connect(self._on_context_sentence_analyzed)
         self.combo_context_sentence.currentIndexChanged.connect(self._on_context_combo_changed)
-        sug_header.addWidget(self.combo_context_sentence)
+        sug_layout.addWidget(self.combo_context_sentence)
 
         self.btn_analyze_sentence = QPushButton("⚡ Gợi ý")
         self.btn_analyze_sentence.setCursor(Qt.PointingHandCursor)
@@ -5417,7 +6188,7 @@ class TabAssets(QWidget):
                 border: none;
                 border-radius: 4px;
                 color: #ffffff;
-                font-size: 10.5px;
+                font-size: 11px;
                 font-weight: bold;
                 padding: 0 10px;
             }}
@@ -5426,33 +6197,11 @@ class TabAssets(QWidget):
             }}
         """)
         self.btn_analyze_sentence.clicked.connect(self._on_context_sentence_analyzed)
-        sug_header.addWidget(self.btn_analyze_sentence)
-
-        self.btn_toggle_sug = QPushButton("▲")
-        self.btn_toggle_sug.setFixedSize(24, 24)
-        self.btn_toggle_sug.setCursor(Qt.PointingHandCursor)
-        self.btn_toggle_sug.setToolTip("Thu gọn / Mở rộng khay gợi ý AI")
-        self.btn_toggle_sug.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                border: 1px solid rgba(139, 92, 246, 0.3);
-                border-radius: 4px;
-                color: {ThemeColors.TEXT_MUTED};
-                font-size: 9.5px;
-            }}
-            QPushButton:hover {{
-                color: {ThemeColors.TEXT_PRIMARY};
-                border-color: {ThemeColors.PRIMARY};
-            }}
-        """)
-        self.btn_toggle_sug.clicked.connect(self._toggle_suggestion_tray)
-        sug_header.addWidget(self.btn_toggle_sug)
-
-        sug_layout.addLayout(sug_header)
+        sug_layout.addWidget(self.btn_analyze_sentence)
 
         # Scroll area for suggestion chips
         self.scroll_sug = QScrollArea()
-        self.scroll_sug.setFixedHeight(40)
+        self.scroll_sug.setFixedHeight(28)
         self.scroll_sug.setWidgetResizable(True)
         self.scroll_sug.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll_sug.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -5461,11 +6210,54 @@ class TabAssets(QWidget):
         self.sug_chips_container = QWidget()
         self.sug_chips_container.setStyleSheet("background: transparent;")
         self.sug_chips_layout = QHBoxLayout(self.sug_chips_container)
-        self.sug_chips_layout.setContentsMargins(0, 1, 0, 1)
+        self.sug_chips_layout.setContentsMargins(0, 0, 0, 0)
         self.sug_chips_layout.setSpacing(6)
         self.scroll_sug.setWidget(self.sug_chips_container)
+        sug_layout.addWidget(self.scroll_sug, stretch=1)
 
-        sug_layout.addWidget(self.scroll_sug)
+        self.btn_toggle_sug = QPushButton("▲")
+        self.btn_toggle_sug.setFixedSize(20, 20)
+        self.btn_toggle_sug.setCursor(Qt.PointingHandCursor)
+        self.btn_toggle_sug.setToolTip("Thu gọn / Mở rộng khay gợi ý AI")
+        self.btn_toggle_sug.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: 1px solid #353841;
+                border-radius: 4px;
+                color: {ThemeColors.TEXT_MUTED};
+                font-size: 10px;
+            }}
+            QPushButton:hover {{
+                color: {ThemeColors.TEXT_PRIMARY};
+                border-color: {ThemeColors.PRIMARY};
+            }}
+        """)
+        self.btn_toggle_sug.clicked.connect(self._toggle_suggestion_tray)
+        sug_layout.addWidget(self.btn_toggle_sug)
+
+        self.btn_close_sug = QPushButton("×")
+        self.btn_close_sug.setFixedSize(20, 20)
+        self.btn_close_sug.setCursor(Qt.PointingHandCursor)
+        self.btn_close_sug.setToolTip("Đóng thanh gợi ý (mở lại từ nút 💡 Gợi ý trên thanh lọc)")
+        self.btn_close_sug.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: 1px solid #353841;
+                border-radius: 4px;
+                color: #71717a;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0;
+            }
+            QPushButton:hover {
+                color: #ffffff;
+                background: rgba(239, 68, 68, 0.2);
+                border-color: #ef4444;
+            }
+        """)
+        self.btn_close_sug.clicked.connect(self._close_suggestion_bar)
+        sug_layout.addWidget(self.btn_close_sug)
+
         self._render_suggestion_chips([])
 
     def _render_suggestion_chips(self, suggestions: List[Any]):
@@ -5501,14 +6293,14 @@ class TabAssets(QWidget):
                 btn_sample.setStyleSheet(f"""
                     QPushButton {{
                         background: {ThemeColors.BG_CARD};
-                        border: 1px dashed rgba(139, 92, 246, 0.4);
+                        border: 1px dashed #353841;
                         border-radius: 4px;
                         padding: 0 8px;
                         color: {ThemeColors.TEXT_MUTED};
-                        font-size: 9.5px;
+                        font-size: 10px;
                     }}
                     QPushButton:hover {{
-                        color: #c4b5fd;
+                        color: #f59e0b;
                         border-color: {ThemeColors.PRIMARY};
                         background: {ThemeColors.BG_CARD_ACTIVE};
                     }}
@@ -5526,6 +6318,7 @@ class TabAssets(QWidget):
         if not clean_text:
             self._render_suggestion_chips([])
             return
+        self.combo_context_sentence.setToolTip(clean_text)
         suggestions = self.suggester.suggest_for_text(clean_text, role=getattr(self, "_current_context_role", ""))
         self._render_suggestion_chips(suggestions)
 
@@ -5542,6 +6335,7 @@ class TabAssets(QWidget):
         if hasattr(self, "combo_context_sentence"):
             self.combo_context_sentence.blockSignals(True)
             self.combo_context_sentence.setEditText(text)
+            self.combo_context_sentence.setToolTip(text)
             self.combo_context_sentence.blockSignals(False)
         self._on_context_sentence_analyzed()
 
@@ -5572,6 +6366,20 @@ class TabAssets(QWidget):
         else:
             self.scroll_sug.setVisible(True)
             self.btn_toggle_sug.setText("▲")
+
+    def _close_suggestion_bar(self):
+        """Đóng ribbon gợi ý AI."""
+        if hasattr(self, "suggestion_bar"):
+            self.suggestion_bar.hide()
+        if hasattr(self, "btn_toggle_sug_bar"):
+            self.btn_toggle_sug_bar.blockSignals(True)
+            self.btn_toggle_sug_bar.setChecked(False)
+            self.btn_toggle_sug_bar.blockSignals(False)
+
+    def _on_sug_bar_toggled(self, checked: bool):
+        """Bật / tắt hiển thị ribbon gợi ý từ nút toolbar."""
+        if hasattr(self, "suggestion_bar"):
+            self.suggestion_bar.setVisible(checked)
 
     def _set_filter_mode(self, mode: str):
         self.filter_mode = mode
@@ -5613,9 +6421,9 @@ class TabAssets(QWidget):
                 return True
             elif event.type() == QEvent.Drop and event.mimeData().hasUrls():
                 paths = [u.toLocalFile() for u in event.mimeData().urls() if u.toLocalFile()]
-                if paths:
-                    self._import_files_or_folders(paths)
                 event.acceptProposedAction()
+                if paths:
+                    QTimer.singleShot(0, lambda: self._import_files_or_folders(paths))
                 return True
         return super().eventFilter(obj, event)
 
@@ -5634,9 +6442,9 @@ class TabAssets(QWidget):
     def dropEvent(self, event):
         if event.mimeData().hasUrls():
             paths = [u.toLocalFile() for u in event.mimeData().urls() if u.toLocalFile()]
-            if paths:
-                self._import_files_or_folders(paths)
             event.acceptProposedAction()
+            if paths:
+                QTimer.singleShot(0, lambda: self._import_files_or_folders(paths))
         else:
             event.ignore()
 
@@ -5757,6 +6565,248 @@ class TabAssets(QWidget):
         else:
             self._show_toast(f"⚠ AutoCut: {result.message}")
 
+    def _dict_to_studio_asset(self, record: Dict[str, Any]) -> StudioAsset:
+        """Chuyển đổi UI asset dict sang StudioAsset đầy đủ metadata hiển thị và xem trước (G04-04A2a)."""
+        tab = str(record.get("tab") or record.get("category") or "broll").strip().lower()
+        category = str(record.get("category") or tab)
+
+        # Trích xuất subcategory chuẩn, ưu tiên subcategory rồi tới sub, mặc định Tất cả
+        raw_sub = record.get("subcategory")
+        if not isinstance(raw_sub, str) or not raw_sub.strip():
+            raw_sub = record.get("sub")
+        if not isinstance(raw_sub, str) or not raw_sub.strip():
+            raw_sub = "Tất cả"
+
+        pack_name = str(record.get("pack_name") or "")
+
+        # Biểu tượng badge đặc trưng theo tab
+        badge_icon = record.get("badge_icon")
+        if not badge_icon:
+            badge_map = {
+                "text": "🔤", "trans": "🎬", "lut": "🎨", "meme": "🎭",
+                "sfx": "🔊", "bgm": "🎵", "overlay": "✨", "broll": "📹"
+            }
+            badge_icon = badge_map.get(tab, "📁")
+
+        # Xử lý duration an toàn: không tạo 3.0s giả cho media chưa biết
+        raw_dur = record.get("duration_sec", record.get("duration"))
+        duration_sec = None
+        display_dur = 0.0
+        if raw_dur is not None and not isinstance(raw_dur, bool):
+            try:
+                dur_f = float(raw_dur)
+                if math.isfinite(dur_f) and dur_f > 0.0:
+                    duration_sec = dur_f
+                    display_dur = dur_f
+            except (ValueError, TypeError, OverflowError):
+                pass
+
+        file_path = str(record.get("file_path") or "")
+        thumbnail_path = str(record.get("thumbnail_path") or "")
+        preview_path = str(record.get("preview_path") or file_path)
+
+        asset = StudioAsset(
+            id=str(record.get("id") or ""),
+            name=str(record.get("name") or record.get("id") or ""),
+            tab=tab,
+            category=category,
+            sub=raw_sub,
+            badge_icon=badge_icon,
+            file_path=file_path,
+            thumbnail_path=thumbnail_path,
+            preview_path=preview_path,
+            pack_name=pack_name,
+            duration=display_dur,
+        )
+
+        # Khôi phục sub gốc vì StudioAsset.__init__ tự ý gán sub = pack_name nếu có pack
+        asset.sub = raw_sub
+        asset.duration_sec = duration_sec
+
+        # Bảo toàn tags là bản sao độc lập, không chia sẻ tham chiếu mutable list
+        raw_tags = record.get("tags")
+        asset.tags = list(raw_tags) if isinstance(raw_tags, (list, tuple, set)) else []
+
+        # Các trường quản lý kho và nguồn gốc
+        asset.availability = str(record.get("availability") or "online")
+        asset.storage_managed = True
+        asset.pack_id = record.get("pack_id")
+        asset.source_kind = record.get("source_kind")
+        asset.source_id = record.get("source_id")
+        asset.template_type = record.get("template_type")
+        asset.size_bytes = int(record.get("size_bytes") or 0) if isinstance(record.get("size_bytes"), int) else 0
+
+        # Bảo toàn đường dẫn gốc và nguồn gốc định danh (G04-04C2-P)
+        asset.library_path = record.get("library_path")
+        asset.external_path = record.get("external_path")
+        asset.relative_path = record.get("relative_path")
+        asset.origin_library_id = record.get("origin_library_id")
+        asset.origin_root = record.get("origin_root")
+
+        # Bảo toàn tham chiếu identity cho runtime objects (không deepcopy)
+        if "_raw_obj" in record:
+            asset._raw_obj = record["_raw_obj"]
+        if "native_preset" in record:
+            asset.native_preset = record["native_preset"]
+
+        return asset
+
+    @staticmethod
+    def _get_asset_id(item: Any) -> str:
+        if isinstance(item, dict):
+            return str(item.get("id") or "")
+        return str(getattr(item, "id", "") or "")
+
+    @staticmethod
+    def _is_storage_managed(item: Any) -> bool:
+        if isinstance(item, dict):
+            return bool(item.get("storage_managed", False))
+        return bool(getattr(item, "storage_managed", False))
+
+    @staticmethod
+    def _get_asset_tab(item: Any) -> str:
+        if isinstance(item, dict):
+            return str(item.get("tab") or "")
+        return str(getattr(item, "tab", "") or "")
+
+    @staticmethod
+    def _get_asset_sub(item: Any) -> str:
+        if isinstance(item, dict):
+            return str(item.get("sub") or item.get("sub_category") or "")
+        return str(getattr(item, "sub", "") or getattr(item, "sub_category", "") or "")
+
+    def _sync_storage_rail(self, taxonomy: Optional[Dict[str, str]] = None):
+        if taxonomy is None:
+            from src.core.storage_manager import StorageManager
+            labels = StorageManager().taxonomy()
+        else:
+            labels = dict(taxonomy)
+        labels["broll"] = labels.get("broll", "Cảnh")
+        for asset in self.all_assets:
+            tab = self._get_asset_tab(asset)
+            if tab and tab not in self.rail_btns:
+                button = QPushButton("📁\n" + labels.get(tab, tab))
+                button.setCheckable(True)
+                button.setFixedSize(74, 42)
+                button.clicked.connect(lambda checked=False, cid=tab: self._filter_by_rail(cid))
+                self.rail_btns[tab] = button
+                rail_layout = self.rail.layout()
+                rail_layout.insertWidget(max(0, rail_layout.count() - 1), button)
+
+    def _merge_storage_assets(self):
+        """Nạp snapshot kho ngoài; metadata không phụ thuộc media đang online."""
+        from src.core.storage_manager import StorageManager
+        for record in StorageManager().ui_assets():
+            self.all_assets.append(self._dict_to_studio_asset(record))
+
+    def apply_storage_snapshot(
+        self,
+        managed_assets: Optional[List[Dict[str, Any]]] = None,
+        taxonomy: Optional[Dict[str, str]] = None,
+        generation_sig: Optional[Any] = None
+    ) -> None:
+        """
+        Cập nhật snapshot tài nguyên kho ngoài mà KHÔNG quét lại đĩa cứng (zero disk re-scan).
+        - Bảo toàn 100% 8 danh sách bundled và local presets
+        - Zero storage/indexer I/O khi caller truyền dữ liệu
+        - Kiểm tra trùng lặp ID và va chạm với non-managed trước khi thay đổi trạng thái
+        - KHÔNG phát signal library_assets_changed (tránh Echo Loop)
+        """
+        from collections.abc import Mapping
+
+        if managed_assets is None:
+            from src.core.storage_manager import StorageManager
+            managed_assets = StorageManager().ui_assets()
+
+        if taxonomy is None:
+            from src.core.storage_manager import StorageManager
+            taxonomy = StorageManager().taxonomy()
+
+        # 1. Kiểm tra tính hợp lệ trước khi thay đổi trạng thái (Transaction validation)
+        seen_ids = set()
+        for r in managed_assets:
+            if not isinstance(r, Mapping):
+                raise ValueError(f"Managed asset record must be a Mapping/dict, got: {type(r).__name__}")
+            rid = r.get("id")
+            if not isinstance(rid, str) or not rid:
+                raise ValueError(f"Managed asset record must have a non-empty str 'id', got: {rid!r}")
+            if rid in seen_ids:
+                raise ValueError(f"Duplicate asset ID in managed snapshot: {rid}")
+            seen_ids.add(rid)
+
+        non_managed_ids = {
+            self._get_asset_id(a) for a in self.all_assets
+            if not self._is_storage_managed(a) and self._get_asset_id(a)
+        }
+        for r in managed_assets:
+            rid = r["id"]
+            if rid in non_managed_ids:
+                raise ValueError(f"Asset ID collision between managed snapshot and non-managed asset: {rid}")
+
+        # 2. Thay thế phần managed, bảo toàn phần non-managed
+        base_assets = [
+            a for a in self.all_assets
+            if not self._is_storage_managed(a)
+        ]
+        new_managed = [self._dict_to_studio_asset(r) for r in managed_assets]
+        self.all_assets = base_assets + new_managed
+
+        # 3. Ghi nhận ID đang chọn trước khi cập nhật Model
+        selected_id = self._get_asset_id(self.selected_asset) if self.selected_asset else None
+
+        # 4. Invalidation các thành phần phụ trợ
+        if hasattr(self, "suggester") and self.suggester is not None:
+            self.suggester.set_assets(self.all_assets)
+
+        self._populate_cards()
+        self._sync_storage_rail(taxonomy)
+        self._rebuild_categories_column()
+
+        # Kiểm tra tính hợp lệ của subcategory hiện tại
+        if hasattr(self, "current_sub_cat") and self.current_sub_cat not in ("all", "Tất cả"):
+            cur_tab = getattr(self, "current_rail_tab", "")
+            valid_subs = {self._get_asset_sub(a) for a in self.all_assets if self._get_asset_tab(a) == cur_tab}
+            if self.current_sub_cat not in valid_subs:
+                self.current_sub_cat = "all"
+
+        self._refresh_grid()
+
+        # 5. Phục hồi hoặc dọn sạch lựa chọn (selection & Inspector)
+        if selected_id:
+            matched = next((a for a in self.all_assets if self._get_asset_id(a) == selected_id), None)
+            if matched is not None and hasattr(self, "asset_model") and hasattr(self, "asset_filter"):
+                src_idx = self.asset_model.index_of_asset_id(selected_id)
+                if src_idx.isValid():
+                    proxy_idx = self.asset_filter.mapFromSource(src_idx)
+                    if proxy_idx.isValid() and proxy_idx.row() >= 0:
+                        self.selected_asset = matched
+                        if hasattr(self, "asset_grid"):
+                            self.asset_grid.setCurrentIndex(proxy_idx)
+                        self._update_inspector_details()
+                    else:
+                        self.selected_asset = None
+                        if hasattr(self, "asset_grid"):
+                            self.asset_grid.clearSelection()
+                        self._update_inspector_details()
+                else:
+                    self.selected_asset = None
+                    if hasattr(self, "asset_grid"):
+                        self.asset_grid.clearSelection()
+                    self._update_inspector_details()
+            else:
+                self.selected_asset = None
+                if hasattr(self, "asset_grid"):
+                    self.asset_grid.clearSelection()
+                self._update_inspector_details()
+        else:
+            self.selected_asset = None
+            if hasattr(self, "asset_grid"):
+                self.asset_grid.clearSelection()
+            self._update_inspector_details()
+
+        # 6. Ghi nhận signature checkpoint sau khi apply thành công
+        self._last_storage_sig = generation_sig
+
     def _rescan_assets(self):
         AssetIndexer.clear_cache()
         indexer = AssetIndexer()
@@ -5775,13 +6825,14 @@ class TabAssets(QWidget):
         scanned_transitions = indexer.scan_transitions()
         self.all_transitions = BUILTIN_TRANSITIONS.copy() + dicts_to_assets(scanned_transitions, "trans", "custom", "Tùy chỉnh", "🎬")
         scanned_luts = indexer.scan_luts()
-        self.all_luts = MOCKUP_LUTS.copy() + (dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else [])
+        self.all_luts = dicts_to_assets(scanned_luts, "lut", "cinema", "Màu tự động", "🎨") if scanned_luts else []
         scanned_memes = indexer.scan_memes()
-        self.all_memes = dicts_to_assets(scanned_memes, "meme", "trending", "Meme", "🎭") if scanned_memes else MOCKUP_MEMES.copy()
+        self.all_memes = dicts_to_assets(scanned_memes, "meme", "trending", "Meme", "🎭") if scanned_memes else []
         scanned_sfx = indexer.scan_sfx()
-        self.all_sfx = dicts_to_assets(scanned_sfx, "sfx", "accent", "Âm thanh", "🔊") if scanned_sfx else MOCKUP_SFX.copy()
+        self.all_sfx = dicts_to_assets(scanned_sfx, "sfx", "accent", "Âm thanh", "🔊") if scanned_sfx else []
         scanned_overlays = indexer.scan_overlays()
-        self.all_overlays = dicts_to_assets(scanned_overlays, "overlay", "cinematic", "Lớp phủ", "✨") if scanned_overlays else MOCKUP_OVERLAYS.copy()
+        self.all_overlays = dicts_to_assets(scanned_overlays, "overlay", "cinematic", "Lớp phủ", "✨") if scanned_overlays else []
+        self.all_icons = []
         
         music_data = indexer.scan_music_assets()
         scanned_bgm = []
@@ -5811,6 +6862,8 @@ class TabAssets(QWidget):
         self.all_assets.extend(self.all_memes)
         self.all_assets.extend(self.all_sfx)
         self.all_assets.extend(self.all_bgm)
+        self._merge_storage_assets()
+        self._sync_storage_rail()
         
         if hasattr(self, "suggester"):
             self.suggester.set_assets(self.all_assets)
@@ -5819,6 +6872,7 @@ class TabAssets(QWidget):
         self._populate_cards()
         self._rebuild_categories_column()
         self._refresh_grid()
+        self.library_assets_changed.emit(self.all_assets)
         self._show_toast("✅ Đã quét và cập nhật lại toàn bộ kho tài nguyên!")
 
     def _set_trans_alignment(self, align: str):
@@ -5895,30 +6949,32 @@ class TabAssets(QWidget):
             self.lbl_split_pct.setText(f"{value}%")
 
     def _toggle_inspector_sfx_play(self):
-        if hasattr(self, "sfx_waveform_canvas") and self.sfx_waveform_canvas.is_playing:
+        if hasattr(self, "audio_inspector_widget"):
+            self.audio_inspector_widget.toggle_playback()
+        elif hasattr(self, "sfx_waveform_canvas") and self.sfx_waveform_canvas.is_playing:
             self._stop_inspector_sfx_play()
         else:
             self._start_inspector_sfx_play()
 
     def _start_inspector_sfx_play(self):
-        if hasattr(self, "sfx_waveform_canvas"):
-            self.sfx_waveform_canvas.is_playing = True
-            self.sfx_waveform_canvas.update()
-        if hasattr(self, "sfx_play_btn"):
-            self.sfx_play_btn.setText("⏸ Dừng")
-        dur = getattr(self.selected_asset, "duration", 1.5)
-        if hasattr(self, "sfx_playback_timer"):
-            self.sfx_playback_timer.stop()
-            self.sfx_playback_timer.start(int(dur * 1000) if dur > 0 else 1500)
+        if hasattr(self, "audio_inspector_widget"):
+            self.audio_inspector_widget.start_playback()
+        else:
+            if hasattr(self, "sfx_waveform_canvas"):
+                self.sfx_waveform_canvas.is_playing = True
+                self.sfx_waveform_canvas.update()
+            if hasattr(self, "sfx_play_btn"):
+                self.sfx_play_btn.setText("⏸ Dừng")
 
     def _stop_inspector_sfx_play(self):
-        if hasattr(self, "sfx_waveform_canvas"):
-            self.sfx_waveform_canvas.is_playing = False
-            self.sfx_waveform_canvas.update()
-        if hasattr(self, "sfx_play_btn"):
-            self.sfx_play_btn.setText("▶ Nghe thử")
-        if hasattr(self, "sfx_playback_timer"):
-            self.sfx_playback_timer.stop()
+        if hasattr(self, "audio_inspector_widget"):
+            self.audio_inspector_widget.stop_playback()
+        else:
+            if hasattr(self, "sfx_waveform_canvas"):
+                self.sfx_waveform_canvas.is_playing = False
+                self.sfx_waveform_canvas.update()
+            if hasattr(self, "sfx_play_btn"):
+                self.sfx_play_btn.setText("▶ Nghe thử")
 
     def _on_inspector_sfx_playback_finished(self):
         self._stop_inspector_sfx_play()
@@ -5976,10 +7032,15 @@ class TabAssets(QWidget):
     def _update_inspector_details(self):
         if not self.selected_asset:
             return
+        if hasattr(self, "_empty_inspector_label"):
+            self._empty_inspector_label.hide()
+        for widget, was_hidden in getattr(self, "_inspector_hidden_widgets", []):
+            widget.setVisible(not was_hidden)
+        self._inspector_hidden_widgets = []
 
-        name = getattr(self.selected_asset, "name", "")
+        name = self.selected_asset.get("name", "") if isinstance(self.selected_asset, dict) else getattr(self.selected_asset, "name", "")
         self.lbl_insp_title.setText(f"<b>{name}</b>")
-        sub = getattr(self.selected_asset, "sub", "") or getattr(self.selected_asset, "description", "")
+        sub = (self.selected_asset.get("sub") or self.selected_asset.get("description", "")) if isinstance(self.selected_asset, dict) else (getattr(self.selected_asset, "sub", "") or getattr(self.selected_asset, "description", ""))
         pack_name = getattr(self.selected_asset, "pack_name", "") or (self.selected_asset.get("pack_name") if isinstance(self.selected_asset, dict) else "")
         if pack_name and pack_name != "Mặc định":
             sub_text = f"📦 {pack_name} · {sub}" if sub and sub != pack_name else f"📦 {pack_name}"
@@ -5997,13 +7058,15 @@ class TabAssets(QWidget):
                 self.lbl_insp_collections.setText("")
                 self.lbl_insp_collections.hide()
 
-        is_text = isinstance(self.selected_asset, TextStylePreset) or getattr(self.selected_asset, "tab", "") == "text"
-        is_lut = getattr(self.selected_asset, "tab", "") == "lut"
-        is_sfx = getattr(self.selected_asset, "tab", "") == "sfx"
-        is_bgm = getattr(self.selected_asset, "tab", "") == "bgm"
-        is_trans = isinstance(self.selected_asset, TransitionStylePreset) or getattr(self.selected_asset, "tab", "") == "trans"
+        asset_tab = str(self.selected_asset.get("tab", "") if isinstance(self.selected_asset, dict) else getattr(self.selected_asset, "tab", "")).lower()
+        is_text = isinstance(self.selected_asset, TextStylePreset) or asset_tab == "text"
+        is_lut = asset_tab in ("lut", "luts")
+        is_sfx = asset_tab == "sfx"
+        is_bgm = asset_tab in ("bgm", "audio", "music")
+        is_trans = isinstance(self.selected_asset, TransitionStylePreset) or asset_tab in ("trans", "transition", "transitions")
 
         if is_text:
+            self.icon_meme_widget.stop_playback()
             self.inspector_aspect_btn.show()
             self.inspector_text_preview.show()
             self.inspector_lut_viewport.hide()
@@ -6122,9 +7185,13 @@ class TabAssets(QWidget):
                         ctrl.blockSignals(False)
 
             self._update_text_preview_from_params()
-            self.btn_insert_title_playhead.setText("🚀 Chèn tại Playhead (V2)")
+            self.btn_insert_title_playhead.setText("🚀 Chèn Text cơ bản")
+            self.btn_insert_title_playhead.setToolTip(
+                "Chèn tiêu đề cơ bản lên Timeline (phông, cỡ, kiểu, màu). Lưu ý: Timeline comp chưa hỗ trợ viền (stroke) và đường cong (curve) tùy biến; để giữ trọn vẹn mọi hiệu ứng, vui lòng dùng 'Sao chép mã Fusion'."
+            )
 
         elif is_lut:
+            self.icon_meme_widget.stop_playback()
             self.inspector_aspect_btn.hide()
             self.inspector_text_preview.hide()
             self.inspector_lut_viewport.show()
@@ -6157,6 +7224,7 @@ class TabAssets(QWidget):
             self.btn_insert_title_playhead.setText("🎨 Áp LUT lên Timeline")
 
         elif is_sfx or is_bgm:
+            self.icon_meme_widget.stop_playback()
             self.inspector_aspect_btn.hide()
             self.inspector_text_preview.hide()
             self.inspector_lut_viewport.hide()
@@ -6182,30 +7250,64 @@ class TabAssets(QWidget):
 
             self.combo_target_track.clear()
             if is_bgm:
-                self.combo_target_track.addItems(["Audio Track 4/5 (A4/A5 - BGM)", "Audio Track 1 (A1)"])
-                self.lbl_track_hint.setText("Nhạc nền stereo chuẩn phát song song trên Track A4/A5.")
+                self.combo_target_track.addItem("Tự động (Tìm track trống A4+)", {"mode": "auto", "track": None})
+                self.combo_target_track.addItem("Audio Track 4 (A4 - BGM gợi ý)", {"mode": "timeline_track", "track": 4})
+                self.combo_target_track.addItem("Audio Track 2 (A2)", {"mode": "timeline_track", "track": 2})
+                self.combo_target_track.addItem("Audio Track 1 (A1)", {"mode": "timeline_track", "track": 1})
+                self.combo_target_track.addItem("Track mới (Tự tạo track)", {"mode": "new_track", "track": None})
+                self.lbl_track_hint.setText("Nhạc nền stereo chuẩn phát song song trên Track A4/A5 (Tự động tìm track trống).")
             else:
-                self.combo_target_track.addItems(["Audio Track 2 (A2 - SFX)", "Audio Track 1 (A1)"])
-                self.lbl_track_hint.setText("Gợi ý: Audio Track 2 với bù âm -12dB phù hợp mạng xã hội, không đè giọng nói.")
+                self.combo_target_track.addItem("Tự động (Tìm track trống A2+)", {"mode": "auto", "track": None})
+                self.combo_target_track.addItem("Audio Track 2 (A2 - SFX gợi ý)", {"mode": "timeline_track", "track": 2})
+                self.combo_target_track.addItem("Audio Track 1 (A1 - Đè voice)", {"mode": "timeline_track", "track": 1})
+                self.combo_target_track.addItem("Track mới (Tự tạo track)", {"mode": "new_track", "track": None})
+                self.lbl_track_hint.setText("Gợi ý: Tự động tìm track trống từ A2 để tránh đè giọng nói chính trên A1.")
 
-            pid = getattr(self.selected_asset, "id", "sfx" if is_sfx else "bgm")
-            dur = getattr(self.selected_asset, "duration", 2.0 if is_sfx else 120.0)
-            self.sfx_waveform_canvas.set_preset_id(pid, num_bars=32)
-            mins = int(dur // 60)
-            secs = int(dur % 60)
-            self.sfx_time_lbl.setText(f"{mins}:{secs:02d}" if dur >= 60 else f"{dur:.1f}s")
-            real_file = getattr(self.selected_asset, "file_path", "")
-            self.sfx_hint_lbl.setText(os.path.basename(real_file) if real_file else f"{pid}.wav")
-            self.sfx_play_btn.setText("▶ Nghe thử")
-            self.btn_insert_title_playhead.setText("🎵 Chèn nhạc nền (A4/A5)" if is_bgm else "🔊 Chèn âm thanh tại Playhead (A2)")
+            if hasattr(self, "audio_inspector_widget"):
+                self.audio_inspector_widget.set_asset(self.selected_asset)
+            else:
+                pid = (self.selected_asset.get("id") if isinstance(self.selected_asset, dict) else getattr(self.selected_asset, "id", None)) or ("sfx" if is_sfx else "bgm")
+                raw_dur = self.selected_asset.get("duration") if isinstance(self.selected_asset, dict) else getattr(self.selected_asset, "duration", None)
+                dur = float(raw_dur) if raw_dur is not None else (2.0 if is_sfx else 120.0)
+                if hasattr(self, "sfx_waveform_canvas"):
+                    self.sfx_waveform_canvas.set_preset_id(pid, num_bars=32)
+                mins = int(dur // 60)
+                secs = int(dur % 60)
+                if hasattr(self, "sfx_time_lbl"):
+                    self.sfx_time_lbl.setText(f"{mins}:{secs:02d}" if dur >= 60 else f"{dur:.1f}s")
+                real_file = self.selected_asset.get("file_path", "") if isinstance(self.selected_asset, dict) else getattr(self.selected_asset, "file_path", "")
+                if hasattr(self, "sfx_hint_lbl"):
+                    self.sfx_hint_lbl.setText(os.path.basename(real_file) if real_file else f"{pid}.wav")
+                if hasattr(self, "sfx_play_btn"):
+                    self.sfx_play_btn.setText("▶ Nghe thử")
+            self.btn_insert_title_playhead.setText("🎵 Chèn nhạc nền tại Playhead" if is_bgm else "🔊 Chèn âm thanh tại Playhead")
 
         elif is_trans:
             self.inspector_aspect_btn.hide()
             self.inspector_text_preview.hide()
             self.inspector_lut_viewport.hide()
             self.inspector_sfx_viewport.hide()
-            self.inspector_trans_viewport.show()
-            self.inspector_icon_viewport.hide()
+
+            # Ưu tiên hiển thị ảnh thumbnail thực tế / video preview thay vì khung chữ
+            thumb_path = getattr(self.selected_asset, "thumbnail_path", "")
+            prev_path = getattr(self.selected_asset, "preview_path", "")
+            fpath = getattr(self.selected_asset, "file_path", "")
+            video_file = prev_path if (prev_path and prev_path.endswith((".mp4", ".mov", ".webm"))) else (fpath if fpath.endswith((".mp4", ".mov")) else "")
+
+            if thumb_path or video_file:
+                self.inspector_trans_viewport.hide()
+                self.inspector_icon_viewport.show()
+                self.icon_meme_widget.set_asset(self.selected_asset, sub=sub)
+            else:
+                self.icon_meme_widget.stop_playback()
+                self.inspector_trans_viewport.show()
+                self.inspector_icon_viewport.hide()
+                kind = getattr(self.selected_asset, "category", "transform")
+                frames = getattr(self.selected_asset, "frames", getattr(self, "trans_frames", 12))
+                if hasattr(self, "slide_trans_frames"):
+                    self.slide_trans_frames.setValue(frames)
+                self.trans_loop_widget.set_transition(name, kind, frames)
+                self._update_trans_alignment_styles()
 
             self.grp_params.show()
             if hasattr(self, "grp_sample_text"):
@@ -6259,13 +7361,8 @@ class TabAssets(QWidget):
             self.combo_target_track.addItems(["Video Track 2 (V2)", "Video Track 3 (V3)", "Video Track 1 (V1)"])
             self.lbl_track_hint.setText("Đề xuất: Chèn lên V2/V3 để tránh đè video chính V1.")
 
-            tab_type = getattr(self.selected_asset, "tab", "icon")
-            badge = getattr(self.selected_asset, "badge_icon", "✨")
-            color_hex = getattr(self.selected_asset, "color_hex", "#facc15")
-            thumb_path = getattr(self.selected_asset, "thumbnail_path", "")
-            fpath = getattr(self.selected_asset, "file_path", "")
-            asset_id = getattr(self.selected_asset, "id", "")
-            self.icon_meme_widget.set_item(name, tab_type, badge, color_hex, sub, thumb_path, fpath, asset_id=asset_id)
+            tab_type = self.selected_asset.get("tab", "icon") if isinstance(self.selected_asset, dict) else getattr(self.selected_asset, "tab", "icon")
+            self.icon_meme_widget.set_asset(self.selected_asset, sub=sub)
 
             if tab_type == "meme":
                 self.lbl_track_hint.setText("🎬 Đề xuất: Kéo thả trực tiếp card vào DaVinci Timeline để chèn meme.")
@@ -6529,206 +7626,452 @@ class TabAssets(QWidget):
             self.toast_timer.stop()
             self.toast_timer.start(2500)
 
+    def _get_insert_service(self):
+        if getattr(self, "_insert_service", None):
+            return self._insert_service
+        parent = self.parent()
+        if parent and getattr(parent, "_insert_service", None):
+            self._insert_service = parent._insert_service
+            return self._insert_service
+        try:
+            from src.services.resolve_gateway import ResolveGateway
+            from src.services.insert_service import InsertService
+            self._gateway = ResolveGateway(self)
+            self._insert_service = InsertService(self._gateway, self)
+            return self._insert_service
+        except Exception as e:
+            logger.warning("Không thể khởi tạo InsertService trong TabAssets: %s", e)
+            return None
+
+    @staticmethod
+    def _extract_video_duration(payload: dict) -> float:
+        """
+        Trích xuất duration hợp lệ cho video từ payload:
+        - Ưu tiên duration_sec nếu có trong payload; fallback sang duration khi không có key duration_sec.
+        - Trường hợp unknown (None, 0, số âm, NaN, Inf, bool, kiểu dữ liệu không hợp lệ) -> trả về 0.0 (sentinel).
+        - Trường hợp positive finite number -> trả về float.
+        - Không làm biến dị (mutate) payload hay đối tượng được chọn.
+        """
+        if not isinstance(payload, dict):
+            return 0.0
+
+        if "duration_sec" in payload:
+            val = payload.get("duration_sec")
+        else:
+            val = payload.get("duration")
+
+        if val is None or isinstance(val, bool):
+            return 0.0
+
+        try:
+            import math
+            fval = float(val)
+            if math.isnan(fval) or math.isinf(fval) or fval <= 0.0:
+                return 0.0
+            return fval
+        except (ValueError, TypeError):
+            return 0.0
+
     def _insert_at_playhead(self):
         if not self.selected_asset:
             return
 
-        from src.services.insert_service import to_asset_dict
+        from src.services.insert_service import to_asset_dict, InsertResult
         asset_d = to_asset_dict(self.selected_asset)
         tab = str(asset_d.get("tab") or "").lower()
         fp = str(asset_d.get("file_path") or "").lower()
         ext = os.path.splitext(fp)[1] if fp else ""
 
-        is_trans = tab == "trans" or isinstance(self.selected_asset, TransitionStylePreset)
-        is_video = tab in ("meme", "overlay") or ext in (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".png", ".jpg", ".jpeg", ".webp", ".svg")
+        is_trans = tab in ("trans", "transition", "transitions") or isinstance(self.selected_asset, TransitionStylePreset) or "transitions" in fp
+        is_video = not is_trans and (tab in ("meme", "overlay", "broll", "video", "sticker", "green_screen") or ext in (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".png", ".jpg", ".jpeg", ".webp", ".svg"))
         is_sfx = tab == "sfx" or ext in (".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a")
         is_bgm = tab == "bgm"
         is_lut = tab == "lut" or ext in (".cube", ".3dl")
         is_text = tab == "text" or isinstance(self.selected_asset, TextStylePreset) or (not is_trans and not is_video and not is_sfx and not is_bgm and not is_lut)
 
-        try:
-            resolve_auto = ResolveAutomation()
-        except Exception:
-            resolve_auto = None
+        # 1. Các danh mục chuyển đổi sang InsertService (G04-04C4-I / G04-04C4-R1)
+        if is_video or is_trans or is_sfx or is_bgm or is_lut:
+            svc = self._get_insert_service()
+            if not svc:
+                self._show_toast("❌ Dịch vụ chèn không sẵn sàng. Hãy khởi động lại ứng dụng.")
+                return
 
-        if is_video:
-            real_file_path = asset_d.get("file_path", "")
-            asset_name = asset_d.get("name", "Asset")
-            asset_id = asset_d.get("id", "")
-            if not real_file_path or not os.path.isfile(real_file_path):
-                try:
-                    from src.core.broll_sfx import BRollSFXResolver
-                    real_file_path = BRollSFXResolver().resolve_meme(asset_id or asset_name)
-                except Exception:
-                    pass
-            if not real_file_path or not os.path.isfile(real_file_path):
-                try:
-                    from src.utils.path_utils import PosixPathAdapter
-                    for sub in ("memes", "overlays", "green_screen", "cinematic"):
-                        cand = PosixPathAdapter.get_asset_path("broll_memes", sub, f"{asset_id}.mp4")
-                        if os.path.exists(cand):
-                            real_file_path = str(cand)
-                            break
-                        cand_mov = PosixPathAdapter.get_asset_path("broll_memes", sub, f"{asset_id}.mov")
-                        if os.path.exists(cand_mov):
-                            real_file_path = str(cand_mov)
-                            break
-                except Exception:
-                    pass
+            payload = dict(asset_d)
+            asset_name = str(payload.get("name") or payload.get("id") or "Asset")
+            asset_id = str(payload.get("id") or "")
 
-            success = False
-            if real_file_path and os.path.isfile(real_file_path):
-                if resolve_auto and hasattr(resolve_auto, "insert_media_at_playhead"):
+            mode = "auto"
+            preferred_track = None
+            duration = 0.0
+            extra_params = {}
+
+            if is_video:
+                duration = self._extract_video_duration(payload)
+                if hasattr(self, "combo_target_track") and self.combo_target_track:
+                    cdata = self.combo_target_track.currentData()
+                    if isinstance(cdata, dict):
+                        mode = cdata.get("mode", mode)
+                        preferred_track = cdata.get("track", preferred_track)
+                    elif cdata == "new_track":
+                        mode = "new_track"
+                        preferred_track = None
+                    elif isinstance(cdata, int):
+                        mode = "timeline_track"
+                        preferred_track = cdata
+                    else:
+                        track_text = self.combo_target_track.currentText().strip()
+                        if "New" in track_text or "Mới" in track_text:
+                            mode = "new_track"
+                        elif "V" in track_text:
+                            import re
+                            digits = re.findall(r"\d+", track_text)
+                            if digits:
+                                try:
+                                    preferred_track = int(digits[0])
+                                    mode = "timeline_track"
+                                except Exception:
+                                    pass
+                if not preferred_track and mode == "auto":
+                    preferred_track = 3
+
+            elif is_trans:
+                mode = "auto"
+
+            elif is_sfx or is_bgm:
+                raw_dur = payload.get("duration")
+                if raw_dur is not None and not isinstance(raw_dur, bool):
                     try:
-                        success = bool(resolve_auto.insert_media_at_playhead(media_path=os.path.abspath(real_file_path), target_track=3))
-                    except Exception as e:
-                        logger.error(f"Lỗi khi chèn media vào DaVinci: {e}")
-                        success = False
-                if success:
-                    self._show_toast(f"✅ Đã chèn video “{asset_name}” tại Playhead (V3)")
+                        d = float(raw_dur)
+                        import math
+                        duration = d if (d > 0 and not math.isnan(d) and not math.isinf(d)) else (1.5 if is_sfx else 120.0)
+                    except Exception:
+                        duration = 1.5 if is_sfx else 120.0
                 else:
-                    self._show_toast(f"❌ Chưa thể chèn video “{asset_name}” vào DaVinci. Hãy kiểm tra Timeline.")
-            else:
-                self._show_toast(f"❌ Không tìm thấy tệp video của “{asset_name}” trên đĩa.")
+                    duration = 1.5 if is_sfx else 120.0
 
-        elif is_trans:
-            trans_name = asset_d.get("name", "Chuyển cảnh")
-            pid = asset_d.get("id", trans_name)
-            dur = float(asset_d.get("duration", 0.8) or 0.8)
-            success = False
-            try:
-                from src.core.transition_preset import TransitionMacroGenerator
-                TransitionMacroGenerator.install_transitions_to_davinci_resolve()
-                from src.core.resolve_bridge import insert_transition_at_playhead
-                item = insert_transition_at_playhead(style=pid, duration_sec=dur, track_index=2)
-                success = item is not None
-            except Exception as e:
-                logger.error(f"Lỗi khi chèn transition vào DaVinci: {e}")
-                success = False
+                vol_offset = -18.0 if is_bgm else -12.0
+                extra_params["volume_offset"] = vol_offset
 
-            if success:
-                self._show_toast(f"✅ Đã chèn chuyển cảnh “{trans_name}” tại Playhead (V2)")
-            else:
-                self._show_toast(f"✨ “{trans_name}” đã sẵn sàng trong Effects > Video Transitions")
+                # Audio default luôn là auto và preferred_track = None
+                mode = "auto"
+                preferred_track = None
 
-        elif is_sfx or is_bgm:
-            real_file_path = asset_d.get("file_path", "")
-            pid = asset_d.get("id", "whoosh" if is_sfx else "bgm")
-            if real_file_path and os.path.isfile(real_file_path):
-                audio_file = real_file_path
-            else:
-                clean_id = pid.replace("sfx_", "").replace("bgm_", "")
-                audio_file = os.path.join("assets", "sfx", f"{clean_id}.wav")
-                if not os.path.exists(audio_file):
-                    audio_file = os.path.join("assets", "sfx", f"{pid}.wav")
-            dur = float(asset_d.get("duration", 1.5 if is_sfx else 120.0) or (1.5 if is_sfx else 120.0))
-            target_track = 4 if is_bgm else 2
-            vol_offset = -18.0 if is_bgm else -12.0
-            success = False
-            if resolve_auto and hasattr(resolve_auto, "insert_sfx_to_track"):
-                try:
-                    success = bool(resolve_auto.insert_sfx_to_track(
-                        sfx_path=os.path.abspath(audio_file) if os.path.exists(audio_file) else audio_file,
-                        target_track=target_track,
-                        volume_offset_db=vol_offset
-                    ))
-                except Exception as e:
-                    logger.error(f"Lỗi khi chèn SFX vào DaVinci: {e}")
-                    success = False
-            self.insert_sfx_requested.emit(audio_file, target_track, vol_offset)
-            track_name = "A4/A5" if is_bgm else "A2"
-            if success:
-                self._show_toast(f"✅ Đã chèn âm thanh “{asset_d.get('name', pid)}” tại Playhead ({track_name})")
-            else:
-                self._show_toast(f"❌ Chưa thể chèn âm thanh vào DaVinci. Hãy kiểm tra DaVinci đã mở Timeline chưa.")
+                if hasattr(self, "combo_target_track") and self.combo_target_track:
+                    cdata = self.combo_target_track.currentData()
+                    if isinstance(cdata, dict):
+                        mode = cdata.get("mode", "auto")
+                        preferred_track = cdata.get("track", None)
+                    elif cdata == "auto":
+                        mode = "auto"
+                        preferred_track = None
+                    elif cdata == "new_track":
+                        mode = "new_track"
+                        preferred_track = None
+                    elif isinstance(cdata, int):
+                        mode = "timeline_track"
+                        preferred_track = cdata
+                    else:
+                        track_text = self.combo_target_track.currentText().strip()
+                        # Hỗ trợ cả nhãn tiếng Việt mới, nhãn legacy và explicit choices:
+                        if any(k in track_text for k in ("Tự động", "Auto", "A2 - SFX", "A4/A5 - BGM", "Track 4/5")):
+                            mode = "auto"
+                            preferred_track = None
+                        elif "New" in track_text or "Mới" in track_text:
+                            mode = "new_track"
+                            preferred_track = None
+                        elif "A" in track_text:
+                            import re
+                            digits = re.findall(r"\d+", track_text)
+                            if digits:
+                                try:
+                                    preferred_track = int(digits[0])
+                                    mode = "timeline_track"
+                                except Exception:
+                                    mode = "auto"
+                                    preferred_track = None
 
-        elif is_lut:
-            lut_name = asset_d.get("name", "")
-            pid = asset_d.get("id", "")
-            real_file_path = asset_d.get("file_path", "")
-            if real_file_path and os.path.isfile(real_file_path):
-                lut_file = real_file_path
-            else:
-                lut_file = os.path.join("assets", "luts", f"ResolveFlow_{pid}.cube")
-            lut_res = None
-            if resolve_auto and hasattr(resolve_auto, "apply_look_lut"):
-                try:
-                    lut_res = resolve_auto.apply_look_lut(lut_path=os.path.abspath(lut_file) if os.path.exists(lut_file) else lut_file, scope="timeline")
-                except Exception as e:
-                    logger.error(f"Lỗi khi áp LUT vào DaVinci: {e}")
-            self.apply_lut_requested.emit(pid)
-            if lut_res and lut_res.get("applied", 0) > 0:
-                self._show_toast(f"✅ Đã áp LUT “{lut_name}” lên Timeline ({lut_res['applied']} mục)")
-            elif lut_res and lut_res.get("skipped", 0) > 0:
-                self._show_toast(f"ℹ️ LUT “{lut_name}” đã có sẵn trên Timeline")
-            else:
-                self._show_toast(f"❌ Chưa thể áp LUT “{lut_name}”. Hãy kiểm tra DaVinci đã mở Timeline chưa.")
+            elif is_lut:
+                if hasattr(self, "combo_target_track") and self.combo_target_track:
+                    cdata = self.combo_target_track.currentData()
+                    if isinstance(cdata, dict) and "track" in cdata:
+                        extra_params["track"] = cdata["track"]
+                    else:
+                        track_text = self.combo_target_track.currentText().strip()
+                        if "V" in track_text:
+                            import re
+                            digits = re.findall(r"\d+", track_text)
+                            if digits:
+                                try:
+                                    extra_params["track"] = int(digits[0])
+                                except Exception:
+                                    pass
 
-        elif is_text:
-            text = self.txt_single_title.text().strip() or "ResolveFlow Title"
-            preset_id = asset_d.get("id", "karaoke_pop")
-            dur = float(self.slide_title_dur.value()) / 10.0 if hasattr(self, 'slide_title_dur') and self.slide_title_dur.value() > 0 else 4.0
-            font_name = self.combo_font.currentText() if hasattr(self, 'combo_font') else asset_d.get("font", "Arial")
-            font_size = self.slide_font_size.value() if hasattr(self, 'slide_font_size') else asset_d.get("size", 48)
-            stroke_width = (float(self.slide_stroke_width.value()) / 100.0) if hasattr(self, 'slide_stroke_width') else asset_d.get("outline_width", 0.15)
-            
+            # Gửi duy nhất 1 lần qua InsertService
+            res = svc.insert(
+                payload,
+                mode=mode,
+                duration=duration,
+                preferred_track=preferred_track,
+                extra_params=extra_params,
+            )
+
+            # Tuyệt đối KHÔNG emit insert_sfx_requested hay apply_lut_requested (chống double dispatch)
+            if res and res.ok:
+                msg = res.message
+                if not msg:
+                    track_info = f" ({res.track})" if res.track else ""
+                    msg = f"Đã chèn “{asset_name}” tại Playhead{track_info}"
+                self._show_toast(f"✅ {msg}")
+                if asset_id:
+                    RecentManager.add(asset_id)
+            else:
+                err = res.error if res and res.error else "Chưa thể chèn tài nguyên"
+                if "chưa thay đổi" in err or "đã có LUT" in err:
+                    self._show_toast(f"ℹ️ {err}")
+                else:
+                    self._show_toast(f"❌ {err}")
+            return
+
+        # 2. Nhánh Text / Title Presets qua InsertService (G04-04C11-I)
+        if is_text:
+            # Filebacked .setting macro: Truthful guidance, 0 job, 0 carrier, 0 Recent
+            if ext == ".setting" or fp.endswith(".setting") or getattr(self.selected_asset, "template_type", "") == "macro" or asset_d.get("template_type") == "macro":
+                self._show_toast("ℹ️ Hiệu ứng macro Fusion (.setting) chưa hỗ trợ chèn tự động lên Edit Timeline; vui lòng bấm 'Sao chép mã Fusion' để sao chép node hoặc dùng phím tắt vào Fusion Page.")
+                return
+
+            # Chặn duplicate click khi đang có tác vụ in-flight
+            if getattr(self, "_in_flight_requests", None):
+                self._show_toast("⚠️ Đang thực hiện tác vụ chèn, vui lòng đợi...")
+                return
+
+            svc = self._get_insert_service()
+            if not svc:
+                self._show_toast("❌ Dịch vụ chèn không sẵn sàng. Hãy khởi động lại ứng dụng.")
+                return
+
+            sample_text = self.txt_single_title.text().strip() if hasattr(self, "txt_single_title") else ""
+            if not sample_text:
+                sample_text = asset_d.get("name", "ResolveFlow Title")
+
+            font_name = self.combo_font.currentText() if hasattr(self, "combo_font") else asset_d.get("font", "Arial")
+            font_size = int(self.slide_font_size.value()) if hasattr(self, "slide_font_size") else int(asset_d.get("size", 48))
+
             weight = "bold"
             if hasattr(self, "weight_buttons"):
                 for k, b in self.weight_buttons.items():
                     if b.isChecked():
-                        weight = k
+                        weight = "extra_bold" if k in ("black", "extra_bold", "extrabold") else ("normal" if k in ("regular", "light", "normal") else "bold")
                         break
 
             animation = "pop"
             if hasattr(self, "anim_chips"):
                 for k, b in self.anim_chips.items():
                     if b.isChecked():
-                        animation = k
+                        animation = "box_highlight" if k == "box" else (k if k in ("pop", "bounce", "typewriter", "slide", "box_highlight", "glow", "static", "fade_up", "fade") else "pop")
                         break
 
             timing_curve = "spring"
             if hasattr(self, "curve_chips"):
                 for k, b in self.curve_chips.items():
                     if b.isChecked():
-                        timing_curve = k
+                        timing_curve = "ease-in-out" if k in ("ease_in_out", "ease-in-out", "smooth") else (k if k in ("spring", "linear") else "spring")
                         break
 
-            color_hex = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, 'swatch_colors') else asset_d.get("standard_color", "#FFFFFF")
-            highlight_hex = self.swatch_colors.get("highlight", "#FACC15") if hasattr(self, 'swatch_colors') else asset_d.get("highlight_color", "#FACC15")
-            stroke_hex = self.swatch_colors.get("stroke", "#000000") if hasattr(self, 'swatch_colors') else asset_d.get("outline_color", "#000000")
-            box_glow_hex = self.swatch_colors.get("box_glow", "#EF4444") if hasattr(self, 'swatch_colors') else asset_d.get("box_color", "#EF4444")
+            text_col = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else asset_d.get("standard_color", "#FFFFFF")
+            hl_col = self.swatch_colors.get("highlight", "#FACC15") if hasattr(self, "swatch_colors") else asset_d.get("highlight_color", "#FACC15")
+            stroke_col = self.swatch_colors.get("stroke", "#000000") if hasattr(self, "swatch_colors") else asset_d.get("outline_color", "#000000")
+            box_glow_col = self.swatch_colors.get("box_glow", "#EF4444") if hasattr(self, "swatch_colors") else asset_d.get("box_color", "#EF4444")
 
-            success = False
-            if resolve_auto and hasattr(resolve_auto, "insert_title_at_playhead"):
+            stroke_width = (float(self.slide_stroke_width.value()) / 100.0) if hasattr(self, "slide_stroke_width") else float(asset_d.get("outline_width", 0.15))
+            dur = float(self.slide_title_dur.value()) / 10.0 if hasattr(self, "slide_title_dur") and self.slide_title_dur.value() > 0 else 4.0
+
+            preferred_track = 2
+            if hasattr(self, "combo_target_track") and self.combo_target_track:
+                cdata = self.combo_target_track.currentData()
+                if isinstance(cdata, int):
+                    preferred_track = cdata
+                elif isinstance(cdata, dict) and "track" in cdata:
+                    preferred_track = cdata["track"]
+                else:
+                    track_text = self.combo_target_track.currentText().strip()
+                    if "V" in track_text:
+                        import re
+                        digits = re.findall(r"\d+", track_text)
+                        if digits:
+                            try:
+                                preferred_track = int(digits[0])
+                            except Exception:
+                                pass
+
+            extra_params = {
+                "text": sample_text,
+                "font": font_name,
+                "size": font_size,
+                "weight": weight,
+                "animation": animation,
+                "timing_curve": timing_curve,
+                "color": text_col,
+                "highlight_color": hl_col,
+                "stroke_color": stroke_col,
+                "stroke_width": stroke_width,
+                "box_glow_hex": box_glow_col,
+                "duration": dur,
+                "preferred_track": preferred_track,
+                "explicit_timeline": True,
+            }
+
+            import uuid
+            tracked_asset_id = str(asset_d.get("id") or "")
+            request_id = f"req_{tracked_asset_id}_{uuid.uuid4().hex[:8]}"
+            if not hasattr(self, "_in_flight_requests"):
+                self._in_flight_requests = {}
+            self._in_flight_requests[request_id] = {
+                "asset_id": tracked_asset_id,
+                "start_time": time.time(),
+            }
+
+            self.btn_insert_title_playhead.setEnabled(False)
+            self.btn_insert_title_playhead.setText("⏳ Đang chèn...")
+
+            if not hasattr(self, "_insert_observer_timer") or not self._insert_observer_timer:
+                self._insert_observer_timer = QTimer(self)
+                self._insert_observer_timer.setSingleShot(True)
+                self._insert_observer_timer.timeout.connect(self._on_insert_observer_timeout)
+            self._insert_observer_timer.start(15000)
+
+            def _on_insert_finished(res: InsertResult):
                 try:
-                    success = bool(resolve_auto.insert_title_at_playhead(
-                        text=text,
-                        preset_id=preset_id,
-                        duration_sec=dur,
-                        font_name=font_name,
-                        font_size=font_size,
-                        color_hex=color_hex,
-                        highlight_hex=highlight_hex,
-                        stroke_hex=stroke_hex,
-                        stroke_width=stroke_width,
-                        box_glow_hex=box_glow_hex,
-                        weight=weight,
-                        animation=animation,
-                        timing_curve=timing_curve
-                    ))
-                except Exception as e:
-                    logger.error(f"Lỗi khi chèn title vào DaVinci: {e}")
-                    success = False
-            self.insert_title_requested.emit(text, preset_id, dur)
-            if success:
-                self._show_toast(f"✅ Đã chèn “{asset_d.get('name', text)}” tại Playhead (V2)")
-            else:
-                self._show_toast(f"❌ Chưa thể chèn vào DaVinci. Hãy kiểm tra DaVinci đã mở Timeline chưa.")
+                    if not hasattr(self, "btn_insert_title_playhead") or self.btn_insert_title_playhead is None:
+                        return
+                except Exception:
+                    return
+
+                if not hasattr(self, "_in_flight_requests") or request_id not in self._in_flight_requests:
+                    return
+                self._in_flight_requests.pop(request_id, None)
+
+                if hasattr(self, "_insert_observer_timer") and self._insert_observer_timer:
+                    self._insert_observer_timer.stop()
+
+                self.btn_insert_title_playhead.setEnabled(True)
+                self.btn_insert_title_playhead.setText("🚀 Chèn Text cơ bản")
+
+                if res and res.ok:
+                    msg = res.message or f"Đã chèn “{sample_text}” tại Playhead"
+                    self._show_toast(f"✅ {msg} (Lưu ý: Timeline áp dụng kiểu cơ bản; dùng 'Sao chép mã Fusion' để có đầy đủ hiệu ứng viền/curve)")
+                    if tracked_asset_id:
+                        RecentManager.add(tracked_asset_id)
+                else:
+                    err = res.error if res and res.error else "Chưa thể chèn Text vào DaVinci Resolve."
+                    self._show_toast(f"❌ {err}")
+
+            svc.insert_async(
+                self.selected_asset,
+                mode="auto",
+                duration=dur,
+                preferred_track=preferred_track,
+                callback=_on_insert_finished,
+                extra_params=extra_params,
+            )
+            return
+
         else:
             self._show_toast(f"Đã chèn “{asset_d.get('name', 'Asset')}” vào Timeline")
+            # Ghi nhận vào mục Gần đây (Recent)
+            RecentManager.add(asset_d.get("id", ""))
 
-        # Ghi nhận vào mục Gần đây (Recent)
-        RecentManager.add(asset_d.get("id", ""))
+    def _on_insert_observer_timeout(self):
+        """Observer timeout: cảnh báo người dùng thao tác đang xử lý chậm; tuyệt đối không mở khóa hay rerun."""
+        self._show_toast("⚠️ Thao tác chèn đang mất nhiều thời gian hơn dự kiến (15s). DaVinci Resolve có thể đang xử lý; vui lòng chờ phản hồi, không bấm chèn lại để tránh trùng lặp.")
+
+    def _build_custom_text_preset(self, target: Any) -> Tuple[Optional[TextStylePreset], str]:
+        """
+        Xây dựng bản sao tùy biến (customized clone) của TextStylePreset từ các điều khiển Inspector UI.
+        Base preset tuyệt đối bất biến (immutable). Các trường dữ liệu được thẩm định chặt chẽ
+        trước khi khởi tạo preset mới.
+        """
+        base_preset = None
+        if isinstance(target, TextStylePreset):
+            base_preset = target
+        elif isinstance(getattr(target, "native_preset", None), TextStylePreset):
+            base_preset = target.native_preset
+        elif isinstance(getattr(target, "_raw_obj", None), TextStylePreset):
+            base_preset = target._raw_obj
+        elif isinstance(target, Mapping):
+            if isinstance(target.get("native_preset"), TextStylePreset):
+                base_preset = target["native_preset"]
+            elif isinstance(target.get("_raw_obj"), TextStylePreset):
+                base_preset = target["_raw_obj"]
+
+        sample_txt = self.txt_single_title.text().strip() if hasattr(self, "txt_single_title") else ""
+        if not sample_txt:
+            sample_txt = getattr(target, "name", "ResolveFlow Title") if not isinstance(target, Mapping) else str(target.get("name") or "ResolveFlow Title")
+
+        asset_id = getattr(target, "id", "asset") if not isinstance(target, Mapping) else str(target.get("id") or "asset")
+        asset_name = getattr(target, "name", "Title") if not isinstance(target, Mapping) else str(target.get("name") or "Title")
+
+        font_name = self.combo_font.currentText() if hasattr(self, "combo_font") else (getattr(base_preset, "font", "Arial") if base_preset else "Arial")
+        font_size = self.slide_font_size.value() if hasattr(self, "slide_font_size") else (getattr(base_preset, "size", 48) if base_preset else 48)
+        stroke_width = (float(self.slide_stroke_width.value()) / 100.0) if hasattr(self, "slide_stroke_width") else (getattr(base_preset, "outline_width", 0.15) if base_preset else 0.15)
+
+        weight = "bold"
+        if hasattr(self, "weight_buttons"):
+            for k, b in self.weight_buttons.items():
+                if b.isChecked():
+                    weight = "extra_bold" if k in ("black", "extra_bold", "extrabold") else ("normal" if k in ("regular", "light", "normal") else "bold")
+                    break
+        elif base_preset:
+            weight = getattr(base_preset, "weight", "bold")
+
+        animation = "pop"
+        if hasattr(self, "anim_chips"):
+            for k, b in self.anim_chips.items():
+                if b.isChecked():
+                    animation = "box_highlight" if k == "box" else (k if k in ("pop", "bounce", "typewriter", "slide", "box_highlight", "glow", "static", "fade_up", "fade") else "pop")
+                    break
+        elif base_preset:
+            animation = getattr(base_preset, "animation", "pop")
+
+        timing_curve = "spring"
+        if hasattr(self, "curve_chips"):
+            for k, b in self.curve_chips.items():
+                if b.isChecked():
+                    timing_curve = "ease-in-out" if k in ("ease_in_out", "ease-in-out", "smooth") else (k if k in ("spring", "linear") else "spring")
+                    break
+        elif base_preset:
+            timing_curve = getattr(base_preset, "timing_curve", "spring")
+
+        text_col = self.swatch_colors.get("text", getattr(base_preset, "standard_color", "#FFFFFF")) if hasattr(self, "swatch_colors") else (getattr(base_preset, "standard_color", "#FFFFFF") if base_preset else "#FFFFFF")
+        hl_col = self.swatch_colors.get("highlight", getattr(base_preset, "highlight_color", "#FACC15")) if hasattr(self, "swatch_colors") else (getattr(base_preset, "highlight_color", "#FACC15") if base_preset else "#FACC15")
+        out_col = self.swatch_colors.get("stroke", getattr(base_preset, "outline_color", "#000000")) if hasattr(self, "swatch_colors") else (getattr(base_preset, "outline_color", "#000000") if base_preset else "#000000")
+        box_glow_col = self.swatch_colors.get("box_glow", getattr(base_preset, "box_color", "#EF4444")) if hasattr(self, "swatch_colors") else (getattr(base_preset, "box_color", "#EF4444") if base_preset else "#EF4444")
+
+        update_data = {
+            "font": font_name,
+            "size": int(font_size),
+            "weight": weight,
+            "outline_width": float(stroke_width),
+            "animation": animation,
+            "timing_curve": timing_curve,
+            "standard_color": text_col,
+            "highlight_color": hl_col,
+            "outline_color": out_col,
+            "box_color": box_glow_col,
+            "glow_color": box_glow_col,
+        }
+
+        try:
+            if base_preset is not None:
+                from src.core.text_preset import pydantic_dump
+                base_dict = dict(pydantic_dump(base_preset))
+                base_dict.update(update_data)
+                custom_preset = TextStylePreset(**base_dict)
+            else:
+                custom_preset = TextStylePreset(id=asset_id, name=asset_name, **update_data)
+            return custom_preset, sample_txt
+        except Exception as e:
+            logger.warning("Lỗi tạo tùy biến TextStylePreset: %s", e)
+            return None, sample_txt
 
     def _create_drag_mime_data(self, asset: Optional[Any] = None) -> QMimeData:
         target = asset if asset is not None else self.selected_asset
@@ -6736,264 +8079,100 @@ class TabAssets(QWidget):
         if not target:
             return mime_data
 
-        RecentManager.add(getattr(target, "id", ""))
+        try:
+            # 1. Kiểm tra xem target có phải là procedural text preset không
+            is_procedural_text = False
+            if isinstance(target, TextStylePreset) or isinstance(getattr(target, "native_preset", None), TextStylePreset) or isinstance(getattr(target, "_raw_obj", None), TextStylePreset):
+                is_procedural_text = True
+            elif isinstance(target, Mapping):
+                if isinstance(target.get("native_preset"), TextStylePreset) or isinstance(target.get("_raw_obj"), TextStylePreset):
+                    is_procedural_text = True
+                elif target.get("tab") == "text" and not target.get("file_path"):
+                    is_procedural_text = True
+            elif getattr(target, "tab", "") == "text" and not getattr(target, "file_path", ""):
+                is_procedural_text = True
 
-        file_path = getattr(target, "file_path", "")
-        if file_path and os.path.isfile(file_path):
-            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(file_path))])
-            return mime_data
+            # 2. Xử lý tùy biến Text nếu là procedural text
+            if is_procedural_text:
+                custom_preset, sample_txt = self._build_custom_text_preset(target)
+                from src.ui.lux.library.asset_grid import create_asset_mime_data
+                return create_asset_mime_data(target, sample_text=sample_txt, custom_preset=custom_preset)
 
-        temp_dir = tempfile.gettempdir()
-        sample_txt = self.txt_single_title.text().strip() or "ResolveFlow Title"
-        asset_id = getattr(target, "id", "asset")
-        tab_type = getattr(target, "tab", "")
+            # 3. Với các tài nguyên file-backed hoặc chuyển cảnh native, ủy quyền toàn bộ cho helper đã bảo vệ
+            from src.ui.lux.library.asset_grid import create_asset_mime_data
+            return create_asset_mime_data(target, sample_text="")
 
-        if isinstance(target, TextStylePreset) or tab_type == "text":
-            temp_setting = os.path.join(temp_dir, f"ResolveFlow_{asset_id}_{uuid.uuid4().hex[:6]}.setting")
-            
-            font_name = self.combo_font.currentText() if hasattr(self, "combo_font") else getattr(target, "font", "Arial")
-            font_size = self.slide_font_size.value() if hasattr(self, "slide_font_size") else getattr(target, "size", 48)
-            stroke_width = (float(self.slide_stroke_width.value()) / 100.0) if hasattr(self, "slide_stroke_width") else getattr(target, "outline_width", 0.15)
-            
-            weight = "bold"
-            if hasattr(self, "weight_buttons"):
-                for k, b in self.weight_buttons.items():
-                    if b.isChecked():
-                        weight = "extra_bold" if k == "black" else ("normal" if k == "regular" else "bold")
-                        break
+        except Exception as e:
+            logger.warning("Lỗi tạo MIME kéo thả Inspector: %s", e)
+            return QMimeData()
 
-            animation = "pop"
-            if hasattr(self, "anim_chips"):
-                for k, b in self.anim_chips.items():
-                    if b.isChecked():
-                        animation = "box_highlight" if k == "box" else k
-                        break
-
-            timing_curve = "spring"
-            if hasattr(self, "curve_chips"):
-                for k, b in self.curve_chips.items():
-                    if b.isChecked():
-                        timing_curve = k
-                        break
-
-            text_col = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else getattr(target, "standard_color", "#FFFFFF")
-            hl_col = self.swatch_colors.get("highlight", "#FACC15") if hasattr(self, "swatch_colors") else getattr(target, "highlight_color", "#FACC15")
-            out_col = self.swatch_colors.get("stroke", "#000000") if hasattr(self, "swatch_colors") else getattr(target, "outline_color", "#000000")
-            box_glow_col = self.swatch_colors.get("box_glow", "#EF4444") if hasattr(self, "swatch_colors") else getattr(target, "box_color", "#EF4444")
-
-            customized_preset = TextStylePreset(
-                id=asset_id,
-                name=getattr(target, "name", "Text Title"),
-                font=font_name,
-                size=font_size,
-                weight=weight,
-                standard_color=text_col,
-                highlight_color=hl_col,
-                outline_color=out_col,
-                outline_width=stroke_width,
-                box_color=box_glow_col,
-                glow_color=box_glow_col,
-                animation=animation,
-                timing_curve=timing_curve
-            )
-            FusionSettingGenerator.export_setting_file(customized_preset, temp_setting, sample_text=sample_txt)
-            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(temp_setting))])
-
-        elif isinstance(target, TransitionStylePreset) or tab_type == "trans":
-            temp_setting = os.path.join(temp_dir, f"ResolveFlow_{asset_id}_{uuid.uuid4().hex[:6]}.setting")
-            if isinstance(target, TransitionStylePreset):
-                TransitionMacroGenerator.export_setting_file(target, temp_setting)
-            else:
-                trans_obj = next((t for t in self.all_transitions if getattr(t, "id", "") == asset_id), None)
-                if isinstance(trans_obj, TransitionStylePreset):
-                    TransitionMacroGenerator.export_setting_file(trans_obj, temp_setting)
-                else:
-                    tmp_t = TransitionStylePreset(
-                        id=asset_id,
-                        name=getattr(target, "name", "Transition"),
-                        category="transform",
-                        duration_frames=getattr(target, "frames", 20)
-                    )
-                    TransitionMacroGenerator.export_setting_file(tmp_t, temp_setting)
-            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(temp_setting))])
-
-        elif tab_type == "sfx" or "sfx" in asset_id:
-            clean_id = asset_id.replace("sfx_", "")
-            candidate_paths = [
-                str(PosixPathAdapter.get_asset_path("sfx", f"{clean_id}.wav")),
-                str(PosixPathAdapter.get_asset_path("sfx", f"{asset_id}.wav")),
-                getattr(target, "file_path", "")
-            ]
-            sfx_file = None
-            for p in candidate_paths:
-                if p and os.path.exists(p):
-                    sfx_file = os.path.abspath(p)
-                    break
-            if not sfx_file:
-                import wave
-                sfx_file = os.path.join(temp_dir, f"ResolveFlow_{clean_id}.wav")
-                if not os.path.exists(sfx_file):
-                    try:
-                        with wave.open(sfx_file, "wb") as wf:
-                            wf.setnchannels(1)
-                            wf.setsampwidth(2)
-                            wf.setframerate(44100)
-                            wf.writeframes(b"\x00\x00" * 4410)
-                    except Exception:
-                        with open(sfx_file, "wb") as f:
-                            f.write(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00D\xac\x00\x00\x88X\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
-            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(sfx_file))])
-
-        elif tab_type == "lut":
-            candidate_paths = [
-                str(PosixPathAdapter.get_asset_path("luts", f"ResolveFlow_{asset_id}.cube")),
-                str(PosixPathAdapter.get_asset_path("luts", f"{asset_id}.cube")),
-                getattr(target, "file_path", "")
-            ]
-            lut_file = None
-            for p in candidate_paths:
-                if p and os.path.exists(p):
-                    lut_file = os.path.abspath(p)
-                    break
-            if not lut_file:
-                lut_file = os.path.join(temp_dir, f"ResolveFlow_{asset_id}.cube")
-                if not os.path.exists(lut_file):
-                    with open(lut_file, "w", encoding="utf-8") as f:
-                        f.write(f'TITLE "ResolveFlow_{asset_id}"\nLUT_3D_SIZE 2\n0.0 0.0 0.0\n1.0 0.0 0.0\n0.0 1.0 0.0\n1.0 1.0 0.0\n0.0 0.0 1.0\n1.0 0.0 1.0\n0.0 1.0 1.0\n1.0 1.0 1.0\n')
-            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(lut_file))])
-
-        elif tab_type in ("meme", "overlay"):
-            dir_name = "memes" if tab_type == "meme" else getattr(target, "category", "cinematic")
-            candidate_paths = [
-                str(PosixPathAdapter.get_asset_path("broll_memes", dir_name, f"{asset_id}.mp4")),
-                str(PosixPathAdapter.get_asset_path("broll_memes", f"{asset_id}.mp4")),
-                getattr(target, "file_path", "")
-            ]
-            vid_file = None
-            for p in candidate_paths:
-                if p and os.path.exists(p):
-                    vid_file = os.path.abspath(p)
-                    break
-            if not vid_file:
-                vid_file = os.path.join(temp_dir, f"ResolveFlow_{asset_id}.mp4")
-                if not os.path.exists(vid_file):
-                    with open(vid_file, "wb") as f:
-                        f.write(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00isommp42")
-            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(vid_file))])
-
-        elif isinstance(target, LocalAsset):
-            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(target.file_path))])
-            mime_data.setText(os.path.abspath(target.file_path))
-
-        elif tab_type == "icon":
-            badge = getattr(target, "badge_icon", "✨")
-            color_hex = getattr(target, "color_hex", "#facc15")
-            png_path = os.path.join(temp_dir, f"ChunDVC_Sticker_{asset_id}.png")
-            pixmap = QPixmap(512, 512)
-            pixmap.fill(Qt.transparent)
-            painter = QPainter(pixmap)
-            painter.setRenderHint(QPainter.Antialiasing)
-            painter.setRenderHint(QPainter.TextAntialiasing)
-            font = QFont("Segoe UI Emoji", 260)
-            painter.setFont(font)
-            painter.setPen(QColor(color_hex))
-            painter.drawText(QRectF(0, 0, 512, 512), Qt.AlignCenter, badge)
-            painter.end()
-            pixmap.save(png_path, "PNG")
-            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(png_path))])
-            mime_data.setText(os.path.abspath(png_path))
-
-        else:
-            temp_path = os.path.join(temp_dir, f"ResolveFlow_{asset_id}.txt")
-            with open(temp_path, "w", encoding="utf-8") as f:
-                f.write(getattr(target, "name", "ResolveFlow Asset"))
-            mime_data.setUrls([QUrl.fromLocalFile(os.path.abspath(temp_path))])
-
-        return mime_data
-
-    def _get_current_fusion_macro_code(self) -> str:
-        target = self.selected_asset
+    def _get_current_fusion_macro_code(self, asset: Optional[Any] = None) -> str:
+        target = asset if asset is not None else self.selected_asset
         if not target:
+            self._last_fusion_export_error = "Chưa chọn tài nguyên."
             return ""
 
-        sample_txt = self.txt_single_title.text().strip() or "ResolveFlow Title"
-        asset_id = getattr(target, "id", "asset")
-        tab_type = getattr(target, "tab", "")
+        from src.ui.lux.library.asset_grid import _normalize_asset_payload
+        payload = _normalize_asset_payload(target)
 
-        if isinstance(target, TextStylePreset) or tab_type == "text":
-            font_name = self.combo_font.currentText() if hasattr(self, "combo_font") else getattr(target, "font", "Arial")
-            font_size = self.slide_font_size.value() if hasattr(self, "slide_font_size") else getattr(target, "size", 48)
-            stroke_width = (float(self.slide_stroke_width.value()) / 100.0) if hasattr(self, "slide_stroke_width") else getattr(target, "outline_width", 0.15)
-            
-            weight = "bold"
-            if hasattr(self, "weight_buttons"):
-                for k, b in self.weight_buttons.items():
-                    if b.isChecked():
-                        weight = "extra_bold" if k == "black" else ("normal" if k == "regular" else "bold")
-                        break
+        from src.core.action_guard import check_action_availability
+        guard_res = check_action_availability(
+            payload,
+            intent="fusion_export",
+            bundled_root=getattr(self, "_bundled_root", None),
+        )
 
-            animation = "pop"
-            if hasattr(self, "anim_chips"):
-                for k, b in self.anim_chips.items():
-                    if b.isChecked():
-                        animation = "box_highlight" if k == "box" else k
-                        break
+        if not guard_res.allowed:
+            self._last_fusion_export_error = guard_res.reason or "Không thể xuất mã Fusion cho tài nguyên này."
+            return ""
 
-            timing_curve = "spring"
-            if hasattr(self, "curve_chips"):
-                for k, b in self.curve_chips.items():
-                    if b.isChecked():
-                        timing_curve = k
-                        break
+        if guard_res.result_code == "OK_PROCEDURAL_FUSION_EXPORT":
+            custom_preset, sample_txt = self._build_custom_text_preset(target)
+            if custom_preset is None:
+                self._last_fusion_export_error = "Dữ liệu tùy biến kiểu chữ không hợp lệ."
+                return ""
+            from src.core.text_preset import FusionSettingGenerator
+            try:
+                return FusionSettingGenerator.generate_setting_content(custom_preset, sample_text=sample_txt)
+            except Exception as e:
+                logger.error("Lỗi sinh nội dung Fusion Setting từ procedural preset: %s", e)
+                self._last_fusion_export_error = f"Lỗi sinh mã Fusion: {e}"
+                return ""
 
-            text_col = self.swatch_colors.get("text", "#FFFFFF") if hasattr(self, "swatch_colors") else getattr(target, "standard_color", "#FFFFFF")
-            hl_col = self.swatch_colors.get("highlight", "#FACC15") if hasattr(self, "swatch_colors") else getattr(target, "highlight_color", "#FACC15")
-            out_col = self.swatch_colors.get("stroke", "#000000") if hasattr(self, "swatch_colors") else getattr(target, "outline_color", "#000000")
-            box_glow_col = self.swatch_colors.get("box_glow", "#EF4444") if hasattr(self, "swatch_colors") else getattr(target, "box_color", "#EF4444")
+        elif guard_res.result_code == "OK_FILEBACKED_FUSION_EXPORT":
+            resolved_path = guard_res.resolved_path
+            if not resolved_path:
+                self._last_fusion_export_error = "Đường dẫn file .setting không hợp lệ."
+                return ""
 
-            customized_preset = TextStylePreset(
-                id=asset_id,
-                name=getattr(target, "name", "Title"),
-                font=font_name,
-                size=font_size,
-                weight=weight,
-                standard_color=text_col,
-                highlight_color=hl_col,
-                outline_color=out_col,
-                outline_width=stroke_width,
-                box_color=box_glow_col,
-                glow_color=box_glow_col,
-                animation=animation,
-                timing_curve=timing_curve
-            )
-            return FusionSettingGenerator.generate_setting_content(customized_preset, sample_text=sample_txt)
-        elif isinstance(target, TransitionStylePreset):
-            return TransitionMacroGenerator.generate_setting_content(target)
-        elif tab_type == "trans":
-            trans_obj = next((t for t in self.all_transitions if getattr(t, "id", "") == asset_id), None)
-            if isinstance(trans_obj, TransitionStylePreset):
-                return TransitionMacroGenerator.generate_setting_content(trans_obj)
-            tmp_t = TransitionStylePreset(
-                id=asset_id,
-                name=getattr(target, "name", "Transition"),
-                category="transform",
-                duration_frames=getattr(target, "frames", 20)
-            )
-            return TransitionMacroGenerator.generate_setting_content(tmp_t)
-        else:
-            name = getattr(target, "name", "Asset")
-            return f"""{{
-    Tools = ordered() {{
-        RF_{asset_id} = TextPlus {{
-            Inputs = {{
-                StyledText = Input {{ Value = "{name}", }},
-                Font = Input {{ Value = "Arial", }},
-                Size = Input {{ Value = 0.08, }},
-            }},
-            ViewInfo = OperatorInfo {{ Pos = {{ 220, 36.3 }} }},
-        }}
-    }}
-}}"""
+            import stat
+            try:
+                with open(resolved_path, "rb") as f:
+                    st = os.fstat(f.fileno())
+                    if not stat.S_ISREG(st.st_mode):
+                        self._last_fusion_export_error = "File .setting không phải file thông thường."
+                        return ""
+                    data = f.read(MAX_FUSION_SETTING_BYTES + 1)
+                if len(data) > MAX_FUSION_SETTING_BYTES:
+                    self._last_fusion_export_error = f"File .setting vượt quá kích thước tối đa ({MAX_FUSION_SETTING_BYTES // (1024 * 1024)}MB)."
+                    return ""
+                if not data:
+                    self._last_fusion_export_error = "File .setting rỗng."
+                    return ""
+                text_content = data.decode("utf-8")
+                if not text_content.strip():
+                    self._last_fusion_export_error = "File .setting chỉ chứa khoảng trắng."
+                    return ""
+                return text_content
+            except UnicodeDecodeError as e:
+                self._last_fusion_export_error = f"File .setting không phải mã hóa UTF-8 hợp lệ: {e}"
+                return ""
+            except (OSError, IOError) as e:
+                self._last_fusion_export_error = f"Lỗi đọc file .setting: {e}"
+                return ""
+
+        self._last_fusion_export_error = "Loại tài nguyên không hỗ trợ xuất mã Fusion."
+        return ""
 
     def _install_to_fusion(self) -> Tuple[int, str]:
         from src.core.asset_manager import AssetManager
@@ -7090,114 +8269,73 @@ class TabAssets(QWidget):
             self._show_toast(f"❌ Lỗi: {str(e)}")
 
     def _import_files_or_folders(self, paths: Optional[List[str]] = None):
-
         if not paths:
             files, _ = QFileDialog.getOpenFileNames(
                 self,
-                "Chọn tệp nhập kho (Title .setting, Meme/Overlay .mp4, SFX .wav, LUT .cube, Sticker .png)",
+                "Chọn tệp nhập kho (Title .setting, Meme/Overlay .mp4, SFX .wav, LUT .cube, Sticker .png, Pack .zip/.rfpack)",
                 "",
-                "Tất cả tài nguyên (*.setting *.mp4 *.mov *.wav *.mp3 *.cube *.png);;Fusion Setting (*.setting);;Video (*.mp4 *.mov);;Audio (*.wav *.mp3);;LUT (*.cube);;Sticker (*.png);;Tất cả tệp (*.*)"
+                "Tất cả tài nguyên (*.setting *.mp4 *.mov *.wav *.mp3 *.cube *.png *.zip *.rfpack);;Fusion Setting (*.setting);;Video (*.mp4 *.mov);;Audio (*.wav *.mp3);;LUT (*.cube);;Gói nén (*.zip *.rfpack);;Tất cả tệp (*.*)"
             )
             if not files:
                 return
             paths = files
 
-        from src.core.asset_manager import AssetManager
-        titles_dvc = str(AssetManager.get_fusion_template_dir("Titles"))
-        trans_dvc = str(AssetManager.get_fusion_template_dir("Transitions"))
-        lut_dvc = str(AssetManager.get_lut_install_dir())
+        if getattr(self, "_ingest_in_progress", False):
+            return
+        self._ingest_in_progress = True
 
-        import shutil
-        added_count = 0
-        sync_dvc_count = 0
+        from PySide6.QtWidgets import QDialog
+        from src.ui.widgets.pack_ingest_wizard import PackIngestWizard
 
-        # Thu thập toàn bộ tệp (hỗ trợ cả kéo thả thư mục)
-        all_file_paths = []
-        for p in paths:
-            if os.path.isdir(p):
-                for root, _, files in os.walk(p):
-                    for f in files:
-                        all_file_paths.append(os.path.join(root, f))
-            elif os.path.isfile(p):
-                all_file_paths.append(p)
+        committed_sources = []
+        committed_payloads = []
+        canceled = False
+        error_sources = []
 
-        indexer = AssetIndexer()
+        try:
+            for p in paths:
+                if canceled:
+                    break
+                if not os.path.exists(p):
+                    continue
 
-        for fp in all_file_paths:
-            ext = os.path.splitext(fp)[1].lower()
-            fname = os.path.basename(fp)
-
-            if ext == ".setting":
-                is_trans = False
                 try:
-                    with open(fp, "r", encoding="utf-8", errors="ignore") as f:
-                        c = f.read()
-                        if "Transition" in c or "CrossDissolve" in c or "fromClip" in c:
-                            is_trans = True
-                except Exception:
-                    pass
+                    dialog = PackIngestWizard(parent=self, source=str(p), auto_prepare=True)
+                    self._active_ingest_wizard = dialog
+                    committed = [False]
+                    def _on_committed(meta):
+                        committed[0] = True
+                        if isinstance(meta, dict):
+                            committed_payloads.append(meta)
+                    dialog.pack_committed.connect(_on_committed)
+                    res = dialog.exec()
+                    self._active_ingest_wizard = None
+                    if (committed[0] or dialog.is_pack_committed()) and (res == QDialog.DialogCode.Accepted or res == 1):
+                        committed_sources.append(p)
+                    else:
+                        canceled = True
+                        break
+                except Exception as exc:
+                    error_sources.append((p, str(exc)))
+                    break
 
-                target_dir = "assets/templates/transitions" if is_trans else "assets/templates/titles"
-                dvc_dir = trans_dvc if is_trans else titles_dvc
-                os.makedirs(target_dir, exist_ok=True)
-                os.makedirs(dvc_dir, exist_ok=True)
-
-                dest_local = os.path.join(target_dir, fname)
-                shutil.copy2(fp, dest_local)
-
-                dvc_name = fname if fname.startswith("ChunDVC_") else f"ChunDVC_{fname}"
-                dest_dvc = os.path.join(dvc_dir, dvc_name)
-                shutil.copy2(fp, dest_dvc)
-
-                added_count += 1
-                sync_dvc_count += 1
-
-            elif ext == ".cube":
-                lut_local_dir = PosixPathAdapter.get_asset_path("luts")
-                lut_local_dir.mkdir(parents=True, exist_ok=True)
-                os.makedirs(lut_dvc, exist_ok=True)
-
-                dest_local = str(lut_local_dir / fname)
-                shutil.copy2(fp, dest_local)
-
-                dest_dvc = os.path.join(lut_dvc, fname)
-                shutil.copy2(fp, dest_dvc)
-
-                added_count += 1
-                sync_dvc_count += 1
-
-            elif ext in (".wav", ".mp3"):
-                sfx_local_dir = PosixPathAdapter.get_asset_path("sfx")
-                sfx_local_dir.mkdir(parents=True, exist_ok=True)
-                dest_local = str(sfx_local_dir / fname)
-                shutil.copy2(fp, dest_local)
-                added_count += 1
-
-            elif ext in (".mp4", ".mov"):
-                lower_fp = fp.lower()
-                if self.current_rail_tab == "trans" or "trans" in lower_fp:
-                    target_dir = PosixPathAdapter.get_asset_path("templates", "transitions", "previews")
-                elif self.current_rail_tab == "overlay" or any(k in lower_fp for k in ["overlay", "light", "leak", "dust"]):
-                    target_dir = PosixPathAdapter.get_asset_path("broll_memes", "overlays")
+            if committed_sources:
+                self._rescan_assets()
+                unsynced = sum(1 for m in committed_payloads if m.get("snapshot_synced") is False)
+                unsynced_note = f" (⚠️ {unsynced} gói chưa đồng bộ bộ đệm offline)" if unsynced > 0 else ""
+                if error_sources:
+                    err_p, err_msg = error_sources[0]
+                    self._show_toast(f"ℹ️ Đã nhập {len(committed_sources)}/{len(paths)} nguồn{unsynced_note} (gói '{os.path.basename(err_p)}' lỗi: {err_msg}; đã dừng hàng đợi).")
+                elif canceled:
+                    self._show_toast(f"ℹ️ Đã nhập {len(committed_sources)}/{len(paths)} nguồn{unsynced_note} (đã dừng hàng đợi).")
                 else:
-                    target_dir = PosixPathAdapter.get_asset_path("broll_memes", "memes")
-                target_dir.mkdir(parents=True, exist_ok=True)
-                dest_local = str(target_dir / fname)
-                shutil.copy2(fp, dest_local)
-                # Tự động xuất thumbnail khung hình đầu bằng ffmpeg
-                indexer._find_thumbnail(Path(dest_local))
-                added_count += 1
-
-            elif ext == ".png":
-                target_dir = PosixPathAdapter.get_asset_path("broll_memes", "overlays")
-                target_dir.mkdir(parents=True, exist_ok=True)
-                dest_local = str(target_dir / fname)
-                shutil.copy2(fp, dest_local)
-                added_count += 1
-
-        self._rescan_assets()
-        msg = f"✅ Đã thêm {added_count} tệp vào Kho! (Tự động đồng bộ {sync_dvc_count} tệp sang DaVinci Resolve)"
-        self._show_toast(msg)
+                    self._show_toast(f"✅ Đã nhập thành công {len(committed_sources)} nguồn vào kho!{unsynced_note}")
+            elif error_sources:
+                err_p, err_msg = error_sources[0]
+                self._show_toast(f"❌ Lỗi nhập kho cho {os.path.basename(err_p)}: {err_msg}")
+        finally:
+            self._ingest_in_progress = False
+            self._active_ingest_wizard = None
 
     def _on_insert_single_title_clicked(self):
         self._insert_at_playhead()
@@ -7206,14 +8344,41 @@ class TabAssets(QWidget):
         self._install_to_fusion()
 
     def _on_copy_fusion_clicked(self):
-        macro_code = self._get_current_fusion_macro_code()
-        QApplication.clipboard().setText(macro_code)
-        preset_id = getattr(self.selected_asset, "id", "karaoke_pop")
-        self.copy_fusion_node_requested.emit(preset_id)
-        self._show_toast("Đã copy Fusion node! Dán vào trang Fusion bằng Ctrl+V")
+        target = self.selected_asset
+        if not target:
+            self._show_toast("⚠️ Chưa chọn tài nguyên để xuất mã Fusion.")
+            return
+
+        macro_code = self._get_current_fusion_macro_code(target)
+        if not macro_code:
+            err_msg = getattr(self, "_last_fusion_export_error", "Không thể xuất mã Fusion cho tài nguyên này.")
+            self._show_toast(f"❌ {err_msg}")
+            return
+
+        try:
+            QApplication.clipboard().setText(macro_code)
+        except Exception as e:
+            logger.error("Lỗi ghi clipboard: %s", e)
+            self._show_toast(f"❌ Lỗi ghi clipboard: {e}")
+            return
+
+        pid = getattr(target, "id", "") if not isinstance(target, Mapping) else str(target.get("id") or "")
+        if pid:
+            self.copy_fusion_node_requested.emit(pid)
+        self._show_toast("✅ Đã sao chép mã Fusion node! Hãy dán vào trang Fusion (Ctrl+V)")
 
     def _on_fast_paste_fusion_clicked(self):
-        macro_code = self._get_current_fusion_macro_code()
+        target = self.selected_asset
+        if not target:
+            self._show_toast("⚠️ Chưa chọn tài nguyên để dán tự động.")
+            return
+
+        macro_code = self._get_current_fusion_macro_code(target)
+        if not macro_code:
+            err_msg = getattr(self, "_last_fusion_export_error", "Không thể xuất mã Fusion cho tài nguyên này.")
+            self._show_toast(f"❌ {err_msg}")
+            return
+
         from src.core.fast_paste import fast_paste_to_fusion
         res = fast_paste_to_fusion(macro_code)
         if res.get("ok"):
@@ -7250,4 +8415,20 @@ class TabAssets(QWidget):
         self._rebuild_categories_column()
         self._refresh_grid()
         QMessageBox.information(self, "Quét hoàn tất", f"Đã nạp thành công {found} tài nguyên cá nhân vào Kho Đạo Cụ!")
+
+    def hideEvent(self, event):
+        if hasattr(self, "audio_inspector_widget"):
+            self.audio_inspector_widget.stop_playback()
+        if hasattr(self, "icon_meme_widget"):
+            self.icon_meme_widget.stop_playback()
+        if event is not None:
+            super().hideEvent(event)
+
+    def closeEvent(self, event):
+        if hasattr(self, "audio_inspector_widget"):
+            self.audio_inspector_widget.stop_playback()
+        if hasattr(self, "icon_meme_widget"):
+            self.icon_meme_widget.stop_playback()
+        if event is not None:
+            super().closeEvent(event)
 

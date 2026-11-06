@@ -8,15 +8,45 @@ from __future__ import annotations
 
 import logging
 from typing import Optional, List, Dict, Set, Any
+import unicodedata
 
 from PySide6.QtCore import Qt, QSortFilterProxyModel, QModelIndex
 from src.ui.lux.library.asset_model import (
-    IdRole, CategoryRole, SubCategoryRole, IsFavRole, NameRole, PackNameRole
+    IdRole, CategoryRole, SubCategoryRole, IsFavRole, NameRole, PackNameRole, TagsRole
 )
 from src.core.collections_manager import CollectionsManager
 from src.services.search_index import SearchIndex
 
-logger = logging.getLogger("ResolveFlow.AssetFilter")
+logger = logging.getLogger("ChunDVC.AssetFilter")
+
+
+def normalize_taxonomy(text: Any) -> str:
+    """Canonical Unicode NFC lower normalization for category/tag matching."""
+    if not text:
+        return ""
+    return unicodedata.normalize("NFC", str(text)).strip().lower()
+
+
+CANONICAL_CATEGORIES: Dict[str, List[str]] = {
+    "text": ["text", "title", "chu", "chữ", "subtitle", "kinetic", "kinetics"],
+    "trans": ["trans", "chuyen_canh", "chuyển cảnh", "transition", "transitions"],
+    "meme": ["meme", "hai_huoc", "hài hước", "reaction"],
+    "overlay": ["overlay", "lop_phu", "lớp phủ"],
+    "sfx": ["sfx", "sound", "audio", "am_thanh", "âm thanh"],
+    "bgm": ["bgm", "nhac_nen", "nhạc nền", "music", "nhac", "nhạc"],
+    "lut": ["lut", "color", "mau", "màu"],
+    "icon": ["icon", "sticker", "dao_cu", "đạo cụ"],
+    "fx": ["fx", "fusion", "macro"],
+    "broll": ["broll", "b-roll", "footage", "canh", "cảnh"],
+}
+
+
+def get_canonical_category(cat: str) -> str:
+    norm = normalize_taxonomy(cat)
+    for canon, aliases in CANONICAL_CATEGORIES.items():
+        if norm == canon or norm in aliases:
+            return canon
+    return norm
 
 
 class AssetFilterProxyModel(QSortFilterProxyModel):
@@ -33,6 +63,8 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
         self._search_index = search_index
         self._category: str = "all"
         self._sub_category: str = "all"
+        self._tag: Optional[str] = None
+        self._pack_filter: Optional[str] = None
         self._filter_mode: str = "all"  # "all", "fav", "recent"
         self._search_query: str = ""
 
@@ -53,13 +85,49 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
         if self._category != cat:
             self._category = cat
             self._sub_category = "all"
+            self._tag = None  # Đổi category reset tag
+            self._pack_filter = None
             self.invalidate()
 
     def set_sub_category(self, sub: str):
         sub = (sub or "all").strip()
-        if self._sub_category != sub:
+        tag_changed = False
+        if sub in ("all", "Tất cả", "fav:all"):
+            if self._tag is not None:
+                self._tag = None  # "Tất cả" xóa riêng tag
+                tag_changed = True
+        if self._sub_category != sub or tag_changed:
             self._sub_category = sub
             self.invalidate()
+
+    def set_pack_filter(self, pack_name: Optional[str]):
+        """Explicit filter by pack_name."""
+        norm = normalize_taxonomy(pack_name) if pack_name and pack_name != "all" else None
+        if self._pack_filter != norm:
+            self._pack_filter = norm
+            self.invalidate()
+
+    def active_pack(self) -> Optional[str]:
+        return self._pack_filter
+
+    def set_tag(self, tag: Optional[str]):
+        """Sets canonical tag filter. None, 'all', or 'Tất cả' clears active tag."""
+        if not tag or tag in ("all", "Tất cả", "fav:all"):
+            tag_norm = None
+        else:
+            tag_norm = normalize_taxonomy(tag)
+        if self._tag != tag_norm:
+            self._tag = tag_norm
+            self.invalidate()
+
+    def active_tag(self) -> Optional[str]:
+        return self._tag
+
+    def filter_subcategory(self) -> str:
+        return self._sub_category
+
+    def filter_category(self) -> str:
+        return self._category
 
     def set_filter_mode(self, mode: str):
         """Sets mode: 'all', 'fav' (favorites), or 'recent'."""
@@ -96,7 +164,7 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
             return
 
         # Perform high-performance inverted index search (<1ms)
-        results = self._search_index.search(self._search_query)
+        results = self._search_index.search(self._search_query, limit=0)
         self._search_scores = {r["asset"]["id"]: r["score"] for r in results}
         self._matched_ids = set(self._search_scores.keys())
 
@@ -114,6 +182,8 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
         cat = str(src_model.data(idx, CategoryRole) or "").lower()
         sub = str(src_model.data(idx, SubCategoryRole) or "")
         pack = str(src_model.data(idx, PackNameRole) or "")
+        tags_raw = src_model.data(idx, TagsRole) or []
+        tags_norm = [normalize_taxonomy(t) for t in tags_raw if t]
 
         # 1. Search Query Filter
         if self._search_query:
@@ -140,35 +210,35 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
             if asset_id not in self._recent_ids:
                 return False
 
-        # 3. Category Filter
+        # 3. Category Filter (canonical mapping with Unicode normalization - exact, no substring bleed)
         if self._category and self._category not in ("all", "fav", "recent"):
-            cat_aliases = {
-                "chuyen_canh": ["chuyen_canh", "trans", "transition"],
-                "trans": ["trans", "chuyen_canh", "transition"],
-                "text": ["text", "title", "chu"],
-                "am_thanh": ["sfx", "sound", "audio", "am_thanh"],
-                "sfx": ["sfx", "sound", "audio", "am_thanh"],
-                "nhac_nen": ["bgm", "nhac_nen", "music"],
-                "bgm": ["bgm", "nhac_nen", "music"],
-                "lut": ["lut", "color", "mau"],
-                "meme": ["meme", "hai_huoc"],
-                "overlay": ["overlay", "lop_phu"],
-                "icon": ["icon", "sticker"],
-                "fx": ["fx", "fusion"],
-            }
-            allowed = cat_aliases.get(self._category, [self._category])
-            if cat not in allowed and self._category not in cat:
+            target_canon = get_canonical_category(self._category)
+            asset_canon = get_canonical_category(cat)
+            if target_canon != asset_canon:
                 return False
 
-        # 4. Sub-category & Pack Filter
+        # 4. Explicit Pack Filter
+        if getattr(self, "_pack_filter", None):
+            if normalize_taxonomy(pack) != self._pack_filter:
+                return False
+
+        # 5. Sub-category Filter (supports pack: prefix or subcategory/tag)
         if self._sub_category and self._sub_category not in ("all", "Tất cả", "fav:all"):
             if self._sub_category.startswith("pack:"):
-                target_pack = self._sub_category[5:]
-                if pack != target_pack and sub != target_pack:
+                target_pack = normalize_taxonomy(self._sub_category[5:])
+                if normalize_taxonomy(pack) != target_pack:
                     return False
             elif self._category != "fav":
-                if sub != self._sub_category and pack != self._sub_category:
+                sub_norm = normalize_taxonomy(sub)
+                target_sub = normalize_taxonomy(self._sub_category)
+                if sub_norm != target_sub and target_sub not in tags_norm:
                     return False
+
+        # 6. Tag Filter (explicit tag matching only - pack is never treated as tag)
+        if self._tag:
+            sub_norm = normalize_taxonomy(sub)
+            if self._tag not in tags_norm and self._tag != sub_norm:
+                return False
 
         return True
 

@@ -34,7 +34,7 @@ from ..context.context_profiles import PROFILES, ContextProfile
 from .command_registry import CommandRegistry, CommandItem
 from .palette_model import PaletteSearchProvider, PaletteItem
 
-logger = logging.getLogger("ResolveFlow.CommandPalette")
+logger = logging.getLogger("ChunDVC.CommandPalette")
 
 
 class PaletteSearchInput(QLineEdit):

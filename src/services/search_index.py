@@ -247,7 +247,7 @@ class SearchIndex:
         self,
         query: str,
         limit_categories: Optional[Iterable[str]] = None,
-        limit: int = 50,
+        limit: Optional[int] = 50,
     ) -> List[Dict[str, Any]]:
         """
         Executes query search and returns items sorted by score descending.
@@ -293,6 +293,8 @@ class SearchIndex:
                 results.append({"asset": a, "score": score, "why": why})
 
         results.sort(key=lambda r: r["score"], reverse=True)
+        if limit is None or limit == 0:
+            return results
         return results[:limit]
 
     def _score_item(

@@ -10,7 +10,7 @@ Unit tests for Edge Dock (Bước 3):
 import pytest
 from unittest.mock import MagicMock, patch
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import Qt, QRect
+from PySide6.QtCore import Qt, QRect, QVariantAnimation
 
 from src.ui.lux.shell.dock_state import DockState, DockStateMachine
 from src.ui.lux.shell.edge_dock import EdgeDockWindow
@@ -172,6 +172,9 @@ def test_edge_dock_keyboard_actions(qapp):
         dock.keyPressEvent(esc_event)
         assert dock.sheet.is_open is False
 
+    dock.close()
+    dock.palette.close()
+
 
 def test_sheet_inspector_responsive_modes_and_editors(qapp):
     parent = EdgeDockWindow()
@@ -218,8 +221,9 @@ def test_sheet_inspector_responsive_modes_and_editors(qapp):
 
 
 def test_system_tray_icon(qapp):
+    from src.core.branding import TRAY_TOOLTIP
     tray = ChunDVCTrayIcon()
-    assert tray.toolTip() == "ChunDVC — ResolveFlow Assistant"
+    assert tray.toolTip() == TRAY_TOOLTIP
     assert tray.contextMenu() is not None
 
     menu_actions = [a.text() for a in tray.contextMenu().actions() if a.text()]
@@ -273,3 +277,366 @@ def test_edge_dock_left_right_position_and_settings_dialog(qapp):
     dock.set_dock_edge("right")
     dock.close()
     dock.palette.close()
+
+
+def test_dock_header_overflow_at_360px_and_label_preservation(qapp):
+    dock = EdgeDockWindow()
+    dock._auto_collapse_on_leave = False
+    dock.show()
+    dock.open_dock(animated=False)
+    qapp.processEvents()
+
+    dock._update_dock_position(420, animated=False)
+    qapp.processEvents()
+    assert dock.header.btn_director.isVisible() is True
+    assert dock.header.btn_studio.isVisible() is True
+    assert dock.header.btn_settings.isVisible() is True
+    assert dock.header.btn_overflow.isVisible() is False
+
+    dock.header.set_page_label("Fusion", locked=True)
+    assert "Fusion" in dock.header.btn_page_chip.text()
+    assert "Khóa" in dock.header.btn_page_chip.text()
+
+    dock._update_dock_position(360, animated=False)
+    qapp.processEvents()
+    assert dock.header.btn_director.isVisible() is False
+    assert dock.header.btn_studio.isVisible() is False
+    assert dock.header.btn_settings.isVisible() is False
+    assert dock.header.btn_overflow.isVisible() is True
+
+    assert "Fusion" in dock.header.btn_page_chip.text()
+    assert "Khóa" in dock.header.btn_page_chip.text()
+
+    dock.close()
+    dock.palette.close()
+
+
+def test_dock_suggest_block_reopen_and_horizontal_scroll(qapp):
+    from src.ui.lux.context.special_blocks import HorizontalChipScrollArea
+    dock = EdgeDockWindow()
+    dock.show()
+    dock.open_dock(animated=False)
+    qapp.processEvents()
+
+    block = dock.block_edit
+    assert isinstance(block.scroll_chips, HorizontalChipScrollArea)
+    assert block.container.isVisible() is True
+    assert block.btn_reopen.isVisible() is False
+
+    block.btn_close.click()
+    qapp.processEvents()
+    assert block.container.isVisible() is False
+    assert block.btn_reopen.isVisible() is True
+
+    block.btn_reopen.click()
+    qapp.processEvents()
+    assert block.container.isVisible() is True
+    assert block.btn_reopen.isVisible() is False
+
+    dock.close()
+    dock.palette.close()
+
+
+def test_dock_toggle_multi_cycle_snapshot_restore_and_guards(qapp):
+    """Regression test: Ít nhất 2 chu kỳ toggle/open qua hotkey signal và strip button,
+    bảo toàn category, search, scroll, selected asset và guards.
+    """
+    from src.ui.lux.shell.dock_state import DockState
+    from PySide6.QtCore import QVariantAnimation
+
+    dock = EdgeDockWindow(edge_side="right")
+    dock._auto_collapse_on_leave = False
+    dock.show()
+
+    assets = [
+        {"id": "a", "name": "A Whoosh", "category": "sfx"},
+        {"id": "b", "name": "B Title", "category": "text"},
+    ]
+    dock.asset_model.set_assets(assets)
+    dock.open_dock(animated=False)
+    qapp.processEvents()
+
+    # Chu kỳ 1: SFX + search 'Whoosh' + Asset A
+    dock.category_nav.select_category("sfx")
+    dock.header.txt_search.setText("Whoosh")
+    dock.proxy_model.set_search_query("Whoosh")
+    qapp.processEvents()
+
+    src_a = dock.asset_model.index_of_asset_id("a")
+    proxy_a = dock.proxy_model.mapFromSource(src_a)
+    assert proxy_a.isValid()
+    dock.grid.setCurrentIndex(proxy_a)
+    dock._selected_asset = assets[0]
+    dock.action_bar.set_asset(assets[0])
+
+    # Thu gọn bằng hotkey signal -> Dock ẩn hoàn toàn, Quả cầu nổi hiện
+    dock.hotkey_service.dock_toggle_requested.emit()
+    qapp.processEvents()
+    assert dock.isVisible() is False
+    assert dock.bubble.isVisible() is True
+
+    # Mở lại qua click quả cầu nổi
+    dock.bubble.open_dock_requested.emit()
+    if dock._anim.state() == QVariantAnimation.State.Running:
+        dock._anim.setCurrentTime(dock._anim.totalDuration())
+    qapp.processEvents()
+    assert dock.isVisible() is True
+    assert dock.fsm.is_open is True
+    assert dock.category_nav.current_category == "sfx"
+    assert dock.header.txt_search.text() == "Whoosh"
+    assert dock._selected_asset is not None and dock._selected_asset["id"] == "a"
+    assert dock.grid.currentIndex().isValid()
+
+    # --- CHU KỲ 2: TEXT + search rỗng '' + Asset B ---
+    dock.category_nav.select_category("text")
+    dock.header.clear_search()
+    dock.proxy_model.set_search_query("")
+    qapp.processEvents()
+
+    src_b = dock.asset_model.index_of_asset_id("b")
+    proxy_b = dock.proxy_model.mapFromSource(src_b)
+    assert proxy_b.isValid()
+    dock.grid.setCurrentIndex(proxy_b)
+    dock._selected_asset = assets[1]
+    dock.action_bar.set_asset(assets[1])
+
+    # Thu gọn bằng hotkey signal lần 2 -> Dock ẩn hoàn toàn, Quả cầu nổi hiện
+    dock.hotkey_service.dock_toggle_requested.emit()
+    qapp.processEvents()
+    assert dock.isVisible() is False
+    assert dock.bubble.isVisible() is True
+
+    # Mở lại qua click quả cầu nổi lần 2
+    dock.bubble.open_dock_requested.emit()
+    if dock._anim.state() == QVariantAnimation.State.Running:
+        dock._anim.setCurrentTime(dock._anim.totalDuration())
+    qapp.processEvents()
+    assert dock.isVisible() is True
+    assert dock.fsm.is_open is True
+    assert dock.category_nav.current_category == "text"
+    assert dock.header.txt_search.text() == ""
+    assert dock._selected_asset is not None and dock._selected_asset["id"] == "b"
+
+    # --- CHU KỲ 3: Cập nhật model & Xóa asset khi đang thu gọn ---
+    dock.collapse_dock(to_strip=True, animated=False)
+    qapp.processEvents()
+    # Sửa metadata asset b
+    dock.asset_model.set_assets([
+        {"id": "a", "name": "A Whoosh", "category": "sfx"},
+        {"id": "b", "name": "B Title Updated", "category": "text"},
+    ])
+    qapp.processEvents()
+    dock.open_dock(animated=False)
+    qapp.processEvents()
+    assert dock._selected_asset is not None
+    assert dock._selected_asset["name"] == "B Title Updated"
+
+    # Xóa asset b khỏi model khi đang thu gọn
+    dock.collapse_dock(to_strip=True, animated=False)
+    qapp.processEvents()
+    dock.asset_model.set_assets([
+        {"id": "a", "name": "A Whoosh", "category": "sfx"},
+    ])
+    qapp.processEvents()
+    dock.open_dock(animated=False)
+    qapp.processEvents()
+    assert dock._selected_asset is None
+    assert dock.action_bar._current_asset is None
+    assert dock.action_bar.btn_primary.isEnabled() is False
+
+    # Guards test
+    dock.fsm._is_in_dock = False
+    assert dock.fsm.can_auto_collapse() is True
+    dock.fsm.set_dragging(True)
+    assert dock.fsm.can_auto_collapse() is False
+    dock.fsm.set_dragging(False)
+
+    dock.fsm.set_menu_open(True)
+    assert dock.fsm.can_auto_collapse() is False
+    dock.fsm.set_menu_open(False)
+
+    dock.header.btn_pin.click()
+    assert dock.fsm.is_pinned is True
+    assert dock.fsm.can_auto_collapse() is False
+
+    dock._anim.stop()
+    dock.close()
+    dock.palette.close()
+
+
+def test_dock_builtin_presets_multi_cycle_restore_and_filter_change(qapp):
+    """Regression test: Dùng BUILTIN_PRESETS thật (TextStylePreset), chọn -> hotkey thu ->
+    strip mở lặp lại ít nhất 2 chu kỳ, assert _selected_asset là dict và đúng ID,
+    sau khi reopen đổi bộ lọc chứng minh _on_model_filter_changed không AttributeError và deselect đúng.
+    """
+    from src.core.text_preset import BUILTIN_PRESETS, TextStylePreset
+    from src.ui.lux.shell.dock_state import DockState
+    from PySide6.QtCore import QVariantAnimation
+
+    if len(BUILTIN_PRESETS) >= 2:
+        preset1 = BUILTIN_PRESETS[0]
+        preset2 = BUILTIN_PRESETS[1]
+    else:
+        preset1 = TextStylePreset(id="txt_preset_1", name="Karaoke Pop", category="kinetic", description="Karaoke")
+        preset2 = TextStylePreset(id="txt_preset_2", name="Clean Sub", category="clean_minimal", description="Clean")
+
+    dock = EdgeDockWindow(edge_side="right")
+    dock._auto_collapse_on_leave = False
+    dock.show()
+    dock.set_assets([preset1, preset2])
+    dock.open_dock(animated=False)
+    qapp.processEvents()
+
+    # Chọn preset 1 thật
+    dock._on_asset_clicked(preset1)
+    qapp.processEvents()
+    assert isinstance(dock._selected_asset, dict)
+    assert dock._selected_asset["id"] == preset1.id
+
+    # --- CHU KỲ 1: Thu gọn qua hotkey -> mở lại qua click quả cầu nổi ---
+    dock.hotkey_service.dock_toggle_requested.emit()
+    qapp.processEvents()
+    assert dock.isVisible() is False
+    assert dock.bubble.isVisible() is True
+
+    dock.bubble.open_dock_requested.emit()
+    if dock._anim.state() == QVariantAnimation.State.Running:
+        dock._anim.setCurrentTime(dock._anim.totalDuration())
+    qapp.processEvents()
+    assert dock.isVisible() is True
+    assert dock.fsm.is_open is True
+    assert isinstance(dock._selected_asset, dict), f"Phải là dict, không được là {type(dock._selected_asset)}"
+    assert dock._selected_asset["id"] == preset1.id
+
+    # --- CHU KỲ 2: Thu gọn qua hotkey -> mở lại qua click quả cầu nổi lần 2 ---
+    dock.hotkey_service.dock_toggle_requested.emit()
+    qapp.processEvents()
+    assert dock.isVisible() is False
+    assert dock.bubble.isVisible() is True
+
+    dock.bubble.open_dock_requested.emit()
+    if dock._anim.state() == QVariantAnimation.State.Running:
+        dock._anim.setCurrentTime(dock._anim.totalDuration())
+    qapp.processEvents()
+    assert dock.isVisible() is True
+    assert dock.fsm.is_open is True
+    assert isinstance(dock._selected_asset, dict), f"Chu kỳ 2 phải là dict, không được là {type(dock._selected_asset)}"
+    assert dock._selected_asset["id"] == preset1.id
+
+    # Chọn preset 2 và kiểm tra tiếp 1 chu kỳ
+    dock._on_asset_clicked(preset2)
+    qapp.processEvents()
+    assert isinstance(dock._selected_asset, dict)
+    assert dock._selected_asset["id"] == preset2.id
+
+    dock.collapse_dock(to_strip=True, animated=False)
+    qapp.processEvents()
+    dock.open_dock(animated=False)
+    qapp.processEvents()
+    assert isinstance(dock._selected_asset, dict)
+    assert dock._selected_asset["id"] == preset2.id
+
+    # Đổi filter che preset sau reopen: không gây AttributeError và deselect chuẩn
+    dock.proxy_model.set_category("sfx")
+    dock._on_model_filter_changed()
+    qapp.processEvents()
+    assert dock._selected_asset is None
+    assert dock.action_bar._current_asset is None
+
+    dock._anim.stop()
+    dock.close()
+    dock.palette.close()
+
+
+def test_dock_collapses_to_floating_bubble_and_no_strip(qapp):
+    """Kiểm tra tính năng thu nhỏ EdgeDock:
+    Khi thu nhỏ: Dock ẩn hoàn toàn (TUYỆT ĐỐI KHÔNG HIỆN DẢI STRIP DỌC ĐEN),
+    chỉ có DUY NHẤT Quả cầu nổi 56px (FloatingBubbleWidget) ở mép màn hình.
+    Click quả cầu thì bung lại Dock to 420px đầy đủ.
+    """
+    from src.ui.bubble.floating_bubble import FloatingBubbleWidget
+
+    dock = EdgeDockWindow(edge_side="right")
+    dock._auto_collapse_on_leave = False
+    dock._get_screen_rect = lambda: (0, 0, 1920, 1080)
+    assert hasattr(dock, "bubble")
+    assert isinstance(dock.bubble, FloatingBubbleWidget)
+
+    # 1. Ban đầu mở Dock: Dock to 420px hiển thị đầy đủ, Bubble ẩn
+    dock.show()
+    dock.open_dock(animated=False)
+    qapp.processEvents()
+    assert dock.isVisible() is True
+    assert dock.fsm.is_open is True
+    assert dock.width() == 420
+    assert dock.bubble.isVisible() is False
+
+    # 2. Thu gọn Dock: Dock ẩn hoàn toàn khỏi màn hình, Quả cầu nổi hiện ở mép phải
+    dock.collapse_dock(to_strip=True, animated=False)
+    qapp.processEvents()
+    assert dock.isVisible() is False
+    assert dock.bubble.isVisible() is True
+    assert dock.bubble.x() >= 1920 - dock.bubble.width() - 30
+
+    # 3. Kéo trượt di chuyển quả cầu lên xuống dọc mép
+    dock.bubble.move(dock.bubble.x(), 450)
+    qapp.processEvents()
+    assert dock.bubble.y() == 450
+
+    # 4. Click vào quả cầu -> Quả cầu ẩn, Dock mở lại to 420px đầy đủ
+    dock.bubble.open_dock_requested.emit()
+    if dock._anim.state() == QVariantAnimation.State.Running:
+        dock._anim.setCurrentTime(dock._anim.totalDuration())
+    qapp.processEvents()
+    assert dock.bubble.isVisible() is False
+    assert dock.isVisible() is True
+    assert dock.fsm.is_open is True
+    assert dock.width() == 420
+
+    # Dọn dẹp
+    dock._anim.stop()
+    dock.bubble.close()
+    dock.close()
+    dock.palette.close()
+
+
+def test_dock_special_container_adaptive_size_and_no_empty_gap(qapp):
+    """Regression test: Đảm bảo special_container tự động thích ứng kích thước theo widget con hiện tại,
+    không bị phình to bởi các trang lớn (như Deliver 233px) gây ra khoảng trống đen gần 200px.
+    Grid tài nguyên phải nằm ngay sát dưới thanh Gợi ý thoại (khoảng cách = 0px).
+    """
+    from src.ui.lux.shell.edge_dock import AdaptiveStackedWidget
+
+    dock = EdgeDockWindow(edge_side="right")
+    dock._auto_collapse_on_leave = False
+    assert isinstance(dock.special_container, AdaptiveStackedWidget)
+
+    dock.show()
+    dock.open_dock(animated=False)
+    qapp.processEvents()
+
+    # 1. Trang Edit: special_container chỉ cao bằng EditSuggestBlock (36-38px)
+    assert dock.special_container.height() <= 38
+    assert dock.special_container.currentWidget() == dock.block_edit
+
+    # 2. Không có khoảng trống (Gap = 0) giữa thanh gợi ý và Grid tài nguyên
+    gap = dock.grid.y() - (dock.special_container.y() + dock.special_container.height())
+    assert gap == 0, f"Phát hiện khoảng trống rỗng {gap}px giữa thanh gợi ý và grid!"
+
+    # 3. Khi đóng thanh gợi ý (✕), container tự co lại 24px và grid tự động kéo lên
+    dock.block_edit.btn_close.click()
+    qapp.processEvents()
+    assert dock.special_container.height() <= 26
+    gap_closed = dock.grid.y() - (dock.special_container.y() + dock.special_container.height())
+    assert gap_closed == 0
+
+    # 4. Khi mở lại thanh gợi ý (✨ Gợi ý), container dãn ra 36-38px và grid duy trì gap = 0
+    dock.block_edit.btn_reopen.click()
+    qapp.processEvents()
+    assert dock.special_container.height() <= 38
+    gap_reopened = dock.grid.y() - (dock.special_container.y() + dock.special_container.height())
+    assert gap_reopened == 0
+
+    dock.close()
+    dock.palette.close()
+

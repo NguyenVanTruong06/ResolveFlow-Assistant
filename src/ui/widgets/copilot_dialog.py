@@ -115,7 +115,7 @@ class StoryCopilotDialog(QDialog):
         header_lbl.setStyleSheet("font-size: 15px; color: #63B3ED;")
         layout.addWidget(header_lbl)
 
-        sub_lbl = QLabel("Tận dụng tư duy Marketing & Giữ chân AVD của Claude.ai để lên kịch bản, sau đó ResolveFlow tự động dựng 100%.")
+        sub_lbl = QLabel("Tận dụng tư duy Marketing & Giữ chân AVD của Claude.ai để lên kịch bản, sau đó ChunDVC tự động hỗ trợ dựng.")
         sub_lbl.setStyleSheet("font-size: 12px; color: #A0AEC0;")
         layout.addWidget(sub_lbl)
 

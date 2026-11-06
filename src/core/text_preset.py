@@ -113,476 +113,28 @@ class TextStylePreset(BaseModel):
         return hex_to_fcpxml_rgba(self.outline_color)
 
 
-BUILTIN_PRESETS: List[TextStylePreset] = [
-    TextStylePreset(
-        id="kinetic_hormozi",
-        name="Alex Hormozi Pop (Kinetic Bounce)",
-        category="kinetic",
-        badge_icon="💥",
-        tags=["Viral", "Hormozi", "TikTok", "Shorts", "SpringPop", "HighEnergy"],
-        description="Chữ nảy lò xo (Spring curve) bám từng từ khóa chính, màu vàng neon/xanh chuối viền đen dày tương phản cao cho Shorts/Reels triệu view.",
-        font="Impact",
-        size=54,
-        weight="extra_bold",
+BUILTIN_PRESETS: List[TextStylePreset] = []
+
+
+def get_neutral_default_text_preset(preset_id: str = "default_title") -> TextStylePreset:
+    """Tạo mẫu chữ kỹ thuật trung tính cho engine khi kho rỗng hoặc không tìm thấy preset."""
+    return TextStylePreset(
+        id=preset_id,
+        name="Default Title",
+        category="clean_minimal",
+        badge_icon="📝",
+        font="Arial",
+        size=48,
+        weight="bold",
         standard_color="#FFFFFF",
         highlight_color="#FFE600",
         outline_color="#000000",
-        outline_width=0.18,
-        animation="bounce",
-        timing_curve="spring",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="highlighter_swipe",
-        name="Highlighter Marker (Bút Dạ Quang)",
-        category="highlighter_paper",
-        badge_icon="🖍️",
-        tags=["Marker", "Highlighter", "Documentary", "Study", "Focus", "YellowBar"],
-        description="Khung màu vàng dạ quang quét sau lưng từ khóa như đánh dấu bút nhớ dòng tài liệu nghiên cứu.",
-        font="Arial Black",
-        size=48,
-        weight="bold",
-        standard_color="#000000",
-        highlight_color="#1A1A1A",
-        outline_color="#000000",
-        outline_width=0.0,
-        box_color="#FFE600",
-        animation="box_highlight",
-        timing_curve="ease-in-out",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="paper_cutout",
-        name="Paper Cutout (Xé Giấy Vintage)",
-        category="highlighter_paper",
-        badge_icon="📄",
-        tags=["Scrapbook", "Collage", "StopMotion", "Retro", "PaperCut", "Vintage"],
-        description="Phong cách nhãn dán xé giấy thủ công Stop-motion, nền giấy ngà cổ điển tạo cảm giác mộc mạc và chân thực.",
-        font="Georgia",
-        size=46,
-        weight="bold",
-        standard_color="#1A1A1A",
-        highlight_color="#C62828",
-        outline_color="#333333",
-        outline_width=0.06,
-        box_color="#FBF9F1",
-        animation="pop",
-        timing_curve="spring",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="rgb_glitch",
-        name="RGB Split Glitch (Nhiễu Sóng Số)",
-        category="glitch_cyber",
-        badge_icon="⚡",
-        tags=["Cyberpunk", "Glitch", "Gaming", "SciFi", "RGB", "Aberration"],
-        description="Tách kênh màu quang sai (Chromatic Aberration) đỏ-xanh kèm viền phát quang điện tử sắc nét phong cách Cyberpunk.",
-        font="Impact",
-        size=52,
-        weight="extra_bold",
-        standard_color="#E0F7FA",
-        highlight_color="#00E5FF",
-        outline_color="#D500F9",
-        outline_width=0.12,
-        glow_color="#FF0055",
-        animation="bounce",
-        timing_curve="spring",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="neon_pulse",
-        name="Neon Pulse Glow (Đèn Neon Đêm)",
-        category="glitch_cyber",
-        badge_icon="🟣",
-        tags=["Neon", "Glow", "Synthwave", "Nightclub", "Cyber", "Purple"],
-        description="Ánh sáng ống đèn Neon huỳnh quang phát sáng tỏa bóng mờ ảo đa lớp rực rỡ trong không gian tối.",
-        font="Arial",
-        size=50,
-        weight="bold",
-        standard_color="#F3E5F5",
-        highlight_color="#E040FB",
-        outline_color="#6A1B9A",
-        outline_width=0.08,
-        glow_color="#00E5FF",
-        animation="glow",
-        timing_curve="ease-in-out",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="vhs_retro",
-        name="90s VHS Camcorder (Thước Phim Băng)",
-        category="retro_film",
-        badge_icon="📺",
-        tags=["VHS", "Camcorder", "90s", "Retro", "Tape", "Nostalgia", "Y2K"],
-        description="Phông chữ monospaced màu vàng cam viền đen đặc trưng máy quay băng gia đình thập niên 90 kèm cảm giác hoài niệm.",
-        font="Consolas",
-        size=44,
-        weight="bold",
-        standard_color="#FFF59D",
-        highlight_color="#FFEB3B",
-        outline_color="#000000",
-        outline_width=0.15,
-        animation="typewriter",
-        timing_curve="linear",
-        position_y_16_9=0.12,
-        position_y_9_16=0.25
-    ),
-    TextStylePreset(
-        id="clean_minimal",
-        name="Clean Minimal (Podcast & Phỏng Vấn)",
-        category="clean_minimal",
-        badge_icon="🧊",
-        tags=["Minimal", "Interview", "Podcast", "Documentary", "Clean", "Modern"],
-        description="Thiết kế tối giản thanh lịch, đường nét sạch sẽ với viền mờ tinh tế giúp khán giả tập trung 100% vào nội dung.",
-        font="Arial",
-        size=44,
-        weight="normal",
-        standard_color="#FFFFFF",
-        highlight_color="#64B5F6",
-        outline_color="#000000",
-        outline_width=0.12,
-        animation="static",
-        timing_curve="linear",
-        position_y_16_9=0.12,
-        position_y_9_16=0.25
-    ),
-    TextStylePreset(
-        id="karaoke_pop",
-        name="Karaoke Pop (Word Highlight)",
-        category="kinetic",
-        badge_icon="🎤",
-        tags=["Karaoke", "Subtitles", "Classic", "WordByWord", "YellowGold"],
-        description="Đổi màu vàng kim rực rỡ theo từng từ đang phát âm, phong cách TV show và Karaoke chuyên nghiệp.",
-        font="Arial",
-        size=48,
-        weight="bold",
-        standard_color="#FFFFFF",
-        highlight_color="#FFD700",
-        outline_color="#000000",
-        outline_width=0.12,
-        animation="pop",
-        timing_curve="spring",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="bounce_word",
-        name="Bounce Word (Nhảy Chữ Spring)",
-        category="kinetic",
-        badge_icon="🏀",
-        tags=["Bounce", "Motion", "Spring", "Energy", "Cyan"],
-        description="Chữ nhảy nảy bật spring vui tươi thu hút ánh mắt người xem trên từng nhịp thoại.",
-        font="Arial",
-        size=52,
-        weight="extra_bold",
-        standard_color="#FFFFFF",
-        highlight_color="#00FFCC",
-        outline_color="#111111",
-        outline_width=0.15,
-        animation="bounce",
-        timing_curve="spring",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="box_highlight",
-        name="Box Highlight (Hộp Màu Đỏ Bám Từ)",
-        category="highlighter_paper",
-        badge_icon="📦",
-        tags=["Box", "RedBox", "CapCut", "News", "HighlightBox"],
-        description="Đóng hộp chữ nhật màu đỏ bám sát từ khóa đang đọc, tăng độ tương phản tuyệt đối trên nền video phức tạp.",
-        font="Arial",
-        size=46,
-        weight="bold",
-        standard_color="#FFFFFF",
-        highlight_color="#FFFFFF",
-        outline_color="#000000",
-        outline_width=0.0,
-        box_color="#E60000",
-        animation="box_highlight",
-        timing_curve="ease-in-out",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="glow_neon",
-        name="Glow Neon Cyan (Phát Sáng Xanh)",
-        category="glitch_cyber",
-        badge_icon="💡",
-        tags=["Cyan", "Glow", "Tech", "Future", "Neon"],
-        description="Hào quang xanh lam công nghệ tỏa bóng mềm mại hiện đại.",
-        font="Arial",
-        size=50,
-        weight="bold",
-        standard_color="#E0FFFF",
-        highlight_color="#00FFFF",
-        outline_color="#008B8B",
         outline_width=0.1,
-        glow_color="#00FFFF",
-        animation="glow",
-        timing_curve="ease-in-out",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="clean_outline",
-        name="Clean Outline (Podcast Nét)",
-        category="clean_minimal",
-        badge_icon="🎙️",
-        tags=["Podcast", "Outline", "Subtitle", "Crisp"],
-        description="Chữ trắng viền đen chuẩn mực cho mọi chương trình podcast và trò chuyện chuyên sâu.",
-        font="Arial",
-        size=44,
-        weight="normal",
-        standard_color="#FFFFFF",
-        highlight_color="#FFFFFF",
-        outline_color="#000000",
-        outline_width=0.15,
-        animation="static",
-        timing_curve="linear",
-        position_y_16_9=0.12,
-        position_y_9_16=0.25
-    ),
-    TextStylePreset(
-        id="gradient_fill",
-        name="Gradient Sunset (Chuyển Sắc Hoàng Hôn)",
-        category="clean_minimal",
-        badge_icon="🌅",
-        tags=["Gradient", "Sunset", "Vibrant", "Creative", "Modern"],
-        description="Dải màu hoàng hôn chuyển tiếp từ cam san hô sang hồng tím đầy tính nghệ thuật.",
-        font="Arial",
-        size=50,
-        weight="extra_bold",
-        standard_color="#FFFFFF",
-        highlight_color="#FF5E36",
-        outline_color="#222222",
-        outline_width=0.1,
-        gradient_colors=["#FFA07A", "#FF4500", "#FF1493"],
-        animation="slide",
-        timing_curve="ease-in-out",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="slide_in",
-        name="Slide-in (Trượt Mượt Mà)",
-        category="kinetic",
-        badge_icon="🚀",
-        tags=["Slide", "Smooth", "Intro", "Fluid", "Motion"],
-        description="Chữ trượt vào từ cạnh dưới êm ái tạo cảm giác thanh thoát và lôi cuốn.",
-        font="Arial",
-        size=48,
-        weight="bold",
-        standard_color="#F0F0F0",
-        highlight_color="#FFEA00",
-        outline_color="#000000",
-        outline_width=0.12,
-        animation="slide",
-        timing_curve="ease-in-out",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    # --- 6 Global Text Presets ---
-    TextStylePreset(
-        id="mrbeast_impact_yellow",
-        name="MrBeast Viral Impact (Vàng Nổi)",
-        category="kinetic",
-        badge_icon="⚡",
-        tags=["MrBeast", "Viral", "YouTube", "Impact", "HighEnergy", "Yellow"],
-        description="Chữ in hoa bùng nổ tông vàng chanh rực rỡ, viền đen dày dặn chuẩn phong cách thumbnail và video MrBeast.",
-        font="Impact",
-        size=58,
-        weight="extra_bold",
-        standard_color="#FFFFFF",
-        highlight_color="#FFE600",
-        outline_color="#000000",
-        outline_width=0.20,
-        animation="bounce",
-        timing_curve="spring",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="apple_keynote_clean",
-        name="Apple Keynote (Tối Giản Đẳng Cấp)",
-        category="clean_minimal",
-        badge_icon="🍎",
-        tags=["Apple", "Keynote", "Minimal", "Tech", "Elegant", "Clean"],
-        description="Phong cách thuyết trình tối giản đặc trưng của Apple, phông chữ thanh thoát, bóng đổ nhẹ không viền gắt.",
-        font="Segoe UI",
-        size=46,
-        weight="bold",
-        standard_color="#F5F5F7",
-        highlight_color="#38BDF8",
-        outline_color="#1E293B",
-        outline_width=0.08,
-        animation="fade_up",
-        timing_curve="ease-in-out",
-        position_y_16_9=0.12,
-        position_y_9_16=0.28
-    ),
-    TextStylePreset(
-        id="true_crime_documentary",
-        name="True Crime Documentary (Hồ Sơ Vụ Án)",
-        category="retro_film",
-        badge_icon="🕵️",
-        tags=["TrueCrime", "Documentary", "Mystery", "Investigation", "Netflix"],
-        description="Không khí tài liệu trinh thám điều tra u tối, chữ gõ nhịp chậm rãi kèm tông đỏ thẫm bí ẩn.",
-        font="Georgia",
-        size=44,
-        weight="bold",
-        standard_color="#E2E8F0",
-        highlight_color="#EF4444",
-        outline_color="#0F172A",
-        outline_width=0.14,
-        animation="typewriter",
-        timing_curve="linear",
-        position_y_16_9=0.12,
-        position_y_9_16=0.25
-    ),
-    TextStylePreset(
-        id="comic_manga_burst",
-        name="Comic Manga Burst (Truyện Tranh Hành Động)",
-        category="kinetic",
-        badge_icon="💥",
-        tags=["Comic", "Manga", "Action", "Gaming", "Punchy", "Anime"],
-        description="Phong cách truyện tranh siêu anh hùng bùng nổ, viền đen cực dày, chữ nghiêng năng động tạo xung lực mạnh mẽ.",
-        font="Arial Black",
-        size=56,
-        weight="extra_bold",
-        standard_color="#FFF176",
-        highlight_color="#FF0055",
-        outline_color="#000000",
-        outline_width=0.22,
-        animation="pop",
-        timing_curve="spring",
-        position_y_16_9=0.16,
-        position_y_9_16=0.36
-    ),
-    TextStylePreset(
-        id="luxury_gold_serif",
-        name="Luxury Gold Serif (Sang Trọng & Thượng Lưu)",
-        category="clean_minimal",
-        badge_icon="👑",
-        tags=["Luxury", "Gold", "Serif", "HighEnd", "RealEstate", "Jewelry"],
-        description="Font serif quý phái ánh vàng hoàng gia kết hợp hiệu ứng nổi nhẹ nhàng cho bất động sản và thương hiệu cao cấp.",
-        font="Georgia",
-        size=46,
-        weight="bold",
-        standard_color="#F8FAFC",
-        highlight_color="#F59E0B",
-        outline_color="#451A03",
-        outline_width=0.10,
-        glow_color="#FBBF24",
-        animation="fade_up",
-        timing_curve="ease-in-out",
-        position_y_16_9=0.12,
-        position_y_9_16=0.26
-    ),
-    TextStylePreset(
-        id="minimal_podcast_pill",
-        name="Minimal Podcast Pill (Khung Bo Tròn Tinh Tế)",
-        category="highlighter_paper",
-        badge_icon="🎙️",
-        tags=["Podcast", "Pill", "Modern", "Interview", "MinimalBox"],
-        description="Khung nền đen mờ bo góc kiểu viên thuốc (Pill Box) bọc gọn câu từ, đảm bảo đọc rõ ràng trên mọi cảnh quay.",
-        font="Arial",
-        size=42,
-        weight="bold",
-        standard_color="#FFFFFF",
-        highlight_color="#38BDF8",
-        outline_color="#000000",
-        outline_width=0.0,
-        box_color="#0F172A",
-        animation="box_highlight",
-        timing_curve="ease-in-out",
-        position_y_16_9=0.12,
-        position_y_9_16=0.25
-    ),
-    # --- 4 Vietnamese Creator Text Presets ---
-    TextStylePreset(
-        id="schannel_vlog_nhanh",
-        name="Schannel Vlog Nhịp Nhanh",
-        category="kinetic",
-        badge_icon="🔥",
-        tags=["Schannel", "Vlog", "Vietnamese", "TechReview", "Dynamic", "GenZ"],
-        description="Phong cách phụ đề dí dỏm, nhịp nhảy chữ dồn dập bắt tai bắt mắt quen thuộc của kênh Schannel & review đồ chơi công nghệ.",
-        font="Arial Black",
-        size=52,
-        weight="extra_bold",
-        standard_color="#FFFFFF",
-        highlight_color="#FFD700",
-        outline_color="#18181B",
-        outline_width=0.18,
-        animation="bounce",
-        timing_curve="spring",
-        position_y_16_9=0.15,
-        position_y_9_16=0.35
-    ),
-    TextStylePreset(
-        id="khoai_lang_thang_chua_lanh",
-        name="Khoai Lang Thang Chữa Lành",
-        category="clean_minimal",
-        badge_icon="🌾",
-        tags=["KhoaiLangThang", "ChuaLanh", "Travel", "MocMac", "Acoustic", "Vlog"],
-        description="Tông chữ trắng ấm ngà dịu mắt, chuyển động êm đềm như những chuyến đi bình yên khám phá ẩm thực văn hóa Việt Nam.",
-        font="Georgia",
-        size=44,
-        weight="bold",
-        standard_color="#FEF3C7",
-        highlight_color="#F59E0B",
-        outline_color="#27272A",
-        outline_width=0.10,
-        animation="fade_up",
-        timing_curve="ease-in-out",
-        position_y_16_9=0.12,
-        position_y_9_16=0.26
-    ),
-    TextStylePreset(
-        id="phim_truyen_hinh_vtv_retro",
-        name="VTV Phim Truyền Hình Retro",
-        category="retro_film",
-        badge_icon="📺",
-        tags=["VTV", "PhimViet", "Retro", "TruyenHinh", "CoDien", "Nostalgia"],
-        description="Chữ vàng chanh viền đen kinh điển của những bộ phim truyền hình VTV thập niên 90-2000 in đậm trong ký ức.",
-        font="Arial",
-        size=46,
-        weight="bold",
-        standard_color="#FFEB3B",
-        highlight_color="#FFFFFF",
-        outline_color="#000000",
-        outline_width=0.16,
-        animation="static",
-        timing_curve="linear",
-        position_y_16_9=0.12,
-        position_y_9_16=0.24
-    ),
-    TextStylePreset(
-        id="giat_gan_showbiz_tiktok",
-        name="Giật Gân Showbiz Drama TikTok",
-        category="glitch_cyber",
-        badge_icon="🚨",
-        tags=["Drama", "Showbiz", "TikTok", "GiatGan", "HotNews", "HongBien"],
-        description="Màu hồng neon kết hợp phát sáng xanh cyan giật nảy liên tục, giữ chân người xem từng giây với tin nóng hổi.",
-        font="Arial Black",
-        size=54,
-        weight="extra_bold",
-        standard_color="#FFF0F5",
-        highlight_color="#FF0055",
-        outline_color="#4A0E2E",
-        outline_width=0.16,
-        glow_color="#00FFFF",
         animation="pop",
         timing_curve="spring",
         position_y_16_9=0.15,
-        position_y_9_16=0.35
+        position_y_9_16=0.35,
     )
-]
 
 
 class PresetManager:
@@ -595,21 +147,17 @@ class PresetManager:
         self.base_dir = base_dir
         self.custom_dir = os.path.join(self.base_dir, "custom")
         self.ensure_directories()
-        self.ensure_default_presets()
 
     def ensure_directories(self):
         os.makedirs(self.base_dir, exist_ok=True)
         os.makedirs(self.custom_dir, exist_ok=True)
 
     def ensure_default_presets(self):
-        """Khởi tạo hoặc đồng bộ các file JSON preset mặc định."""
-        for preset in BUILTIN_PRESETS:
-            file_path = os.path.join(self.base_dir, f"{preset.id}.json")
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(pydantic_dump(preset), f, indent=2, ensure_ascii=False)
+        """Không tự sinh file JSON mặc định (kho xuất bản riêng)."""
+        pass
 
     def list_presets(self) -> List[TextStylePreset]:
-        """Tải toàn bộ danh sách preset (cả mặc định và tùy chỉnh)."""
+        """Tải danh sách preset từ đĩa (custom và base). Kho rỗng trả list rỗng."""
         presets = []
         preset_ids = set()
 
@@ -633,10 +181,6 @@ class PresetManager:
                         presets.append(p)
                         preset_ids.add(p.id)
 
-        # 3. Đảm bảo nếu chưa có file nào thì nạp từ BUILTIN_PRESETS
-        if not presets:
-            return BUILTIN_PRESETS.copy()
-            
         return presets
 
     def _load_preset_file(self, file_path: str) -> Optional[TextStylePreset]:
@@ -648,12 +192,12 @@ class PresetManager:
             return None
 
     def get_preset(self, preset_id: str) -> TextStylePreset:
-        """Lấy preset theo ID, fallback về karaoke_pop nếu không tìm thấy."""
+        """Lấy preset theo ID, trả về mẫu chữ kỹ thuật trung tính nếu không tìm thấy."""
         all_presets = self.list_presets()
         for p in all_presets:
             if p.id == preset_id:
                 return p
-        return BUILTIN_PRESETS[0]
+        return get_neutral_default_text_preset(preset_id)
 
     def save_custom_preset(self, preset: TextStylePreset) -> str:
         """Lưu một preset tùy chỉnh vào thư mục custom."""

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional, List, Dict
 import logging
 
-logger = logging.getLogger("ResolveFlow.CommandRegistry")
+logger = logging.getLogger("ChunDVC.CommandRegistry")
 
 
 @dataclass

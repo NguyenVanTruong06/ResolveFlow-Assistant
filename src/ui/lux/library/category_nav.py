@@ -17,9 +17,27 @@ DEFAULT_CATEGORIES = [
     {"id": "overlay", "label": "Lớp phủ", "subs": ["Tất cả", "Grain", "Light Leak", "VHS", "Dust"]},
     {"id": "sfx", "label": "Âm thanh", "subs": ["Tất cả", "Whoosh", "UI", "Glitch", "Impact"]},
     {"id": "bgm", "label": "Nhạc", "subs": ["Tất cả", "Vlog", "Cinematic", "Lofi"]},
-    {"id": "lut", "label": "Màu (LUT)", "subs": ["Tất cả", "Điện ảnh", "Vintage", "Cyber", "Vlog"]},
+    {"id": "lut", "label": "Màu (LUT)", "subs": ["Tất cả"]},
     {"id": "mine", "label": "Của tôi", "subs": ["Tất cả", "Đã lưu", "Macro"]},
 ]
+
+
+class HorizontalChipScrollArea(QScrollArea):
+    """Cuộn ngang bằng bánh xe chuột hoặc pixel delta của touchpad."""
+
+    def wheelEvent(self, event):
+        delta = event.pixelDelta()
+        if not delta.isNull():
+            distance = delta.x() or delta.y()
+        else:
+            angle = event.angleDelta()
+            distance = (angle.x() or angle.y()) / 120 * 60
+        bar = self.horizontalScrollBar()
+        if distance and bar.maximum() > 0:
+            bar.setValue(bar.value() - round(distance))
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
 
 class CategoryNavWidget(QWidget):
@@ -47,14 +65,28 @@ class CategoryNavWidget(QWidget):
         main_layout.setContentsMargins(6, 4, 6, 4)
         main_layout.setSpacing(4)
 
-        # Row 1: Primary category chips
-        self.cat_scroll = QScrollArea()
+        # Row 1: Primary category chips with overflow arrow buttons
+        cat_nav_row = QHBoxLayout()
+        cat_nav_row.setContentsMargins(0, 0, 0, 0)
+        cat_nav_row.setSpacing(2)
+
+        self.btn_scroll_left = QPushButton("‹")
+        self.btn_scroll_left.setFixedSize(18, 28)
+        self.btn_scroll_left.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_scroll_left.setCursor(Qt.PointingHandCursor)
+        self.btn_scroll_left.setToolTip("Cuộn sang trái")
+        self.btn_scroll_left.setStyleSheet(self._arrow_style())
+        self.btn_scroll_left.clicked.connect(self._scroll_left)
+        cat_nav_row.addWidget(self.btn_scroll_left)
+
+        self.cat_scroll = HorizontalChipScrollArea()
         self.cat_scroll.setFixedHeight(34)
         self.cat_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.cat_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.cat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.cat_scroll.setWidgetResizable(True)
         self.cat_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.cat_scroll.setToolTip("Lăn chuột hoặc vuốt ngang để xem thêm danh mục")
         self.cat_scroll.setStyleSheet("background: transparent;")
 
         self.cat_container = QWidget()
@@ -62,10 +94,25 @@ class CategoryNavWidget(QWidget):
         self.cat_layout.setContentsMargins(0, 0, 0, 0)
         self.cat_layout.setSpacing(6)
         self.cat_scroll.setWidget(self.cat_container)
-        main_layout.addWidget(self.cat_scroll)
+        cat_nav_row.addWidget(self.cat_scroll, 1)
+
+        self.btn_scroll_right = QPushButton("›")
+        self.btn_scroll_right.setFixedSize(18, 28)
+        self.btn_scroll_right.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_scroll_right.setCursor(Qt.PointingHandCursor)
+        self.btn_scroll_right.setToolTip("Cuộn sang phải")
+        self.btn_scroll_right.setStyleSheet(self._arrow_style())
+        self.btn_scroll_right.clicked.connect(self._scroll_right)
+        cat_nav_row.addWidget(self.btn_scroll_right)
+
+        main_layout.addLayout(cat_nav_row)
+
+        bar = self.cat_scroll.horizontalScrollBar()
+        bar.valueChanged.connect(self._update_scroll_arrows)
+        bar.rangeChanged.connect(self._update_scroll_arrows)
 
         # Row 2: Sub-category chips
-        self.sub_scroll = QScrollArea()
+        self.sub_scroll = HorizontalChipScrollArea()
         self.sub_scroll.setFixedHeight(28)
         self.sub_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.sub_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -109,7 +156,7 @@ class CategoryNavWidget(QWidget):
         icon_map = {
             "text": "text", "trans": "trans", "meme": "meme",
             "overlay": "overlay", "sfx": "sfx", "bgm": "music",
-            "lut": "palette", "mine": "sparkles"
+            "lut": "lut", "mine": "sparkles"
         }
         return icon_map.get(cid, "folder")
 
@@ -140,6 +187,7 @@ class CategoryNavWidget(QWidget):
 
         self.cat_layout.addStretch(1)
         self.render_subcategories()
+        self._update_scroll_arrows()
 
     def render_subcategories(self):
         while self.sub_layout.count():
@@ -172,6 +220,8 @@ class CategoryNavWidget(QWidget):
         self.sub_layout.addStretch(1)
 
     def select_category(self, cat_id: str):
+        if cat_id in self._cat_buttons:
+            self.cat_scroll.ensureWidgetVisible(self._cat_buttons[cat_id])
         if self._current_cat == cat_id:
             return
         self._current_cat = cat_id
@@ -183,7 +233,10 @@ class CategoryNavWidget(QWidget):
             btn.setStyleSheet(self._cat_style(is_active))
             btn.setIcon(get_vector_icon(self._get_cat_icon(cid), "#ffffff" if is_active else "#a1a1aa", 13))
 
+        if cat_id in self._cat_buttons:
+            self.cat_scroll.ensureWidgetVisible(self._cat_buttons[cat_id])
         self.render_subcategories()
+        self._update_scroll_arrows()
         self.category_changed.emit(self._current_cat)
         self.sub_category_changed.emit(self._current_sub)
 
@@ -194,6 +247,60 @@ class CategoryNavWidget(QWidget):
         for btn in self._sub_buttons:
             btn.setStyleSheet(self._sub_style(btn.text() == self._current_sub))
         self.sub_category_changed.emit(self._current_sub)
+
+    def _scroll_left(self):
+        bar = self.cat_scroll.horizontalScrollBar()
+        bar.setValue(bar.value() - 100)
+
+    def _scroll_right(self):
+        bar = self.cat_scroll.horizontalScrollBar()
+        bar.setValue(bar.value() + 100)
+
+    def _update_scroll_arrows(self):
+        if not hasattr(self, "btn_scroll_left") or not hasattr(self, "btn_scroll_right"):
+            return
+        bar = self.cat_scroll.horizontalScrollBar()
+        max_v = bar.maximum()
+        val = bar.value()
+        if max_v <= 0:
+            self.btn_scroll_left.setVisible(False)
+            self.btn_scroll_right.setVisible(False)
+        else:
+            self.btn_scroll_left.setVisible(True)
+            self.btn_scroll_right.setVisible(True)
+            self.btn_scroll_left.setEnabled(val > 0)
+            self.btn_scroll_right.setEnabled(val < max_v)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_scroll_arrows()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_scroll_arrows()
+
+    def _arrow_style(self) -> str:
+        return """
+            QPushButton {
+                background: #18181b;
+                color: #a1a1aa;
+                border: 1px solid #27272a;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0;
+            }
+            QPushButton:hover:enabled {
+                background: #27272a;
+                color: #ffffff;
+                border-color: #3f3f46;
+            }
+            QPushButton:disabled {
+                background: transparent;
+                color: #3f3f46;
+                border-color: transparent;
+            }
+        """
 
     @property
     def current_category(self) -> str:

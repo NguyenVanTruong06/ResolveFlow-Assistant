@@ -40,16 +40,19 @@ class DockStatusBar(QWidget):
         self.lbl_timeline.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout.addWidget(self.lbl_timeline, stretch=1)
 
-        # Playhead timecode
+        # Playhead timecode (Tabular NLE Monospace)
         self.lbl_timecode = QLabel("00:00:00:00")
-        self.lbl_timecode.setStyleSheet("color: #d4d4d8; font-family: monospace; font-size: 11px;")
+        self.lbl_timecode.setStyleSheet(
+            "color: #e4e4e7; font-family: 'JetBrains Mono', 'Cascadia Mono', 'Consolas', monospace; "
+            "font-size: 11px; font-weight: 600; letter-spacing: 0.3px;"
+        )
         self.lbl_timecode.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout.addWidget(self.lbl_timecode)
 
         self.setStyleSheet("""
             QWidget {
-                background: #09090b;
-                border-top: 1px solid #18181b;
+                background: #0b0b0e;
+                border-top: 1px solid #1f1f27;
             }
         """)
 

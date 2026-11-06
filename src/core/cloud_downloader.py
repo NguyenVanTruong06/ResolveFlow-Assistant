@@ -16,6 +16,44 @@ from typing import Optional, Callable, Dict, Any, Tuple, List
 from pydantic import BaseModel, Field
 
 
+def sanitize_filename(name: str) -> str:
+    """Chuẩn hóa tên tệp tải về từ Google Drive, loại bỏ ký tự nguy hiểm/bị cấm."""
+    base = os.path.basename(str(name))
+    cleaned = re.sub(r'[\\/*?:"<>|]', "_", base).strip(". ")
+    return cleaned
+
+
+class TransferBudget:
+    """Bộ quản lý ngân sách chuyển tải dữ liệu gói đạo cụ (Pack-only Transfer Budget)."""
+
+    def __init__(self, max_bytes: int):
+        if type(max_bytes) is not int or isinstance(max_bytes, bool) or max_bytes <= 0:
+            raise ValueError(f"max_bytes phải là số nguyên dương (int > 0), nhận: {max_bytes!r}")
+        self.max_bytes = max_bytes
+        self.total_consumed = 0
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.max_bytes - self.total_consumed)
+
+    def check_declared(self, size: int) -> None:
+        if type(size) is not int or isinstance(size, bool) or size < 0:
+            raise ValueError(f"Dung lượng khai báo phải là số nguyên không âm (int >= 0), nhận: {size!r}")
+        if size > self.remaining:
+            raise ValueError(
+                f"Dung lượng khai báo ({size} bytes) vượt quá hạn mức còn lại ({self.remaining} bytes) của gói tải {self.max_bytes} bytes."
+            )
+
+    def consume(self, chunk_len: int) -> None:
+        if type(chunk_len) is not int or isinstance(chunk_len, bool) or chunk_len < 0:
+            raise ValueError(f"chunk_len phải là số nguyên không âm (int >= 0), nhận: {chunk_len!r}")
+        if self.total_consumed + chunk_len > self.max_bytes:
+            raise ValueError(
+                f"Tổng dung lượng tải về vượt quá giới hạn cho phép {self.max_bytes} bytes."
+            )
+        self.total_consumed += chunk_len
+
+
 class CloudResourceInfo(BaseModel):
     """Thông tin trích xuất từ đường dẫn Cloud."""
     url: str
@@ -192,18 +230,28 @@ class GoogleDriveDownloader:
         custom_filename: Optional[str] = None,
         progress_callback: Optional[Callable[[DownloadProgress], None]] = None,
         cancel_checker: Optional[Callable[[], bool]] = None,
-        max_retries: int = 3
+        max_retries: int = 3,
+        write_guard: Optional[Callable[[int], None]] = None,
+        *,
+        budget: Optional[TransferBudget] = None
     ) -> str:
         """
         Tải một tệp từ Google Drive về output_dir với streaming chunk, tự động vượt qua trang cảnh báo virus,
         chống ghi nhầm HTML vào file MP4, tự động retry khi gặp lỗi tạm thời.
         """
+        if budget is not None and not isinstance(budget, TransferBudget):
+            raise ValueError("budget phải là TransferBudget hoặc None.")
+        if write_guard:
+            write_guard(0)
         os.makedirs(output_dir, exist_ok=True)
 
-        for attempt in range(1, max_retries + 1):
+        effective_max_retries = 1 if budget is not None else max_retries
+
+        for attempt in range(1, effective_max_retries + 1):
             if cancel_checker and cancel_checker():
                 raise InterruptedError("Tiến trình tải Google Drive đã bị hủy bởi người dùng.")
 
+            part_created = False
             try:
                 cookie_jar = CookieJar()
                 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
@@ -213,61 +261,126 @@ class GoogleDriveDownloader:
                 req = urllib.request.Request(base_url, headers={"User-Agent": cls.USER_AGENT})
 
                 resp = opener.open(req, timeout=35)
-                content_type = resp.headers.get("Content-Type", "")
+                content_type = (resp.headers.get("Content-Type") or "").lower()
 
                 # Nếu gặp trang HTML cảnh báo virus cho file lớn
-                if "text/html" in content_type:
-                    html_text = resp.read().decode("utf-8", errors="ignore")
-                    resp.close()
+                if "text/html" in content_type or "application/xhtml+xml" in content_type:
+                    try:
+                        if budget is not None:
+                            html_bytes = resp.read(1024 * 1024 + 1)
+                            if len(html_bytes) > 1024 * 1024:
+                                raise ValueError("Trang HTML xác nhận Google Drive quá lớn (> 1 MiB).")
+                            html_text = html_bytes.decode("utf-8", errors="ignore")
+                        else:
+                            html_text = resp.read().decode("utf-8", errors="ignore")
 
-                    # Kiểm tra các thông báo lỗi nghiêm trọng
-                    if "Quota exceeded" in html_text or "too many users" in html_text.lower():
-                        raise ValueError("Google Drive báo lỗi: Vượt quá hạn ngạch tải (Quota exceeded). File này đang có quá nhiều lượt tải.")
-                    if "Access denied" in html_text or "You need access" in html_text:
-                        raise ValueError("Không có quyền truy cập file này. Vui lòng kiểm tra quyền chia sẻ công khai.")
+                        # Kiểm tra các thông báo lỗi nghiêm trọng
+                        html_lower = html_text.lower()
+                        if "quota exceeded" in html_lower or "too many users" in html_lower:
+                            raise ValueError("Google Drive báo lỗi: Vượt quá hạn ngạch tải (Quota exceeded). File này đang có quá nhiều lượt tải.")
+                        if "access denied" in html_lower or "you need access" in html_lower:
+                            raise ValueError("Không có quyền truy cập file này. Vui lòng kiểm tra quyền chia sẻ công khai.")
 
-                    # Trích xuất link xác nhận tải
-                    direct_url = cls._extract_download_link_from_html(html_text, file_id)
-                    if not direct_url:
-                        direct_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+                        # Trích xuất link xác nhận tải (tối đa 1 round)
+                        direct_url = cls._extract_download_link_from_html(html_text, file_id)
+                        if not direct_url:
+                            direct_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+                    finally:
+                        resp.close()
 
                     confirm_req = urllib.request.Request(direct_url, headers={"User-Agent": cls.USER_AGENT})
                     resp = opener.open(confirm_req, timeout=45)
-                    content_type_2 = resp.headers.get("Content-Type", "")
+                    content_type_2 = (resp.headers.get("Content-Type") or "").lower()
 
                     # Nếu sau khi xác nhận vẫn trả về HTML lỗi -> báo lỗi rõ ràng
-                    if "text/html" in content_type_2:
-                        html_text_2 = resp.read().decode("utf-8", errors="ignore")
-                        resp.close()
-                        if "Quota exceeded" in html_text_2 or "too many users" in html_text_2.lower():
-                            raise ValueError("Google Drive báo lỗi vượt hạn ngạch tải ẩn danh (Quota exceeded).")
-                        # Thử Fallback qua gdown nếu có
-                        raise RuntimeError(f"Google Drive yêu cầu xác thực web hoặc giới hạn tải: {html_text_2[:200]}")
+                    if "text/html" in content_type_2 or "application/xhtml+xml" in content_type_2:
+                        try:
+                            if budget is not None:
+                                html_bytes_2 = resp.read(1024 * 1024 + 1)
+                                if len(html_bytes_2) > 1024 * 1024:
+                                    raise ValueError("Trang HTML xác nhận Google Drive quá lớn (> 1 MiB).")
+                                html_text_2 = html_bytes_2.decode("utf-8", errors="ignore")
+                            else:
+                                html_text_2 = resp.read().decode("utf-8", errors="ignore")
+                            html_lower_2 = html_text_2.lower()
+                            if "quota exceeded" in html_lower_2 or "too many users" in html_lower_2:
+                                raise ValueError("Google Drive báo lỗi vượt hạn ngạch tải ẩn danh (Quota exceeded).")
+                            raise ValueError(f"Google Drive yêu cầu xác thực web hoặc giới hạn tải: {html_text_2[:200]}")
+                        finally:
+                            resp.close()
 
-                # Xác định tên file an toàn (chống path traversal & dotfiles)
-                raw_filename = custom_filename or cls._extract_filename_from_headers(resp.headers, file_id)
-                safe_filename = os.path.basename(raw_filename)
-                safe_filename = re.sub(r'[\\/*?:"<>|]', "_", safe_filename).strip(". ")
-                if not safe_filename:
-                    safe_filename = f"GoogleDrive_{file_id}.mp4"
-                output_dir_abs = os.path.abspath(output_dir)
-                target_path = os.path.abspath(os.path.join(output_dir_abs, safe_filename))
-                if not target_path.startswith(output_dir_abs):
-                    safe_filename = f"GoogleDrive_{file_id}.mp4"
-                    target_path = os.path.join(output_dir_abs, safe_filename)
-                target_filename = safe_filename
-                part_path = target_path + ".part"
-
-                total_length_header = resp.headers.get("Content-Length")
-                total_bytes = int(total_length_header) if total_length_header and total_length_header.isdigit() else 0
-
-                downloaded_bytes = 0
-                chunk_size = 1024 * 1024  # 1MB chunk
-                start_time = time.time()
-                last_report_time = start_time
-
+                # Toàn bộ xử lý response cuối được bảo vệ bởi try...finally: resp.close()
                 try:
-                    with open(part_path, "wb") as out_file:
+                    # Xác thực HTTP status:
+                    status = getattr(resp, 'status', None)
+                    if status is None and hasattr(resp, 'code'):
+                        status = resp.code
+                    if status is None and hasattr(resp, 'getcode'):
+                        status = resp.getcode()
+
+                    if budget is not None:
+                        if status is None or type(status) is not int or status != 200:
+                            raise ValueError(f"HTTP status không hợp lệ: {status}. Chỉ chấp nhận 200.")
+                    else:
+                        if status is not None and (type(status) is not int or status != 200):
+                            raise ValueError(f"HTTP status không hợp lệ: {status}. Chỉ chấp nhận 200.")
+
+                    final_ct = (resp.headers.get("Content-Type") or "").lower()
+                    if budget is not None and ("text/html" in final_ct or "application/xhtml+xml" in final_ct):
+                        raise ValueError("Liên kết Google Drive trả về trang web HTML thay vì tệp tài nguyên.")
+
+                    # Xác định tên file an toàn (chống path traversal & dotfiles)
+                    raw_filename = custom_filename or cls._extract_filename_from_headers(resp.headers, file_id)
+                    safe_filename = sanitize_filename(raw_filename)
+                    if not safe_filename:
+                        safe_filename = f"GoogleDrive_{file_id}.mp4"
+                    output_dir_abs = os.path.abspath(output_dir)
+                    target_path = os.path.abspath(os.path.join(output_dir_abs, safe_filename))
+                    if not target_path.startswith(output_dir_abs):
+                        safe_filename = f"GoogleDrive_{file_id}.mp4"
+                        target_path = os.path.join(output_dir_abs, safe_filename)
+                    target_filename = safe_filename
+                    part_path = target_path + ".part"
+
+                    # Pack mode: không ghi đè target hoặc part đã có sẵn
+                    if budget is not None:
+                        if os.path.exists(target_path) or os.path.islink(target_path):
+                            raise FileExistsError(f"Tệp đích đã tồn tại trong staging: {target_filename}")
+                        if os.path.exists(part_path) or os.path.islink(part_path):
+                            raise FileExistsError(f"Tệp tạm .part đã tồn tại trong staging: {target_filename}.part")
+
+                    total_length_header = resp.headers.get("Content-Length")
+                    has_declared_len = bool(total_length_header and total_length_header.isdigit())
+                    total_bytes = int(total_length_header) if has_declared_len else 0
+
+                    if budget is not None and has_declared_len and total_bytes > 0:
+                        budget.check_declared(total_bytes)
+
+                    downloaded_bytes = 0
+                    chunk_size = 1024 * 1024  # 1MB chunk
+                    start_time = time.time()
+                    last_report_time = start_time
+
+                    prefix_buf = bytearray()
+                    PREFIX_LIMIT = 512
+                    html_checked = False
+
+                    def check_html_prefix(buf: bytes | bytearray) -> None:
+                        header_bytes = bytes(buf[:PREFIX_LIMIT]).lstrip(b'\xef\xbb\xbf \t\r\n')
+                        header_lower = header_bytes.decode('utf-8', errors='ignore').lower()
+                        html_markers = (
+                            '<!doctype html', '<html', '<head', '<body', '<title',
+                            'quota exceeded', 'too many users',
+                        )
+                        if any(marker in header_lower for marker in html_markers):
+                            raise ValueError("Nội dung tải về là trang web HTML hoặc thông báo lỗi, không phải tệp tài nguyên.")
+
+                    if write_guard:
+                        write_guard(total_bytes if has_declared_len else 0)
+
+                    part_mode = "xb" if budget is not None else "wb"
+                    with open(part_path, part_mode) as out_file:
+                        part_created = True
                         while True:
                             if cancel_checker and cancel_checker():
                                 raise InterruptedError("Tiến trình tải Google Drive đã bị hủy bởi người dùng.")
@@ -276,8 +389,30 @@ class GoogleDriveDownloader:
                             if not chunk:
                                 break
 
-                            out_file.write(chunk)
-                            downloaded_bytes += len(chunk)
+                            if budget is not None:
+                                if not html_checked:
+                                    prefix_buf.extend(chunk)
+                                    if len(prefix_buf) >= PREFIX_LIMIT:
+                                        check_html_prefix(prefix_buf)
+                                        html_checked = True
+
+                                budget.consume(len(chunk))
+
+                            if write_guard:
+                                write_guard(len(chunk))
+
+                            if budget is not None:
+                                if html_checked:
+                                    if prefix_buf:
+                                        out_file.write(prefix_buf)
+                                        downloaded_bytes += len(prefix_buf)
+                                        prefix_buf.clear()
+                                    else:
+                                        out_file.write(chunk)
+                                        downloaded_bytes += len(chunk)
+                            else:
+                                out_file.write(chunk)
+                                downloaded_bytes += len(chunk)
 
                             now = time.time()
                             if progress_callback and (now - last_report_time >= 0.25 or downloaded_bytes == total_bytes):
@@ -293,16 +428,33 @@ class GoogleDriveDownloader:
                                     status="downloading"
                                 ))
                                 last_report_time = now
+
+                        if budget is not None and not html_checked:
+                            if len(prefix_buf) == 0:
+                                raise ValueError("Tệp tải về rỗng (0 bytes).")
+                            check_html_prefix(prefix_buf)
+                            html_checked = True
+                            out_file.write(prefix_buf)
+                            downloaded_bytes += len(prefix_buf)
+                            prefix_buf.clear()
+
+                        if budget is not None:
+                            if downloaded_bytes == 0:
+                                raise ValueError("Tệp tải về rỗng (0 bytes).")
+                            if has_declared_len and downloaded_bytes != total_bytes:
+                                raise ValueError(f"Dữ liệu tải về không đầy đủ (đã tải {downloaded_bytes}/{total_bytes} bytes).")
                 finally:
                     resp.close()
 
                 # Kiểm tra tính toàn vẹn của tệp .part trước khi đổi tên
                 if not cls._is_valid_binary_file(part_path):
-                    if os.path.exists(part_path):
+                    if part_created and os.path.exists(part_path):
                         os.remove(part_path)
                     raise ValueError("Tệp tải về không hợp lệ hoặc bị lỗi máy chủ Google Drive.")
 
-                if os.path.exists(target_path):
+                if budget is not None and (os.path.exists(target_path) or os.path.islink(target_path)):
+                    raise FileExistsError(f"Tệp đích đã tồn tại: {target_filename}")
+                if budget is None and os.path.exists(target_path):
                     try:
                         os.remove(target_path)
                     except Exception:
@@ -322,15 +474,25 @@ class GoogleDriveDownloader:
                 return target_path
 
             except InterruptedError:
+                if part_created and 'part_path' in locals() and os.path.exists(part_path):
+                    try: os.remove(part_path)
+                    except Exception: pass
                 raise
             except Exception as e:
+                if budget is not None or write_guard:
+                    if part_created and 'part_path' in locals() and os.path.exists(part_path):
+                        try: os.remove(part_path)
+                        except Exception: pass
+                    raise  # Kho quản lý không dùng fallback tải thiếu kiểm soát dung lượng.
                 # Dọn dẹp file part nếu có
                 raw_cleanup_fn = custom_filename or f"GoogleDrive_{file_id}.mp4"
-                safe_cleanup_fn = os.path.basename(raw_cleanup_fn).strip(". ") or f"GoogleDrive_{file_id}.mp4"
+                safe_cleanup_fn = sanitize_filename(raw_cleanup_fn) or f"GoogleDrive_{file_id}.mp4"
                 part_path = os.path.join(output_dir, safe_cleanup_fn + ".part")
-                if os.path.exists(part_path):
+                if part_created and os.path.exists(part_path):
                     try:
                         os.remove(part_path)
+                    except Exception:
+                        pass
                     except Exception:
                         pass
 

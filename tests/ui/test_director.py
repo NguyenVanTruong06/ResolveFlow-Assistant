@@ -234,10 +234,24 @@ def test_director_window_navigation_and_panels(qapp):
     assert win.current_step == 3
     assert win.btn_primary.text() == "Tiếp: Dựng timeline ›"
 
-    # Chuyển bước 4
+    # Chuyển bước 4 khi chưa duyệt -> bị chặn ở Bước 3 (G07 Approval Gate)
     win.btn_primary.click()
+    assert win.current_step == 3
+    assert win.btn_primary.text() == "Tiếp: Dựng timeline ›"
+
+    # Khi có kịch bản đã duyệt hợp lệ -> cho phép vào Bước 4 xem tóm tắt
+    from unittest.mock import MagicMock
+    from src.core.contracts.edit_plan_proposal_contracts import EditPlanProposal
+    from src.core.contracts.edit_plan_approval_contracts import AppOwnedApprovalRecord
+    mock_prop = MagicMock(spec=EditPlanProposal)
+    mock_prop.proposal_id = "p_test"
+    mock_appr = MagicMock(spec=AppOwnedApprovalRecord)
+    mock_appr.approval_id = "a_test"
+    win.page_review.get_approved_proposal_and_record = lambda: (mock_prop, mock_appr)
+
+    win.go_to_step(4)
     assert win.current_step == 4
-    assert win.btn_primary.text() == "✂ 🚀 Dựng timeline"
+    assert win.btn_primary.text() == "Kiểm tra nguồn & tài nguyên"
 
     # Bấm quay lại
     win.btn_back.click()
@@ -302,24 +316,35 @@ def test_review_page_three_modes_and_two_prompts(qapp):
     page.btn_mode_web.click()
     assert page.ai_stack.currentIndex() == 0
 
-    # 4. Kiểm tra sinh 2 luồng prompt:
-    # Luồng 1: Prompt Dựng Video (V1)
+    # 4. Kiểm tra sinh 2 luồng prompt theo hợp đồng C2b:
+    # Luồng 1: Prompt Dựng Video (V1) - sync getter trả về '' khi chưa chuẩn bị, không bịa clip giả
+    assert page.get_video_prompt() == ""
+
+    # Khi có snapshot chuẩn bị sẵn khớp ngữ cảnh in-memory:
+    curr_ctx = page._get_current_context()
+    curr_sig = page._extract_context_signature(curr_ctx)
+    page._prepared_prompt_snapshot = {
+        "prompt_text": "THÔNG TIN DỰ ÁN\n\nTranscript lời thoại...",
+        "context_signature": curr_sig,
+        "request_id": "test_prep_1",
+    }
     video_prompt = page.get_video_prompt()
     assert "THÔNG TIN DỰ ÁN" in video_prompt or "transcript" in video_prompt.lower()
-    assert len(video_prompt) > 50
+    assert len(video_prompt) > 20
 
+    # Khi không có video_paths, bấm copy không tự ý phát signal copied rác
     copied_signals = []
     page.prompt_copied.connect(copied_signals.append)
     page.btn_copy_video_prompt.click()
-    assert "video" in copied_signals
+    assert "video" not in copied_signals  # Chưa có tệp video, bị reject an toàn
 
-    # Luồng 2: Prompt Chữ Kinetic (V2)
+    # Luồng 2: Prompt Chữ Kinetic (V2) - Gated an toàn trong slice này
     kinetic_prompt = page.get_kinetic_prompt(aspect="9:16")
-    assert "Kinetic" in kinetic_prompt or "subtitles" in kinetic_prompt or "pages" in kinetic_prompt
-    assert len(kinetic_prompt) > 50
+    assert kinetic_prompt == ""  # Gated, không chạy DEMO_WORDS hay legacy I/O
 
     page.btn_copy_kinetic_prompt.click()
-    assert "kinetic" in copied_signals
+    assert "kinetic" not in copied_signals  # Không ghi đè clipboard, 0 signal
+    assert "chưa khả dụng" in page.btn_copy_kinetic_prompt.toolTip() or "nâng cấp" in page.btn_copy_kinetic_prompt.toolTip()
 
 
 def test_review_page_json_apply_and_persistence(qapp):

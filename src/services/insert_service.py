@@ -49,7 +49,10 @@ def to_asset_dict(asset: Any) -> Dict[str, Any]:
     ext = os.path.splitext(fp)[1].lower() if fp else ""
     raw_tab = str(d.get("tab") or "").lower()
 
-    if type_name == "TransitionStylePreset" or hasattr(raw, "transition_type"):
+    if (type_name == "TransitionStylePreset" or hasattr(raw, "transition_type")
+            or raw_tab in ("trans", "transition", "transitions")
+            or str(d.get("category") or "").lower() in ("trans", "transition", "transitions")
+            or "transitions" in fp.lower()):
         d["tab"] = "trans"
         d["sub"] = d.get("category", "Transition")
         d["category"] = "trans"
@@ -91,6 +94,7 @@ class InsertResult:
     item_ref: Any = None
     error: str = ""
     inserted_at: float = field(default_factory=time.time)
+    message: str = ""
 
 
 class InsertService(QObject):
@@ -174,10 +178,36 @@ class InsertService(QObject):
         Asynchronously inserts an asset based on its category and mode.
         """
         asset_dict = to_asset_dict(asset)
-        cat = str(asset_dict.get("category") or asset_dict.get("tab") or "").lower()
+
+        # Action-time Availability & Authority Guard (G04-04C2-I)
+        from src.core.action_guard import check_action_availability, ActionGuardResult
+        try:
+            guard_res = check_action_availability(asset_dict, intent="insert")
+        except Exception as e:
+            guard_res = ActionGuardResult(
+                allowed=False,
+                status="offline",
+                result_code="ERR_GUARD_EXCEPTION",
+                reason=f"Lỗi kiểm tra tính khả dụng: {e}",
+            )
+
         title_id = str(asset_dict.get("id") or asset_dict.get("name") or "karaoke_pop")
         name = str(asset_dict.get("name") or title_id or "Asset")
-        file_path = str(asset_dict.get("file_path") or asset_dict.get("path") or "")
+
+        if not guard_res.allowed:
+            res = InsertResult(
+                ok=False,
+                item_name=name,
+                error=guard_res.reason,
+            )
+            self._record_result(res)
+            if callback:
+                callback(res)
+            self.insertion_finished.emit(res)
+            return
+
+        cat = str(asset_dict.get("category") or asset_dict.get("tab") or "").lower()
+        file_path = guard_res.resolved_path or str(asset_dict.get("file_path") or asset_dict.get("path") or "")
         ext = os.path.splitext(file_path)[1].lower() if file_path else ""
 
         if extra_params:
@@ -188,34 +218,284 @@ class InsertService(QObject):
                     pass
             if extra_params.get("text"):
                 name = str(extra_params["text"])
+            if preferred_track is None:
+                if "preferred_track" in extra_params:
+                    try:
+                        preferred_track = int(extra_params["preferred_track"])
+                    except Exception:
+                        pass
+                elif "track_mode" in extra_params:
+                    tm = str(extra_params["track_mode"]).strip()
+                    if tm.lower() == "new":
+                        mode = "new_track"
+                    elif tm.lower() not in ("auto", "timeline_track"):
+                        import re
+                        digits = re.findall(r"\d+", tm)
+                        if digits:
+                            try:
+                                preferred_track = int(digits[0])
+                            except Exception:
+                                pass
 
-        # 1. Mode: Fusion Paste (Ctrl+V into Fusion node tree)
-        if mode == "fusion_paste" or (self._state_service and self._state_service.current_page == "fusion" and cat in ("titles", "text", "transitions", "trans", "fx")):
+        # 1. Mode: Explicit Fusion Paste (Ctrl+V into Fusion node tree)
+        if mode == "fusion_paste":
             self._insert_fusion_paste(name, file_path, callback)
             return
 
-        # 2. SFX / BGM Audio insertion
-        if ext in (".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a") or cat in ("sfx", "bgm", "audio", "sound"):
-            self._insert_audio(name, file_path, mode, duration, preferred_track, callback)
+        # Check filebacked .setting macro: Truthful guidance, 0 gateway, 0 carrier, 0 Recent
+        if ext == ".setting" or file_path.lower().endswith(".setting") or asset_dict.get("template_type") == "macro":
+            res = InsertResult(
+                ok=False,
+                item_name=name,
+                error="Tài nguyên mẫu Fusion (.setting) chưa hỗ trợ chèn tự động lên Edit Timeline; vui lòng bấm 'Sao chép mã Fusion' để sao chép node hoặc dùng phím tắt vào Fusion Page.",
+                inserted_at=time.time(),
+            )
+            if callback:
+                callback(res)
+            self.insertion_finished.emit(res)
             return
 
-        # 3. LUT Application
-        if ext in (".cube", ".3dl") or cat in ("luts", "lut", "color"):
-            self._insert_lut(name, file_path, callback)
-            return
-
-        # 4. Video / Meme / B-Roll / Overlay insertion (Any video file format or still image or meme category)
-        if ext in (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".png", ".jpg", ".jpeg", ".webp", ".svg") or cat in ("meme", "memes", "broll", "video", "overlay", "overlays", "green_screen", "sticker", "stickers"):
-            self._insert_video(name, file_path, mode, duration, preferred_track, callback, extra_params=extra_params)
-            return
-
-        # 5. Video Transitions (Ensure installed in Effects Library, never insert as title text)
+        # 2. Video Transitions (Ensure native guidance or Effects Library installation, never implicit Fusion paste or title)
         if cat in ("trans", "transitions", "transition") or "transitions" in file_path.lower():
             self._insert_transition(name, file_path, mode, duration, callback, extra_params=extra_params)
             return
 
-        # 6. Fusion Title / Template -> Title Worker (QProcess)
+        # 3. Implicit Fusion page paste for titles, text, and fx (Chỉ áp dụng khi không có explicit timeline intent)
+        explicit_timeline = bool(extra_params and (extra_params.get("explicit_timeline") or extra_params.get("intent") == "timeline"))
+        if not explicit_timeline and self._state_service and self._state_service.current_page == "fusion" and cat in ("titles", "text", "fx"):
+            self._insert_fusion_paste(name, file_path, callback)
+            return
+
+        # 4. SFX / BGM Audio insertion
+        if ext in (".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a") or cat in ("sfx", "bgm", "audio", "sound"):
+            self._insert_audio(name, file_path, mode, duration, preferred_track, callback, extra_params=extra_params)
+            return
+
+        # 5. LUT Application
+        if ext in (".cube", ".3dl") or cat in ("luts", "lut", "color"):
+            self._insert_lut(name, file_path, callback, extra_params=extra_params)
+            return
+
+        # 6. Video / Meme / B-Roll / Overlay insertion (Any video file format or still image or meme category)
+        if ext in (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".png", ".jpg", ".jpeg", ".webp", ".svg") or cat in ("meme", "memes", "broll", "video", "overlay", "overlays", "green_screen", "sticker", "stickers"):
+            self._insert_video(name, file_path, mode, duration, preferred_track, callback, extra_params=extra_params)
+            return
+
+        # 7. Procedural Text / Title via ResolveGateway
+        from src.core.text_preset import TextStylePreset
+        raw_obj = asset_dict.get("_raw_obj") or asset_dict.get("native_preset") or asset
+        is_text = (
+            cat in ("text", "title", "titles")
+            or isinstance(raw_obj, TextStylePreset)
+            or isinstance(asset, TextStylePreset)
+        )
+        if is_text:
+            self._insert_procedural_text(asset_dict, name, mode, duration, preferred_track, callback, extra_params=extra_params)
+            return
+
+        # 8. Fusion Title / Template -> Title Worker (QProcess fallback)
         self._insert_title_worker(name, mode, duration, preferred_track, callback, title_id=title_id)
+
+    def _insert_procedural_text(
+        self,
+        asset_dict: Dict[str, Any],
+        name: str,
+        mode: str,
+        duration: float,
+        preferred_track: Optional[int],
+        callback: Optional[Callable[[InsertResult], None]],
+        extra_params: Optional[Dict[str, Any]] = None,
+    ):
+        """Chèn tiêu đề / Text cơ bản qua ResolveGateway và resolve_bridge."""
+        extra = dict(extra_params or {})
+        text_content = str(extra.get("text") or name or "ResolveFlow Title")
+        font_name = str(extra.get("font") or asset_dict.get("font") or "Arial")
+
+        # Style / weight mapping
+        raw_weight = str(extra.get("weight") or asset_dict.get("weight") or "bold").lower()
+        if raw_weight in ("extra_bold", "extrabold", "black"):
+            weight_style = "Black"
+        elif raw_weight in ("regular", "normal", "light"):
+            weight_style = "Regular"
+        else:
+            weight_style = "Bold"
+
+        # Size conversion: UI slider (12..120 pt) to Fusion (0.04..0.25)
+        raw_size = extra.get("size", asset_dict.get("size", 48))
+        try:
+            sz = float(raw_size)
+            if sz > 1.0:
+                fusion_size = round(max(0.04, min(0.25, sz / 600.0)), 4)
+            else:
+                fusion_size = max(0.04, min(0.25, sz))
+        except Exception:
+            fusion_size = 0.08
+
+        # Colors
+        color_hex = str(extra.get("color") or asset_dict.get("standard_color") or "#FFFFFF")
+        accent_hex = str(extra.get("highlight_color") or extra.get("box_glow_hex") or asset_dict.get("highlight_color") or "#FFD400")
+
+        # Style mapping:
+        anim = str(extra.get("animation") or asset_dict.get("animation") or "pop").lower()
+        from src.core.fusion.titles import TITLES
+        anim_map = {
+            "pop": "spring_pop",
+            "bounce": "spring_pop",
+            "spring": "spring_pop",
+            "typewriter": "typewriter",
+            "glow": "neon_pulse",
+            "neon_pulse": "neon_pulse",
+            "box": "highlighter",
+            "box_highlight": "highlighter",
+            "highlighter": "highlighter",
+            "glitch": "rgb_glitch",
+            "rgb_glitch": "rgb_glitch",
+            "paper": "paper_cutout",
+            "paper_cutout": "paper_cutout",
+            "slide": "lower_third",
+            "static": "lower_third",
+            "lower_third": "lower_third",
+        }
+        style_key = anim_map.get(anim, "spring_pop")
+        if style_key not in TITLES:
+            cand_id = str(asset_dict.get("id") or "")
+            if cand_id in TITLES:
+                style_key = cand_id
+            else:
+                style_key = "spring_pop"
+
+        target_track = preferred_track or 2
+
+        def _task(resolve):
+            tl = None
+            proj = None
+            if resolve and hasattr(resolve, "GetProjectManager"):
+                pm = resolve.GetProjectManager()
+                proj = pm.GetCurrentProject() if pm else None
+                tl = proj.GetCurrentTimeline() if proj else None
+
+            if not tl:
+                raise RuntimeError("No active timeline in DaVinci Resolve")
+
+            from src.core.resolve_api import current_record_frame, _nominal_fps
+            start_frame, current_tc = current_record_frame(tl, proj)
+            _, fps = _nominal_fps(proj)
+            if not fps or fps <= 0:
+                fps = 24.0
+
+            # Quantize duration strictly: positive at least 1 frame
+            dur_frames = max(1, int(round(duration * fps)))
+
+            title_params = {
+                "text": text_content,
+                "font": font_name,
+                "style": weight_style,
+                "size": fusion_size,
+                "color": color_hex,
+                "accent": accent_hex,
+                "duration_frames": dur_frames,
+            }
+
+            from src.core.resolve_bridge import insert_title_at_playhead, _get_safe_uid
+            proj_name = proj.GetName() if proj and hasattr(proj, "GetName") else ""
+            proj_id = _get_safe_uid(proj)
+            tl_name = tl.GetName() if tl and hasattr(tl, "GetName") else ""
+            tl_id = _get_safe_uid(tl)
+
+            created_item = insert_title_at_playhead(
+                style=style_key,
+                params=title_params,
+                track_index=target_track,
+                on_conflict="next_free",
+                record_frame=start_frame,
+                resolve=resolve,
+                expected_project_id=proj_id,
+                expected_timeline_id=tl_id,
+            )
+
+            actual_name = created_item.GetName() if hasattr(created_item, "GetName") else f"RF {text_content}"
+            actual_start = created_item.GetStart() if hasattr(created_item, "GetStart") else start_frame
+            actual_dur = created_item.GetDuration() if hasattr(created_item, "GetDuration") else dur_frames
+            actual_end = actual_start + actual_dur
+            unique_id = _get_safe_uid(created_item)
+
+            actual_track = None
+            if hasattr(tl, "GetItemListInTrack"):
+                for tr in range(1, int(tl.GetTrackCount("video") or 8) + 1):
+                    tr_items = tl.GetItemListInTrack("video", tr) or []
+                    for it in tr_items:
+                        it_uid = _get_safe_uid(it)
+                        if (unique_id and it_uid and it_uid == unique_id) or it == created_item or it is created_item:
+                            actual_track = tr
+                            break
+                    if actual_track is not None:
+                        break
+
+            track_label = f"V{actual_track}" if actual_track is not None else ""
+
+            return {
+                "ok": True,
+                "item_name": actual_name,
+                "track": track_label,
+                "track_index": actual_track,
+                "start_frame": actual_start,
+                "end_frame": actual_end,
+                "duration_frames": actual_dur,
+                "duration_sec": actual_dur / fps,
+                "start_tc": current_tc,
+                "project_name": proj_name,
+                "project_id": proj_id,
+                "timeline_name": tl_name,
+                "timeline_id": tl_id,
+                "unique_id": unique_id,
+            }
+
+        def _finish(data):
+            track_label = data.get("track", "")
+            track_index = data.get("track_index")
+            envelope = {
+                "kind": "title",
+                "project_name": data.get("project_name", ""),
+                "project_id": data.get("project_id", ""),
+                "timeline_name": data.get("timeline_name", ""),
+                "timeline_id": data.get("timeline_id", ""),
+                "track": track_label,
+                "track_index": track_index,
+                "start_frame": data.get("start_frame", 0),
+                "end_frame": data.get("end_frame", 0),
+                "duration_frames": data.get("duration_frames", 0),
+                "item_name": data.get("item_name", name),
+                "unique_id": data.get("unique_id", ""),
+            }
+            track_msg = f" ({track_label})" if track_label else ""
+            res = InsertResult(
+                ok=True,
+                track=track_label,
+                item_name=data.get("item_name", name),
+                start_frame=data.get("start_frame", -1),
+                duration_sec=data.get("duration_sec", duration),
+                start_tc=data.get("start_tc", ""),
+                item_ref=envelope,
+                inserted_at=time.time(),
+                message=f"Đã chèn “{data.get('item_name', name)}” tại Playhead{track_msg}",
+            )
+            self._record_result(res)
+            if callback:
+                callback(res)
+            self.insertion_finished.emit(res)
+
+        def _on_error(err):
+            res = InsertResult(
+                ok=False,
+                item_name=name,
+                error=str(err),
+                inserted_at=time.time(),
+            )
+            if callback:
+                callback(res)
+            self.insertion_finished.emit(res)
+
+        self._gateway.submit(_task, callback=_finish, errback=_on_error)
 
     def _insert_transition(
         self,
@@ -226,76 +506,33 @@ class InsertService(QObject):
         callback: Optional[Callable[[InsertResult], None]],
         extra_params: Optional[Dict[str, Any]] = None,
     ):
-        """
-        Handles DaVinci Resolve Video Transitions:
-        1. Ensures template is installed into DaVinci's Effects Library under 'Effects > Video Transitions > ResolveFlow'.
-        2. Copies template code to clipboard for Fusion page pasting.
-        3. Inserts an animated Transition / Overlay clip directly onto Track V2 across the Playhead cut!
-        """
-        # 1. Cài đặt macro và copy clipboard
-        try:
-            from src.core.transition_preset import TransitionMacroGenerator
-            TransitionMacroGenerator.install_transitions_to_davinci_resolve()
-            code = ""
-            if file_path and os.path.exists(file_path):
-                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                    code = f.read()
-            elif file_path:
-                code = file_path
-            if code:
-                app = QApplication.instance()
-                if app:
-                    app.clipboard().setText(code)
-        except Exception:
-            pass
-
-        # 2. Chèn trực tiếp Transition Clip lên Timeline tại Playhead qua ResolveGateway
-        dur_sec = duration if duration > 0 else 0.8
+        """Chuẩn bị chuyển cảnh native: copy tên, tìm vết cắt và hướng dẫn kéo từ Effects."""
+        app = QApplication.instance()
+        if app:
+            app.clipboard().setText(name)
 
         def _task(resolve):
-            from src.core.resolve_bridge import insert_transition_at_playhead
-            item = insert_transition_at_playhead(
-                style=name,
-                duration_sec=dur_sec,
-                track_index=2,
-            )
-            if item:
-                trk_info = item.GetTrackTypeAndIndex() if hasattr(item, "GetTrackTypeAndIndex") else (None, 2)
-                trk_name = f"V{trk_info[1]}" if trk_info and trk_info[1] else "V2"
-                return {
-                    "track": trk_name,
-                    "name": item.GetName() if hasattr(item, "GetName") else name,
-                }
-            return {"track": "V2", "name": name}
+            from src.core.resolve_bridge import prepare_native_transition
+            return prepare_native_transition(name, resolve)
 
-        def _on_success(data: dict):
+        def _finish(data):
             res = InsertResult(
-                ok=True,
-                track=data.get("track", "V2"),
-                item_name=data.get("name", name),
-                duration_sec=dur_sec,
-                inserted_at=time.time(),
+                ok=True, track="Transitions", item_name=name,
+                start_frame=data.get("start_frame", -1),
+                start_tc=data.get("start_tc", ""), message=data["message"],
             )
-            self._record_result(res)
+            # Không ghi lịch sử Undo: thao tác này không tạo clip.
             if callback:
                 callback(res)
             self.insertion_finished.emit(res)
 
-        def _on_error(err: str):
-            # Fallback nếu DaVinci chưa mở timeline
-            res = InsertResult(
-                ok=True,
-                track="Transitions",
-                item_name=name,
-                duration_sec=dur_sec,
-                inserted_at=time.time(),
-            )
-            self._record_result(res)
+        def _on_error(err):
+            res = InsertResult(ok=False, item_name=name, error=str(err))
             if callback:
                 callback(res)
             self.insertion_finished.emit(res)
 
-        self._gateway.submit(_task, callback=_on_success, errback=_on_error)
+        self._gateway.submit(_task, callback=_finish, errback=_on_error)
 
     def _insert_fusion_paste(self, name: str, file_path: str, callback: Optional[Callable[[InsertResult], None]]):
         """Fast-pastes node text into Fusion using fast_paste.py."""
@@ -326,6 +563,31 @@ class InsertService(QObject):
             callback(res)
         self.insertion_finished.emit(res)
 
+    @staticmethod
+    def _find_free_audio_track(timeline, start_frame: int, end_frame: int) -> int:
+        """Tìm khoảng trống [start, end), giữ A1 cho lời thoại; thêm track nếu cần."""
+        count = int(timeline.GetTrackCount("audio"))
+        for track in range(2, count + 1):
+            if hasattr(timeline, "GetIsTrackLocked") and timeline.GetIsTrackLocked("audio", track):
+                continue
+            items = timeline.GetItemListInTrack("audio", track)
+            if items is None:
+                continue  # Không xác minh được track trống.
+            occupied = False
+            for item in items:
+                left = float(item.GetStart())
+                right = left + float(item.GetDuration())
+                if left < end_frame and right > start_frame:
+                    occupied = True
+                    break
+            if not occupied:
+                return track
+        target = max(2, count + 1)
+        for _ in range(count, target):
+            if not hasattr(timeline, "AddTrack") or not timeline.AddTrack("audio"):
+                raise RuntimeError("Hết track audio trống và không thể tạo track mới.")
+        return target
+
     def _insert_audio(
         self,
         name: str,
@@ -334,10 +596,12 @@ class InsertService(QObject):
         duration: float,
         preferred_track: Optional[int],
         callback: Optional[Callable[[InsertResult], None]],
+        extra_params: Optional[Dict[str, Any]] = None,
     ):
         """Inserts an audio SFX/BGM onto a free audio track via ResolveGateway."""
         def _task(resolve):
             tl = None
+            proj = None
             if resolve and hasattr(resolve, "GetProjectManager"):
                 pm = resolve.GetProjectManager()
                 proj = pm.GetCurrentProject() if pm else None
@@ -349,45 +613,50 @@ class InsertService(QObject):
                 if not auto.is_connected() and not self._gateway._worker.get_resolve_object():
                     auto.connect()
                 tl = auto.get_active_timeline()
+                proj = auto.current_project
 
             if not tl:
                 raise RuntimeError("No active timeline in DaVinci Resolve")
 
-            current_tc = tl.GetCurrentTimecode() if hasattr(tl, "GetCurrentTimecode") else "01:00:00:00"
+            import math
+            from src.core.resolve_api import current_record_frame, _nominal_fps
+            start_frame, current_tc = current_record_frame(tl, proj)
+            _, fps = _nominal_fps(proj)
+            end_frame = start_frame + max(1, math.ceil(duration * fps))
 
             # Determine audio track
-            track_num = preferred_track or 2
-            if mode == "new_track":
-                if hasattr(tl, "GetTrackCount"):
-                    track_num = tl.GetTrackCount("audio") + 1
-            elif preferred_track:
-                track_num = preferred_track
+            current_count = int(tl.GetTrackCount("audio"))
+            if mode == "auto" and not preferred_track:
+                track_num = self._find_free_audio_track(tl, start_frame, end_frame)
             else:
-                track_num = 2
+                track_num = max(2, current_count + 1) if mode == "new_track" else (preferred_track or 2)
+                for _ in range(current_count, track_num):
+                    if not tl.AddTrack("audio"):
+                        raise RuntimeError("Không thể tạo track audio mới.")
 
-            try:
-                current_count = tl.GetTrackCount("audio") if hasattr(tl, "GetTrackCount") else 1
-                if track_num > current_count and hasattr(tl, "AddTrack"):
-                    for _ in range(current_count, track_num):
-                        tl.AddTrack("audio")
-            except Exception:
-                pass
+            # Trích xuất volume offset nếu có truyền từ extra_params (ví dụ BGM -18dB)
+            vol_offset = None
+            if extra_params:
+                raw_vol = extra_params.get("volume_offset", extra_params.get("volume_offset_db"))
+                if isinstance(raw_vol, (int, float)) and not isinstance(raw_vol, bool) and not math.isnan(raw_vol) and not math.isinf(raw_vol):
+                    vol_offset = float(raw_vol)
 
-            # Perform insert via mock hook or ResolveAutomation
-            if resolve and hasattr(resolve, "mock_insert_sfx") and callable(getattr(resolve, "mock_insert_sfx", None)):
-                ok = resolve.mock_insert_sfx(file_path, track_num)
-            else:
-                from src.core.resolve_api import ResolveAutomation
-                auto = self._gateway._worker.get_automation() or ResolveAutomation()
-                if not auto.is_connected() and not self._gateway._worker.get_resolve_object():
-                    auto.connect()
-                ok = auto.insert_sfx_to_track(file_path, target_track=track_num)
+            # Chèn đúng frame đã dùng để tìm track trống.
+            from src.core.resolve_api import ResolveAutomation
+            auto = self._gateway._worker.get_automation() or ResolveAutomation()
+            if not auto.is_connected() and not self._gateway._worker.get_resolve_object():
+                auto.connect()
+            sfx_kwargs = {"target_track": track_num, "record_frame": start_frame}
+            if vol_offset is not None:
+                sfx_kwargs["volume_offset_db"] = vol_offset
+            ok = auto.insert_sfx_to_track(file_path, **sfx_kwargs)
 
             if not ok:
                 raise RuntimeError("Failed to insert audio to track")
 
             return {
                 "track": f"A{track_num}",
+                "start_frame": start_frame,
                 "start_tc": current_tc,
                 "duration": duration,
                 "name": name,
@@ -397,6 +666,7 @@ class InsertService(QObject):
             res = InsertResult(
                 ok=True,
                 track=data["track"],
+                start_frame=data["start_frame"],
                 start_tc=data["start_tc"],
                 duration_sec=data["duration"],
                 item_name=data["name"],
@@ -416,29 +686,127 @@ class InsertService(QObject):
 
         self._gateway.submit(_task, callback=_on_success, errback=_on_error)
 
-    def _insert_lut(self, name: str, file_path: str, callback: Optional[Callable[[InsertResult], None]]):
-        """Applies a 3D LUT to the clip at playhead."""
+    def _insert_lut(
+        self,
+        name: str,
+        file_path: str,
+        callback: Optional[Callable[[InsertResult], None]],
+        extra_params: Optional[Dict[str, Any]] = None,
+    ):
+        """Applies a 3D LUT to DaVinci Resolve via ResolveAutomation.apply_look_lut."""
         def _task(resolve):
+            tl = None
+            proj = None
+            if resolve and hasattr(resolve, "GetProjectManager"):
+                pm = resolve.GetProjectManager()
+                proj = pm.GetCurrentProject() if pm else None
+                tl = proj.GetCurrentTimeline() if proj else None
+
             from src.core.resolve_api import ResolveAutomation
             auto = self._gateway._worker.get_automation() or ResolveAutomation()
-            tl = auto.get_active_timeline()
-            if not tl:
-                raise RuntimeError("No active timeline in DaVinci Resolve")
-            tc = tl.GetCurrentTimecode() if hasattr(tl, "GetCurrentTimecode") else "01:00:00:00"
-            ok = auto.apply_lut_to_current_clip(file_path)
-            if not ok:
-                raise RuntimeError("Failed to apply LUT to clip")
-            return tc
+            if resolve:
+                auto.resolve = resolve
+                if proj:
+                    auto.current_project = proj
 
-        def _on_success(tc: str):
-            res = InsertResult(ok=True, track="Color", start_tc=tc, item_name=name, inserted_at=time.time())
+            if not tl:
+                if not auto.is_connected() and not self._gateway._worker.get_resolve_object():
+                    auto.connect()
+                tl = auto.get_active_timeline()
+                proj = auto.current_project
+
+            if not tl:
+                raise RuntimeError("Không có Timeline nào đang mở trong DaVinci Resolve")
+
+            tc = tl.GetCurrentTimecode() if hasattr(tl, "GetCurrentTimecode") else "01:00:00:00"
+
+            if not file_path or not os.path.exists(file_path):
+                raise FileNotFoundError(f"Không tìm thấy file LUT: {file_path}")
+
+            target_track = None
+            skip_existing = True
+            if extra_params:
+                if "track" in extra_params:
+                    try:
+                        target_track = int(extra_params["track"])
+                    except (ValueError, TypeError):
+                        pass
+                elif "preferred_track" in extra_params:
+                    try:
+                        target_track = int(extra_params["preferred_track"])
+                    except (ValueError, TypeError):
+                        pass
+                if "skip_existing" in extra_params:
+                    skip_existing = bool(extra_params["skip_existing"])
+
+            res_dict = auto.apply_lut_to_current_clip(
+                lut_path=os.path.abspath(file_path),
+                target_track=target_track,
+                skip_existing=skip_existing,
+            )
+
+            from collections.abc import Mapping
+            from src.core.contracts.status_contracts import (
+                MutationStatus,
+                lut_result_to_mutation_outcome,
+            )
+
+            # Phân loại kết quả qua hợp đồng mutation chuẩn hóa
+            mut_status, evidence = lut_result_to_mutation_outcome(res_dict)
+
+            msg = res_dict.get("message", "") if isinstance(res_dict, Mapping) else ""
+            clip_name = res_dict.get("clip_name", "") if isinstance(res_dict, Mapping) else ""
+            track_idx = res_dict.get("track", 1) if isinstance(res_dict, Mapping) else 1
+
+            if mut_status == MutationStatus.APPLIED:
+                # applied > 0 và failed == 0 (kể cả khi skipped > 0)
+                return tc, msg or f"Đã áp LUT vào clip '{clip_name}'", f"V{track_idx}", clip_name
+            elif mut_status == MutationStatus.SKIPPED:
+                # Bỏ qua hợp lệ (clip đã có LUT): giữ compatibility ok=False, thông báo chưa thay đổi
+                raise RuntimeError(msg or f"Clip '{clip_name}' đã có LUT, chưa thay đổi")
+            elif mut_status == MutationStatus.FAILED:
+                # Thất bại hoàn toàn: applied == 0 và failed > 0
+                raise RuntimeError(msg or f"Áp LUT vào clip '{clip_name}' thất bại")
+            elif mut_status == MutationStatus.PARTIAL_APPLIED:
+                # Đột biến một phần: applied > 0 và failed > 0 (báo lỗi vì InsertResult chưa có trục partial)
+                partial_msg = f"Đã áp {evidence.applied_count} clip, lỗi {evidence.failed_count} clip."
+                if msg:
+                    partial_msg += f" Chi tiết: {msg}"
+                raise RuntimeError(partial_msg)
+            elif mut_status == MutationStatus.UNKNOWN:
+                # Thiếu bộ đếm bằng chứng hoặc tất cả counters đều bằng 0
+                warn_msg = "Kết quả áp LUT chưa xác minh (thiếu bộ đếm bằng chứng hoặc tất cả bằng 0)."
+                if msg:
+                    warn_msg += f" Chi tiết: {msg}"
+                raise RuntimeError(warn_msg)
+            else:
+                raise RuntimeError(msg or f"Trạng thái áp LUT không xác định: {mut_status.value}")
+
+        def _on_success(result_data):
+            if isinstance(result_data, tuple):
+                tc, msg, track_name, clip_name = result_data
+            else:
+                tc, msg, track_name, clip_name = result_data, f"Đã áp LUT '{name}'", "V1", ""
+            res = InsertResult(
+                ok=True,
+                track=track_name,
+                start_tc=tc,
+                item_name=name,
+                message=msg,
+                inserted_at=time.time(),
+            )
             self._record_result(res)
             if callback:
                 callback(res)
             self.insertion_finished.emit(res)
 
         def _on_error(err: str):
-            res = InsertResult(ok=False, item_name=name, error=err, inserted_at=time.time())
+            res = InsertResult(
+                ok=False,
+                item_name=name,
+                error=err,
+                inserted_at=time.time(),
+            )
             self._record_result(res)
             if callback:
                 callback(res)
@@ -476,25 +844,7 @@ class InsertService(QObject):
                 track_num = preferred_track
 
             target_path = os.path.abspath(file_path) if file_path and os.path.exists(os.path.abspath(file_path)) else file_path
-            if not target_path or not os.path.exists(target_path):
-                try:
-                    from src.core.broll_sfx import BRollSFXResolver
-                    target_path = BRollSFXResolver().resolve_meme(name)
-                except Exception:
-                    pass
-
-            if not target_path or not os.path.exists(target_path):
-                from src.utils.path_utils import PosixPathAdapter
-                for sub in ("memes", "overlays", "green_screen", "cinematic"):
-                    for cand_ext in (".mp4", ".mov", ".png", ".jpg", ".jpeg", ".webp"):
-                        cand = PosixPathAdapter.get_asset_path("broll_memes", sub, f"{name}{cand_ext}")
-                        if os.path.exists(cand):
-                            target_path = str(cand)
-                            break
-                    if target_path and os.path.exists(target_path):
-                        break
-
-            if not target_path or not os.path.exists(target_path):
+            if not target_path or not os.path.isfile(target_path):
                 raise RuntimeError(f"Không tìm thấy tệp media cho '{name}'")
 
             dur_sec = duration if duration > 0 else None
@@ -650,18 +1000,72 @@ class InsertService(QObject):
 
         def _undo_task(resolve):
             tl = None
+            proj = None
             if resolve and hasattr(resolve, "GetProjectManager"):
                 pm = resolve.GetProjectManager()
                 proj = pm.GetCurrentProject() if pm else None
                 tl = proj.GetCurrentTimeline() if proj else None
 
-            if not tl:
+            is_title = isinstance(target.item_ref, dict) and target.item_ref.get("kind") == "title"
+
+            if not tl and not is_title:
                 from src.core.resolve_api import ResolveAutomation
                 auto = self._gateway._worker.get_automation() or ResolveAutomation()
                 tl = auto.get_active_timeline()
 
             if not tl:
                 raise RuntimeError("Không tìm thấy Timeline đang mở")
+
+            # Title-specific Undo contract: Xác minh project, timeline và clip identity tuyệt đối
+            if is_title:
+                ref = target.item_ref
+                from src.core.resolve_bridge import _get_safe_uid
+
+                cur_proj_name = proj.GetName() if proj and hasattr(proj, "GetName") else ""
+                cur_proj_id = _get_safe_uid(proj)
+                cur_tl_name = tl.GetName() if tl and hasattr(tl, "GetName") else ""
+                cur_tl_id = _get_safe_uid(tl)
+
+                raw_stored_proj = ref.get("project_id")
+                raw_stored_tl = ref.get("timeline_id")
+                stored_proj_id = raw_stored_proj.strip() if isinstance(raw_stored_proj, str) and not isinstance(raw_stored_proj, bool) else ""
+                stored_tl_id = raw_stored_tl.strip() if isinstance(raw_stored_tl, str) and not isinstance(raw_stored_tl, bool) else ""
+
+                if not stored_proj_id or not stored_tl_id:
+                    raise RuntimeError("Không thể hoàn tác: Thiếu Project ID hoặc Timeline ID ổn định để định danh an toàn.")
+
+                if ref.get("project_name") and cur_proj_name and ref["project_name"] != cur_proj_name:
+                    raise RuntimeError("Không thể hoàn tác: Project hoặc Timeline trong DaVinci Resolve đã thay đổi.")
+                if not cur_proj_id or cur_proj_id != stored_proj_id:
+                    raise RuntimeError("Không thể hoàn tác: Project ID trong DaVinci Resolve đã thay đổi hoặc không thể xác minh.")
+
+                if ref.get("timeline_name") and cur_tl_name and ref["timeline_name"] != cur_tl_name:
+                    raise RuntimeError("Không thể hoàn tác: Project hoặc Timeline trong DaVinci Resolve đã thay đổi.")
+                if not cur_tl_id or cur_tl_id != stored_tl_id:
+                    raise RuntimeError("Không thể hoàn tác: Timeline ID trong DaVinci Resolve đã thay đổi hoặc không thể xác minh.")
+
+                raw_uid = ref.get("unique_id")
+                uid = raw_uid.strip() if isinstance(raw_uid, str) and not isinstance(raw_uid, bool) else ""
+                if not uid:
+                    raise RuntimeError("Không thể hoàn tác: Clip không có Unique ID ổn định để định danh an toàn.")
+
+                track_index = ref.get("track_index")
+                if track_index is None:
+                    raise RuntimeError("Không thể hoàn tác: Không xác định được track của clip.")
+
+                items = tl.GetItemListInTrack("video", track_index) or []
+                matching_items = [it for it in items if _get_safe_uid(it) == uid]
+
+                if len(matching_items) == 0:
+                    raise RuntimeError(f"Clip '{target.item_name}' (ID: {uid}) không còn tồn tại trên {target.track}.")
+                if len(matching_items) > 1:
+                    raise RuntimeError(f"Không thể hoàn tác: Phát hiện nhiều clip có cùng Unique ID trên {target.track}.")
+
+                item_to_delete = matching_items[0]
+                ok = tl.DeleteClips([item_to_delete], False)
+                if not ok:
+                    raise RuntimeError("Lệnh DeleteClips từ DaVinci Resolve thất bại.")
+                return True
 
             track_type = "video" if target.track.startswith("V") else ("audio" if target.track.startswith("A") else "video")
             try:

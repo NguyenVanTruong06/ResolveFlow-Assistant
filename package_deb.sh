@@ -7,13 +7,15 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-RAW_VER="${1:-1.0.0}"
-VERSION="${RAW_VER#v}" # Bỏ tiền tố 'v' nếu có (v1.0.0 -> 1.0.0)
+VERSION=${1:-"1.0.0"}
+VERSION="${VERSION#v}" # Strip 'v' prefix if present (v1.0.0 -> 1.0.0)
+VERSION="${VERSION:-"1.0.0"}"
 
 APP_NAME="resolveflow-assistant"
 DIST_DIR="${SCRIPT_DIR}/dist/ResolveFlow-Assistant"
 PKG_DIR="${SCRIPT_DIR}/build/deb_pkg"
 DEB_NAME="${APP_NAME}_${VERSION}_amd64.deb"
+DEB_TARGET="${SCRIPT_DIR}/dist/${DEB_NAME}"
 
 echo "======================================================="
 echo "   Đóng gói Debian Package (.deb) cho ResolveFlow"
@@ -37,6 +39,7 @@ mkdir -p "${PKG_DIR}/opt/resolveflow-assistant"
 mkdir -p "${PKG_DIR}/usr/local/bin"
 mkdir -p "${PKG_DIR}/usr/share/applications"
 mkdir -p "${PKG_DIR}/DEBIAN"
+mkdir -p "${SCRIPT_DIR}/dist"
 
 # 3. Sao chép nội dung ứng dụng vào /opt/resolveflow-assistant
 echo "📁 Đang sao chép tệp chương trình vào cấu trúc gói..."
@@ -83,16 +86,24 @@ Description: AI-Powered Rough Cut & Asset Studio for DaVinci Resolve
  imports timelines directly into DaVinci Resolve.
 EOF
 
-# 7. Đóng gói bằng dpkg-deb
+# 7. Đóng gói bằng dpkg-deb vào dist/
 echo "📦 Đang nén và tạo tệp .deb qua dpkg-deb..."
-dpkg-deb --build "$PKG_DIR" "${SCRIPT_DIR}/${DEB_NAME}"
+dpkg-deb --build "$PKG_DIR" "${DEB_TARGET}"
+
+# Sao chép ra thư mục gốc nếu cần tương thích ngược
+cp -f "${DEB_TARGET}" "${SCRIPT_DIR}/${DEB_NAME}" 2>/dev/null || true
+
+# 8. Tự động sinh dist/SHA256SUMS chứa SHA-256 checksum của resolveflow-assistant_${VERSION}_amd64.deb
+echo "🔒 Đang tạo dist/SHA256SUMS..."
+(cd "${SCRIPT_DIR}/dist" && sha256sum "${DEB_NAME}" > SHA256SUMS)
 
 echo ""
 echo "🎉 [THÀNH CÔNG] Đã tạo gói Debian:"
-echo "   👉 Tệp cài đặt: ${SCRIPT_DIR}/${DEB_NAME}"
+echo "   👉 Tệp cài đặt: ${DEB_TARGET}"
+echo "   👉 Checksum: ${SCRIPT_DIR}/dist/SHA256SUMS"
 echo ""
 echo "💡 Cách cài đặt gói trên Ubuntu / Debian / Linux Mint:"
-echo "   sudo dpkg -i ${DEB_NAME}"
+echo "   sudo dpkg -i dist/${DEB_NAME}"
 echo "   sudo apt-get install -f   # (Nếu cần tự sửa thiếu dependencies)"
 echo ""
 echo "💡 Cách gỡ cài đặt sau này:"

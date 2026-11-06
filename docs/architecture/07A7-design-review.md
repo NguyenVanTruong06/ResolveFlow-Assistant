@@ -1,0 +1,5 @@
+# G07-07A7-D — Codex review
+
+Reviewed 2026-11-02T15:14:23+07:00: **DESIGN_ACCEPTED_WITH_BINDING_CORRECTIONS**. Report SHA256 `241ef1b5d9867884390362e89df530c722ad165ce75c147eaf4b5a00d3855865` and design SHA256 `97e7adacd433b8d77a34b138a17baa5612f8e5fff216165e6c1efa195fbddd22` match. R1 addresses the five prior findings: advisory lock is ownership authority (PID diagnostic only); torn tail is observation, not a crash-cause claim; diagnostics are bounded/sanitized; idempotency index failures block replay; compensation is only an operator-review candidate.
+
+Approve the proposed G07-07A7-I read-only classifier in its exact three-module scope. Bindings: recovery reads must not mutate receipt, index, lock, or journal; probe locks non-blocking and release only a lock acquired by this process; inability to establish lock/index/target authority yields blocked/ambiguous classification. Do not interpret ACTION_COMMITTED as current Resolve state or promise rollback. Preserve ready_to_execute=False and zero Resolve mutation.

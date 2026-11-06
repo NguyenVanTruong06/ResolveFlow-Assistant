@@ -35,11 +35,12 @@ class DirectorStepButton(QPushButton):
         if self.is_active:
             self.setStyleSheet("""
                 QPushButton {
-                    background-color: rgba(124, 58, 237, 0.22);
+                    background-color: #262930;
                     color: #ffffff;
-                    border: 1px solid #8b5cf6;
-                    border-radius: 6px;
-                    padding: 0 14px;
+                    border: 1px solid #3d424d;
+                    border-bottom: 2px solid #e05a47;
+                    border-radius: 4px;
+                    padding: 0 15px;
                     font-size: 12px;
                     font-weight: 700;
                 }
@@ -47,16 +48,17 @@ class DirectorStepButton(QPushButton):
         elif self.is_completed:
             self.setStyleSheet("""
                 QPushButton {
-                    background-color: #18181b;
+                    background-color: #1f2227;
                     color: #4ade80;
-                    border: 1px solid #27272a;
-                    border-radius: 6px;
-                    padding: 0 14px;
+                    border: 1px solid #2e333b;
+                    border-radius: 4px;
+                    padding: 0 15px;
                     font-size: 12px;
                     font-weight: 600;
                 }
                 QPushButton:hover {
-                    background-color: #27272a;
+                    background-color: #272b31;
+                    border-color: #3d4450;
                     color: #86efac;
                 }
             """)
@@ -64,16 +66,17 @@ class DirectorStepButton(QPushButton):
             self.setStyleSheet("""
                 QPushButton {
                     background-color: transparent;
-                    color: #71717a;
+                    color: #888e99;
                     border: 1px solid transparent;
-                    border-radius: 6px;
-                    padding: 0 14px;
+                    border-radius: 4px;
+                    padding: 0 15px;
                     font-size: 12px;
-                    font-weight: 500;
+                    font-weight: 600;
                 }
                 QPushButton:hover {
-                    background-color: #27272a;
-                    color: #e4e4e7;
+                    background-color: #22242a;
+                    border-color: #2e3138;
+                    color: #e6e8ec;
                 }
             """)
 
@@ -96,6 +99,12 @@ class DirectorStepperWidget(QWidget):
         self._init_ui()
 
     def _init_ui(self):
+        self.setObjectName("director_stepper_widget")
+        self.setStyleSheet("""
+            QWidget#director_stepper_widget {
+                background-color: #191a1e;
+            }
+        """)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(8)
@@ -109,7 +118,7 @@ class DirectorStepperWidget(QWidget):
             # Thêm mũi tên kết nối nhỏ giữa các bước
             if i < len(self.STEP_TITLES):
                 lbl_arr = QLabel("›")
-                lbl_arr.setStyleSheet("color: #3f3f46; font-size: 14px; font-weight: bold;")
+                lbl_arr.setStyleSheet("color: #4a4a56; font-size: 14px; font-weight: bold; background: transparent;")
                 layout.addWidget(lbl_arr)
 
         layout.addStretch(1)

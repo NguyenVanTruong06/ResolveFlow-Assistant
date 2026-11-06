@@ -226,6 +226,13 @@ def create_vector_icon(icon_type: str, color_hex: str = ThemeColors.TEXT_PRIMARY
         painter.drawLine(QPointF(18, 12.5), QPointF(18, 4))
         painter.drawLine(QPointF(9.5, 5.5), QPointF(18, 4))
 
+    elif icon_type in ("lut", "color", "grading"):
+        # Bánh xe màu / Bảng pha màu cho LUT
+        painter.drawEllipse(QRectF(4, 4, 16, 16))
+        painter.drawLine(QPointF(12, 4), QPointF(12, 20))
+        painter.drawLine(QPointF(4, 12), QPointF(20, 12))
+        painter.drawEllipse(QRectF(8.5, 8.5, 7, 7))
+
     elif icon_type == "palette":
         # Kính lúp / Command HUD với cán cầm sắc nét
         painter.drawEllipse(QRectF(4.5, 4.5, 10.5, 10.5))

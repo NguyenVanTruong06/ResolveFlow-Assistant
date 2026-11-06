@@ -1,0 +1,14 @@
+# G05-05B-I3b-I — Codex review (2026-10-27)
+
+CHANGES_REQUIRED trong tích hợp Stage3. Fresh5files84passed3.29s exit0. Nhận PhaseA core error-reservation preservation, defaultOFF/no-network GUI, thứ tự3stage và giữ dữ liệu audio/overview khi description lỗi theo các ca đã có. Không có real Ollama/model/desktop proof.
+
+1. FALSE CACHE COUNTER (probe có thật): was_already_cached chỉ dựa priorstatuscomplete/descriptions/errors, không signature/config/modeldigest. Fake mô phỏng old-model-signature -> describer thực thi một lượt và thay thành new-model-signature, worker báo visual_describe.cached=1. Core actual vẫn suy luận đúng nhưng UI/counters gianhận cache. Cần evidence từ core hoặc adapter xác minh đúng run, không chỉ priorcomplete.
+2. COVERAGE LABEL (probe có thật): raw sampled/valid_windows2/selected2, chỉ1window observation trongpartial -> row“Mô tả AI một phần(2/2 cửa sổ)”. valid_windows là sample validity, không analyzed windows. Worker hiện không chuyển analysis.windows counts sang runtime result; cần derive riêng analyzed/described/pending/quality từ actual metadata và labels nói rõ mẫu số.
+3. SNAPSHOT GAP: _runtime_status_config5tuple chỉ whisper/model/optin/visionmodel/paths, bỏ endpoint và window_sec/frames_per_window/max_windows/max_refinements. Task đã yêu cầu full config snapshot/invalidation. Giữ legacy adapter nhưng thêm structured runtime config thật cho matching trước refresh/verifiedlabels; không đổi DirectorConfig/project persistence trong slice này.
+Tests mới đa phần fake prior/post metadata không signature/windows và không chứng minh cached vs new/partial selection. Bổ sung tracer actual core+fakeHTTP2runs/switchmodel; không thêm model/VRAM/physical claims.
+Scope4modules hiện có đủ: visual_describer.py chỉ additive run evidence nếu cần; worker+SourcePage+DirectorWindow. Không reopen core checkpoint design. HIGH tiếp tục, khôngshutdown.
+
+## Quyết định G05-05B-I3b-R1 — 2026-10-27
+CODE_ACCEPTED_WITH_RECORDED_LIMITS cho tích hợp Stage3. Fresh5files87passed3.18s exit0. Codex đọc run_evidence core/worker, ratio analyzed vs selected và structured snapshot endpoint/budgets; đối chiếu tracer actualcore+fakeHTTP ModelA -> ModelB -> replayB. ModelB inference mới ghi new, replay0/api/chat ghi cached; đây là mock transport, chưa realmodel. PhaseA refinement errorreservation core tiếp tục regression trong nhóm.
+Nhận ratio labels và snapshot guards trong ca đã thử; không coi là validation toàn bộ cache input hay accuracy caption. DefaultOFF, source-only/noResolve và owner tới QThread.finished tiếp tục giữ. Không cộng87 với34/85 vì giao nhau.
+Chưa nghiệm thu real inference/desktopStage3, Whisper thực trong luồng unified, nguồn3giờ, Review/Prompt consumption. Palette dialog residualG08 giữ nguyên. Task kế tiếp smoke real localmodels có sẵn, không download/Resolve/userfootage. HIGH tiếp tục, khôngshutdown.

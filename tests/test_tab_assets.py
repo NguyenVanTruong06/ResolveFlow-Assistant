@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QLabel, QPushButton, QFrame, QSlider, QApplication
 from PySide6.QtCore import Qt
@@ -516,70 +517,134 @@ def test_text_live_preview_and_inspector_reactive_edits(qapp, monkeypatch):
     assert call["animation"] == "glow"
 
 
-def test_meme_live_preview_and_video_playback(qapp, monkeypatch):
-    """Kiểm tra tính năng xem trước video Meme / Overlay và trình mô phỏng tương tác ~30 FPS."""
-    from src.ui.tabs.tab_assets import TabAssets, IconMemePreviewWidget
+def test_meme_live_preview_and_video_playback(qapp, tmp_path, monkeypatch):
+    """Kiểm tra tính năng xem trước video Meme / Overlay theo chính sách ActionGuard, không simulation và không alias."""
+    from unittest.mock import MagicMock
+    from src.ui.tabs.tab_assets import TabAssets, IconMemePreviewWidget, StudioAsset
     from PySide6.QtGui import QPainter, QPixmap
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    root_dir = tmp_path / "storage_root"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    video_file = root_dir / "valid_test_meme.mp4"
+    video_file.write_bytes(b"\x00\x00\x00\x20ftypmp42" + b"\x00" * 100)
+
+    class MockStorage:
+        def __init__(self, root: str, library_id: str, online: bool = True):
+            from pathlib import Path
+            self._root = Path(root)
+            self.library_id = library_id
+            self._config = {"root": str(self._root), "library_id": library_id}
+            self.online = online
+
+        @property
+        def root(self):
+            return self._root
+
+        def ui_assets(self):
+            return []
+
+        def taxonomy(self):
+            return {}
+
+        def links(self):
+            return []
+
+    def make_studio_asset(**kwargs):
+        kwargs.setdefault("category", kwargs.get("tab", "meme"))
+        if "file_path" in kwargs and kwargs.get("source_kind") == "managed" and "origin_root" in kwargs and "relative_path" not in kwargs:
+            try:
+                kwargs["relative_path"] = str(Path(kwargs["file_path"]).relative_to(Path(kwargs["origin_root"])))
+            except ValueError:
+                kwargs["relative_path"] = Path(kwargs["file_path"]).name
+        init_keys = {"id", "name", "tab", "category", "sub", "badge_icon", "pal", "duration", "frames", "color_hex", "svg_path", "native_preset", "file_path", "thumbnail_path", "pack_name", "preview_path"}
+        init_args = {k: v for k, v in kwargs.items() if k in init_keys}
+        extra_attrs = {k: v for k, v in kwargs.items() if k not in init_keys}
+        asset = StudioAsset(**init_args)
+        for k, v in extra_attrs.items():
+            setattr(asset, k, v)
+        return asset
+
+    mock_storage = MockStorage(str(root_dir), "lib_test", online=True)
+    monkeypatch.setattr("src.core.storage_manager.StorageManager", lambda: mock_storage)
 
     tab = TabAssets()
     tab.show()
     tab._filter_by_rail("meme")
 
-    # 1. Chọn card Meme đầu tiên
-    meme_asset = tab.all_memes[0]
-    tab._on_card_selected(meme_asset.id)
+    # 1. Chọn card Meme được trang bị dữ liệu managed có kiểm chứng
+    test_meme = make_studio_asset(
+        id="meme_test_01",
+        name="Test Meme Guarded",
+        tab="meme",
+        category="meme",
+        source_kind="managed",
+        origin_library_id="lib_test",
+        origin_root=str(root_dir),
+        file_path=str(video_file),
+        storage_managed=True,
+        availability="online"
+    )
+    tab.all_assets.insert(0, test_meme)
+    tab.asset_model.set_assets(tab.all_assets)
+    tab._on_card_selected("meme_test_01")
 
     assert not tab.inspector_icon_viewport.isHidden()
     assert hasattr(tab, "icon_meme_widget")
     assert isinstance(tab.icon_meme_widget, IconMemePreviewWidget)
-    assert tab.icon_meme_widget.item_name == meme_asset.name
+    assert tab.icon_meme_widget.item_name == test_meme.name
 
-    # 2. Nút xem thử luôn khả dụng (kể cả khi chưa tải file video local)
+    # 2. Khi file hợp lệ: nút xem khả dụng, không autoplay
     assert tab.icon_meme_widget.btn_play.isEnabled()
-    assert hasattr(tab.icon_meme_widget, "btn_browse")
     assert hasattr(tab.icon_meme_widget, "btn_replay")
+    assert tab.icon_meme_widget.resolved_file_path == str(video_file.resolve())
 
-    # 3. Kích hoạt phát video (nếu có file) hoặc mô phỏng xem trước
+    # 3. Kích hoạt phát video thực tế (mock QMediaPlayer để tránh phụ thuộc driver phần cứng)
+    mock_player = MagicMock()
+    mock_player.playbackState.return_value = QMediaPlayer.StoppedState
+    tab.icon_meme_widget._player = mock_player
+
     tab.icon_meme_widget._toggle_playback()
-    assert ("Dừng" in tab.icon_meme_widget.btn_play.text()) or (tab.icon_meme_widget._is_simulating is True)
+    assert mock_player.setSource.called
+    assert mock_player.play.called
     tab.icon_meme_widget.stop_playback()
 
-    # Kiểm tra cơ chế mô phỏng tương tác ~30 FPS khi chưa có file cục bộ
-    tab.icon_meme_widget.resolved_file_path = ""
+    # 4. Khi tệp bị thiếu: chính sách fail-closed, 0 simulation, 0 timer, controls disabled
+    missing_asset = make_studio_asset(
+        id="meme_cat_cry",
+        name="Meme Cat Cry Missing",
+        tab="meme",
+        category="meme",
+        source_kind="managed",
+        origin_library_id="lib_test",
+        origin_root=str(root_dir),
+        file_path=str(root_dir / "non_existent.mp4"),
+        storage_managed=True,
+        availability="online"
+    )
+    tab.icon_meme_widget.set_asset(missing_asset)
+    assert tab.icon_meme_widget.resolved_file_path == ""
+    assert "meme_meo_khoc_banana" not in tab.icon_meme_widget.resolved_file_path
+    assert tab.icon_meme_widget.btn_play.isEnabled() is False
+    assert getattr(tab.icon_meme_widget, "_is_simulating", False) is False
+    assert not getattr(tab.icon_meme_widget, "_sim_timer", MagicMock(isActive=lambda: False)).isActive()
+
+    # Thử toggle khi mất file -> không phát, không simulation
     tab.icon_meme_widget._toggle_playback()
-    assert tab.icon_meme_widget._is_simulating is True
-    assert tab.icon_meme_widget._sim_timer.isActive()
+    assert getattr(tab.icon_meme_widget, "_is_simulating", False) is False
 
-    # Vòng lặp tick hoạt ảnh mô phỏng
-    init_prog = tab.icon_meme_widget._sim_progress
-    tab.icon_meme_widget._on_sim_tick()
-    assert tab.icon_meme_widget._sim_progress > init_prog
-    assert "00:" in tab.icon_meme_widget.lbl_time.text()
-
-    # Vẽ canvas mô phỏng không phát sinh ngoại lệ
+    # Vẽ canvas không phát sinh ngoại lệ
     pix = QPixmap(200, 150)
     tab.icon_meme_widget.render(pix)
 
-    # Dừng xem thử
-    tab.icon_meme_widget.stop_playback()
-    assert tab.icon_meme_widget._is_simulating is False
-    assert not tab.icon_meme_widget._sim_timer.isActive()
-
-    # 4. Kiểm tra nút Quick Play trên AssetCard Meme
-    meme_cards = [c for c in tab.card_widgets if getattr(c.preset, "tab", "") == "meme"]
-    assert len(meme_cards) > 0
-    m_card = meme_cards[0]
-    assert hasattr(m_card, "btn_quick_play"), "Meme card must have btn_quick_play"
-    m_card.btn_quick_play.click()
-    assert ("Dừng" in tab.icon_meme_widget.btn_play.text()) or (tab.icon_meme_widget._is_simulating is True)
-    tab.icon_meme_widget.stop_playback()
-
-    # 5. Kiểm tra an toàn cross-platform _open_external (không crash trên Linux)
+    # 5. Kiểm tra an toàn _open_external: chỉ mở khi video hợp lệ
     ext_opened = []
     monkeypatch.setattr("PySide6.QtGui.QDesktopServices.openUrl", lambda url: ext_opened.append(url))
-    tab.icon_meme_widget.resolved_file_path = __file__
+    tab.icon_meme_widget.set_asset(test_meme)
     tab.icon_meme_widget._open_external()
     assert len(ext_opened) == 1
+
+    tab.close()
 
 
 def test_text_presets_distinct_visual_styles_and_signature_text(qapp):

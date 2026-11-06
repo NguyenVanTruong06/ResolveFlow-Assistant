@@ -1,0 +1,60 @@
+[Unit]
+Description=ResolveFlow Live Canary Dispatcher Daemon
+Documentation=file:///opt/resolveflow-assistant/docs/architecture/07B7-GATE6-DEP01-live-dispatch-oracle-design.md
+After=network.target resolveflow-signer.service
+Wants=resolveflow-signer.service
+PartOf=resolveflow.target
+
+[Service]
+Type=simple
+User=_resolveflow_dispatcher
+Group=_resolveflow_dispatcher
+UMask=0117
+
+# Environment definitions derived from runtime launch scripts (run_resolveflow.sh)
+WorkingDirectory=/opt/resolveflow-assistant
+Environment=PYTHONPATH=/opt/resolveflow-assistant:/opt/resolve/Developer/Scripting/Modules
+Environment=RESOLVE_SCRIPT_API=/opt/resolve/Developer/Scripting
+Environment=RESOLVE_SCRIPT_LIB=/opt/resolve/libs/Fusion/fusionscript.so
+Environment=LD_LIBRARY_PATH=/opt/resolve/libs:/opt/resolveflow-assistant
+Environment=DISPLAY=:1
+Environment=QT_QPA_PLATFORM=xcb
+Environment=QT_MEDIA_BACKEND=ffmpeg
+
+# DEP02A-03 / BLOCKER-D-F03 Packaging & Runtime Dependency Statement:
+# While 'src.services.live_canary_dispatch_service' exists in source (DEP-03 R5), no AF_UNIX
+# admission listener daemon entrypoint or .deb daemon installation ('package_deb.sh') exists yet.
+# Per Workorder G07-07B7-GATE6-DEP02A Section 3.4 and Reconciliation finding BLOCKER-D-F03, ExecStart
+# remains intentionally inert as /bin/false pending authorized daemon wrapper and packaging workorders.
+ExecStart=/bin/false
+
+Restart=on-failure
+RestartSec=5s
+
+# Sandboxing & Least Privilege (DEP-01 R3 Section 2.1 & 2.2, DEP02A-R2-04)
+# Operates strictly under primary identity _resolveflow_dispatcher:_resolveflow_dispatcher (902:902).
+# Possesses zero supplementary group memberships to prevent cross-service DAC traversal.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Filesystem DAC Boundaries
+# Dispatcher owns its durable state and client socket directory
+ReadWritePaths=/var/lib/resolveflow/dispatcher /run/resolveflow/dispatcher_client
+# Dispatcher reads Oracle socket in /run/resolveflow/oracle and Class A trust anchors in /etc/resolveflow
+ReadOnlyPaths=/run/resolveflow/oracle /run/resolveflow /etc/resolveflow
+# Dispatcher connects to DaVinci Resolve IPC socket on host
+ReadWritePaths=/var/tmp/davinci_socket /tmp/.X11-unix
+
+# Strictly deny Dispatcher access to Signer keystore, nonces, and signer client socket
+InaccessiblePaths=/var/lib/resolveflow/signer
+InaccessiblePaths=/run/resolveflow/signer_client
+
+[Install]
+WantedBy=multi-user.target

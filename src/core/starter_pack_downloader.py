@@ -13,13 +13,16 @@ Quản lý danh mục manifest 75+ đạo cụ hot trend tuyển chọn:
 import os
 import sys
 import json
+import shutil
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable
 
 from PySide6.QtCore import QThread, Signal as pyqtSignal
 
 from src.core.asset_indexer import AssetIndexer
-from src.core.lut_generator import LUT3DGenerator
+from src.core.lut_generator import LUT3DGenerator, BUILTIN_COLOR_LOOKS
+from src.core.sfx_generator import generate_all_sfx
+from src.core.storage_manager import StorageManager, StorageState, StorageOfflineError, atomic_json, read_json
 from src.core.text_preset import PresetManager
 from src.core.recipe_manager import RecipeManager
 from src.core.transition_preset import TransitionMacroGenerator
@@ -191,3 +194,220 @@ class StarterPackWorker(QThread):
             self.download_completed.emit(summary)
         except Exception as e:
             self.error_occurred.emit(str(e))
+
+
+class StarterPackProducer:
+    """
+    Sinh gói Starter Pack (SFX & LUTs) vào thư mục staging của StorageManager,
+    chuẩn bị draft job để đưa vào PackIngestWizard kiểm duyệt trước khi nhập kho.
+    """
+    PACK_NAME = "Starter Pack (SFX & LUTs)"
+    PACK_VERSION = "1.0"
+    PREFLIGHT_BUDGET_BYTES = 64 * 1024 * 1024  # 64 MiB giả định an toàn cho SFX + LUTs (chưa đo thực tế)
+
+    # Bảng tra cứu nhóm con và tags theo từ khóa tên tệp SFX
+    SFX_TAG_MAP = {
+        "whoosh": ("chuyen_canh", ["chuyen_canh", "whoosh", "transition", "starter_pack"]),
+        "swoosh": ("chuyen_canh", ["chuyen_canh", "swoosh", "transition", "starter_pack"]),
+        "cymbal": ("chuyen_canh", ["chuyen_canh", "cymbal", "swell", "starter_pack"]),
+        "riser": ("chuyen_canh", ["chuyen_canh", "riser", "tension", "starter_pack"]),
+        "braam": ("giat_minh", ["giat_minh", "braam", "cinematic", "starter_pack"]),
+        "drop": ("giat_minh", ["giat_minh", "bass_drop", "impact", "starter_pack"]),
+        "boom": ("giat_minh", ["giat_minh", "vine_boom", "sub", "starter_pack"]),
+        "punch": ("giat_minh", ["giat_minh", "punch", "hit", "starter_pack"]),
+        "cuoi": ("hai_huoc", ["hai_huoc", "tieng_cuoi", "sitcom", "starter_pack"]),
+        "airhorn": ("hai_huoc", ["hai_huoc", "airhorn", "meme", "starter_pack"]),
+        "bonk": ("hai_huoc", ["hai_huoc", "bonk", "chao_go", "starter_pack"]),
+        "de_keu": ("hai_huoc", ["hai_huoc", "de_keu", "que_do", "starter_pack"]),
+        "pop": ("diem_nhan", ["diem_nhan", "pop", "bubble", "starter_pack"]),
+        "ding": ("diem_nhan", ["diem_nhan", "ding", "bell", "starter_pack"]),
+        "shutter": ("diem_nhan", ["diem_nhan", "camera", "shutter", "starter_pack"]),
+        "cash": ("diem_nhan", ["diem_nhan", "cash", "ting", "starter_pack"]),
+        "tada": ("diem_nhan", ["diem_nhan", "tada", "fanfare", "starter_pack"]),
+        "glitch": ("cong_nghe", ["cong_nghe", "glitch", "digital", "starter_pack"]),
+        "click": ("cong_nghe", ["cong_nghe", "click", "ui", "starter_pack"]),
+        "censor": ("cong_nghe", ["cong_nghe", "bleep", "censor", "starter_pack"]),
+        "bleep": ("cong_nghe", ["cong_nghe", "bleep", "1000hz", "starter_pack"]),
+        "mech": ("cong_nghe", ["cong_nghe", "ban_phim", "mech", "starter_pack"]),
+        "error": ("cong_nghe", ["cong_nghe", "error", "buzzer", "starter_pack"]),
+    }
+
+    @classmethod
+    def _categorize_sfx(cls, stem: str) -> tuple[str, list[str]]:
+        stem_lower = stem.lower()
+        for key, (subcat, tags) in cls.SFX_TAG_MAP.items():
+            if key in stem_lower:
+                return subcat, list(tags)
+        return "hieu_ung", ["sfx", stem_lower, "starter_pack"]
+
+    @classmethod
+    def _categorize_lut(cls, filename: str) -> tuple[str, str, list[str]]:
+        for look in BUILTIN_COLOR_LOOKS:
+            if look.file_name == filename:
+                subcat = look.category or "cinema"
+                return subcat, look.name, [subcat, "lut", "3d_lut", "starter_pack"]
+        # Fallback khi look id lạ
+        name = Path(filename).stem.replace("ResolveFlow_", "").replace("_", " ")
+        return "cinema", name, ["cinema", "lut", "starter_pack"]
+
+    @classmethod
+    def produce_to_staging(
+        cls,
+        storage: StorageManager,
+        cancel: Callable[[], bool] = lambda: False,
+        progress: Callable[[str], None] = lambda text: None,
+        sfx_generator_fn: Optional[Callable[[str], int]] = None,
+        lut_generator_fn: Optional[Callable[[str], int]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Sinh các asset vào sm.new_staging() / 'payload',
+        tạo pack_manifest.json chuẩn,
+        gọi PackIngestService.inspect_job() và trả về job draft cho PackIngestWizard.
+        """
+        storage.require_online()
+        state = storage.get_state()
+        if state != StorageState.ONLINE:
+            raise ValueError(f"Kho lưu trữ không ở trạng thái ghi được (hiện tại: {state}).")
+
+        initial_root = storage.root.resolve()
+        initial_library_id = str(storage._config.get("library_id", ""))
+        initial_marker_id = str(read_json(storage.meta / "library.json", {}).get("library_id", ""))
+
+        storage.ensure_space(cls.PREFLIGHT_BUDGET_BYTES)
+
+        job_dir = storage.new_staging()
+        if not job_dir.is_dir() or job_dir.is_symlink() or job_dir.parent.resolve() != (initial_root / ".chundvc_meta" / "staging").resolve():
+            raise ValueError("Staging directory không hợp lệ hoặc chứa symlink.")
+
+        payload = job_dir / "payload"
+
+        def _verify_identity():
+            if not storage.online:
+                raise StorageOfflineError("Kho đã offline trong quá trình sinh gói.")
+            cur_root = storage.root.resolve()
+            cur_lib_id = str(storage._config.get("library_id", ""))
+            cur_marker_id = str(read_json(storage.meta / "library.json", {}).get("library_id", ""))
+            if cur_root != initial_root or cur_lib_id != initial_library_id or cur_marker_id != initial_marker_id:
+                raise ValueError("Danh tính kho lưu trữ (root / library_id / marker) đã bị thay đổi trong quá trình sinh gói.")
+            if job_dir.is_symlink() or payload.is_symlink():
+                raise ValueError("Phát hiện symlink không an toàn trong đường dẫn staging.")
+
+        def _cleanup_staging():
+            try:
+                if not storage.online:
+                    return
+                if storage.root.resolve() != initial_root:
+                    return
+                if str(storage._config.get("library_id", "")) != initial_library_id:
+                    return
+                marker = read_json(storage.meta / "library.json", {})
+                if str(marker.get("library_id", "")) != initial_marker_id:
+                    return
+                if job_dir.is_symlink() or not job_dir.is_dir():
+                    return
+                if job_dir.resolve().parent != (initial_root / ".chundvc_meta" / "staging").resolve():
+                    return
+                shutil.rmtree(job_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+        try:
+            payload.mkdir(parents=True, exist_ok=True)
+            if payload.is_symlink():
+                raise ValueError("Payload directory là symlink không hợp lệ.")
+
+            _verify_identity()
+
+            # 1. Kiểm tra cancel trước Batch 1
+            if cancel():
+                _cleanup_staging()
+                raise InterruptedError("Đã hủy trước khi sinh SFX.")
+
+            # 2. Batch 1: Sinh SFX
+            progress("Đang tổng hợp các hiệu ứng âm thanh SFX...")
+            sfx_target = payload / "sfx"
+            sfx_target.mkdir(parents=True, exist_ok=True)
+            gen_sfx = sfx_generator_fn or generate_all_sfx
+            sfx_count = gen_sfx(str(sfx_target))
+            sfx_files = list(sfx_target.glob("*.wav"))
+            if sfx_count <= 0 or not sfx_files:
+                _cleanup_staging()
+                raise ValueError("Bộ sinh SFX không tạo ra tệp âm thanh nào.")
+
+            # 3. Kiểm tra cancel và identity giữa Batch 1 và Batch 2
+            if cancel():
+                _cleanup_staging()
+                raise InterruptedError("Đã hủy sau khi sinh SFX.")
+
+            _verify_identity()
+            storage.ensure_space(cls.PREFLIGHT_BUDGET_BYTES)
+
+            # 4. Batch 2: Sinh 3D LUTs
+            progress("Đang tính toán các bảng màu 3D LUTs điện ảnh...")
+            luts_target = payload / "luts"
+            luts_target.mkdir(parents=True, exist_ok=True)
+            gen_luts = lut_generator_fn or LUT3DGenerator.ensure_all_luts_exist
+            lut_count = gen_luts(str(luts_target))
+            lut_files = list(luts_target.glob("*.cube"))
+            if lut_count <= 0 or not lut_files:
+                _cleanup_staging()
+                raise ValueError("Bộ sinh LUT không tạo ra tệp bảng màu nào.")
+
+            # 5. Kiểm tra cancel và identity trước khi tạo manifest và inspect
+            if cancel():
+                _cleanup_staging()
+                raise InterruptedError("Đã hủy sau khi sinh LUTs.")
+
+            _verify_identity()
+
+            # 6. Quét file thực và xây dựng manifest v1
+            assets_records = []
+            for p in sorted(sfx_files):
+                rel = str(p.relative_to(payload))
+                subcat, tags = cls._categorize_sfx(p.stem)
+                name = p.stem.replace("_", " ").title()
+                assets_records.append({
+                    "relative_path": rel,
+                    "name": name,
+                    "category": "sfx",
+                    "subcategory": subcat,
+                    "tags": tags,
+                    "excluded": False,
+                })
+
+            for p in sorted(lut_files):
+                rel = str(p.relative_to(payload))
+                subcat, name, tags = cls._categorize_lut(p.name)
+                assets_records.append({
+                    "relative_path": rel,
+                    "name": name,
+                    "category": "luts",
+                    "subcategory": subcat,
+                    "tags": tags,
+                    "excluded": False,
+                })
+
+            if not assets_records:
+                _cleanup_staging()
+                raise ValueError("Không có tài nguyên nào được sinh vào staging.")
+
+            manifest = {
+                "schema_version": 1,
+                "name": cls.PACK_NAME,
+                "version": cls.PACK_VERSION,
+                "assets": assets_records,
+            }
+            atomic_json(payload / "pack_manifest.json", manifest)
+
+            # 7. Gọi inspect_job để tạo draft
+            progress("Đang kiểm định dữ liệu staging...")
+            from src.core.pack_ingest import PackIngestService
+            service = PackIngestService(storage)
+            job_draft = service.inspect_job(job_dir, name=cls.PACK_NAME, cancel=cancel)
+            _verify_identity()
+            return job_draft
+
+        except Exception:
+            _cleanup_staging()
+            raise
+

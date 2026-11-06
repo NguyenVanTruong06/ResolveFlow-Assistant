@@ -8,7 +8,7 @@ from PySide6.QtCore import QObject, Signal as pyqtSignal
 
 from .context_profiles import ContextProfile, PROFILES, PAGES
 
-logger = logging.getLogger("ResolveFlow.ContextRouter")
+logger = logging.getLogger("ChunDVC.ContextRouter")
 
 
 class ProfileMemory:

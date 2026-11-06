@@ -161,6 +161,10 @@ def test_word_timestamps_match_between_subtitles_and_review_page(monkeypatch, tm
         ]
     }
 
+    review_page._prepared_kinetic_snapshot = {
+        "words": extracted_sub_words
+    }
+
     final_cut_words = review_page.get_final_cut_words()
 
     # So sánh từng từ: số lượng, từ vựng và start/end phải khớp chính xác
@@ -394,3 +398,303 @@ def test_xml_parses_cleanly_and_snapshot_3_segments(tmp_path):
     assert root_fcpxml.tag == "fcpxml"
     asset_clips = root_fcpxml.findall(".//spine/asset-clip")
     assert len(asset_clips) == 3
+
+
+# =========================================================================
+# TEST 7: Regression quantization half-even điểm nửa nhạy phép trừ
+# =========================================================================
+def test_add_segment_subtraction_half_even_tie_regression():
+    """
+    Probe Codex (G01-01B2-Q-I): src_in_sec=0.35, pad_sec=0.1, FPS=30.
+    Toán học:
+      Fraction('0.35') - Fraction('0.1') = Fraction('0.25') = 1/4 s.
+      1/4 * 30 = 15/2 = 7.5 frames -> half-even: 8 frames.
+    Mã float cũ:
+      (0.35 - 0.1) * 30.0 = 0.24999999999999997 * 30 = 7.499999999999999 -> round() cho 7.
+    Sau khi lượng tử hóa bằng Fraction trước pts_to_frame:
+      src_in_frames bắt buộc là 8!
+    """
+    mapper = TimelineMapper(fps=30.0)
+    seg = mapper.add_segment(
+        clip_id="TIE_PROBE",
+        src_in_sec=0.35,
+        src_out_sec=5.0,
+        pad_sec=0.1,
+    )
+    assert seg.src_in_frames == 8, f"Kỳ vọng 8 (half-even trên 7.5), nhận được {seg.src_in_frames}"
+
+
+def test_add_segment_explicit_fraction_fps_and_50_segments_continuity():
+    """
+    Kiểm tra TimelineMapper với Fraction explicit (vd: 2997/100) qua 50 segments:
+    - rec_in[k+1] == rec_out[k]
+    - cursor_frames == sum(rec_dur_frames)
+    - rec_dur_frames >= 1
+    """
+    frac_fps = Fraction(2997, 100)
+    mapper = TimelineMapper(fps=frac_fps, speed_mode="timeremap")
+
+    for i in range(50):
+        dur = 1.0 + (i % 3) * 0.5
+        mapper.add_segment(
+            clip_id=f"C{i:02d}",
+            src_in_sec=1.0,
+            src_out_sec=1.0 + dur,
+            speed=1.0,
+            pad_sec=0.1,
+            clip_duration_sec=30.0
+        )
+
+    assert len(mapper.segments) == 50
+    for k in range(len(mapper.segments) - 1):
+        assert mapper.segments[k].rec_out_frames == mapper.segments[k + 1].rec_in_frames
+        assert mapper.segments[k].rec_dur_frames >= 1
+
+    assert mapper.get_total_duration_frames() == mapper.segments[-1].rec_out_frames
+    assert mapper.get_total_duration_frames() == sum(s.rec_dur_frames for s in mapper.segments)
+
+
+def test_add_segment_rejects_nan_and_inf_inputs():
+    """
+    TimelineMapper.add_segment ném ValueError khi nhận NaN hoặc Inf,
+    không thêm segment và không dịch chuyển cursor_frames.
+    """
+    mapper = TimelineMapper(fps=30.0)
+    assert mapper.cursor_frames == 0
+
+    with pytest.raises(ValueError, match="src_in_sec"):
+        mapper.add_segment("ERR", float("nan"), 5.0)
+    assert mapper.cursor_frames == 0
+    assert len(mapper.segments) == 0
+
+    with pytest.raises(ValueError, match="src_out_sec"):
+        mapper.add_segment("ERR", 1.0, float("inf"))
+    assert mapper.cursor_frames == 0
+    assert len(mapper.segments) == 0
+
+    with pytest.raises(ValueError, match="pad_sec"):
+        mapper.add_segment("ERR", 1.0, 5.0, pad_sec=float("nan"))
+    assert mapper.cursor_frames == 0
+    assert len(mapper.segments) == 0
+
+
+# =========================================================================
+# TEST 8: G01-01B2-M-I Đồng nhất lượng tử hóa trong src_to_timeline
+# =========================================================================
+def test_src_to_timeline_fraction_half_even_probe():
+    """
+    Probe Codex (G01-01B2-M-I):
+    m = TimelineMapper(fps=Fraction(24000, 1001), speed_mode="off")
+    m.add_segment("C1", 0.0, 10.0, pad_sec=0.0)
+    t = Fraction(3003, 16000)
+    Toán học:
+      t * fps = (3003 / 16000) * (24000 / 1001) = 9/2 = 4.5.
+      Làm tròn half-even trên 4.5 (giữa 4 chẵn và 5 lẻ) bắt buộc là 4.
+    Mã float cũ:
+      float(t) * self.fps = 4.500000000000001 -> round() cho 5 (SAI).
+    Sau khi dùng RationalFPS + pts_to_frame:
+      Kỳ vọng phải là 4!
+    """
+    m = TimelineMapper(fps=Fraction(24000, 1001), speed_mode="off")
+    m.add_segment("C1", 0.0, 10.0, pad_sec=0.0)
+    t = Fraction(3003, 16000)
+    assert m.src_to_timeline(0, t) == 4
+
+
+@pytest.mark.parametrize(
+    "fps_frac,half_points",
+    [
+        (
+            Fraction(24000, 1001),
+            [
+                (Fraction(9, 2), 4),    # 4.5 -> 4
+                (Fraction(11, 2), 6),   # 5.5 -> 6
+                (Fraction(13, 2), 6),   # 6.5 -> 6
+                (Fraction(15, 2), 8),   # 7.5 -> 8
+                (Fraction(17, 2), 8),   # 8.5 -> 8
+            ]
+        ),
+        (
+            Fraction(30000, 1001),
+            [
+                (Fraction(9, 2), 4),    # 4.5 -> 4
+                (Fraction(11, 2), 6),   # 5.5 -> 6
+                (Fraction(13, 2), 6),   # 6.5 -> 6
+                (Fraction(15, 2), 8),   # 7.5 -> 8
+                (Fraction(17, 2), 8),   # 8.5 -> 8
+            ]
+        ),
+        (
+            Fraction(24, 1),
+            [
+                (Fraction(9, 2), 4),    # 4.5 -> 4
+                (Fraction(11, 2), 6),   # 5.5 -> 6
+                (Fraction(13, 2), 6),   # 6.5 -> 6
+                (Fraction(15, 2), 8),   # 7.5 -> 8
+                (Fraction(17, 2), 8),   # 8.5 -> 8
+            ]
+        ),
+    ]
+)
+def test_src_to_timeline_parametrized_half_frames(fps_frac, half_points):
+    """
+    Parametrize exact source half-frame PTS cho 24000/1001, 30000/1001, 24/1.
+    t = frame_ratio / fps_frac.
+    Kỳ vọng kết quả half-even độc lập.
+    """
+    m = TimelineMapper(fps=fps_frac, speed_mode="off")
+    m.add_segment("C1", 0.0, 10.0, pad_sec=0.0)
+    for frame_ratio, expected_frame in half_points:
+        t_src = frame_ratio / fps_frac
+        res = m.src_to_timeline(0, t_src)
+        assert res == expected_frame, (
+            f"FPS {fps_frac}, PTS {t_src} ({float(t_src):.6f}s, frame {float(frame_ratio)}): "
+            f"kỳ vọng {expected_frame}, nhận được {res}"
+        )
+
+
+def test_src_to_timeline_explicit_fraction_2997_100():
+    """
+    Kiểm tra explicit Fraction(2997, 100) rate được giữ nguyên và round half-even chính xác.
+    """
+    fps_frac = Fraction(2997, 100)
+    m = TimelineMapper(fps=fps_frac, speed_mode="off")
+    m.add_segment("C1", 0.0, 10.0, pad_sec=0.0)
+
+    # 4.5 frames: t = (9/2) / (2997/100) = 450 / 2997 = 50 / 333
+    t_4_5 = Fraction(50, 333)
+    assert m.src_to_timeline(0, t_4_5) == 4
+
+    # 5.5 frames: t = (11/2) / (2997/100) = 550 / 2997
+    t_5_5 = Fraction(550, 2997)
+    assert m.src_to_timeline(0, t_5_5) == 6
+
+    # Điểm nguyên: frame 10 -> t = 10 / (2997/100) = 1000 / 2997
+    t_10 = Fraction(1000, 2997)
+    assert m.src_to_timeline(0, t_10) == 10
+
+
+def test_src_to_timeline_multi_segment_offsets_and_clamp():
+    """
+    Kiểm tra multi-segment:
+    - rec_in != 0 (segment 1 sau segment 0)
+    - source_in != 0
+    - pad 0 vs pad > 0
+    - clamp_to_segment=True vs clamp_to_segment=False
+    - ngoài khoảng trả về None
+    - invalid index trả về None
+    - ngưỡng tol 1ms (0.001s)
+    """
+    m = TimelineMapper(fps=30.0, speed_mode="off")
+    # Seg 0: 0.0 -> 5.0 (dur 5s = 150 frames, rec: 0 -> 150)
+    m.add_segment("C0", 0.0, 5.0, pad_sec=0.0)
+    # Seg 1: 2.0 -> 8.0, pad=0.5 (dur 6s = 180 frames, rec: 150 -> 330)
+    m.add_segment("C1", 2.0, 8.0, pad_sec=0.5)
+
+    assert m.segments[1].rec_in_frames == 150
+    assert m.segments[1].src_in_frames == round((2.0 - 0.5) * 30.0)  # 1.5 * 30 = 45
+
+    # 1. Invalid index
+    assert m.src_to_timeline(-1, 3.0) is None
+    assert m.src_to_timeline(2, 3.0) is None
+    assert m.src_to_timeline(999, 3.0) is None
+
+    # 2. Segment 1: clamp_to_segment=True
+    # Khoảng hợp lệ: [src_in - tol, src_out + tol] = [2.0 - 0.001, 8.0 + 0.001]
+    # Tại t = 2.0:
+    # t_src_f = 2.0 * 30 = 60. offset_src_f = 60 - 45 = 15.
+    # timeline_offset_f = 15. rec_f = 150 + 15 = 165.
+    assert m.src_to_timeline(1, 2.0, clamp_to_segment=True) == 165
+
+    # Tại t = 1.999 (nằm trong tol 1ms của src_in 2.0):
+    assert m.src_to_timeline(1, 1.999, clamp_to_segment=True) is not None
+    # Tại t = 1.998 (ngoài tol 1ms):
+    assert m.src_to_timeline(1, 1.998, clamp_to_segment=True) is None
+
+    # Tại t = 8.001 (nằm trong tol 1ms của src_out 8.0):
+    assert m.src_to_timeline(1, 8.001, clamp_to_segment=True) is not None
+    # Tại t = 8.002 (ngoài tol):
+    assert m.src_to_timeline(1, 8.002, clamp_to_segment=True) is None
+
+    # 3. Segment 1: clamp_to_segment=False
+    # Cho phép padding: [src_in - pad - tol, src_out + pad + tol] = [1.5 - 0.001, 8.5 + 0.001]
+    # Tại t = 1.5 (vùng pad đầu):
+    # t_src_f = 1.5 * 30 = 45. offset_src_f = 45 - 45 = 0 -> rec_f = 150.
+    assert m.src_to_timeline(1, 1.5, clamp_to_segment=False) == 150
+    # Tại t = 1.498 (ngoài pad và tol):
+    assert m.src_to_timeline(1, 1.498, clamp_to_segment=False) is None
+
+
+def test_src_to_timeline_speed_modes_and_formula():
+    """
+    Kiểm tra speed_mode='timeremap' với applied_speed khác 1.0 (cụ thể 2.0):
+    - verify source frame quantization mới + legacy timeline_offset formula:
+      offset_src_f = t_src_f - seg.src_in_frames
+      timeline_offset_f = round(offset_src_f / seg.applied_speed)
+      rec_f = seg.rec_in_frames + timeline_offset_f
+    - verify query không làm biến đổi segments hay cursor_frames.
+    """
+    m = TimelineMapper(fps=24.0, speed_mode="timeremap")
+    m.add_segment("C_FAST", 1.0, 5.0, speed=2.0, pad_sec=0.0)
+
+    initial_cursor = m.cursor_frames
+    initial_segs_len = len(m.segments)
+    seg0 = m.segments[0]
+    initial_rec_dur = seg0.rec_dur_frames
+
+    # src_in = 1.0 -> src_in_f = 24. applied_speed = 2.0.
+    # Tại t = 3.0: t_src_f = 3.0 * 24 = 72.
+    # offset_src_f = 72 - 24 = 48.
+    # timeline_offset_f = round(48 / 2.0) = 24.
+    # rec_f = 0 + 24 = 24.
+    res = m.src_to_timeline(0, 3.0)
+    assert res == 24
+
+    # Query không mutate trạng thái mapper
+    assert m.cursor_frames == initial_cursor
+    assert len(m.segments) == initial_segs_len
+    assert seg0.rec_dur_frames == initial_rec_dur
+
+
+def test_src_to_timeline_sec_delegation():
+    """
+    src_to_timeline_sec ủy quyền cho src_to_timeline và trả về round(rec_f / self.fps, 4).
+    """
+    m = TimelineMapper(fps=30.0, speed_mode="off")
+    m.add_segment("C1", 0.0, 10.0, pad_sec=0.0)
+
+    # Tại t = 2.0s -> rec_f = 60 -> sec = round(60 / 30.0, 4) = 2.0
+    sec = m.src_to_timeline_sec(0, 2.0)
+    assert sec == 2.0
+
+    # Ngoài segment -> trả về None
+    assert m.src_to_timeline_sec(0, 15.0) is None
+    assert m.src_to_timeline_sec(99, 2.0) is None
+
+
+def test_src_to_timeline_nonfinite_inputs():
+    """
+    Query với input không hữu hạn (NaN):
+    - Ném ValueError khi vào tính toán arithmetic.
+    - Không làm thay đổi segments hoặc cursor_frames.
+    """
+    m = TimelineMapper(fps=30.0, speed_mode="off")
+    m.add_segment("C1", 0.0, 10.0, pad_sec=0.0)
+
+    cursor_before = m.cursor_frames
+    segs_count_before = len(m.segments)
+
+    # NaN vượt qua eligibility guard (nan < x và nan > x đều False) và vào arithmetic
+    with pytest.raises(ValueError):
+        m.src_to_timeline(0, float("nan"))
+
+    # Mapper state phải hoàn toàn bất biến
+    assert m.cursor_frames == cursor_before
+    assert len(m.segments) == segs_count_before
+
+    # Inf hoặc -Inf nằm ngoài khoảng [src_in - pad - tol, src_out + pad + tol] -> trả về None
+    assert m.src_to_timeline(0, float("inf")) is None
+    assert m.src_to_timeline(0, float("-inf")) is None
+
+
+

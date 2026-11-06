@@ -79,8 +79,12 @@ def test_transcribe_preserves_signals_and_metadata(monkeypatch, tmp_path) -> Non
     mock_model.transcribe.return_value = ([mock_seg], mock_info)
 
     dummy_wav = str(tmp_path / "test.wav")
-    with open(dummy_wav, "wb") as f:
-        f.write(b"RIFFdummydata")
+    import wave
+    with wave.open(dummy_wav, "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(16000)
+        f.writeframes(b"\x00\x00" * 1600)
 
     results = transcriber.transcribe(dummy_wav, language="vi")
 

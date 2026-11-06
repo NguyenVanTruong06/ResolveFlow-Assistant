@@ -14,7 +14,7 @@ from typing import Optional, List, Dict, Any, Set
 from PySide6.QtCore import Qt, QAbstractListModel, QModelIndex, Signal, Slot
 from PySide6.QtGui import QPixmap
 
-logger = logging.getLogger("ResolveFlow.AssetModel")
+logger = logging.getLogger("ChunDVC.AssetModel")
 
 # Custom Item Data Roles
 IdRole = Qt.ItemDataRole.UserRole + 1
@@ -41,10 +41,9 @@ def extract_asset_info(item: Any) -> Dict[str, Any]:
         cat = str(item.get("tab") or item.get("category") or "text").lower()
         pack_name = str(item.get("pack_name") or "")
         sub = str(item.get("sub") or item.get("sub_category") or (item.get("category") if item.get("tab") else "Tất cả"))
-        if pack_name and pack_name != "Mặc định":
-            sub = pack_name
         dur = float(item.get("duration") or item.get("dur") or 0.0)
         file_path = str(item.get("file_path") or item.get("path") or "")
+        thumbnail_path = str(item.get("thumbnail_path") or item.get("thumb") or "")
         preview_path = str(item.get("preview_path") or file_path)
         motion = str(item.get("motion") or "")
         tags = item.get("tags") or []
@@ -61,15 +60,14 @@ def extract_asset_info(item: Any) -> Dict[str, Any]:
             sub = str(getattr(item, "category", "") or "Transition")
         elif getattr(item, "tab", ""):
             cat = str(getattr(item, "tab")).lower()
-            sub = str(getattr(item, "category", "") or getattr(item, "sub", "") or "Tất cả")
+            sub = str(getattr(item, "sub", "") or getattr(item, "category", "") or "Tất cả")
         else:
             cat = str(getattr(item, "category", "text")).lower()
             sub = str(getattr(item, "sub", "") or getattr(item, "sub_category", "Tất cả"))
-        if pack_name and pack_name != "Mặc định":
-            sub = pack_name
 
         dur = float(getattr(item, "duration", 0.0) or getattr(item, "dur", 0.0))
         file_path = str(getattr(item, "file_path", "") or getattr(item, "path", ""))
+        thumbnail_path = str(getattr(item, "thumbnail_path", "") or getattr(item, "thumb", "") or "")
         preview_path = str(getattr(item, "preview_path", "") or file_path)
         motion = str(getattr(item, "motion", "") or getattr(item, "animation", ""))
         tags = getattr(item, "tags", []) or []
@@ -100,6 +98,7 @@ def extract_asset_info(item: Any) -> Dict[str, Any]:
         "sub": sub,
         "duration": dur,
         "file_path": file_path,
+        "thumbnail_path": thumbnail_path,
         "preview_path": preview_path,
         "motion": motion,
         "tags": tags,
@@ -184,7 +183,7 @@ class AssetListModel(QAbstractListModel):
         if role == PackNameRole:
             return info.get("pack_name", "")
 
-        if role == AssetObjRole:
+        if role in (Qt.ItemDataRole.UserRole, AssetObjRole):
             return info["obj"]
 
         if role == IsFavRole:
@@ -201,10 +200,18 @@ class AssetListModel(QAbstractListModel):
                     self._thumb_cache[asset_id] = pix
                     return pix
 
-            # Request async thumbnail if file path exists
-            file_p = info["file_path"]
-            if file_p and file_p not in self._pending_thumb_requests:
-                self._request_async_thumbnail(asset_id, file_p)
+            # Nếu có thumbnail_path trực tiếp là ảnh hợp lệ, nạp và cache ngay
+            thumb_p = info.get("thumbnail_path")
+            if thumb_p and os.path.isfile(thumb_p):
+                pix = QPixmap(thumb_p)
+                if not pix.isNull():
+                    self._thumb_cache[asset_id] = pix
+                    return pix
+
+            # Thử nạp từ preview_path hoặc file_path
+            cand_p = thumb_p or info.get("preview_path") or info.get("file_path")
+            if cand_p and cand_p not in self._pending_thumb_requests:
+                self._request_async_thumbnail(asset_id, cand_p)
             return None
 
         return None
@@ -215,6 +222,12 @@ class AssetListModel(QAbstractListModel):
         self._assets = [extract_asset_info(it) for it in items]
         self._id_to_row = {info["id"]: idx for idx, info in enumerate(self._assets)}
         self.endResetModel()
+
+    def index_of_asset_id(self, asset_id: str) -> QModelIndex:
+        """Returns source QModelIndex for given asset_id, or invalid index if not found."""
+        if asset_id in self._id_to_row:
+            return self.index(self._id_to_row[asset_id], 0)
+        return QModelIndex()
 
     def update_thumbnail(self, asset_id: str, pixmap: QPixmap):
         """Thread-safe update of loaded thumbnail."""

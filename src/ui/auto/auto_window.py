@@ -28,7 +28,7 @@ from src.core.fcpxml_generator import FCPXMLGenerator
 from src.core.audit_reporter import ExecutionAuditReporter
 from src.core.text_preset import TextStylePreset, PresetManager, TextPreviewRenderer
 from src.core.recipe_manager import Recipe, RecipeManager
-from src.core.cache_manager import ScanCacheManager, compute_file_checksum
+from src.core.cache_manager import ScanCacheManager, compute_file_checksum, compute_full_file_sha256, validate_file_identity
 from src.core.proxy_manager import ProxyManager, ParallelScanPipeline, suggest_whisper_model
 from src.core.review_state import ReviewState, StoryReviewState
 from src.core.story_arranger import ROLE_LABELS, ROLE_COLORS, Arrangement, ArrangedItem, Block
@@ -332,7 +332,17 @@ class PipelineWorker(QThread):
                 clip_data_list = list(self.clip_data_cache) if self.clip_data_cache else []
                 if not clip_data_list and self.use_cache:
                     for vp in self.video_paths:
-                        cached = cache_mgr.get_cached_scan(vp, self.model_size, self.language)
+                        if self.is_interrupted:
+                            self._handle_interrupted()
+                            return
+                        cached = cache_mgr.get_cached_scan(
+                            vp, self.model_size, self.language,
+                            verify_full=True,
+                            cancelled_fn=lambda: self.is_interrupted
+                        )
+                        if self.is_interrupted:
+                            self._handle_interrupted()
+                            return
                         if cached:
                             raw_subs = cached.get("raw_subtitles", [])
                             dur = cached.get("clip_dur", 0.0)
@@ -348,6 +358,7 @@ class PipelineWorker(QThread):
                                 "visual_activity": cached.get("visual_activity", None),
                                 "audio_energy_db": cached.get("audio_energy_db", None)
                             })
+                self.clip_data_out_cache = clip_data_list
                 self.log_signal.emit(f"🎬 Khôi phục dữ liệu cache từ Phase 1 cho {len(clip_data_list)} clips...")
             else:
                 clip_data_list = []
@@ -365,15 +376,56 @@ class PipelineWorker(QThread):
                 self.enable_vlog_hook
             )
 
+            # Bộ nhớ đệm run-local để tái sử dụng verified identity giữa preflight, loop và save
+            local_verified_identities: Dict[str, Tuple[str, Dict[str, Any]]] = {}
+            local_verified_cache: Dict[str, Dict[str, Any]] = {}
+
             # Kiểm tra xem có clip nào thực sự cần chạy Whisper model không (hay tất cả đã có cache)
             clips_needing_whisper = []
             if self.use_cache and needs_transcription:
                 for vp in self.video_paths:
-                    if not cache_mgr.get_cached_scan(vp, self.model_size, self.language):
-                        clips_needing_whisper.append(vp)
+                    if self.is_interrupted:
+                        self._handle_interrupted()
+                        return
+                    full_hash, prov = compute_full_file_sha256(
+                        vp,
+                        cancelled_fn=lambda: self.is_interrupted
+                    )
+                    if self.is_interrupted:
+                        self._handle_interrupted()
+                        return
+
+                    if full_hash and prov:
+                        local_verified_identities[vp] = (full_hash, prov)
+                        cached = cache_mgr.get_cached_scan(
+                            vp,
+                            self.model_size,
+                            self.language,
+                            verify_full=True,
+                            cancelled_fn=lambda: self.is_interrupted,
+                            verified_identity=(full_hash, prov)
+                        )
+                        if self.is_interrupted:
+                            self._handle_interrupted()
+                            return
+                        if cached is not None:
+                            local_verified_cache[vp] = cached
+                        else:
+                            clips_needing_whisper.append(vp)
+                    else:
+                        if self.is_interrupted:
+                            self._handle_interrupted()
+                            return
+                        self.log_signal.emit(
+                            f"❌ Không xác minh được danh tính nội dung cho '{os.path.basename(vp)}' tại preflight. Dừng xử lý fail-safe."
+                        )
+                        self.step_signal.emit("speech_to_text", "error")
+                        self.finished_signal.emit(False, "missing_verified_identity")
+                        return
             else:
                 clips_needing_whisper = list(self.video_paths)
 
+            transcriber = None
             if self.phase in [0, 1] and needs_transcription:
                 if not clips_needing_whisper and self.use_cache:
                     self.step_signal.emit("load_model", "done")
@@ -497,12 +549,54 @@ class PipelineWorker(QThread):
 
                     self.log_signal.emit(f"\n🎬 [Clip {idx+1}/{total_clips}] Phân tích nguồn: {os.path.basename(video_path)}")
                     
-                    # Kiểm tra Scan Cache theo Checksum
+                    # Kiểm tra Scan Cache theo Verified Full Content SHA256
                     cached_data = None
+                    identity = local_verified_identities.get(video_path)
                     if self.use_cache and needs_transcription:
-                        cached_data = cache_mgr.get_cached_scan(video_path, self.model_size, self.language)
+                        if identity:
+                            full_hash, prov = identity
+                            if not validate_file_identity(video_path, prov):
+                                self.log_signal.emit(
+                                    f"❌ Nguồn '{os.path.basename(video_path)}' đã bị thay đổi sau preflight. Dừng xử lý để bảo vệ tính toàn vẹn dữ liệu."
+                                )
+                                self.step_signal.emit("speech_to_text", "error")
+                                self.finished_signal.emit(False, "source_mutated_after_preflight")
+                                return
+
+                            cached_data = local_verified_cache.get(video_path)
+                            if cached_data is None:
+                                cached_data = cache_mgr.get_cached_scan(
+                                    video_path, self.model_size, self.language,
+                                    verify_full=True,
+                                    cancelled_fn=lambda: self.is_interrupted,
+                                    verified_identity=identity
+                                )
+                        else:
+                            self.log_signal.emit(
+                                f"❌ Không xác minh được danh tính nội dung cho '{os.path.basename(video_path)}'. Dừng xử lý fail-safe."
+                            )
+                            self.step_signal.emit("speech_to_text", "error")
+                            self.finished_signal.emit(False, "missing_verified_identity")
+                            return
+
+                        if self.is_interrupted:
+                            self._handle_interrupted()
+                            return
+
                         if cached_data:
                             self.log_signal.emit("   ⚡ [Scan Cache Hit] Đã tìm thấy dữ liệu đệm từ trước, nạp hoàn tất trong 0.05s (Không tốn thời gian dịch lại)!")
+
+                    if not cached_data and needs_transcription and transcriber is None:
+                        self.log_signal.emit(f"   🤖 Tải mô hình Whisper AI '{self.model_size}' cho nguồn cần dịch mới...")
+                        self.step_signal.emit("load_model", "running")
+                        model_config = ModelConfig(
+                            model_size=self.model_size,
+                            device="cuda",
+                            compute_type="float16"
+                        )
+                        transcriber = ResolveTranscriber(model_config)
+                        transcriber.load_model(log_callback=self.log_signal.emit)
+                        self.step_signal.emit("load_model", "done")
 
                     clip_base_name = os.path.splitext(os.path.basename(video_path))[0]
                     unique_id = uuid.uuid4().hex[:8]
@@ -592,6 +686,7 @@ class PipelineWorker(QThread):
                     visual_activity = None
 
                     # Tái sử dụng dữ liệu từ cache nếu có
+                    has_cached_cut_data = False
                     if cached_data:
                         if cached_data.get("visual_activity") is not None:
                             try:
@@ -599,9 +694,19 @@ class PipelineWorker(QThread):
                                 visual_activity = np.asarray(cached_data["visual_activity"], dtype=np.float32)
                             except Exception:
                                 visual_activity = None
-                        keep_intervals = cached_data.get("silence_keep_intervals", [(0.0, clip_dur)])
-                        speedup_segments = cached_data.get("speedup_segments", [])
-                        cut_segments = cached_data.get("cut_segments", [])
+                        if "silence_keep_intervals" in cached_data and cached_data["silence_keep_intervals"] is not None:
+                            keep_intervals = cached_data["silence_keep_intervals"]
+                            speedup_segments = cached_data.get("speedup_segments", [])
+                            raw_cached_cuts = cached_data.get("cut_segments", [])
+                            if raw_cached_cuts:
+                                from src.core.autocut import CutSegment
+                                cut_segments = [
+                                    CutSegment(**s) if isinstance(s, dict) else s
+                                    for s in raw_cached_cuts
+                                ]
+                                has_cached_cut_data = True
+                            elif keep_intervals:
+                                has_cached_cut_data = True
 
                     # Chỉ đo chuyển động hình ảnh nếu chưa có cache và đang ở Phase 0 hoặc 2
                     if visual_activity is None and self.phase != 1 and (
@@ -625,7 +730,7 @@ class PipelineWorker(QThread):
                         from src.core.autocut import CutSegment
                         cut_segments = [CutSegment(start=0.0, end=clip_dur, action="keep", speed=1.0)]
                         keep_intervals = [(0.0, clip_dur)]
-                    elif self.run_cut and not cut_segments and self.phase != 1:
+                    elif self.run_cut and not has_cached_cut_data and self.phase != 1:
                         if not os.path.exists(temp_wav) or os.path.getsize(temp_wav) == 0:
                             AudioExtractor.extract_audio(video_path, temp_wav)
 
@@ -701,7 +806,7 @@ class PipelineWorker(QThread):
                                 "rec_duration": rec_dur,
                                 "note": note
                             })
-                    else:
+                    elif not has_cached_cut_data:
                         if clip_dur <= 0:
                             try:
                                 meta = get_media_metadata(video_path)
@@ -725,21 +830,29 @@ class PipelineWorker(QThread):
 
                     # Lưu vào Cache nếu vừa mới quét
                     if self.use_cache and not cached_data and needs_transcription:
-                        cache_mgr.save_scan_result(
-                            file_path=video_path,
-                            scan_data={
-                                "raw_subtitles": raw_subtitles,
-                                "clip_dur": clip_dur,
-                                "visual_activity": visual_activity.tolist() if visual_activity is not None else None,
-                                "audio_energy_db": energy_list,
-                                "silence_keep_intervals": keep_intervals,
-                                "speedup_segments": speedup_segments
-                            },
-                            model_size=self.model_size,
-                            language=self.language,
-                            detected_language=getattr(transcriber, "last_detected_language", None) if transcriber else None,
-                            language_probability=getattr(transcriber, "last_language_probability", None) if transcriber else None
-                        )
+                        if self.is_interrupted:
+                            self._handle_interrupted()
+                            return
+
+                        identity = local_verified_identities.get(video_path)
+                        if identity:
+                            cache_mgr.save_scan_result(
+                                file_path=video_path,
+                                scan_data={
+                                    "raw_subtitles": raw_subtitles,
+                                    "clip_dur": clip_dur,
+                                    "visual_activity": visual_activity.tolist() if visual_activity is not None else None,
+                                    "audio_energy_db": energy_list,
+                                    "silence_keep_intervals": keep_intervals,
+                                    "speedup_segments": speedup_segments
+                                },
+                                model_size=self.model_size,
+                                language=self.language,
+                                detected_language=getattr(transcriber, "last_detected_language", None) if transcriber else None,
+                                language_probability=getattr(transcriber, "last_language_probability", None) if transcriber else None,
+                                verified_identity=identity,
+                                cancelled_fn=lambda: self.is_interrupted
+                            )
 
                     # Lưu cache
                     clip_data_list.append({
@@ -5954,7 +6067,7 @@ class AutoWindow(QMainWindow):
                         self,
                         "Tải mô hình Whisper AI",
                         f"Mô hình Whisper '{model_size}' chưa có trên máy.\n\n"
-                        f"ResolveFlow sẽ cần tải khoảng {size_str} từ internet trong lần chạy đầu tiên.\n\n"
+                        f"ChunDVC sẽ cần tải khoảng {size_str} từ internet trong lần chạy đầu tiên.\n\n"
                         f"Bạn có muốn tiếp tục tải và bắt đầu tiến trình không?",
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                         QMessageBox.StandardButton.Yes

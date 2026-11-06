@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QProgressBar, QFileDialog, QMessageBox, QFrame
 )
-from PySide6.QtCore import Qt, QThread, Signal as pyqtSignal
+from PySide6.QtCore import Qt, QThread, Slot, Signal as pyqtSignal
 from src.ui.theme import ThemeColors, ThemeFonts
 from src.core.cloud_downloader import (
     parse_google_drive_url,
@@ -95,6 +95,8 @@ class GoogleDriveImportDialog(QDialog):
         """)
 
         self.worker: Optional[CloudDownloadWorker] = None
+        self._pending_done = None
+        self._download_result = None
         self._init_ui()
 
     def _init_ui(self):
@@ -197,6 +199,10 @@ class GoogleDriveImportDialog(QDialog):
             self.txt_output_dir.setText(d)
 
     def _start_download(self):
+        if self.worker is not None:
+            return
+        self._pending_done = None
+        self._download_result = None
         url = self.txt_url.text().strip()
         info = parse_google_drive_url(url)
         if not info:
@@ -217,6 +223,7 @@ class GoogleDriveImportDialog(QDialog):
         self.worker = CloudDownloadWorker(info, out_dir)
         self.worker.progress_signal.connect(self._on_progress)
         self.worker.finished_signal.connect(self._on_finished)
+        self.worker.finished.connect(self._on_worker_stopped, Qt.ConnectionType.QueuedConnection)
         self.worker.start()
 
     def _on_progress(self, p: DownloadProgress):
@@ -232,7 +239,24 @@ class GoogleDriveImportDialog(QDialog):
                 f"📥 Đang tải: <b>{p.filename}</b> ({mb_down:.1f} MB) • ⚡ {p.speed_mb_s:.1f} MB/s"
             )
 
+    @Slot(bool, str, str)
     def _on_finished(self, success: bool, target_path: str, message: str):
+        self._download_result = (success, target_path, message)
+
+    @Slot()
+    def _on_worker_stopped(self):
+        worker = self.worker
+        self.worker = None
+        if worker:
+            worker.deleteLater()
+        if self._pending_done is not None:
+            result = self._pending_done
+            self._pending_done = None
+            super().done(result)
+        elif self._download_result:
+            self._apply_download_result(*self._download_result)
+
+    def _apply_download_result(self, success: bool, target_path: str, message: str):
         if success and target_path and os.path.exists(target_path):
             self.lbl_progress_status.setText(f"✔ Hoàn thành: {os.path.basename(target_path)}")
             is_folder = os.path.isdir(target_path)
@@ -245,8 +269,26 @@ class GoogleDriveImportDialog(QDialog):
             self.lbl_progress_status.setText(f"❌ {message}")
             QMessageBox.critical(self, "Lỗi Tải Google Drive", f"Không thể tải tệp từ Google Drive:\n{message}")
 
-    def _on_cancel(self):
-        if self.worker and self.worker.isRunning():
+    def done(self, result):
+        if self.worker is not None:
+            self._pending_done = result
             self.worker.cancel()
-            self.worker.wait(1000)
+            self.lbl_progress_status.setText("Đang hủy tải, vui lòng chờ...")
+            return
+        super().done(result)
+
+    def reject(self):
+        self.done(QDialog.DialogCode.Rejected)
+
+    def accept(self):
+        self.done(QDialog.DialogCode.Accepted)
+
+    def closeEvent(self, event):
+        if self.worker is not None:
+            self.reject()
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def _on_cancel(self):
         self.reject()

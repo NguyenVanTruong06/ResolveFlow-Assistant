@@ -1,0 +1,10 @@
+# Codex quyết định — G03-03A3-D
+
+DESIGN ACCEPTED_WITH_BINDING_CORRECTIONS, giao03A3-I.
+1. Giữ packfolderlisting/loop ởPackIngestService trongslice; KHÔNGrefactorshared download_folder lúc này. Sharedsourcefootage defaultAPI/behavior giữ. Chỉdownload_file thêm keyword-onlybudget cuối.
+2. TransferBudget pack-only, positiveintmax_bytes, cumulativeconsumedbytes từmọifile. check_declared so vớiREMAININGkhôngphải initialmax. Headerkhôngcộngquota. Prefixpending phảiđượcđếm; budgetconsume trướcwrite/quota, khônggọi fieldtotal_written nếuđếmbyteschưaghi. Failclosedoneattempt khioptin nênkhôngrefillquotalúcretry.
+3. HTMLprefixstatePERFILE, khôngđặtprefix_checkedtrênbudgetshared. Reusebudgetnhưngfile2vẫnHTMLcheck512bytes xuyênshortreads/EOF/BOM.
+4. PackconfirmationHTML read bounded1MiB+sentinel, tốiđa1confirmationround; status200final/empty/truncated checks. Khôngopaquegdownfallbackkhibudgetkểcảwrite_guardNone; legacydefaultgiữ.
+5. Existingwrite_guard vốnblocksgdownfallback; đókhôngphảinewbehaviorpháthiện. gdownskip_downloadlisting làmetadataoperationcóthểopaque/uncancellable trongcall; lencheckSAUreturn khôngbảođảmRAM/networklistingboundedtừđầu. Ghilimitkhôngclaim100kpreventmọiRAMexhaustion.
+6. item.local_path từgdowncóthểabsolute dướistaging; khônggọi safe_relative trực tiếplênabsolutepathrồirejectmọifile. Xácminhlexicalcontainment/ancestor symlink vàrelativeportion chuẩn; rejecttraversal/casefoldcollisions trướcnetwork.
+7. Cleanupbest-effort khikhođúngidentity, khôngclaimalwayscleanonunplug. “10tests<2s”chưađo,designcheckboxchỉproposedkhôngđánhdấutestpassed.

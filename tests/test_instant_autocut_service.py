@@ -84,6 +84,10 @@ def test_autocut_service_successful_cut(sample_wav, tmp_path):
 
     mock_timeline.GetName.return_value = "Vlog_Ep1"
     mock_new_timeline.GetName.return_value = "[AutoCut] Vlog_Ep1"
+    mock_timeline.GetUniqueId.return_value = "original"
+    mock_new_timeline.GetUniqueId.return_value = "created"
+    mock_project.GetTimelineCount.return_value = 2
+    mock_project.GetTimelineByIndex.side_effect = lambda index: [mock_timeline, mock_new_timeline][index - 1]
 
     mock_ra.current_project = mock_project
     mock_project.GetMediaPool.return_value = mock_media_pool

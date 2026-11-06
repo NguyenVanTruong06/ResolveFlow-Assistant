@@ -229,11 +229,17 @@ class AssetCardDelegate(QStyledItemDelegate):
 
         painter.fillRect(rect, grad)
 
-        # Center typography hint
-        painter.setPen(QColor(255, 255, 255, 120))
-        f = QFont("Segoe UI", 10)
-        f.setBold(True)
-        painter.setFont(f)
-        fm = QFontMetrics(f)
-        disp_txt = fm.elidedText(name, Qt.TextElideMode.ElideRight, int(rect.width() - 20))
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, disp_txt)
+        if category in ("trans", "transition"):
+            # Biểu tượng chuyển cảnh điện ảnh tinh tế thay vì nhét chữ thô vào khung
+            painter.setFont(QFont("Segoe UI Emoji", 26))
+            painter.setPen(QColor(216, 180, 254, 180))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "🎬")
+        else:
+            # Center typography hint
+            painter.setPen(QColor(255, 255, 255, 120))
+            f = QFont("Segoe UI", 10)
+            f.setBold(True)
+            painter.setFont(f)
+            fm = QFontMetrics(f)
+            disp_txt = fm.elidedText(name, Qt.TextElideMode.ElideRight, int(rect.width() - 20))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, disp_txt)

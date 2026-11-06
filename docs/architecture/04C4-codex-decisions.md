@@ -1,0 +1,11 @@
+# G04-04C4-D — ACCEPTED_WITH_BINDING_DECISIONS
+
+Đối chiếu code: AutoWindow nối insert_sfx_requested và apply_lut_requested tới direct Resolve operations; StudioWindow khôngnối. TabAssets video gọi directAPI, LUT payloadlossy vàservice _insert_video córepofallback sauguard. Design có cơsở code; chưa chạy app/tests trong lượt design.
+
+1. Phê duyệt slice2modules TabAssets +InsertService cho video/B-roll/overlay/meme/SFX/BGM/LUT/nativeguidance. Text customization/directFusion routes DEFERRED rõ, không gọi toànStudio đãsafe.
+2. Remove fallbackrepo ở convertedUI branches và _insert_video. Worker mấtfile sauguard phải fail cho đúngpath, không resolve_meme/name substitute. Builtin ID-only media khôngcópath cần refresh/index đúngsource, không searchrepo actiontime.
+3. Converted flow KHÔNG emit insert_sfx_requested/apply_lut_requested dù success hayfailure: oldsignals là commands cómutatingconsumers, không biến chúng thành notification chỉbằng vịtríemit. Giữ khai báo đểcompat các đường khác, không sửaAutoWindow/khởitạo notificationmới ở tasknày. Service unavailable cũng khôngfallbackdirectAPI hoặcsignallegacy.
+4. Nativeguidance result res.ok cónghĩa chuẩn bị/hướng dẫn thànhcông, không phải clip đãchèn: dùng message từservice. Giữ order native transition default modeauto trước implicit Fusionpage paste trongservice nếu cần để tránh chènpreview/copyFusion nhầm; explicit fusion_paste route không redesign.
+5. Payload base to_asset_dict, shallowcopy khôngmấtorigin/source/path/native refs. Truyền duration/track/mode theo actual UI; LUT target_track qua existingextra_params keys vàgiữ clipplayhead grade. Không bịa controls. Audio Studio giữ intendedSFX-12dB/BGM-18dB nếu codehiệncó; service default-12 cũgiữ, thêm optional extra_params/volumeoffset threading nếu thực sự cần (finite realnumber, khôngbool/NaN). Không đổi recordFrame/free-track.
+6. Recent chỉsuccess convertedflows; denied/error/serviceunavailable khôngRecent. Text legacy đãdeferred khôngrefactorfont/generator/notify trongtasknày. Không claim insert_sync nonblocking: nestedQtEventLoop vẫn synchronous lifecycle.
+7. Errorcodes trongdesign phải khớp corehelperthật: ERR_FOREIGN_ROOT, khôngphantom ERR_STORAGE_ROOT_MISMATCH. Không yêu cầu fullalltests chỉfocusedIDs.

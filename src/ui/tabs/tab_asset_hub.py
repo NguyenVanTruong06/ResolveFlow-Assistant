@@ -68,9 +68,9 @@ class RfPackDropZone(QFrame):
                     event.acceptProposedAction()
                     self.setStyleSheet(f"""
                         QFrame {{
-                            background-color: rgba(124, 58, 237, 0.2);
-                            border: 2px dashed {ThemeColors.PRIMARY_HOVER};
-                            border-radius: 10px;
+                            background-color: rgba(217, 79, 61, 0.16);
+                            border: 1px dashed {ThemeColors.PRIMARY_HOVER};
+                            border-radius: 6px;
                         }}
                     """)
                     return
@@ -175,7 +175,7 @@ class CloudPackCard(QFrame):
         layout.addWidget(self.prog_bar)
 
         self.lbl_status = QLabel("")
-        self.lbl_status.setStyleSheet("color: #a78bfa; font-size: 11px;")
+        self.lbl_status.setStyleSheet("color: #f59e0b; font-size: 11px;")
         self.lbl_status.hide()
         layout.addWidget(self.lbl_status)
 
@@ -306,6 +306,10 @@ class AssetHubWidget(QWidget):
         sec1_header.addWidget(lbl_sec1)
         sec1_header.addStretch(1)
         layout.addLayout(sec1_header)
+
+        storage_button = QPushButton("💾 Kho Chính / Ổ ngoài / Liên kết")
+        storage_button.clicked.connect(self._open_storage_settings)
+        layout.addWidget(storage_button)
 
         # Grid hiển thị các gói starter pack
         grid_packs = QGridLayout()
@@ -469,7 +473,9 @@ class AssetHubWidget(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
-        folders = self.indexer.get_linked_folders()
+        from src.core.storage_manager import StorageManager
+        managed_links = StorageManager().links()
+        folders = list(dict.fromkeys(self.indexer.get_linked_folders() + [link["path"] for link in managed_links]))
         if not folders:
             lbl_empty = QLabel("Chưa liên kết thư mục ngoài nào. Bấm 'Thêm Thư Mục Máy Tính' để nạp kho meme/SFX có sẵn của bạn.")
             lbl_empty.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11.5px; font-style: italic; padding: 6px;")
@@ -519,13 +525,7 @@ class AssetHubWidget(QWidget):
             self.folder_list_container.addWidget(row)
 
     def _on_add_folder_clicked(self):
-        chosen = QFileDialog.getExistingDirectory(self, "Chọn thư mục chứa Meme / SFX / Đạo cụ trên máy")
-        if chosen:
-            added = self.indexer.add_linked_folder(chosen)
-            if added:
-                self._render_linked_folders()
-                self.assets_changed.emit()
-                QMessageBox.information(self, "Thành công", f"Đã kết nối thư mục:\n{chosen}\nKho đạo cụ đã được làm mới!")
+        self._open_storage_settings()
 
     def _on_remove_folder(self, folder_path: str):
         reply = QMessageBox.question(
@@ -535,6 +535,13 @@ class AssetHubWidget(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
+            from src.core.storage_manager import StorageManager
+            storage = StorageManager()
+            try:
+                for link in storage.links():
+                    if link["path"] == folder_path: storage.unlink_folder(link["id"])
+            except Exception as exc:
+                QMessageBox.warning(self, "Không gỡ được liên kết", str(exc)); return
             self.indexer.remove_linked_folder(folder_path)
             self._render_linked_folders()
             self.assets_changed.emit()
@@ -545,42 +552,47 @@ class AssetHubWidget(QWidget):
         self.assets_changed.emit()
         QMessageBox.information(self, "Thông báo", "Đã quét lại toàn bộ kho đạo cụ!")
 
-    def _on_install_pack_requested(self, manifest: PackManifest):
-        card = self._pack_cards.get(manifest.id)
-        if card:
-            card.set_downloading(10.0, "Đang chuẩn bị kết nối đám mây...")
+    def _open_storage_settings(self):
+        from src.ui.widgets.pack_ingest_wizard import StorageSettingsDialog
+        dialog = StorageSettingsDialog(parent=self)
+        dialog.library_changed.connect(self._library_refreshed)
+        dialog.exec()
 
-        self._active_worker = CloudPackInstallWorker(
-            pack_manifest=manifest,
-            target_assets_dir=str(self.indexer.base_dir),
-            parent=self
-        )
-        self._active_worker.progress_signal.connect(
-            lambda pct, msg, c=card: c.set_downloading(pct, msg) if c else None
-        )
-        self._active_worker.finished_signal.connect(
-            lambda ok, msg, counts, c=card: self._on_install_worker_finished(ok, msg, counts, c)
-        )
-        self._active_worker.start()
+    def _library_refreshed(self):
+        self.indexer.clear_cache()
+        self.assets_changed.emit()
+        self._render_linked_folders()
+
+    def _review_pack(self, source=None, url=None, auto_prepare=False):
+        from src.ui.widgets.pack_ingest_wizard import PackIngestWizard
+        try:
+            dialog = PackIngestWizard(parent=self, source=source, url=url, auto_prepare=auto_prepare)
+        except TypeError:
+            dialog = PackIngestWizard(parent=self, source=source, url=url)
+        dialog.library_changed.connect(self._library_refreshed)
+        committed_payload = []
+
+        def _on_committed(meta):
+            committed_payload.append(meta if isinstance(meta, dict) else {})
+
+        dialog.pack_committed.connect(_on_committed)
+        dialog.exec()
+        if committed_payload and committed_payload[0].get("snapshot_synced") is False:
+            QMessageBox.warning(
+                self,
+                "Thông báo",
+                "Gói đã nhập vào kho; bộ đệm offline chưa đồng bộ."
+            )
+
+    def _on_install_pack_requested(self, manifest: PackManifest):
+        self._review_pack(url=manifest.download_url, auto_prepare=True)
 
     def _on_custom_drive_download(self):
         url = self.txt_drive_url.text().strip()
         if not url:
-            QMessageBox.warning(self, "Lỗi", "Vui lòng dán liên kết Google Drive hợp lệ!")
+            QMessageBox.warning(self, "Liên kết", "Vui lòng nhập liên kết Google Drive.")
             return
-
-        self.btn_download_drive.setEnabled(False)
-        self.btn_download_drive.setText("Đang tải...")
-
-        self._active_worker = CloudPackInstallWorker(
-            drive_url=url,
-            target_assets_dir=str(self.indexer.base_dir),
-            parent=self
-        )
-        self._active_worker.finished_signal.connect(
-            lambda ok, msg, counts: self._on_custom_drive_finished(ok, msg)
-        )
-        self._active_worker.start()
+        self._review_pack(url=url, auto_prepare=True)
 
     def _on_custom_drive_finished(self, success: bool, message: str):
         self.btn_download_drive.setEnabled(True)
@@ -601,18 +613,7 @@ class AssetHubWidget(QWidget):
             self.assets_changed.emit()
 
     def _install_local_pack_file(self, filepath: str):
-        try:
-            counts = PackManager.install_pack(filepath, target_base_dir=str(self.indexer.base_dir))
-            self.indexer.clear_cache()
-            self.assets_changed.emit()
-            total = sum(counts.values())
-            QMessageBox.information(
-                self,
-                "Cài đặt thành công",
-                f"Đã giải nén và nạp thành công {total} tài nguyên vào kho ResolveFlow!"
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "Lỗi cài đặt", f"Không thể cài đặt tệp gói:\n{e}")
+        self._review_pack(source=filepath, auto_prepare=True)
 
     def _on_pick_pack_file(self):
         chosen, _ = QFileDialog.getOpenFileName(

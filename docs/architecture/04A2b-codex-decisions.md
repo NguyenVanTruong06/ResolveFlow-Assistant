@@ -1,0 +1,11 @@
+# G04-04A2b — Wiring quyết định ràng buộc
+
+Tiền đề: receiver TabAssets.apply_storage_snapshot(managed_assets=None, taxonomy=None, generation_sig=None) đã accepted62tests exit0. Wiring dưới đây là PROPOSED, chưa implemented.
+
+1. EdgeDockWindow thêm storage_assets_changed = Signal(list, dict). Chỉ refresh_storage_assets sau thành công phát managed-assets/taxonomy metadata; set_assets thụ động không phát. Không dùng full bundled list làm managed payload.
+2. StudioWindow.apply_storage_snapshot wrapper cùng3 args chuyển tiếp nguyên vẹn sang tab_assets. Receiver không emit assets_updated.
+3. create_studio_manager kết nối Dock signal một lần vào closure nhận snapshot. Studio đã tạo (visible/hidden) nhận trực tiếp; chưa tạo không tạo window/worker chỉ để sync, khi open_studio lần đầu chủ động nhận snapshot StorageManager mới nhất sau constructor. Giữ callable return và3 args create_studio_manager để bảo toàn callers.
+4. main storage poll kiểm tra root/expected library_id/online và stat signature marker+registry+taxonomy (mtime_ns, size; lỗi IO phân biệt không crash); không chỉ registrymtime. Thay đổi thực tế gọi dock.refresh_storage_assets(), signal cập nhật Studio. Poll không cần truy cập studio_window private closure. Không monkeypatch method/attach dynamic callbacks để lách closure. Chỉ ghi last-observed signature sau refresh thành công, lỗi phải retry vào tick sau. Không coi stat signature là transaction authority/crash proof.
+5. Studio->Dock giữ assets_updated callback hiện hữu; Dock.set_assets không phát ngược. _on_sync_dock_clicked bỏ lần _notify_assets_changed thừa khi _rescan_assets đã emit. Không đổi nghiệp vụ chủ động rescan G03 ở đây. Timer sau đó có thể reconcile metadata một lần, phải ổn định không echo storm; không yêu cầu dedup tuyệt đối nếu chưa có generation authority đầy đủ.
+6. Metadata payload supplied -> receiver zero StorageManager/indexer IO; Dock provider lấy taxonomy một lần để phát (helper set_assets vẫn có taxonomy read riêng, không tuyên bố một lần toàn pipeline). Không truyền thời lượng3s giả, không deepcopy runtime, không mutate payload caller.
+7. Giữ filters/selection theo receiver accepted; không thêm guard offline hay filter redesign ngoài scope. Telemetry production lifecycle deferred, tests cô lập đúng worker và cleanup thực.

@@ -1,0 +1,84 @@
+name: Bug Report
+description: Create a report to help us reproduce and fix an issue in ChunDVC
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please provide as much detailed context as possible so we can reproduce and fix the bug quickly.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the unexpected behavior...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What operating system are you running ChunDVC on?
+      options:
+        - Ubuntu / Debian Linux
+        - Fedora / Arch / Other Linux
+        - Windows 11
+        - Windows 10
+        - macOS
+    validations:
+      required: true
+
+  - type: dropdown
+    id: resolve_version
+    attributes:
+      label: DaVinci Resolve Version
+      description: Which version of DaVinci Resolve are you running?
+      options:
+        - DaVinci Resolve Studio 19.x
+        - DaVinci Resolve Free 19.x
+        - DaVinci Resolve Studio 18.x
+        - DaVinci Resolve Free 18.x
+        - Not applicable / UI only
+    validations:
+      required: true
+
+  - type: input
+    id: app_version
+    attributes:
+      label: ChunDVC Version / Install Type
+      description: Version of ChunDVC (e.g., v1.0.0 Debian package, standalone zip, or source checkout).
+      placeholder: v1.0.0 (.deb package)
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the issue.
+      placeholder: |
+        1. Open ChunDVC Studio / AI Director
+        2. Ingest video clip 'sample.mov'
+        3. Click 'Run Transcription'
+        4. See error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: The speech transcript should appear in Step 1...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Logs or Console Output
+      description: Paste any terminal output, stack traces, or logs here (remove private paths/keys).
+      render: shell

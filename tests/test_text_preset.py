@@ -11,23 +11,59 @@ def test_hex_to_fcpxml_rgba():
 def test_builtin_presets_and_manager(tmp_path):
     mgr = PresetManager(base_dir=str(tmp_path / "presets"))
     presets = mgr.list_presets()
-    assert len(presets) >= 12
-    
-    preset_ids = [p.id for p in presets]
-    assert "kinetic_hormozi" in preset_ids
-    assert "highlighter_swipe" in preset_ids
-    assert "paper_cutout" in preset_ids
-    assert "rgb_glitch" in preset_ids
-    assert "neon_pulse" in preset_ids
-    assert "vhs_retro" in preset_ids
-    assert "clean_minimal" in preset_ids
-    assert "karaoke_pop" in preset_ids
-    assert "bounce_word" in preset_ids
-    assert "box_highlight" in preset_ids
-    assert "glow_neon" in preset_ids
-    assert "clean_outline" in preset_ids
-    assert "gradient_fill" in preset_ids
-    assert "slide_in" in preset_ids
+    # 1. Kho rỗng trả list rỗng, không tự ý reseed dữ liệu mẫu
+    assert len(presets) == 0
+
+    # 2. Fallback neutral title khi preset không tồn tại
+    fallback = mgr.get_preset("unknown_title")
+    assert fallback.id == "unknown_title"
+    assert fallback.name == "Default Title"
+    assert fallback.category == "clean_minimal"
+
+    # 3. Quản lý lưu và đọc preset tường minh
+    fixture_presets = [
+        TextStylePreset(
+            id="kinetic_hormozi",
+            name="Alex Hormozi Pop (Kinetic Bounce)",
+            category="kinetic",
+            badge_icon="💥",
+            tags=["Viral", "Hormozi", "TikTok", "Shorts"],
+            font="Impact",
+            size=54,
+            standard_color="#FFFFFF",
+            highlight_color="#FFE600",
+            outline_color="#000000",
+            outline_width=0.18,
+        ),
+        TextStylePreset(
+            id="highlighter_swipe",
+            name="Highlighter Marker (Bút Dạ Quang)",
+            category="highlighter_paper",
+            badge_icon="🖍️",
+            tags=["Marker", "Highlighter"],
+            font="Arial Black",
+            size=48,
+            box_color="#FFE600",
+        ),
+        TextStylePreset(
+            id="paper_cutout",
+            name="Paper Cutout (Xé Giấy Vintage)",
+            category="highlighter_paper",
+            badge_icon="📄",
+            tags=["Scrapbook", "StopMotion"],
+            font="Georgia",
+            size=46,
+        )
+    ]
+    for p in fixture_presets:
+        mgr.save_custom_preset(p)
+
+    reloaded = mgr.list_presets()
+    assert len(reloaded) == 3
+    reloaded_ids = [p.id for p in reloaded]
+    assert "kinetic_hormozi" in reloaded_ids
+    assert "highlighter_swipe" in reloaded_ids
+    assert "paper_cutout" in reloaded_ids
 
     # Kiểm tra tags và categories
     hormozi = mgr.get_preset("kinetic_hormozi")
@@ -131,7 +167,10 @@ def test_fusion_setting_generator(tmp_path):
 
 def test_install_presets_to_davinci_resolve(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    count, target_dir = FusionSettingGenerator.install_presets_to_davinci_resolve()
+    fixture_presets = [
+        TextStylePreset(id=f"fixture_preset_{i}", name=f"Fixture Preset {i}") for i in range(7)
+    ]
+    count, target_dir = FusionSettingGenerator.install_presets_to_davinci_resolve(presets=fixture_presets)
     assert count >= 7
     assert os.path.exists(target_dir)
     files = os.listdir(target_dir)

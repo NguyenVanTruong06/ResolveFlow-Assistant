@@ -1,0 +1,53 @@
+[Unit]
+Description=ResolveFlow Trial Authorization Signer Daemon
+Documentation=file:///opt/resolveflow-assistant/docs/architecture/07B7-GATE6-DEP01-live-dispatch-oracle-design.md
+After=network.target
+PartOf=resolveflow.target
+
+[Service]
+Type=simple
+User=_resolveflow_signer
+Group=_resolveflow_signer
+UMask=0117
+
+# Environment definitions
+WorkingDirectory=/opt/resolveflow-assistant
+Environment=PYTHONPATH=/opt/resolveflow-assistant
+
+# DEP02A-03 / BLOCKER-D-F03 Packaging & Runtime Dependency Statement:
+# While 'src.services.trial_authorization_signer_daemon' exists in source (DEP-02B R6), it is not
+# installed by 'package_deb.sh' (standalone executable only) and no production wrapper is packaged yet.
+# Per Workorder G07-07B7-GATE6-DEP02A Section 3.4 and Reconciliation finding BLOCKER-D-F03, ExecStart
+# remains intentionally inert as /bin/false pending authorized daemon wrapper and packaging workorders.
+ExecStart=/bin/false
+
+Restart=on-failure
+RestartSec=5s
+
+# Sandboxing & Least Privilege (DEP-01 R3 Section 2.1 & 2.2, DEP02A-R2-04)
+# Operates strictly under primary identity _resolveflow_signer:_resolveflow_signer (901:901).
+# Possesses zero supplementary group memberships to prevent cross-service DAC traversal.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+
+# Filesystem DAC Boundaries
+# Signer owns state directory and its two socket directories
+ReadWritePaths=/var/lib/resolveflow/signer /run/resolveflow/oracle /run/resolveflow/signer_client
+# Signer reads runtime root /run/resolveflow and Class A trust anchor directory /etc/resolveflow
+ReadOnlyPaths=/run/resolveflow /etc/resolveflow
+
+# Strictly isolate Signer from Dispatcher socket directory and DaVinci Resolve IPC
+InaccessiblePaths=/run/resolveflow/dispatcher_client
+InaccessiblePaths=/var/tmp/davinci_socket
+InaccessiblePaths=/tmp/.X11-unix
+
+[Install]
+WantedBy=multi-user.target

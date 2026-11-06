@@ -10,12 +10,38 @@ Quy tắc:
 """
 
 import os
+import math
 import logging
 from fractions import Fraction
 from typing import List, Dict, Any, Optional, Tuple, Union
 from dataclasses import dataclass, field
 
+from src.core.contracts.time_contracts import RationalFPS, pts_to_frame
+
 logger = logging.getLogger(__name__)
+
+
+def _to_finite_fraction(val: Any, name: str) -> Fraction:
+    """Chuyển đổi an toàn tham số thời gian sang Fraction hữu hạn, bảo toàn giá trị chuỗi/số."""
+    if type(val) is bool:
+        raise ValueError(f"{name} không thể là giá trị bool: {val!r}")
+    if isinstance(val, int):
+        return Fraction(val, 1)
+    if isinstance(val, Fraction):
+        return val
+    if isinstance(val, float):
+        if not math.isfinite(val):
+            raise ValueError(f"{name} phải là số thực hữu hạn (không NaN/Inf), nhận được: {val}")
+        return Fraction(str(val))
+    if isinstance(val, str):
+        try:
+            f = float(val)
+            if not math.isfinite(f):
+                raise ValueError(f"{name} chuỗi phải là số hữu hạn, nhận được: {val}")
+            return Fraction(str(f))
+        except Exception as err:
+            raise ValueError(f"{name} không phải là số hợp lệ: {val!r}") from err
+    raise ValueError(f"{name} có kiểu không hợp lệ: {type(val).__name__}")
 
 
 def get_speed_mode() -> str:
@@ -165,13 +191,29 @@ class TimelineMapper:
 
         fps_val = self.fps
 
-        # 1. Tính toán source frames kèm padding
-        src_in_f = max(0, round((src_in_sec - pad_sec) * fps_val))
-        if clip_duration_sec > 0:
-            max_clip_f = round(clip_duration_sec * fps_val)
-            src_out_f = min(max_clip_f, round((src_out_sec + pad_sec) * fps_val))
+        # Kiểm tra tính hợp lệ của FPS trước khi tính toán
+        if not isinstance(self.fps_fraction, Fraction) or self.fps_fraction <= 0:
+            raise ValueError(f"TimelineMapper có FPS không hợp lệ hoặc không dương: {self.fps_fraction!r}")
+        fps_rat = RationalFPS(self.fps_fraction.numerator, self.fps_fraction.denominator)
+
+        # Chuyển đổi các mốc thời gian sang Fraction hữu hạn trước khi tính toán để bảo toàn tie-breaking
+        src_in_frac = _to_finite_fraction(src_in_sec, "src_in_sec")
+        src_out_frac = _to_finite_fraction(src_out_sec, "src_out_sec")
+        pad_frac = _to_finite_fraction(pad_sec, "pad_sec")
+        clip_dur_frac = _to_finite_fraction(clip_duration_sec, "clip_duration_sec")
+
+        # 1. Tính toán source frames kèm padding bằng số học phân số chính xác
+        in_with_pad = src_in_frac - pad_frac
+        src_in_f = max(0, pts_to_frame(in_with_pad, fps_rat))
+
+        out_with_pad = src_out_frac + pad_frac
+        raw_src_out_f = pts_to_frame(out_with_pad, fps_rat)
+
+        if clip_dur_frac > 0:
+            max_clip_f = pts_to_frame(clip_dur_frac, fps_rat)
+            src_out_f = min(max_clip_f, raw_src_out_f)
         else:
-            src_out_f = round((src_out_sec + pad_sec) * fps_val)
+            src_out_f = raw_src_out_f
 
         # Đảm bảo độ dài tối thiểu 1 frame
         if src_out_f <= src_in_f:
@@ -215,7 +257,7 @@ class TimelineMapper:
     def src_to_timeline(
         self,
         segment_index: int,
-        t_src_sec: float,
+        t_src_sec: Union[float, int, Fraction],
         clamp_to_segment: bool = True
     ) -> Optional[int]:
         """
@@ -235,7 +277,9 @@ class TimelineMapper:
             return None
 
         # Tính khoảng cách frame từ điểm cắt nguồn đầu tiên (đã bao gồm pad)
-        t_src_f = round(t_src_sec * self.fps)
+        t_src_frac = _to_finite_fraction(t_src_sec, "t_src_sec")
+        fps_rat = RationalFPS(self.fps_fraction.numerator, self.fps_fraction.denominator)
+        t_src_f = pts_to_frame(t_src_frac, fps_rat)
         offset_src_f = t_src_f - seg.src_in_frames
 
         # Co giãn theo speed và cộng vào rec_in_frames của segment

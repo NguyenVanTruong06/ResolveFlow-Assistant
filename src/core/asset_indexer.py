@@ -553,6 +553,11 @@ class AssetIndexer:
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
+    def scan_managed_assets(self):
+        """Kho ngoài đã kiểm duyệt; không quét lại/ghi thumbnail vào nguồn."""
+        from src.core.storage_manager import StorageManager
+        return StorageManager().ui_assets()
+
     def scan_all_assets(self, force_refresh: bool = False) -> Dict[str, List[Dict[str, Any]]]:
         music_data = self.scan_music_assets(force_refresh=force_refresh)
         all_bgm = [item for items in music_data.values() for item in items]
@@ -565,6 +570,7 @@ class AssetIndexer:
             "transitions": self.scan_transitions(force_refresh=force_refresh),
             "bgm": all_bgm,
         }
+        all_assets["managed"] = self.scan_managed_assets()
         for mood, items in music_data.items():
             all_assets[f"bgm_{mood}"] = items
         return all_assets

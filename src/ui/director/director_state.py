@@ -10,7 +10,14 @@ Bao gồm:
 from dataclasses import dataclass, field
 import json
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
+
+from src.core.contracts.edit_plan_contracts import (
+    CreativeContext,
+    ReferenceItem,
+    normalize_creative_context,
+    creative_context_to_dict,
+)
 
 
 @dataclass
@@ -23,6 +30,7 @@ class SourceClipInfo:
     resolution: str = "1080p"
     has_cache: bool = False
     file_size_mb: float = 0.0
+    sort_key: tuple = ("", "", "")
 
 
 # 4 Phong cách dựng chuẩn
@@ -71,6 +79,7 @@ class DirectorConfig:
     enabled_features: Set[str] = field(default_factory=lambda: {
         FEAT_HOOK, FEAT_PUNCH_IN, FEAT_BROLL, FEAT_SFX, FEAT_SAFE_ZONE
     })
+    creative_context_dict: Dict[str, Any] = field(default_factory=dict)
 
     # Tham số chi tiết (từ Bảng nâng cao 280px - khớp 100% TabAutoCut)
     silence_cut_enabled: bool = True
@@ -162,6 +171,245 @@ class DirectorConfig:
         elif style_id == STYLE_CUSTOM:
             # Giữ nguyên các tham số tùy biến của người dùng
             pass
+
+    def get_creative_context(self) -> CreativeContext:
+        """Trả về instance CreativeContext tươi mới, bất biến và độc lập từ cấu hình canonical.
+
+        Quy định:
+        - Nếu trường creative_context_dict vắng mặt (legacy missing), rỗng hoặc None, trả về CreativeContext rỗng chuẩn tắc.
+        - Nếu creative_context_dict có dữ liệu: phải là Mapping và normalize thành CreativeContext.
+        - Dữ liệu lỗi (không phải dict/mapping, hoặc trường con không hợp lệ) sẽ raise ValueError kiểm soát.
+        - Tuyệt đối không cho phép alias rò rỉ; caller không thể mutate dữ liệu đã lưu trong config.
+        """
+        if not hasattr(self, "creative_context_dict"):
+            return normalize_creative_context({})
+
+        raw = self.creative_context_dict
+        if raw is None or (isinstance(raw, dict) and len(raw) == 0):
+            return normalize_creative_context({})
+
+        if not isinstance(raw, (dict, Mapping)):
+            raise ValueError(
+                f"ERR_MALFORMED_CREATIVE_CONTEXT: creative_context_dict phải là Mapping hoặc dict, "
+                f"nhận: {type(raw).__name__}"
+            )
+
+        return normalize_creative_context(raw)
+
+    def set_creative_context(self, raw: Any) -> None:
+        """Xác thực và lưu trữ CreativeContext chuẩn tắc vào creative_context_dict (transactional).
+
+        Quy định:
+        - raw phải là Mapping (hoặc dict) hoặc instance CreativeContext.
+        - Bác bỏ None, bool, str, list hoặc kiểu không hợp lệ qua ValueError kiểm soát.
+        - Thực hiện normalize và serialize hoàn chỉnh trước khi gán vào trường dữ liệu.
+        - Nếu validation thất bại, giữ nguyên 100% cấu hình trước đó (transactional, last-good config).
+        - Toàn bộ giá trị lưu trữ là JSON primitives, không giữ alias tới caller list/dict.
+        """
+        if raw is None:
+            raise ValueError("ERR_INVALID_CREATIVE_CONTEXT: raw không được là None")
+        if isinstance(raw, bool):
+            raise ValueError("ERR_INVALID_CREATIVE_CONTEXT: raw không được là bool")
+        if not isinstance(raw, (dict, Mapping, CreativeContext)):
+            raise ValueError(
+                f"ERR_INVALID_CREATIVE_CONTEXT: raw phải là Mapping hoặc CreativeContext, "
+                f"nhận: {type(raw).__name__}"
+            )
+
+        # Chuẩn hóa và serialize (transactional: nếu lỗi, self.creative_context_dict được giữ nguyên)
+        normalized = normalize_creative_context(raw)
+        canonical_dict = creative_context_to_dict(normalized)
+
+        # Gán bản sao sạch dạng JSON primitives
+        self.creative_context_dict = canonical_dict
+
+
+BATCH_DRAFT_REJECT_MSG = (
+    "Đây là bản thảo của một lô, chưa phải kịch bản tổng thể. "
+    "Không thể nạp vào Slot 1/Slot 2. Vui lòng nạp vào ô "
+    "'Nạp Bản Thảo Cho Lô Đang Chọn' trong mục Phân Lô Kịch Bản phía trên."
+)
+
+PROJECT_OVERVIEW_REJECT_MSG = (
+    "Đây là bản thảo tổng quan dự án (project overview draft), chưa phải định dạng kế hoạch "
+    "chi tiết Slot 1 (Video Plan) hoặc Slot 2 (Kinetic Plan). Trình nhập kế hoạch chưa hỗ trợ "
+    "nạp trực tiếp bản thảo tổng quan vào Slot."
+)
+
+
+def contains_project_overview_draft(data: Any, max_depth: int = 8, max_visits: int = 64) -> bool:
+    """
+    Pure helper phát hiện cấu trúc Project Overview Draft (bản thảo tổng quan dự án).
+    Ngăn chặn nạp nhầm vào Slot 1 (Video Plan) hoặc Slot 2 (Kinetic Plan).
+
+    Chính sách an toàn (Fail-closed, Container-semantic & DAG-aware):
+    - Kiểm tra sự hiện diện của marker 'kind' == 'project_overview_draft'.
+    - Hoặc discriminator tường minh: type == 'project_overview_draft' hoặc $schema == 'chundvc_project_overview_v1'.
+    - Phân biệt DAG và Cycle qua active_ancestors (đang trên nhánh đệ quy hiện tại)
+      và safe_nodes (node đã được thẩm định an toàn không chu trình và không marker).
+      Shared alias giữa video_plan và kinetic_plan được chấp nhận, trong khi true cycle bị reject.
+    - Container-semantic: Chỉ duyệt sâu vào recognized container keys:
+      ('data', 'video_plan', 'kinetic_plan', 'generic_plan', 'dual_plan').
+    - Bounded work / queue trước enqueue: Giới hạn max_depth và max_visits;
+      nếu cạn ngân sách thì fail-closed trả về True ngay.
+    """
+    if not isinstance(data, dict):
+        return False
+
+    CONTAINER_KEYS = ("data", "video_plan", "kinetic_plan", "generic_plan", "dual_plan")
+
+    active_ancestors: Set[int] = set()
+    safe_nodes: Set[int] = set()
+    visits = 0
+
+    def _check_node(curr: Dict[str, Any], depth: int) -> bool:
+        nonlocal visits
+
+        curr_id = id(curr)
+
+        # 1. Phát hiện chu trình thực sự (True Cycle)
+        if curr_id in active_ancestors:
+            return True
+
+        # 2. Bỏ qua node đã thẩm định an toàn (Shared DAG node / Alias)
+        if curr_id in safe_nodes:
+            return False
+
+        # 3. Kiểm tra giới hạn độ sâu
+        if depth > max_depth:
+            return True
+
+        # 4. Kiểm tra ngân sách visits
+        visits += 1
+        if visits > max_visits:
+            return True
+
+        # 5. Kiểm tra markers trực tiếp trên dict hiện tại
+        if curr.get("kind") == "project_overview_draft":
+            return True
+        if curr.get("type") == "project_overview_draft" or curr.get("$schema") == "chundvc_project_overview_v1":
+            return True
+
+        active_ancestors.add(curr_id)
+
+        try:
+            # 6. Duyệt có kiểm soát vào các recognized container keys
+            for k in CONTAINER_KEYS:
+                if k not in curr:
+                    continue
+
+                val = curr[k]
+
+                if isinstance(val, dict):
+                    if _check_node(val, depth + 1):
+                        return True
+
+                elif isinstance(val, (list, tuple)) or (hasattr(val, "__iter__") and not isinstance(val, (str, bytes, dict))):
+                    list_steps = 0
+                    for item in val:
+                        list_steps += 1
+                        if visits >= max_visits or list_steps > (max_visits - visits + 1):
+                            return True
+                        if isinstance(item, dict):
+                            if _check_node(item, depth + 1):
+                                return True
+
+            safe_nodes.add(curr_id)
+            return False
+
+        finally:
+            active_ancestors.remove(curr_id)
+
+    return _check_node(data, 0)
+
+
+def contains_batch_draft_plan(data: Any, max_depth: int = 8, max_visits: int = 64) -> bool:
+    """
+    Pure helper phát hiện cấu trúc Batch Draft (kịch bản phân lô).
+    Ngăn chặn nạp nhầm vào Slot 1 (Video Plan) hoặc Slot 2 (Kinetic Plan).
+
+    Chính sách an toàn (Fail-closed, Container-semantic & DAG-aware):
+    - Kiểm tra sự hiện diện của key 'batch_id' (bất kể giá trị là None, "", False, 0 hay object).
+    - Hoặc discriminator tường minh: type == 'batch_draft' hoặc $schema == 'chundvc_batch_draft_v1'.
+    - Phân biệt DAG và Cycle qua active_ancestors (đang trên nhánh đệ quy hiện tại)
+      và safe_nodes (node đã được thẩm định an toàn không chu trình và không marker).
+      Shared alias giữa video_plan và kinetic_plan được chấp nhận, trong khi true cycle bị reject.
+    - Container-semantic: Chỉ duyệt sâu vào recognized container keys:
+      ('data', 'video_plan', 'kinetic_plan', 'generic_plan', 'dual_plan').
+    - Bounded work / queue trước enqueue: Khi duyệt danh sách phần tử trong container,
+      giới hạn số lần duyệt theo remaining budget (+ sentinel nhỏ), không enumerate
+      toàn bộ danh sách rộng; nếu cạn ngân sách thì fail-closed trả về True ngay.
+    - Giới hạn độ sâu (max_depth) và số lần duyệt (max_visits).
+    """
+    if not isinstance(data, dict):
+        return False
+
+    CONTAINER_KEYS = ("data", "video_plan", "kinetic_plan", "generic_plan", "dual_plan")
+
+    active_ancestors: Set[int] = set()
+    safe_nodes: Set[int] = set()
+    visits = 0
+
+    def _check_node(curr: Dict[str, Any], depth: int) -> bool:
+        nonlocal visits
+
+        curr_id = id(curr)
+
+        # 1. Phát hiện chu trình thực sự (True Cycle)
+        # Node nằm trên đường dẫn tổ tiên đang duyệt (active ancestor path) -> CYCLE!
+        if curr_id in active_ancestors:
+            return True
+
+        # 2. Bỏ qua node đã thẩm định an toàn (Shared DAG node / Alias)
+        if curr_id in safe_nodes:
+            return False
+
+        # 3. Kiểm tra giới hạn độ sâu
+        if depth > max_depth:
+            return True
+
+        # 4. Kiểm tra ngân sách visits
+        visits += 1
+        if visits > max_visits:
+            return True
+
+        # 5. Kiểm tra markers trực tiếp trên dict hiện tại
+        if "batch_id" in curr:
+            return True
+        if curr.get("type") == "batch_draft" or curr.get("$schema") == "chundvc_batch_draft_v1":
+            return True
+
+        active_ancestors.add(curr_id)
+
+        try:
+            # 6. Duyệt có kiểm soát vào các recognized container keys
+            for k in CONTAINER_KEYS:
+                if k not in curr:
+                    continue
+
+                val = curr[k]
+
+                if isinstance(val, dict):
+                    if _check_node(val, depth + 1):
+                        return True
+
+                elif isinstance(val, (list, tuple)) or (hasattr(val, "__iter__") and not isinstance(val, (str, bytes, dict))):
+                    list_steps = 0
+                    for item in val:
+                        list_steps += 1
+                        if visits >= max_visits or list_steps > (max_visits - visits + 1):
+                            return True
+                        if isinstance(item, dict):
+                            if _check_node(item, depth + 1):
+                                return True
+
+            safe_nodes.add(curr_id)
+            return False
+
+        finally:
+            active_ancestors.remove(curr_id)
+
+    return _check_node(data, 0)
 
 
 def _is_video_plan_dict(data: Dict[str, Any]) -> bool:
@@ -255,6 +503,16 @@ def parse_web_prompt_json(raw_text: str, target_slot: Optional[str] = None) -> T
 
     # 1. Trích xuất tất cả đối tượng JSON có trong chuỗi
     extracted_objs = _extract_all_json_objects(text)
+
+    # 1a. Project overview draft guard: Nếu bất kỳ JSON candidate nào chứa dấu vết Project Overview Draft,
+    # từ chối toàn bộ đầu vào ngay TRƯỚC mọi phân loại target_slot/dual/auto.
+    if any(contains_project_overview_draft(obj) for obj in extracted_objs):
+        return False, PROJECT_OVERVIEW_REJECT_MSG, None
+
+    # 1b. Batch draft guard: Nếu bất kỳ JSON candidate nào chứa dấu vết Batch Draft,
+    # từ chối toàn bộ đầu vào ngay TRƯỚC mọi phân loại target_slot/dual/auto.
+    if any(contains_batch_draft_plan(obj) for obj in extracted_objs):
+        return False, BATCH_DRAFT_REJECT_MSG, None
 
     # 2. Nếu target_slot được chỉ định rõ:
     if target_slot == "slot1":
@@ -355,6 +613,14 @@ def parse_web_prompt_json(raw_text: str, target_slot: Optional[str] = None) -> T
 
     if not isinstance(data, dict):
         return False, "Dữ liệu JSON phải là một Object {...}", None
+
+    # Project overview draft guard trên fallback decode path
+    if contains_project_overview_draft(data):
+        return False, PROJECT_OVERVIEW_REJECT_MSG, None
+
+    # Batch draft guard trên fallback decode path
+    if contains_batch_draft_plan(data):
+        return False, BATCH_DRAFT_REJECT_MSG, None
 
     # Nhận diện 1: Video Plan V1
     if _is_video_plan_dict(data):

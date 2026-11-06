@@ -443,6 +443,9 @@ def test_director_window_import_from_resolve(tmp_path):
             duration_str="00:10", resolution="1080p", has_cache=False, file_size_mb=5.0
         )
         win._on_import_from_resolve()
+        if win.page_source._active_worker:
+            win.page_source._active_worker.wait(3000)
+        app.processEvents()
 
     assert len(win.page_source._clip_infos) == 1
     assert win.page_source._clip_infos[0].filename == "DJI_001.MP4"
@@ -456,6 +459,7 @@ def test_insert_media_at_playhead(tmp_path):
     auto.current_project = MagicMock()
     auto.current_timeline = MagicMock()
     auto.current_project.GetCurrentTimeline.return_value = auto.current_timeline
+    auto.resolve.GetProjectManager.return_value.GetCurrentProject.return_value = auto.current_project
 
     mock_mp = MagicMock()
     auto.current_project.GetMediaPool.return_value = mock_mp

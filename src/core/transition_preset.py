@@ -31,48 +31,7 @@ class TransitionStylePreset(BaseModel):
     custom_parameters: Dict[str, Any] = Field(default_factory=dict, description="Tham số tùy chỉnh bổ sung cho macro")
 
 
-BUILTIN_TRANSITIONS: List[TransitionStylePreset] = [
-    TransitionStylePreset(
-        id="whip_pan_left",
-        name="Whip Pan Left",
-        category="motion",
-        badge_icon="💨",
-        transition_type="transform",
-        tags=["WhipPan", "Fast", "Motion", "Dynamic", "Action"],
-        description="Chuyển cảnh lướt nhanh sang trái kết hợp nhòe chuyển động (Motion Blur) mạnh mẽ.",
-        duration_frames=24,
-    ),
-    TransitionStylePreset(
-        id="zoom_blur_in",
-        name="Zoom Blur In",
-        category="zoom",
-        badge_icon="🔍",
-        transition_type="zoom",
-        tags=["Zoom", "Blur", "Impact", "Energy", "Fast"],
-        description="Hiệu ứng phóng to quang học cực nhanh tạo điểm nhấn chuyển tiếp tràn đầy năng lượng.",
-        duration_frames=20,
-    ),
-    TransitionStylePreset(
-        id="rgb_glitch",
-        name="RGB Glitch",
-        category="glitch",
-        badge_icon="⚡",
-        transition_type="glitch",
-        tags=["Glitch", "RGB", "Cyber", "Distortion", "Retro"],
-        description="Nhiễu kênh màu RGB phân tách điện tử phong cách Cyberpunk và công nghệ số.",
-        duration_frames=16,
-    ),
-    TransitionStylePreset(
-        id="light_leak",
-        name="Light Leak",
-        category="film",
-        badge_icon="✨",
-        transition_type="glow",
-        tags=["LightLeak", "Warm", "Cinematic", "Film", "Soft"],
-        description="Vệt sáng lóa ống kính ấm áp tự nhiên kết nối 2 khung hình mượt mà và nghệ thuật.",
-        duration_frames=30,
-    ),
-]
+BUILTIN_TRANSITIONS: List[TransitionStylePreset] = []
 
 
 class TransitionMacroGenerator:

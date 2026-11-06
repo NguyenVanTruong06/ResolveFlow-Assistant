@@ -7,3 +7,6 @@ pillow>=10.0.0
 pytest>=7.0.0
 gdown>=5.0.0
 python-xlib>=0.33
+av>=11.0.0
+cryptography>=50.0.2,<51.0.0
+

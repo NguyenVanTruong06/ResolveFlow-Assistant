@@ -1,0 +1,9 @@
+# G06-06C2c2 — ACCEPTED_WITH_RECORDED_LIMITS
+
+2026-10-30. Current report SHA256 `464cc8d549a03c45ef30bc65c0bfd262132efc3448b7dc001db5f2362d9c82ff` verified. Earlier app production code acceptance retained; metadata consumer live gate now closed within the stated Linux tiny-fixture scope.
+
+Codex fresh finite command: `PYTHONDONTWRITEBYTECODE=1 QT_QPA_PLATFORM=offscreen .venv/bin/pytest tests/task/test_verify_06c2c2_live_harness.py tests/core/geometry/test_plan_geometry_assembler.py -q` → **26 passed in1.30s, exit0** (8 harness +18 geometry tests). This closes the metadata evidence review, not the new geometry gate.
+
+Reviewed updated shared outer fault owner, persistence/case gates, queued terminal flush and strong unresolved-owner registry. Worker live metrics under `.bridge/ux-evidence/G06-06C2c2-EVIDENCE-R2/` now record barrier=true, worker_active=true, exact intended fault, cancelled_terminal_emitted=true, results_count1, success_count0. Normal4/4 positive cases include actual ffprobe off main thread, observed30000/1001 and1001/500seconds, batch handoff, real corrupt denial and controlled handoff cancellation. Both runs record0live workers/readers/unreaped children;5 normal/2 fault children have terminal codes and closed pipes, owned sessions no longer exist. Normal five-field stat and SHA before/after match. Codex audited these artifacts without repeating successful live runs; no fresh live run claimed.
+
+Limits: generated small Linux fixture and seeded transcript, not STT/VLM inference, desktop/Windows/Resolve/user-footage acceptance. HEADER_REPORTED is not decoded-frame/CFR/content-identity proof. Only fresh PromptPreparationWorker branch2c was improved; historical metadata/default GUI chronology remain legacy limits, no global cache/schema migration. G06 still open. Stop reopening accepted metadata/harness code in subsequent geometry-only work.

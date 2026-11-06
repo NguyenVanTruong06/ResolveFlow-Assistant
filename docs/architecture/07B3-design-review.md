@@ -1,0 +1,5 @@
+# G07-07B3-D-R1 — Codex design review
+
+Reviewed 2026-11-02T18:19:04+07:00: **DESIGN_ACCEPTED_WITH_BINDING_CORRECTIONS**. Report/design hashes match. R1 resolves the six prior findings: at-most-once admission rather than exactly-once, truthful duplicate response, observer-only timeout with lock retained, safe cancellation boundary, no journal truncation, and execution authorization kept separate.
+
+Approve the proposed G07-07B4-I only as a **mock-Gateway orchestration prototype**. Binding conditions: production path must be unreachable from UI and `ready_to_execute` remains false; no real Resolve imports/connection in tests or runtime; actions execute only against an injected fake Gateway. Timeout must retain task/worker/lock ownership until physical completion is known. Journal PENDING/COMMITTED transitions must be checked against accepted service APIs. Any committed action followed by interruption remains EXECUTING/INTERRUPTED or IN_DOUBT, never ABORTED. No automatic rollback; compensation only simulated in fake gateway and operator-review record.

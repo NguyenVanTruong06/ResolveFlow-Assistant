@@ -61,20 +61,37 @@ class PackManager:
     INSTALLED_PACKS_FILE = Path("data") / "installed_packs.json"
 
     @classmethod
-    def get_installed_packs(cls) -> Dict[str, Any]:
-        """Lấy danh sách các gói đã cài đặt trên máy từ data/installed_packs.json."""
+    def get_installed_packs(cls, verify_files: bool = True) -> Dict[str, Any]:
+        """Lấy danh sách các gói đã cài đặt trên máy từ data/installed_packs.json.
+        Khi verify_files=True (mặc định), các gói có danh sách installed_paths nhưng toàn bộ
+        tệp trên ổ cứng đã bị xóa (ví dụ thư mục tạm pytest hoặc dọn kho) sẽ được lọc bỏ.
+        """
         if not cls.INSTALLED_PACKS_FILE.exists():
             return {}
         try:
             with open(cls.INSTALLED_PACKS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                raw_data = json.load(f)
         except Exception:
             return {}
+        if not isinstance(raw_data, dict):
+            return {}
+        if not verify_files:
+            return raw_data
+        verified: Dict[str, Any] = {}
+        for pack_id, entry in raw_data.items():
+            if not isinstance(entry, dict):
+                continue
+            paths = entry.get("installed_paths")
+            if isinstance(paths, list) and len(paths) > 0:
+                if not any(Path(p).exists() for p in paths):
+                    continue
+            verified[pack_id] = entry
+        return verified
 
     @classmethod
     def is_pack_installed(cls, pack_id: str) -> bool:
-        """Kiểm tra một gói đã cài đặt vào máy hay chưa."""
-        installed = cls.get_installed_packs()
+        """Kiểm tra một gói đã cài đặt vào máy và tệp vẫn còn tồn tại trên ổ đĩa hay chưa."""
+        installed = cls.get_installed_packs(verify_files=True)
         return pack_id in installed
 
     @classmethod

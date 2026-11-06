@@ -33,6 +33,11 @@ class AutoCutResult:
     original_timeline_name: str = ""
     new_timeline_name: str = ""
     generated_file_path: str = ""
+    source_file_path: str = ""
+
+    @property
+    def error_message(self) -> str:
+        return "" if self.ok else self.message
 
 
 class InstantAutoCutService:
@@ -117,6 +122,13 @@ class InstantAutoCutService:
         """
         Thực hiện toàn bộ quy trình AutoCut 1-Click trên Timeline đang mở.
         """
+        try:
+            return self._run_instant_autocut(progress_callback)
+        except Exception as exc:
+            logger.exception("AutoCut API failure")
+            return AutoCutResult(ok=False, message=f"Lỗi API DaVinci Resolve: {exc}")
+
+    def _run_instant_autocut(self, progress_callback=None) -> AutoCutResult:
         def report(pct: int, msg: str):
             if progress_callback:
                 progress_callback(pct, msg)
@@ -146,8 +158,15 @@ class InstantAutoCutService:
 
         video_path = video_paths[0]
         orig_name = timeline.GetName()
+        if not os.path.isfile(video_path):
+            return AutoCutResult(ok=False, message=f"Không tìm thấy tệp nguồn: {video_path}",
+                                 source_file_path=video_path)
+        project = self.resolve_automation.current_project
+        if not project:
+            return AutoCutResult(ok=False, message="Lỗi API DaVinci: không có Project đang mở.")
+        original_id = timeline.GetUniqueId()
 
-        report(25, "Đang trích xuất âm thanh từ video...")
+        report(25, f"Nguồn: {Path(video_path).name} — đang trích xuất âm thanh...")
         wav_path = self.extract_audio(video_path)
         if not wav_path or not os.path.exists(wav_path):
             return AutoCutResult(
@@ -181,7 +200,8 @@ class InstantAutoCutService:
         if cuts_count == 0:
             return AutoCutResult(
                 ok=True,
-                message="Video rất lưu loát, không có khoảng lặng nào vượt ngưỡng cần cắt!",
+                message=f"Nguồn: {Path(video_path).name}. Video rất lưu loát, không có khoảng lặng nào vượt ngưỡng cần cắt! Giữ Timeline '{orig_name}'.",
+                source_file_path=video_path,
                 cuts_count=0,
                 original_duration_sec=orig_dur,
                 new_duration_sec=orig_dur,
@@ -227,22 +247,45 @@ class InstantAutoCutService:
             if ok:
                 new_timeline = self.resolve_automation.get_active_timeline()
 
+        # Xác minh đối tượng thuộc Project và khác timeline gốc, kể cả khi fallback báo True.
+        candidate_id = new_timeline.GetUniqueId() if new_timeline else None
+        verified = False
+        if candidate_id and candidate_id != original_id:
+            for index in range(1, int(project.GetTimelineCount()) + 1):
+                item = project.GetTimelineByIndex(index)
+                if item and item.GetUniqueId() == candidate_id:
+                    verified = True
+                    break
+        if not verified:
+            return AutoCutResult(
+                ok=False, message="Lỗi API DaVinci: không xác minh được timeline mới trong Project.",
+                original_timeline_name=orig_name, source_file_path=video_path,
+                generated_file_path=edl_path,
+            )
+        new_tl_name = new_timeline.GetName()
+        activated = False
+
         # Đặt Timeline mới làm Timeline đang mở trên màn hình DaVinci
         if new_timeline and self.resolve_automation.current_project:
             try:
-                self.resolve_automation.current_project.SetCurrentTimeline(new_timeline)
+                activated = bool(project.SetCurrentTimeline(new_timeline))
             except Exception:
                 pass
 
-        report(100, f"Hoàn tất! Đã cắt {cuts_count} khoảng lặng.")
+        message = (f"Nguồn: {Path(video_path).name}. Đã tạo Timeline '{new_tl_name}': "
+                   f"cắt {cuts_count} khoảng lặng, rút ngắn {saved_dur:.1f}s.")
+        if not activated:
+            message += " Không thể chuyển sang timeline mới; hãy mở trong Media Pool."
+        report(100, message)
         return AutoCutResult(
             ok=True,
-            message=f"Đã cắt {cuts_count} khoảng lặng, rút ngắn {saved_dur:.1f}s! Đã mở Timeline '[AutoCut] {orig_name}'.",
+            message=message,
             cuts_count=cuts_count,
             original_duration_sec=orig_dur,
             new_duration_sec=new_dur,
             duration_saved_sec=saved_dur,
             original_timeline_name=orig_name,
             new_timeline_name=new_tl_name,
-            generated_file_path=edl_path
+            generated_file_path=edl_path,
+            source_file_path=video_path
         )

@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, QTimer, Signal as pyqtSignal
 
 class DockState(str, Enum):
     HIDDEN = "hidden"
+    STRIP = "strip"
     RAIL = "rail"
     PEEK = "peek"
     OPEN = "open"
@@ -19,6 +20,7 @@ class DockStateMachine(QObject):
     """
     State machine for EdgeDock:
     - Hidden: 0 (or 2px indicator)
+    - Strip: 28px mini strip
     - Rail: 44px
     - Peek: 56px (44px + 12px)
     - Open: clamp(320, 30% resolve width, 420px)
@@ -28,6 +30,7 @@ class DockStateMachine(QObject):
     state_changed = pyqtSignal(DockState)
     width_requested = pyqtSignal(int, int)  # target_width, duration_ms
 
+    STRIP_WIDTH = 28
     RAIL_WIDTH = 44
     PEEK_WIDTH = 56
     DEFAULT_OPEN_WIDTH = 420
@@ -98,6 +101,8 @@ class DockStateMachine(QObject):
     def get_width_for_state(self, state: DockState) -> int:
         if state == DockState.HIDDEN:
             return 2
+        elif state == DockState.STRIP:
+            return self.STRIP_WIDTH
         elif state == DockState.RAIL:
             return self.RAIL_WIDTH
         elif state == DockState.PEEK:
@@ -167,16 +172,21 @@ class DockStateMachine(QObject):
         new_state = DockState.WIDE if self._is_wide else (DockState.PINNED if self._is_pinned else DockState.OPEN)
         self._transition_to(new_state, animated=animated)
 
-    def collapse_dock(self, to_hidden: bool = False, animated: bool = True):
+    def collapse_dock(self, to_hidden: bool = False, to_strip: bool = False, animated: bool = True):
         self._peek_timer.stop()
         self._open_timer.stop()
         self._leave_timer.stop()
-        target_state = DockState.HIDDEN if to_hidden else DockState.RAIL
+        if to_hidden:
+            target_state = DockState.HIDDEN
+        elif to_strip:
+            target_state = DockState.STRIP
+        else:
+            target_state = DockState.RAIL
         self._transition_to(target_state, animated=animated)
 
     def toggle_dock(self, animated: bool = True):
         if self.is_open:
-            self.collapse_dock(animated=animated)
+            self.collapse_dock(to_strip=True, animated=animated)
         else:
             self.open_dock(animated=animated)
 
@@ -214,7 +224,7 @@ class DockStateMachine(QObject):
     def _on_leave_timeout(self):
         if not self.can_auto_collapse():
             return
-        self.collapse_dock(animated=True)
+        self.collapse_dock(to_strip=True, animated=True)
 
     def _transition_to(self, new_state: DockState, animated: bool = True):
         if self._state == new_state:

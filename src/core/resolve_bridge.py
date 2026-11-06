@@ -37,6 +37,7 @@ import zlib
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.core.contracts.time_contracts import RationalFPS
 from src.core.fusion import (OVERLAYS, TITLES, TRANSITIONS, TitleParams, build_library, build_title,
                              export_title_comp)
 from src.core.fusion.common import parse_color
@@ -47,6 +48,208 @@ CARRIER_BIN = "ResolveFlow Carriers"
 
 class ResolveFlowError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class ResolveTimelineAuthority:
+    """Kết quả truy vấn thẩm quyền chỉ đọc (read-only) từ DaVinci Resolve active timeline."""
+    ok: bool
+    project_name: str = ""
+    timeline_id: str = ""
+    timeline_name: str = ""
+    timeline_fps: Optional[RationalFPS] = None
+    width: int = 0
+    height: int = 0
+    error_code: str = ""
+    error_message: str = ""
+
+
+def query_active_timeline_authority(resolve_app: Optional[Any] = None) -> ResolveTimelineAuthority:
+    """Truy vấn thẩm quyền đọc (read-only) từ Timeline và Project đang mở trong DaVinci Resolve.
+
+    Ràng buộc G07-07A5-I:
+    - Thuần túy đọc thông số (read-only), 0 mutation, 0 thay đổi timeline.
+    - Bắt buộc DaVinci Resolve đang chạy, ProjectManager hợp lệ, Project đang mở, Timeline đang mở.
+    - Đọc timelineFrameRate, chuẩn hóa thành RationalFPS chính xác; ZERO FLOAT FALLBACK.
+    - Tuyệt đối không fallback sang 24/30, không đoán mò từ clip nguồn hay project preset.
+    - Phát hiện nếu project hoặc timeline bị hoán đổi (identity drift) trong lúc truy vấn.
+    """
+    try:
+        app = resolve_app if resolve_app is not None else get_resolve()
+    except Exception as exc:
+        return ResolveTimelineAuthority(
+            ok=False,
+            error_code="ERR_RESOLVE_NOT_RUNNING",
+            error_message=f"DaVinci Resolve không đang chạy hoặc chưa bật scripting ngoài: {exc}",
+        )
+
+    if app is None:
+        return ResolveTimelineAuthority(
+            ok=False,
+            error_code="ERR_RESOLVE_NOT_RUNNING",
+            error_message="DaVinci Resolve không phản hồi (resolve app is None).",
+        )
+
+    try:
+        pm = app.GetProjectManager()
+    except Exception as exc:
+        return ResolveTimelineAuthority(
+            ok=False,
+            error_code="ERR_RESOLVE_NO_PROJECT_MANAGER",
+            error_message=f"Không thể truy cập ProjectManager: {exc}",
+        )
+
+    if pm is None:
+        return ResolveTimelineAuthority(
+            ok=False,
+            error_code="ERR_RESOLVE_NO_PROJECT_MANAGER",
+            error_message="ProjectManager không khả dụng.",
+        )
+
+    try:
+        project = pm.GetCurrentProject()
+    except Exception as exc:
+        return ResolveTimelineAuthority(
+            ok=False,
+            error_code="ERR_RESOLVE_NO_PROJECT",
+            error_message=f"Lỗi khi truy vấn GetCurrentProject: {exc}",
+        )
+
+    if project is None:
+        return ResolveTimelineAuthority(
+            ok=False,
+            error_code="ERR_RESOLVE_NO_PROJECT",
+            error_message="Chưa có Project nào đang mở trong DaVinci Resolve.",
+        )
+
+    try:
+        timeline = project.GetCurrentTimeline()
+    except Exception as exc:
+        return ResolveTimelineAuthority(
+            ok=False,
+            error_code="ERR_RESOLVE_NO_ACTIVE_TIMELINE",
+            error_message=f"Lỗi khi truy vấn GetCurrentTimeline: {exc}",
+        )
+
+    if timeline is None:
+        return ResolveTimelineAuthority(
+            ok=False,
+            error_code="ERR_RESOLVE_NO_ACTIVE_TIMELINE",
+            error_message="Chưa có Timeline nào đang mở trong DaVinci Resolve trên trang Edit.",
+        )
+
+    # 1. Đọc tên Project và Timeline
+    try:
+        proj_name = str(project.GetName() or "").strip()
+    except Exception:
+        proj_name = ""
+    if not proj_name:
+        proj_name = "Untitled Project"
+
+    try:
+        tl_name = str(timeline.GetName() or "").strip()
+    except Exception:
+        tl_name = ""
+    if not tl_name:
+        tl_name = "Untitled Timeline"
+
+    tl_id = ""
+    try:
+        if hasattr(timeline, "GetUniqueId"):
+            tl_id = str(timeline.GetUniqueId() or "").strip()
+    except Exception:
+        tl_id = ""
+    if not tl_id:
+        tl_id = f"tl_{id(timeline)}"
+
+    # 2. Đọc độ phân giải
+    width = 0
+    height = 0
+    try:
+        w_val = timeline.GetSetting("timelineResolutionWidth")
+        if w_val:
+            width = int(w_val)
+    except Exception:
+        width = 0
+    try:
+        h_val = timeline.GetSetting("timelineResolutionHeight")
+        if h_val:
+            height = int(h_val)
+    except Exception:
+        height = 0
+
+    # 3. Đọc FPS chuẩn tắc duy nhất từ active timeline (cấm fallback sang project)
+    raw_fps = None
+    try:
+        raw_fps = timeline.GetSetting("timelineFrameRate")
+    except Exception as exc:
+        return ResolveTimelineAuthority(
+            ok=False,
+            project_name=proj_name,
+            timeline_id=tl_id,
+            timeline_name=tl_name,
+            error_code="ERR_RESOLVE_TIMELINE_FPS_READ_FAILED",
+            error_message=f"Lỗi ngoại lệ khi đọc timelineFrameRate từ Timeline: {exc}",
+        )
+
+    if raw_fps is None or (isinstance(raw_fps, str) and not raw_fps.strip()):
+        return ResolveTimelineAuthority(
+            ok=False,
+            project_name=proj_name,
+            timeline_id=tl_id,
+            timeline_name=tl_name,
+            error_code="ERR_RESOLVE_TIMELINE_FPS_MISSING",
+            error_message="Timeline không thiết lập timelineFrameRate hoặc trả về giá trị rỗng (cấm fallback sang project).",
+        )
+
+    if type(raw_fps) is bool:
+        return ResolveTimelineAuthority(
+            ok=False,
+            project_name=proj_name,
+            timeline_id=tl_id,
+            timeline_name=tl_name,
+            error_code="ERR_RESOLVE_TIMELINE_FPS_INVALID",
+            error_message=f"timelineFrameRate trả về giá trị boolean không hợp lệ: {raw_fps!r}",
+        )
+
+    try:
+        parsed_fps = RationalFPS.from_value(raw_fps)
+    except Exception as exc:
+        return ResolveTimelineAuthority(
+            ok=False,
+            project_name=proj_name,
+            timeline_id=tl_id,
+            timeline_name=tl_name,
+            error_code="ERR_RESOLVE_TIMELINE_FPS_INVALID",
+            error_message=f"Giá trị timelineFrameRate {raw_fps!r} không thể chuyển đổi thành RationalFPS: {exc}",
+        )
+
+    # 4. Tái kiểm tra danh tính (chống hoán đổi Project / Timeline trong lúc truy vấn)
+    try:
+        re_proj = pm.GetCurrentProject()
+        re_tl = project.GetCurrentTimeline()
+        if re_proj is not project or re_tl is not timeline:
+            return ResolveTimelineAuthority(
+                ok=False,
+                error_code="ERR_RESOLVE_IDENTITY_DRIFT",
+                error_message="Project hoặc Timeline trong DaVinci Resolve đã bị thay đổi trong quá trình truy vấn.",
+            )
+    except Exception as exc:
+        return ResolveTimelineAuthority(
+            ok=False,
+            error_code="ERR_RESOLVE_IDENTITY_DRIFT",
+            error_message=f"Lỗi khi kiểm tra lại danh tính Resolve: {exc}",
+        )
+
+    return ResolveTimelineAuthority(
+        ok=True,
+        project_name=proj_name,
+        timeline_id=tl_id,
+        timeline_name=tl_name,
+        timeline_fps=parsed_fps,
+        width=width,
+        height=height,
+    )
 
 
 # =============================================================================
@@ -161,6 +364,9 @@ class ResolveBridge:
     def ensure_resolve_running(self, log_callback: Optional[Any] = None) -> bool:
         return self._automation.ensure_resolve_running(log_callback=log_callback)
 
+    def query_active_timeline_authority(self, resolve_app: Optional[Any] = None) -> ResolveTimelineAuthority:
+        return query_active_timeline_authority(resolve_app=resolve_app)
+
     def __getattr__(self, name):
         return getattr(self._automation, name)
 
@@ -212,8 +418,9 @@ class Ctx:
     media_pool: Any
 
 
-def context(require_timeline: bool = True) -> Ctx:
-    resolve = get_resolve()
+def context(require_timeline: bool = True, resolve: Any = None) -> Ctx:
+    if resolve is None:
+        resolve = get_resolve()
     try:
         fusion = resolve.Fusion()
         if fusion and hasattr(fusion, "FontManager"):
@@ -441,12 +648,30 @@ def resolve_track(timeline, wanted: int, start: int, end: int, on_conflict: str)
         t += 1
 
 
+def _get_safe_uid(obj: Any) -> str:
+    """Đọc Unique ID an toàn từ Resolve object (Project, Timeline, TimelineItem). Trả về chuỗi rỗng nếu không hỗ trợ hoặc không phải chuỗi."""
+    if obj is None:
+        return ""
+    try:
+        fn = getattr(obj, "GetUniqueId", None)
+        if callable(fn):
+            val = fn()
+            if isinstance(val, str) and not isinstance(val, bool):
+                s = val.strip()
+                return s if s else ""
+    except Exception:
+        pass
+    return ""
+
+
 # =============================================================================
 # Public: insert animated title at playhead
 # =============================================================================
 def insert_title_at_playhead(style: str, params: Optional[dict] = None, track_index: int = 2,
                              on_conflict: str = "next_free", record_frame: Optional[int] = None,
-                             clip_color: str = "Orange"):
+                             clip_color: str = "Orange", resolve: Any = None,
+                             expected_project_id: Optional[str] = None,
+                             expected_timeline_id: Optional[str] = None):
     """
     Put an animated ResolveFlow title at the playhead on V{track_index} (default V2).
 
@@ -454,13 +679,30 @@ def insert_title_at_playhead(style: str, params: Optional[dict] = None, track_in
         {"text": "XIN CHÀO", "font": "Open Sans", "style": "Bold", "size": 0.09,
          "color": "#FFFFFF", "accent": "#FFD400", "duration_frames": 90, "delay_frames": 0}
     on_conflict: "next_free" | "overwrite" | "error"
+    resolve: Optional bound Resolve object from Gateway thread.
+    expected_project_id: Optional project UID from Gateway task to verify context match.
+    expected_timeline_id: Optional timeline UID from Gateway task to verify context match.
     Returns the new TimelineItem.
     """
     if style not in TITLES:
         raise ResolveFlowError("Unknown style %r. Options: %s" % (style, ", ".join(TITLES)))
-    ctx = context()
+    ctx = context(resolve=resolve)
     ctx.resolve.OpenPage("edit")
     tl = ctx.timeline
+
+    # Capture expected project and timeline identity before mutation
+    initial_proj_name = ctx.project.GetName() if hasattr(ctx.project, "GetName") else ""
+    initial_proj_id = _get_safe_uid(ctx.project)
+    initial_tl_name = tl.GetName() if hasattr(tl, "GetName") else ""
+    initial_tl_id = _get_safe_uid(tl)
+
+    if expected_project_id:
+        if not initial_proj_id or initial_proj_id != expected_project_id:
+            raise ResolveFlowError(f"Project ID ({initial_proj_id or 'rỗng'}) không khớp với tác vụ Gateway ({expected_project_id}). Hủy thao tác.")
+    if expected_timeline_id:
+        if not initial_tl_id or initial_tl_id != expected_timeline_id:
+            raise ResolveFlowError(f"Timeline ID ({initial_tl_id or 'rỗng'}) không khớp với tác vụ Gateway ({expected_timeline_id}). Hủy thao tác.")
+
     p = TitleParams.from_dict(params or {})
     try:
         from src.utils.path_utils import resolve_system_font
@@ -475,41 +717,134 @@ def insert_title_at_playhead(style: str, params: Optional[dict] = None, track_in
     track = resolve_track(tl, track_index, start, start + dur, on_conflict)
 
     carrier = get_carrier_clip(ctx, dur, w, h)
+
+    # Recheck project and timeline identity right before Append
+    cur_pm = ctx.resolve.GetProjectManager() if hasattr(ctx.resolve, "GetProjectManager") else None
+    cur_proj = cur_pm.GetCurrentProject() if cur_pm else None
+    cur_tl = cur_proj.GetCurrentTimeline() if cur_proj else None
+    if not cur_proj or not cur_tl:
+        raise ResolveFlowError("Project hoặc Timeline không còn khả dụng trước khi chèn Title. Hủy thao tác để đảm bảo an toàn.")
+
+    cur_proj_name = cur_proj.GetName() if hasattr(cur_proj, "GetName") else ""
+    cur_tl_name = cur_tl.GetName() if hasattr(cur_tl, "GetName") else ""
+    cur_proj_id = _get_safe_uid(cur_proj)
+    cur_tl_id = _get_safe_uid(cur_tl)
+
+    if cur_proj_name != initial_proj_name or cur_tl_name != initial_tl_name:
+        raise ResolveFlowError("Project hoặc Timeline đã thay đổi tên trước khi chèn Title. Hủy thao tác để đảm bảo an toàn.")
+
+    if initial_proj_id:
+        if not cur_proj_id or cur_proj_id != initial_proj_id:
+            raise ResolveFlowError(f"Project UID đã thay đổi hoặc bị mất ({initial_proj_id} -> {cur_proj_id or 'rỗng'}) trước khi chèn Title. Hủy thao tác để đảm bảo an toàn.")
+
+    if initial_tl_id:
+        if not cur_tl_id or cur_tl_id != initial_tl_id:
+            raise ResolveFlowError(f"Timeline UID đã thay đổi hoặc bị mất ({initial_tl_id} -> {cur_tl_id or 'rỗng'}) trước khi chèn Title. Hủy thao tác để đảm bảo an toàn.")
+
+    if not initial_proj_id and not cur_proj_id and cur_proj is not ctx.project and cur_proj != ctx.project:
+        raise ResolveFlowError("Không thể xác minh danh tính Project (thiếu Unique ID). Hủy thao tác để đảm bảo an toàn.")
+
+    if not initial_tl_id and not cur_tl_id and cur_tl is not tl and cur_tl != tl:
+        raise ResolveFlowError("Không thể xác minh danh tính Timeline (thiếu Unique ID). Hủy thao tác để đảm bảo an toàn.")
+
     placed = ctx.media_pool.AppendToTimeline([{
-        "mediaPoolItem": carrier, "startFrame": 0, "endFrame": dur - 1,
+        "mediaPoolItem": carrier, "startFrame": 0, "endFrame": dur,
         "trackIndex": track, "recordFrame": start, "mediaType": 1,
     }])
     if not placed:
         raise ResolveFlowError("AppendToTimeline failed (track V%d, frame %d)." % (track, start))
     item = placed[0]
 
-    comp_path = os.path.join(cache_dir(), "comps", "%s_%d_%d.comp" % (style, start, track))
-    export_title_comp(style, p, comp_path, w, h, fps)
-    comp = item.ImportFusionComp(comp_path)
-    if comp is None:
-        tl.DeleteClips([item], False)
-        raise ResolveFlowError("ImportFusionComp failed for %s" % comp_path)
-    names = list(item.GetFusionCompNameList() or [])
-    if names:
-        item.LoadFusionCompByName(names[-1])          # imported comp becomes the active one
-        for n in names[:-1]:                          # drop the default passthrough comp
+    # Full post-Append failure boundary: cleanup carrier if export/import/activation fails
+    try:
+        comp_path = os.path.join(cache_dir(), "comps", "%s_%d_%d.comp" % (style, start, track))
+        export_title_comp(style, p, comp_path, w, h, fps)
+        comp = item.ImportFusionComp(comp_path)
+        if comp is None:
+            raise ResolveFlowError("ImportFusionComp failed for %s" % comp_path)
+        names = list(item.GetFusionCompNameList() or [])
+        if not names:
+            raise ResolveFlowError("GetFusionCompNameList rỗng sau khi ImportFusionComp")
+        load_res = item.LoadFusionCompByName(names[-1])          # imported comp becomes the active one
+        if load_res is False:
+            raise ResolveFlowError(f"LoadFusionCompByName({names[-1]}) thất bại")
+
+        active_comp = item.GetFusionCompByIndex(1)
+        if active_comp is None:
+            raise ResolveFlowError("GetFusionCompByIndex(1) không trả về comp đang hoạt động")
+
+        connected = _ensure_media_out_connected(active_comp)
+        if not connected:
+            raise ResolveFlowError("Xác minh kết nối MediaOut trong Fusion comp thất bại")
+
+        for n in names[:-1]:                          # drop the default passthrough comp chỉ sau khi activation đã verified
             try:
                 item.DeleteFusionCompByName(n)
             except Exception:
                 pass
-    try:
-        active_comp = item.GetFusionCompByIndex(1)
-        if active_comp:
-            _ensure_media_out_connected(active_comp)
-    except Exception:
-        pass
-    try:
-        item.SetName("RF " + build_title(style, p).name.replace("RF_", "").replace("_", " "))
-    except Exception:
-        pass
-    if clip_color:
-        item.SetClipColor(clip_color)
+        try:
+            item.SetName("RF " + build_title(style, p).name.replace("RF_", "").replace("_", " "))
+        except Exception:
+            pass
+        if clip_color:
+            item.SetClipColor(clip_color)
+    except Exception as e:
+        del_ok = False
+        try:
+            del_ok = bool(tl.DeleteClips([item], False))
+        except Exception:
+            del_ok = False
+        if not del_ok:
+            raise ResolveFlowError(f"{e} (Cảnh báo: Dọn dẹp clip carrier thất bại; clip vẫn còn trên track V{track})")
+        raise
     return item
+
+
+def prepare_native_transition(name: str, resolve=None) -> Dict[str, Any]:
+    """Đưa Playhead tới vết cắt V1 gần nhất; không chèn media lên timeline."""
+    from src.core.resolve_api import current_record_frame, _nominal_fps, _timecode_to_frames
+
+    result = {"start_frame": -1, "start_tc": ""}
+    note = "Không tìm thấy vết cắt liền nhau trên V1; Playhead giữ nguyên."
+    try:
+        if resolve is None:
+            ctx = context()
+            timeline = ctx.timeline
+            project = ctx.project
+        else:
+            pm = resolve.GetProjectManager()
+            project = pm.GetCurrentProject() if pm else None
+            timeline = project.GetCurrentTimeline() if project else None
+        if timeline is None:
+            raise ResolveFlowError("Chưa mở timeline trong DaVinci Resolve.")
+        current, current_tc = current_record_frame(timeline, project)
+        clips = sorted(timeline.GetItemListInTrack("video", 1) or [], key=lambda item: float(item.GetStart()))
+        cuts = []
+        for left, right in zip(clips, clips[1:]):
+            end = float(left.GetStart()) + float(left.GetDuration())
+            start = float(right.GetStart())
+            if abs(end - start) < 0.01:
+                cuts.append(int(round(start)))
+        if cuts:
+            cut = min(cuts, key=lambda frame: (abs(frame - current), frame))
+            nominal, _ = _nominal_fps(project)
+            # Chuyển frame timeline sang timecode, giữ đúng offset và drop-frame.
+            tc_frame = _timecode_to_frames(current_tc, nominal) + cut - current
+            tc = frames_to_tc(tc_frame, nominal, ";" in current_tc)
+            if timeline.SetCurrentTimecode(tc):
+                result.update(start_frame=cut, start_tc=tc)
+                note = "Playhead đã tới vết cắt gần nhất trên V1."
+            else:
+                note = "Resolve không di chuyển được Playhead; hãy chọn vết cắt thủ công."
+    except Exception as exc:
+        note = f"Chưa di chuyển được Playhead: {exc}"
+    result["message"] = (
+        f"✨ Chuyển cảnh '{name}' đã cài sẵn trong DaVinci Resolve! "
+        "Kéo trực tiếp từ 'Effects > Video Transitions > GR Seamless Transitions' "
+        "vào vết cắt. " + note + " Đã copy tên chuyển cảnh. "
+        "Ctrl+T áp dụng chuyển cảnh mặc định của Resolve, không tự chọn mẫu này."
+    )
+    return result
 
 
 def insert_transition_at_playhead(
@@ -520,106 +855,16 @@ def insert_transition_at_playhead(
     clip_color: str = "Purple",
 ) -> Optional[Any]:
     """
-    Put an animated ResolveFlow Transition / Overlay clip at the playhead on V{track_index} (default V2).
-    Centered on playhead so it acts as a transition across the edit cut.
+    Chặn carrier giả transition cho đến khi có mẫu Adjustment Clip thật.
+    Không tự thay hiệu ứng không nhận diện được bằng flash trắng.
     """
-    from src.core.fusion.transitions import TRANSITIONS
-    from src.core.fusion.overlays import OVERLAYS
-
-    ctx = context()
-    ctx.resolve.OpenPage("edit")
-    tl = ctx.timeline
-    fps, nominal, _ = timeline_rate(tl)
-    w = int(tl.GetSetting("timelineResolutionWidth") or 1920)
-    h = int(tl.GetSetting("timelineResolutionHeight") or 1080)
-    dur = max(6, int(round(duration_sec * fps)))
-    current_frame = playhead_frame(tl) if record_frame is None else int(record_frame)
-    start = max(0, current_frame - (dur // 2))
-    track = resolve_track(tl, track_index, start, start + dur, "next_free")
-
-    carrier = get_carrier_clip(ctx, dur, w, h)
-    placed = ctx.media_pool.AppendToTimeline([{
-        "mediaPoolItem": carrier,
-        "startFrame": 0,
-        "endFrame": dur - 1,
-        "trackIndex": track,
-        "recordFrame": start,
-        "mediaType": 1,
-    }])
-    if not placed:
-        raise ResolveFlowError(f"AppendToTimeline failed for transition (track V{track}, frame {start}).")
-    item = placed[0]
-
-    # Normalize style
-    raw_style = str(style or "flash_white").lower().replace("trans_", "").replace("rf_", "").replace("resolveflow_", "")
-    style_map = {
-        "whip_pan_left": "whip_pan",
-        "whip_pan": "whip_pan",
-        "zoom_blur_in": "impact_zoom",
-        "zoom_blur": "impact_zoom",
-        "zoom": "impact_zoom",
-        "impact": "impact_zoom",
-        "glitch": "rgb_glitch",
-        "rgb_glitch": "rgb_glitch",
-        "flash": "flash_white",
-        "flash_white": "flash_white",
-        "shake": "camera_shake",
-        "camera_shake": "camera_shake",
-        "spin": "spin_roll",
-        "spin_roll": "spin_roll",
-        "light_leak": "light_leak",
-    }
-    target_key = style_map.get(raw_style, raw_style)
-
-    macro_fn = None
-    if target_key in TRANSITIONS:
-        macro_fn = TRANSITIONS[target_key]
-    elif target_key in OVERLAYS:
-        macro_fn = OVERLAYS[target_key]
-    else:
-        macro_fn = TRANSITIONS.get("flash_white")
-
-    if macro_fn:
-        try:
-            m = macro_fn()
-            comp_path = os.path.join(cache_dir(), "comps", f"trans_{target_key}_{start}_{track}.comp")
-            os.makedirs(os.path.dirname(comp_path), exist_ok=True)
-            with open(comp_path, "w", encoding="utf-8") as f:
-                f.write(m.to_comp(dur, w, h, fps))
-            comp = item.ImportFusionComp(comp_path)
-            if comp:
-                names = list(item.GetFusionCompNameList() or [])
-                if names:
-                    item.LoadFusionCompByName(names[-1])
-                    for n in names[:-1]:
-                        try:
-                            item.DeleteFusionCompByName(n)
-                        except Exception:
-                            pass
-                active_comp = item.GetFusionCompByIndex(1)
-                if active_comp:
-                    mi = active_comp.FindTool("MediaIn1") or active_comp.AddTool("MediaIn")
-                    if mi:
-                        for t in active_comp.GetToolList().values():
-                            if t.GetAttrs().get("TOOLS_RegID") == "MacroOperator":
-                                inp1 = t.FindMainInput(1)
-                                if inp1 and inp1.GetConnectedOutput() is None:
-                                    inp1.ConnectTo(mi.FindMainOutput(1))
-                                inp2 = t.FindMainInput(2)
-                                if inp2 and inp2.GetConnectedOutput() is None:
-                                    inp2.ConnectTo(mi.FindMainOutput(1))
-                    _ensure_media_out_connected(active_comp)
-        except Exception as e:
-            pass
-
-    item_display = raw_style.replace("_", " ").title()
-    try:
-        item.SetName(f"RF {item_display}")
-    except Exception:
-        pass
-    if clip_color:
-        item.SetClipColor(clip_color)
-    return item
+    # Carrier là media riêng, không nhận hình ảnh từ hai clip bên dưới.
+    # Chỉ bật lại chèn tự động khi có Adjustment Clip thật và hiệu ứng đã xác minh.
+    raise ResolveFlowError(
+        "Chưa có mẫu Adjustment Clip thật để chèn transition tự động. "
+        "Hãy kéo trực tiếp từ Effects > Video Transitions > GR Seamless Transitions "
+        "vào vết cắt giữa hai clip."
+    )
 
 
 def _ensure_media_out_connected(comp) -> bool:

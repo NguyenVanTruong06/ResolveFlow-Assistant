@@ -11,105 +11,173 @@ Special Blocks for each DaVinci Resolve page context:
 from typing import Optional, List, Dict, Any
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QProgressBar, QComboBox, QSlider, QFrame, QGridLayout
+    QProgressBar, QComboBox, QSlider, QFrame, QGridLayout, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal as pyqtSignal, QTimer
+from PySide6.QtGui import QFontMetrics
+
+from src.ui.lux.library.category_nav import HorizontalChipScrollArea
 
 
 class EditSuggestBlock(QWidget):
     """
-    Contextual speech suggestion pill at playhead:
-    [ Gợi ý tại 00:01:12 — "thật không thể tin nổi"   ✕ ]
-    [ Camera Shake ] [ Vine Boom ] [ Ngạc nhiên zoom ]
+    Contextual speech suggestion pill at playhead (compact single-row ribbon, max 38px):
+    [ ✨ Gợi ý: [ Camera Shake ] [ Vine Boom ] [ Ngạc nhiên zoom ]   ✕ ]
     """
     asset_suggested = pyqtSignal(str)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFixedHeight(38)
         self._init_ui()
 
     def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 6, 10, 6)
-        layout.setSpacing(6)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 2, 6, 2)
+        layout.setSpacing(4)
 
         # Container styling
         self.container = QFrame(self)
         self.container.setStyleSheet("""
             QFrame {
                 background: rgba(124, 58, 237, 0.12);
-                border: 1px solid rgba(124, 58, 237, 0.3);
-                border-radius: 8px;
+                border: 1px solid rgba(124, 58, 237, 0.35);
+                border-radius: 6px;
             }
         """)
-        c_layout = QVBoxLayout(self.container)
-        c_layout.setContentsMargins(8, 6, 8, 6)
+        c_layout = QHBoxLayout(self.container)
+        c_layout.setContentsMargins(6, 2, 6, 2)
         c_layout.setSpacing(6)
 
-        # Header row with title and dismiss button
-        h_row = QHBoxLayout()
-        self.lbl_text = QLabel("✨ Gợi ý theo câu thoại — “thật không thể tin nổi”")
-        self.lbl_text.setStyleSheet("color: #e4e4e7; font-size: 11.5px; font-weight: 500;")
-        h_row.addWidget(self.lbl_text, stretch=1)
+        # Context text label (elided with QFontMetrics)
+        self.lbl_text = QLabel("✨ Gợi ý thoại")
+        self.lbl_text.setMaximumWidth(120)
+        self.lbl_text.setStyleSheet("color: #c4b5fd; font-size: 11px; font-weight: 600;")
+        c_layout.addWidget(self.lbl_text)
 
+        # Suggestion chips in horizontal scroll area
+        self.scroll_chips = HorizontalChipScrollArea()
+        self.scroll_chips.setFixedHeight(26)
+        self.scroll_chips.setWidgetResizable(True)
+        self.scroll_chips.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_chips.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_chips.setStyleSheet("background: transparent; border: none;")
+
+        self.chips_container = QWidget()
+        self.chips_container.setStyleSheet("background: transparent;")
+        self.chips_layout = QHBoxLayout(self.chips_container)
+        self.chips_layout.setContentsMargins(0, 0, 0, 0)
+        self.chips_layout.setSpacing(4)
+        self.scroll_chips.setWidget(self.chips_container)
+        c_layout.addWidget(self.scroll_chips, stretch=1)
+
+        # Close button
         self.btn_close = QPushButton("✕")
         self.btn_close.setFixedSize(18, 18)
         self.btn_close.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_close.setCursor(Qt.PointingHandCursor)
+        self.btn_close.setToolTip("Đóng thanh gợi ý (Bấm nút ✨ để mở lại)")
         self.btn_close.setStyleSheet("""
             QPushButton {
                 background: transparent;
                 color: #71717a;
                 border: none;
                 font-size: 11px;
+                padding: 0;
             }
             QPushButton:hover {
                 color: #ffffff;
             }
         """)
-        self.btn_close.clicked.connect(self.hide)
-        h_row.addWidget(self.btn_close)
-        c_layout.addLayout(h_row)
+        self.btn_close.clicked.connect(self._close_ribbon)
+        c_layout.addWidget(self.btn_close)
 
-        # Suggestion chips
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(6)
+        layout.addWidget(self.container)
 
-        suggestions = [
+        # Reopen pill button (shown when ribbon is closed)
+        self.btn_reopen = QPushButton("✨ Gợi ý")
+        self.btn_reopen.setFixedHeight(26)
+        self.btn_reopen.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_reopen.setCursor(Qt.PointingHandCursor)
+        self.btn_reopen.setToolTip("Mở lại thanh gợi ý đạo cụ theo ngữ cảnh")
+        self.btn_reopen.setStyleSheet("""
+            QPushButton {
+                background: rgba(124, 58, 237, 0.15);
+                color: #c4b5fd;
+                border: 1px solid rgba(124, 58, 237, 0.4);
+                border-radius: 13px;
+                padding: 0 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: rgba(124, 58, 237, 0.3);
+                border-color: #7c3aed;
+                color: #ffffff;
+            }
+        """)
+        self.btn_reopen.clicked.connect(self._reopen_ribbon)
+        self.btn_reopen.hide()
+        layout.addWidget(self.btn_reopen)
+
+        # Render default chips
+        self._render_chips([
             ("tr_shake", "Camera Shake"),
             ("s_boom", "Vine Boom"),
             ("m_wow", "Ngạc nhiên zoom"),
-        ]
-        for aid, label in suggestions:
+        ])
+
+    def _close_ribbon(self):
+        self.container.hide()
+        self.btn_reopen.show()
+
+    def _reopen_ribbon(self):
+        self.btn_reopen.hide()
+        self.container.show()
+
+    def _render_chips(self, items: List[tuple[str, str]]):
+        while self.chips_layout.count():
+            item = self.chips_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for aid, label in items:
             btn = QPushButton(label)
-            btn.setFixedHeight(24)
+            btn.setFixedHeight(22)
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip(f"Đạo cụ: {label} (ID: {aid})")
             btn.setStyleSheet("""
                 QPushButton {
                     background: #18181b;
                     color: #c4b5fd;
                     border: 1px solid rgba(124, 58, 237, 0.4);
-                    border-radius: 4px;
+                    border-radius: 11px;
                     padding: 0 8px;
                     font-size: 11px;
                 }
                 QPushButton:hover {
                     background: #7c3aed;
                     color: #ffffff;
+                    border-color: #a78bfa;
                 }
             """)
             btn.clicked.connect(lambda checked=False, x=aid: self.asset_suggested.emit(x))
-            btn_row.addWidget(btn)
+            self.chips_layout.addWidget(btn)
 
-        btn_row.addStretch(1)
-        c_layout.addLayout(btn_row)
+        self.chips_layout.addStretch(1)
 
-        layout.addWidget(self.container)
+    def set_suggestion(self, timecode: str = "", transcript: str = "", items: Optional[List[tuple[str, str]]] = None):
+        full_title = f"✨ Gợi ý tại {timecode} — “{transcript}”" if timecode else f"✨ Gợi ý — “{transcript}”"
+        fm = QFontMetrics(self.lbl_text.font())
+        elided = fm.elidedText(full_title, Qt.TextElideMode.ElideRight, 120)
+        self.lbl_text.setText(elided)
+        self.lbl_text.setToolTip(full_title)
 
-    def set_suggestion(self, timecode: str, transcript: str, items: List[tuple[str, str]]):
-        self.lbl_text.setText(f"✨ Gợi ý tại {timecode} — “{transcript}”")
+        if items:
+            self._render_chips(items)
+        self._reopen_ribbon()
         self.show()
 
 

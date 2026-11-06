@@ -1,0 +1,13 @@
+# G04-04C8-D — Codex binding decisions (2026-10-27)
+
+ACCEPTED_WITH_BINDING_CORRECTIONS. Đã đọc widget _ensure_player/error/resolve/set_item/browse/start/replay/stop và Inspector callsites, old test simulation. Không chạy app/tests ở review thiết kế.
+
+1. Chọn set_asset(asset,sub='') + set_item signature cũ wrapper chỉ legacy scalar callers; các callsite Studio thực truyền asset đầy đủ, không biến managed thành legacy qua set_item. Chọn reuse _normalize_preview_payload từ hover_preview, không di chuyển module trong slice này.
+2. Action-time: sơ đồ design mới chỉ check ở selection rồi Play dùng cached resolved_file_path là chưa đủ. Mọi start/replay/resume/open_external phải revalidate payload hiện tại; file bị xóa/rootID đổi sau selection không được phát/mở. Source player chỉ guard.resolved_path. Guard success còn cần kiểm format playable, .setting/.png/canvas không thành video stream.
+3. Chọn tạm disable/hide btn_browse + thông báo chức năng liên kết cần qua quản lý thư viện; _browse_file directcall cũng phải no-op an toàn. Chưa có relink ownership/persistence contract; không gán file chọn tay vào managed asset cũ hoặc đổi source_kind để vượt guard. Deferred relink riêng, không thêm route tùy chọn-file mới trong slice này.
+4. Generation phải có tác dụng: _is_active_playback false ngăn lúc stopped nhưng không chặn A callback khi B đã active. Dùng epoch/source binding trong callbacks khi thiết lập phiên; test stale callback captured từ A sau B active. Không tự tạo player mới mỗi click; clear source ngay cả player đã StoppedState, idempotent trước signal emissions. Qt native signals không có origin token, ghi rõ best-effort boundary, không tuyên bố raceproof chỉ nhờ counter.
+5. Codec error -> stop/reset, thông báo Việt không simulation. Pause giữ capability resume có guard. Selection không autoplay. Static artwork/canvas không có fake duration/live/progress. hide/close và category-switch stop đúng viewport thực, không dừng vì internal stacked video/canvas chuyển page không liên quan.
+6. Existing tests/test_tab_assets.py::test_meme_live_preview_and_video_playback đòi simulation và gọi card_widgets: phải cập nhật đúng node cho policy mới, không bỏ/xfail hoặc duy trì fake runtime để thỏa test. Không sửa tests khác ngoài scope.
+7. Bổ sung guard với open_external vì cũng đọc đường dẫn media cũ; chỉ verified supported video URL, không tùy tiện os.startfile đường dẫn bất kỳ. Native transition core code có OK_BUILTIN_PREVIEW_VERIFIED, không buộc chỉ OK_PREVIEW_VERIFIED.
+
+Slice G04-04C8-I đúng1production module tab_assets.py. AudioInspector engine/directTextFusion/legacy AssetCard deferred. Focusedtests hữu hạn rồi review; chưa desktop decoder verification.

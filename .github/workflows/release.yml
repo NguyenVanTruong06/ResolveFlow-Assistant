@@ -15,7 +15,7 @@ env:
   QT_QPA_PLATFORM: "offscreen"
 
 jobs:
-  release-windows:
+  build-windows:
     name: Build & Release Standalone (Windows .exe)
     runs-on: windows-latest
 
@@ -23,10 +23,10 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
+    - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
-        python-version: "3.11"
+        python-version: "3.12"
         cache: 'pip'
 
     - name: Set up FFmpeg
@@ -39,6 +39,11 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
+    - name: Pre-build Verification
+      run: |
+        python build_standalone.py --dry-run
+        python build_standalone.py --verify-imports
+
     - name: Build Standalone Executable
       run: |
         python build_standalone.py
@@ -49,10 +54,19 @@ jobs:
         Compress-Archive -Path dist/ResolveFlow-Assistant -DestinationPath "ResolveFlow-Assistant-${{ github.ref_name }}-windows-x64.zip" -Force
         Get-ChildItem -Path "ResolveFlow-Assistant-${{ github.ref_name }}-windows-x64.zip"
 
+    - name: Generate Checksum
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path dist
+        $hash = Get-FileHash "ResolveFlow-Assistant-${{ github.ref_name }}-windows-x64.zip" -Algorithm SHA256
+        "$($hash.Hash.ToLower())  ResolveFlow-Assistant-${{ github.ref_name }}-windows-x64.zip" | Out-File -FilePath dist/SHA256SUMS -Encoding utf8
+
     - name: Publish Windows Release Asset
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v1
       with:
-        files: ResolveFlow-Assistant-${{ github.ref_name }}-windows-x64.zip
+        files: |
+          ResolveFlow-Assistant-${{ github.ref_name }}-windows-x64.zip
+          dist/SHA256SUMS
         name: "ResolveFlow Assistant ${{ github.ref_name }}"
         generate_release_notes: true
         draft: false
@@ -60,7 +74,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  release-linux:
+  build-linux:
     name: Build & Release Standalone (Linux .tar.gz & .deb)
     runs-on: ubuntu-latest
 
@@ -68,10 +82,10 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
+    - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
-        python-version: "3.11"
+        python-version: "3.12"
         cache: 'pip'
 
     - name: Install System Dependencies & FFmpeg
@@ -85,9 +99,14 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
+    - name: Pre-build Verification
+      run: |
+        python build_standalone.py --dry-run
+        python build_standalone.py --verify-imports
+
     - name: Build Standalone Executable
       run: |
-        python3 build_standalone.py
+        python build_standalone.py
 
     - name: Package Standalone Tarball
       run: |
@@ -98,12 +117,19 @@ jobs:
         chmod +x package_deb.sh
         ./package_deb.sh "${{ github.ref_name }}"
 
+    - name: Generate Checksums
+      run: |
+        cp "ResolveFlow-Assistant-${{ github.ref_name }}-linux-x64.tar.gz" dist/ 2>/dev/null || true
+        cd dist
+        sha256sum * > SHA256SUMS || true
+
     - name: Publish Linux Release Assets
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v1
       with:
         files: |
           ResolveFlow-Assistant-${{ github.ref_name }}-linux-x64.tar.gz
-          *.deb
+          dist/*.deb
+          dist/SHA256SUMS
         name: "ResolveFlow Assistant ${{ github.ref_name }}"
         generate_release_notes: true
         draft: false

@@ -70,14 +70,17 @@ def test_edge_dock_instant_autocut_integration(qapp):
         mock_inst = MagicMock()
         mock_inst.is_connected.return_value = False
         mock_inst.connect.return_value = False
+        mock_inst.last_connect_error = "Chưa mở DaVinci Resolve"
         MockAuto.return_value = mock_inst
 
         # Trigger autocut when not connected
         dock.run_instant_autocut()
+        assert dock._autocut_worker.wait(3000)
         qapp.processEvents()
 
         toast = dock._get_toast()
         assert "Chưa mở DaVinci Resolve" in toast.lbl_msg.text()
+        dock.close()
 
 
 def test_edge_dock_palette_command_trigger(qapp):

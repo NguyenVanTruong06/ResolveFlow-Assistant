@@ -28,6 +28,7 @@ class DockSettingsDialog(QDialog):
     dock_edge_changed = pyqtSignal(str)          # 'left' | 'right'
     auto_director_changed = pyqtSignal(bool)
     pin_default_changed = pyqtSignal(bool)
+    auto_collapse_changed = pyqtSignal(bool)
     hover_audio_changed = pyqtSignal(bool)
     hover_volume_changed = pyqtSignal(float)
     auto_secondary_studio_changed = pyqtSignal(bool)
@@ -188,6 +189,11 @@ class DockSettingsDialog(QDialog):
         self.chk_pin_default.toggled.connect(self._on_pin_default_toggled)
         sec2_layout.addWidget(self.chk_pin_default)
 
+        self.chk_auto_collapse = QCheckBox("Tự thu gọn khi rời Dock (về Mini Strip 28px)")
+        self.chk_auto_collapse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.chk_auto_collapse.toggled.connect(self._on_auto_collapse_toggled)
+        sec2_layout.addWidget(self.chk_auto_collapse)
+
         self.chk_hover_audio = QCheckBox("Bật âm thanh khi lướt chuột qua Meme / Video / SFX (Hover Audio)")
         self.chk_hover_audio.setCursor(Qt.CursorShape.PointingHandCursor)
         self.chk_hover_audio.toggled.connect(self._on_hover_audio_toggled)
@@ -323,6 +329,7 @@ class DockSettingsDialog(QDialog):
         grid.setSpacing(6)
 
         hotkeys = [
+            ("Ctrl + Alt + D", "Bật / thu gọn thanh Dock (Mini Strip 28px)"),
             ("Ctrl + Alt + Space", "Mở nhanh Command Palette HUD"),
             ("Ctrl + Alt + K", "Mở Palette ở chế độ gõ lệnh"),
             ("Esc", "Thu gọn thanh Dock về mép màn hình"),
@@ -449,6 +456,9 @@ class DockSettingsDialog(QDialog):
         pin_def = self._settings.value("pinned_by_default", False, type=bool)
         self.chk_pin_default.setChecked(pin_def)
 
+        auto_collapse = self._settings.value("auto_collapse_on_leave", False, type=bool)
+        self.chk_auto_collapse.setChecked(auto_collapse)
+
         hover_aud = self._settings.value("library/hover_audio_enabled", True, type=bool)
         self.chk_hover_audio.setChecked(hover_aud)
 
@@ -484,6 +494,10 @@ class DockSettingsDialog(QDialog):
     def _on_pin_default_toggled(self, checked: bool):
         self._settings.setValue("pinned_by_default", checked)
         self.pin_default_changed.emit(checked)
+
+    def _on_auto_collapse_toggled(self, checked: bool):
+        self._settings.setValue("auto_collapse_on_leave", checked)
+        self.auto_collapse_changed.emit(checked)
 
     def _on_hover_audio_toggled(self, checked: bool):
         self._settings.setValue("library/hover_audio_enabled", checked)

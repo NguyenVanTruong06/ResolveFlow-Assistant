@@ -73,17 +73,17 @@ class DockHeaderWidget(QWidget):
         self.btn_page_chip.setCursor(Qt.PointingHandCursor)
         self.btn_page_chip.setStyleSheet("""
             QPushButton {
-                background: rgba(124, 58, 237, 0.15);
-                color: #c4b5fd;
-                border: 1px solid rgba(124, 58, 237, 0.4);
-                border-radius: 6px;
+                background: #23252a;
+                color: #f59e0b;
+                border: 1px solid #353942;
+                border-radius: 4px;
                 padding: 0 8px;
                 font-size: 11.5px;
                 font-weight: 600;
             }
             QPushButton:hover {
-                background: rgba(124, 58, 237, 0.25);
-                border-color: #7c3aed;
+                background: #2c2f36;
+                border-color: #f59e0b;
             }
         """)
         self.btn_page_chip.clicked.connect(self._on_page_chip_clicked)
@@ -121,17 +121,21 @@ class DockHeaderWidget(QWidget):
         self.txt_search.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.txt_search.setStyleSheet("""
             QLineEdit {
-                background: #18181b;
-                color: #f4f4f5;
-                border: 1px solid #27272a;
-                border-radius: 6px;
-                padding: 0 8px;
+                background: #151619;
+                color: #e6e8ec;
+                border: 1px solid #2e3138;
+                border-radius: 4px;
+                padding: 0 9px;
                 font-size: 12px;
-                selection-background-color: #7c3aed;
+                selection-background-color: #d94f3d;
+            }
+            QLineEdit:hover {
+                border-color: #434752;
+                background: #191a1e;
             }
             QLineEdit:focus {
-                border: 1px solid #7c3aed;
-                background: #202024;
+                border: 1px solid #e05a47;
+                background: #1d1e23;
             }
         """)
         self.txt_search.textChanged.connect(self.search_changed.emit)
@@ -163,7 +167,7 @@ class DockHeaderWidget(QWidget):
 
         # 2.4. Director Mode button (ChunDVC Director: AI AutoCut, Subtitles, Prompt JSON)
         self.btn_director = QPushButton()
-        self.btn_director.setIcon(get_vector_icon("ai", "#c4b5fd", 16))
+        self.btn_director.setIcon(get_vector_icon("ai", "#f59e0b", 16))
         self.btn_director.setIconSize(QSize(16, 16))
         self.btn_director.setFixedSize(28, 28)
         self.btn_director.setToolTip("Mở ChunDVC Director (AI AutoCut, Phụ đề, Web Prompt JSON 0đ)")
@@ -196,6 +200,19 @@ class DockHeaderWidget(QWidget):
         self.btn_settings.setStyleSheet(self._button_style(active=False))
         self.btn_settings.clicked.connect(self.settings_clicked.emit)
         layout.addWidget(self.btn_settings)
+
+        # 2.6.1 Overflow button (shown when w < 410 to access Director, Studio, Settings)
+        self.btn_overflow = QPushButton()
+        self.btn_overflow.setIcon(get_vector_icon("more", "#a1a1aa", 16))
+        self.btn_overflow.setIconSize(QSize(16, 16))
+        self.btn_overflow.setFixedSize(24, 28)
+        self.btn_overflow.setToolTip("Tùy chọn khác (Director, Studio, Cài đặt)")
+        self.btn_overflow.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_overflow.setCursor(Qt.PointingHandCursor)
+        self.btn_overflow.setStyleSheet(self._button_style(active=False))
+        self.btn_overflow.clicked.connect(self._show_overflow_menu)
+        self.btn_overflow.hide()
+        layout.addWidget(self.btn_overflow)
 
         # 2.7. Hover Audio toggle button (Âm thanh xem trước Meme/SFX khi lướt chuột)
         self.btn_audio = QPushButton()
@@ -259,32 +276,35 @@ class DockHeaderWidget(QWidget):
         if active:
             return """
                 QPushButton {
-                    background: rgba(124, 58, 237, 0.25);
-                    color: #c4b5fd;
-                    border: 1px solid #7c3aed;
-                    border-radius: 6px;
+                    background: rgba(217, 79, 61, 0.22);
+                    color: #f8b4a8;
+                    border: 1px solid #d94f3d;
+                    border-radius: 4px;
                     font-size: 13px;
                 }
                 QPushButton:hover {
-                    background: rgba(124, 58, 237, 0.4);
+                    background: rgba(217, 79, 61, 0.35);
                 }
             """
         return """
             QPushButton {
-                background: #18181b;
-                color: #a1a1aa;
-                border: 1px solid #27272a;
-                border-radius: 6px;
+                background: #1c1d21;
+                color: #9da3ae;
+                border: 1px solid #2e3138;
+                border-radius: 4px;
                 font-size: 13px;
             }
             QPushButton:hover {
-                background: #27272a;
-                border-color: #3f3f46;
+                background: #272930;
+                border-color: #434752;
                 color: #ffffff;
             }
         """
 
     def set_page_label(self, label: str, locked: bool = False, color: str = "#7c3aed"):
+        self._current_page = label
+        self._is_locked = locked
+        self._page_color = color
         lock_str = " · Khóa" if locked else ""
         self.btn_page_chip.setText(f"● {label}{lock_str}")
         self.btn_page_chip.setStyleSheet(f"""
@@ -303,10 +323,65 @@ class DockHeaderWidget(QWidget):
             }}
         """)
 
+    def minimumSizeHint(self) -> QSize:
+        return QSize(260, 44)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        w = self.width()
+        if w < 410:
+            self.btn_director.hide()
+            self.btn_studio.hide()
+            self.btn_settings.hide()
+            self.btn_overflow.show()
+        else:
+            self.btn_director.show()
+            self.btn_studio.show()
+            self.btn_settings.show()
+            self.btn_overflow.hide()
+        if w < 340:
+            self.btn_instant_autocut.hide()
+            self.btn_page_chip.setText("●")
+        else:
+            self.btn_instant_autocut.show()
+            lock_str = " · Khóa" if getattr(self, "_is_locked", False) else ""
+            self.btn_page_chip.setText(f"● {self._current_page}{lock_str}")
+
+    def _show_overflow_menu(self):
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background: #18181b;
+                color: #f4f4f5;
+                border: 1px solid #27272a;
+                border-radius: 8px;
+                padding: 4px;
+                font-size: 11.5px;
+            }
+            QMenu::item {
+                padding: 6px 14px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background: #27272a;
+                color: #ffffff;
+            }
+        """)
+        act_dir = menu.addAction("🤖 ChunDVC Director")
+        act_dir.triggered.connect(self.director_clicked.emit)
+        act_studio = menu.addAction("🏛️ ChunDVC Studio")
+        act_studio.triggered.connect(self.restore_standard_window_clicked.emit)
+        act_settings = menu.addAction("⚙️ Cài đặt Dock")
+        act_settings.triggered.connect(self.settings_clicked.emit)
+
+        pos = self.btn_overflow.mapToGlobal(self.btn_overflow.rect().bottomLeft())
+        menu.exec(pos)
+
     def set_pinned(self, pinned: bool):
         self.btn_pin.setStyleSheet(self._button_style(active=pinned))
         if pinned:
-            self.btn_pin.setIcon(get_vector_icon("pinned", "#c4b5fd", 16))
+            self.btn_pin.setIcon(get_vector_icon("pinned", "#f59e0b", 16))
             self.btn_pin.setToolTip("Đã ghim Dock (Bấm để mở tự thu gọn)")
         else:
             self.btn_pin.setIcon(get_vector_icon("pin", "#a1a1aa", 16))
@@ -315,7 +390,7 @@ class DockHeaderWidget(QWidget):
     def set_wide(self, wide: bool):
         self.btn_wide.setStyleSheet(self._button_style(active=wide))
         if wide:
-            self.btn_wide.setIcon(get_vector_icon("shrink", "#c4b5fd", 16))
+            self.btn_wide.setIcon(get_vector_icon("shrink", "#f59e0b", 16))
             self.btn_wide.setToolTip("Thu hẹp về 420px (Compact Mode)")
         else:
             self.btn_wide.setIcon(get_vector_icon("wide", "#a1a1aa", 16))
@@ -333,7 +408,7 @@ class DockHeaderWidget(QWidget):
 
     def _update_audio_button_state(self):
         if self._audio_enabled:
-            self.btn_audio.setIcon(get_vector_icon("sound_on", "#a78bfa", 16))
+            self.btn_audio.setIcon(get_vector_icon("sound_on", "#f59e0b", 16))
             self.btn_audio.setToolTip("Âm thanh khi lướt Meme / SFX: ĐANG BẬT (Bấm để tắt)")
             self.btn_audio.setStyleSheet(self._button_style(active=True))
         else:

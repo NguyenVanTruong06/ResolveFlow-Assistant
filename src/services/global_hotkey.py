@@ -18,7 +18,7 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, Signal as pyqtSignal, Slot
 
-logger = logging.getLogger("ResolveFlow.GlobalHotkey")
+logger = logging.getLogger("ChunDVC.GlobalHotkey")
 
 
 class GlobalHotkeyService(QObject):
@@ -30,6 +30,7 @@ class GlobalHotkeyService(QObject):
     """
     palette_requested = pyqtSignal()
     command_mode_requested = pyqtSignal()
+    dock_toggle_requested = pyqtSignal()
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -58,7 +59,7 @@ class GlobalHotkeyService(QObject):
             except Exception as e:
                 logger.warning("Could not start X11 hotkey thread: %s", e)
         elif system == "Windows":
-            logger.info("Windows hotkey support initialized.")
+            logger.info("Windows native RegisterHotKey not implemented; in-app shortcuts active as fallback.")
 
     def _run_x11(self):
         try:
@@ -82,6 +83,8 @@ class GlobalHotkeyService(QObject):
             root = self._display.screen().root
             space_sym = XK.string_to_keysym("space")
             keycode = self._display.keysym_to_keycode(space_sym)
+            d_sym = XK.string_to_keysym("d")
+            keycode_d = self._display.keysym_to_keycode(d_sym)
 
             if not keycode:
                 logger.warning("Failed to resolve keycode for Space.")
@@ -100,13 +103,18 @@ class GlobalHotkeyService(QObject):
                     root.grab_key(keycode, ctrl_alt_shift | lm, 1, X.GrabModeAsync, X.GrabModeAsync)
                 except Exception as exc:
                     logger.debug("Failed grab_key ctrl_alt_shift with mask %s: %s", lm, exc)
+                if keycode_d:
+                    try:
+                        root.grab_key(keycode_d, ctrl_alt | lm, 1, X.GrabModeAsync, X.GrabModeAsync)
+                    except Exception as exc:
+                        logger.debug("Failed grab_key ctrl_alt_d with mask %s: %s", lm, exc)
 
             try:
                 self._display.flush()
             except Exception as exc:
                 logger.debug("X11 display flush error: %s", exc)
             fd = self._display.display.fileno()
-            logger.info("Global hotkeys (Ctrl+Alt+Space, Ctrl+Alt+Shift+Space) registered on X11 root.")
+            logger.info("Global hotkeys (Ctrl+Alt+Space, Ctrl+Alt+Shift+Space, Ctrl+Alt+D) registered on X11 root.")
 
             while self._running:
                 try:
@@ -125,7 +133,11 @@ class GlobalHotkeyService(QObject):
                                 continue
 
                             state = event.state & (X.ShiftMask | X.ControlMask | X.Mod1Mask)
-                            if state & X.ShiftMask:
+                            if keycode_d and event.detail == keycode_d:
+                                logger.info("Dock toggle hotkey triggered (Ctrl+Alt+D)")
+                                if self._enabled:
+                                    self.dock_toggle_requested.emit()
+                            elif state & X.ShiftMask:
                                 logger.info("Command Palette hotkey triggered (Ctrl+Alt+Shift+Space)")
                                 if self._enabled:
                                     self.command_mode_requested.emit()
@@ -170,12 +182,14 @@ class GlobalHotkeyService(QObject):
     def simulate_hotkey(self, mode: str = "palette"):
         """
         Manually trigger hotkey (for testing, CLI, or desktop environment shortcuts).
-        mode: 'palette' or 'command'
+        mode: 'palette', 'command', or 'dock'
         """
         if not self._enabled:
             return
         if mode == "command":
             self.command_mode_requested.emit()
+        elif mode == "dock":
+            self.dock_toggle_requested.emit()
         else:
             self.palette_requested.emit()
 

@@ -3,9 +3,10 @@ ChunDVC System Tray Icon.
 Provides a clean, persistent OS tray icon replacing the floating bubble by default.
 """
 from typing import Optional
-from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QApplication
+from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QApplication, QMessageBox
 from PySide6.QtCore import QObject, Signal as pyqtSignal
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QPen
+from src.core.branding import TRAY_TOOLTIP, BRAND_BADGE_TEXT
 
 
 # Global settings defaults
@@ -57,9 +58,18 @@ class ChunDVCTrayIcon(QSystemTrayIcon):
     def __init__(self, parent: Optional[QObject] = None):
         icon = QIcon(create_tray_pixmap())
         super().__init__(icon, parent)
-        self.setToolTip("ChunDVC — ResolveFlow Assistant")
+        self.setToolTip(TRAY_TOOLTIP)
         self._init_menu()
         self.activated.connect(self._on_activated)
+
+    def _show_about_dialog(self):
+        QMessageBox.about(
+            None,
+            "Giới thiệu ChunDVC Studio",
+            f"<h3><b>{BRAND_BADGE_TEXT}</b></h3>"
+            "<p>Hệ thống trợ lý AI Director & Kho Đạo Cụ chuyên nghiệp cho DaVinci Resolve.</p>"
+            "<p>Phát triển bởi <b>Trương</b> với công nghệ AI thị giác local và đồng bộ hóa DaVinci API.</p>"
+        )
 
     def _init_menu(self):
         menu = QMenu()
@@ -101,6 +111,9 @@ class ChunDVCTrayIcon(QSystemTrayIcon):
         act_settings = menu.addAction("⚙️ Cài đặt...")
         act_settings.triggered.connect(self.settings_requested.emit)
 
+        act_about = menu.addAction("ℹ️ Giới thiệu ChunDVC...")
+        act_about.triggered.connect(self._show_about_dialog)
+
         menu.addSeparator()
 
         act_quit = menu.addAction("❌ Thoát ChunDVC")
@@ -114,6 +127,3 @@ class ChunDVCTrayIcon(QSystemTrayIcon):
 
     def _on_quit_triggered(self):
         self.quit_requested.emit()
-        app = QApplication.instance()
-        if app:
-            app.quit()

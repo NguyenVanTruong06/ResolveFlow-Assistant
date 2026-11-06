@@ -42,23 +42,49 @@ class DockRailWidget(QWidget):
         self.btn_logo.setCursor(Qt.PointingHandCursor)
         self.btn_logo.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7c3aed, stop:1 #06b6d4);
-                border: 1px solid rgba(255,255,255,0.25);
-                border-radius: 8px;
+                background-color: #d94f3d;
+                border: 1px solid #e86352;
+                border-radius: 5px;
             }
             QPushButton:hover {
                 border-color: #ffffff;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8b5cf6, stop:1 #22d3ee);
+                background-color: #e86352;
             }
         """)
         self.btn_logo.clicked.connect(self.open_dock_requested.emit)
         layout.addWidget(self.btn_logo)
 
+        # 1.5. Chevron toggle button
+        self.btn_chevron = QPushButton("‹")
+        self.btn_chevron.setFixedSize(20, 20)
+        self.btn_chevron.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_chevron.setCursor(Qt.PointingHandCursor)
+        self.btn_chevron.setToolTip("Mở rộng ChunDVC Dock")
+        self.btn_chevron.setStyleSheet("""
+            QPushButton {
+                background: #1c1d21;
+                border: 1px solid #353942;
+                border-radius: 4px;
+                color: #e6e8ec;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 0;
+            }
+            QPushButton:hover {
+                background: #d94f3d;
+                color: #ffffff;
+                border-color: #e86352;
+            }
+        """)
+        self.btn_chevron.clicked.connect(self.open_dock_requested.emit)
+        layout.addWidget(self.btn_chevron)
+        self.btn_chevron.hide()
+
         # Separator line
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("background-color: #27272a; max-height: 1px;")
-        layout.addWidget(sep)
+        self.sep = QFrame()
+        self.sep.setFrameShape(QFrame.Shape.HLine)
+        self.sep.setStyleSheet("background-color: #27272a; max-height: 1px;")
+        layout.addWidget(self.sep)
 
         # 2. Category fast-jump buttons (Hi-DPI vector icons)
         categories = [
@@ -67,6 +93,7 @@ class DockRailWidget(QWidget):
             ("meme", "meme", "Meme & B-Roll"),
             ("overlay", "overlay", "Lớp phủ & Hiệu ứng"),
             ("sfx", "sfx", "Âm thanh & SFX"),
+            ("lut", "lut", "Kho Màu (LUT)"),
         ]
         self._cat_buttons = {}
         for cat_id, icon_type, label in categories:
@@ -118,7 +145,7 @@ class DockRailWidget(QWidget):
 
         # 3. Palette HUD button
         self.btn_palette = QPushButton()
-        self.btn_palette.setIcon(get_vector_icon("palette", "#c4b5fd", 16))
+        self.btn_palette.setIcon(get_vector_icon("palette", "#f59e0b", 16))
         self.btn_palette.setIconSize(QSize(16, 16))
         self.btn_palette.setFixedSize(34, 34)
         self.btn_palette.setToolTip("Quick Palette (Ctrl+Alt+Space)")
@@ -126,13 +153,13 @@ class DockRailWidget(QWidget):
         self.btn_palette.setCursor(Qt.PointingHandCursor)
         self.btn_palette.setStyleSheet("""
             QPushButton {
-                background: #18181b;
-                border: 1px solid #27272a;
-                border-radius: 7px;
+                background: #1c1d21;
+                border: 1px solid #2e3138;
+                border-radius: 5px;
             }
             QPushButton:hover {
-                background: #27272a;
-                border-color: #7c3aed;
+                background: #272930;
+                border-color: #d94f3d;
             }
         """)
         self.btn_palette.clicked.connect(self.palette_requested.emit)
@@ -140,7 +167,7 @@ class DockRailWidget(QWidget):
 
         # 4. Director button
         self.btn_director = QPushButton()
-        self.btn_director.setIcon(get_vector_icon("ai", "#06b6d4", 16))
+        self.btn_director.setIcon(get_vector_icon("ai", "#38bdf8", 16))
         self.btn_director.setIconSize(QSize(16, 16))
         self.btn_director.setFixedSize(34, 34)
         self.btn_director.setToolTip("Mở ChunDVC Director (AI AutoCut, Phụ đề, Prompt JSON)")
@@ -148,13 +175,13 @@ class DockRailWidget(QWidget):
         self.btn_director.setCursor(Qt.PointingHandCursor)
         self.btn_director.setStyleSheet("""
             QPushButton {
-                background: #18181b;
-                border: 1px solid #27272a;
-                border-radius: 7px;
+                background: #1c1d21;
+                border: 1px solid #2e3138;
+                border-radius: 5px;
             }
             QPushButton:hover {
-                background: #27272a;
-                border-color: #06b6d4;
+                background: #272930;
+                border-color: #38bdf8;
             }
         """)
         self.btn_director.clicked.connect(self.director_requested.emit)
@@ -170,13 +197,13 @@ class DockRailWidget(QWidget):
         self.btn_settings.setCursor(Qt.PointingHandCursor)
         self.btn_settings.setStyleSheet("""
             QPushButton {
-                background: #18181b;
-                border: 1px solid #27272a;
-                border-radius: 7px;
+                background: #1c1d21;
+                border: 1px solid #2e3138;
+                border-radius: 5px;
             }
             QPushButton:hover {
-                background: #27272a;
-                border-color: #7c3aed;
+                background: #272930;
+                border-color: #d94f3d;
             }
         """)
         self.btn_settings.clicked.connect(self.settings_requested.emit)
@@ -189,6 +216,48 @@ class DockRailWidget(QWidget):
         self.lbl_status_dot.setStyleSheet("color: #10b981; font-size: 12px;")
         self.lbl_status_dot.setToolTip("Đã kết nối DaVinci Resolve")
         layout.addWidget(self.lbl_status_dot)
+
+    def set_dock_edge(self, edge: str):
+        """Update chevron icon direction according to dock edge."""
+        if hasattr(self, "btn_chevron"):
+            self.btn_chevron.setText("›" if edge == "left" else "‹")
+
+    def set_strip_mode(self, is_strip: bool):
+        """Toggle between full 44px Rail and ultra-compact 28px Mini Strip."""
+        if is_strip:
+            if self.layout():
+                self.layout().setContentsMargins(2, 6, 2, 6)
+            self.setFixedWidth(28)
+            self.btn_logo.setFixedSize(22, 22)
+            self.btn_logo.setIconSize(QSize(14, 14))
+            self.btn_chevron.show()
+            if hasattr(self, "sep"):
+                self.sep.hide()
+            for btn in self._cat_buttons.values():
+                btn.hide()
+            self.btn_instant_autocut.hide()
+            self.btn_palette.hide()
+            self.btn_director.hide()
+            self.btn_settings.hide()
+            if hasattr(self, "lbl_status_dot"):
+                self.lbl_status_dot.hide()
+        else:
+            if self.layout():
+                self.layout().setContentsMargins(4, 8, 4, 8)
+            self.setFixedWidth(44)
+            self.btn_logo.setFixedSize(34, 34)
+            self.btn_logo.setIconSize(QSize(20, 20))
+            self.btn_chevron.hide()
+            if hasattr(self, "sep"):
+                self.sep.show()
+            for btn in self._cat_buttons.values():
+                btn.show()
+            self.btn_instant_autocut.show()
+            self.btn_palette.show()
+            self.btn_director.show()
+            self.btn_settings.show()
+            if hasattr(self, "lbl_status_dot"):
+                self.lbl_status_dot.show()
 
     def set_connected(self, connected: bool):
         if connected:

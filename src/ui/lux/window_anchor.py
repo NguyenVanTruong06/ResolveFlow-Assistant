@@ -13,27 +13,29 @@ from typing import Optional, Tuple
 from PySide6.QtCore import QObject, QTimer, Signal as pyqtSignal
 
 
-def _parse_wmctrl_output(output: str) -> Optional[Tuple[int, int, int, int]]:
-    """
-    Parses `wmctrl -l -G` output for DaVinci Resolve.
-    Format: <id> <desktop> <x> <y> <w> <h> <hostname> <title...>
-    """
-    if not output:
-        return None
-
-    for line in output.strip().splitlines():
-        if "davinci resolve" in line.lower():
-            parts = line.split(None, 7)
-            if len(parts) >= 7:
-                try:
-                    x = int(parts[2])
-                    y = int(parts[3])
-                    w = int(parts[4])
-                    h = int(parts[5])
-                    return (x, y, w, h)
-                except (ValueError, IndexError):
+def _parse_wmctrl_output(output: str, with_identity: bool = False) -> Optional[Tuple[int, int, int, int]]:
+    """Đọc wmctrl -l -G; khi có -p -x, xác minh WM_CLASS thay vì chỉ tiêu đề."""
+    candidates = []
+    for line in output.splitlines():
+        parts = line.split(None, 9 if with_identity else 7)
+        try:
+            if with_identity:
+                if len(parts) < 10:
                     continue
-    return None
+                classes = parts[7].lower().split(".")
+                if not any(c in ("resolve", "davinciresolve") for c in classes):
+                    continue
+                x, y, w, h = map(int, parts[3:7])
+            else:
+                if len(parts) < 8 or not parts[7].lower().startswith("davinci resolve"):
+                    continue
+                x, y, w, h = map(int, parts[2:6])
+            if w > 0 and h > 0:
+                candidates.append((x, y, w, h))
+        except (ValueError, IndexError):
+            continue
+    # Hộp thoại phụ không được thay thế cửa sổ chính lớn hơn.
+    return max(candidates, key=lambda r: r[2] * r[3], default=None)
 
 
 def get_resolve_window_rect() -> Optional[Tuple[int, int, int, int]]:
@@ -47,13 +49,13 @@ def get_resolve_window_rect() -> Optional[Tuple[int, int, int, int]]:
         # Try wmctrl
         try:
             res = subprocess.run(
-                ["wmctrl", "-l", "-G"],
+                ["wmctrl", "-l", "-G", "-p", "-x"],
                 capture_output=True,
                 text=True,
                 timeout=1.0,
             )
             if res.returncode == 0:
-                rect = _parse_wmctrl_output(res.stdout)
+                rect = _parse_wmctrl_output(res.stdout, with_identity=True)
                 if rect:
                     return rect
         except Exception:
@@ -62,7 +64,7 @@ def get_resolve_window_rect() -> Optional[Tuple[int, int, int, int]]:
         # Try xdotool
         try:
             res = subprocess.run(
-                ["xdotool", "search", "--onlyvisible", "--name", "DaVinci Resolve"],
+                ["xdotool", "search", "--onlyvisible", "--class", "^([Rr]esolve|[Dd]a[Vv]inci[Rr]esolve)$"],
                 capture_output=True,
                 text=True,
                 timeout=1.0,
@@ -130,30 +132,45 @@ def calculate_dock_geometry(
     """
     Computes (x, y, width, height) to dock the drawer flush against the anchor.
     Falls back gracefully to screen bounds if anchor is None.
+    Handles narrow Resolve windows (<900px) by floating outside when screen permits.
     """
     sx, sy, sw, sh = screen_rect
+    width = min(max(1, int(drawer_width)), sw)
 
     if anchor_rect:
         ax, ay, aw, ah = anchor_rect
-        # Clip anchor to screen bounds
-        ay = max(sy, ay)
-        ah = min(sh, ah)
-        if edge == "right":
-            x = ax + aw - drawer_width
+        if min(sx + sw, ax + aw) <= max(sx, ax) or min(sy + sh, ay + ah) <= max(sy, ay):
+            anchor_rect = None
         else:
-            x = ax
-        y = ay
-        h = ah
-    else:
-        # Fallback to screen edge
-        if edge == "right":
-            x = sx + sw - drawer_width
-        else:
-            x = sx
-        y = sy
-        h = sh
+            top = max(sy, ay)
+            bottom = min(sy + sh, ay + ah)
+            height = max(1, bottom - top)
 
-    return (int(x), int(y), int(drawer_width), int(h))
+            if edge == "right":
+                if aw < 900:
+                    # Narrow Resolve: float outside right edge if screen space permits
+                    ideal_x = ax + aw
+                    if ideal_x + width <= sx + sw:
+                        x = ideal_x
+                    else:
+                        x = min(ideal_x, sx + sw - width)
+                else:
+                    # Normal/wide Resolve: dock inside right edge
+                    right = min(sx + sw, ax + aw)
+                    x = right - width
+                x = min(max(sx, x), sx + sw - width)
+            else:
+                # Left edge
+                left = max(sx, ax)
+                x = left
+                x = min(max(sx, x), sx + sw - width)
+            return (int(x), int(top), int(width), int(height))
+
+    # Fallback to screen edge
+    x = sx + sw - width if edge == "right" else sx
+    x = min(max(sx, x), sx + sw - width)
+    return (int(x), int(sy), int(width), int(sh))
+
 
 
 class ResolveWindowAnchor(QObject):
@@ -161,7 +178,7 @@ class ResolveWindowAnchor(QObject):
     Background tracker that monitors DaVinci Resolve's window coordinates
     and emits `anchor_updated` whenever position or size shifts.
     """
-    anchor_updated = pyqtSignal(tuple)
+    anchor_updated = pyqtSignal(object)
 
     def __init__(self, poll_interval_ms: int = 1500, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -186,5 +203,4 @@ class ResolveWindowAnchor(QObject):
         current = self.get_rect()
         if current != self._last_rect:
             self._last_rect = current
-            if current is not None:
-                self.anchor_updated.emit(current)
+            self.anchor_updated.emit(current)

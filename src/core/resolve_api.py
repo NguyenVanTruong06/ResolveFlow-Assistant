@@ -456,10 +456,23 @@ class ResolveAutomation:
         Returns:
             object: Đối tượng Timeline của Resolve hoặc None nếu thất bại.
         """
-        if not self.resolve or not self.current_project:
+        if not self.resolve:
             if not self.connect():
                 return None
-        return self.current_project.GetCurrentTimeline()
+        try:
+            if self.resolve:
+                pm = self.resolve.GetProjectManager()
+                if pm:
+                    proj = pm.GetCurrentProject()
+                    if proj:
+                        self.current_project = proj
+                        self.project_manager = pm
+        except Exception:
+            pass
+        if not self.current_project:
+            if not self.connect():
+                return None
+        return self.current_project.GetCurrentTimeline() if self.current_project else None
 
     @staticmethod
     def generate_srt(subtitles: List[Dict[str, Any]], output_path: str) -> str:
@@ -892,6 +905,121 @@ class ResolveAutomation:
         log(f" ✔ LUT từng clip: gắn {stats['applied']}, bỏ qua {stats['skipped']} (đã có LUT), lỗi {stats['failed']}.")
         return stats
 
+    def apply_lut_to_current_clip(
+        self,
+        lut_path: str,
+        target_track: Optional[int] = None,
+        skip_existing: bool = True,
+        log_callback: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Áp dụng LUT (.cube) vào riêng clip video tại vị trí Playhead hiện tại.
+        - Không áp lên Timeline Node Graph hay toàn bộ timeline.
+        - Trả về: {"ok": bool, "status": "applied"|"skipped"|"error", "applied": int, "skipped": int, "failed": int, "clip_name": str, "track": int, "message": str}
+        """
+        def log(msg: str):
+            if log_callback:
+                log_callback(msg)
+            else:
+                print(msg)
+
+        if not lut_path or not os.path.exists(lut_path):
+            msg = f"Không tìm thấy file LUT: {lut_path}"
+            log(f" ❌ {msg}")
+            return {"ok": False, "status": "error", "applied": 0, "skipped": 0, "failed": 1, "clip_name": "", "track": 1, "message": msg}
+
+        timeline = self.get_active_timeline()
+        if not timeline:
+            msg = "Không có Timeline nào đang mở trong DaVinci Resolve."
+            log(f" ❌ {msg}")
+            return {"ok": False, "status": "error", "applied": 0, "skipped": 0, "failed": 1, "clip_name": "", "track": 1, "message": msg}
+
+        try:
+            rec_frame, current_tc = current_record_frame(timeline, self.current_project)
+        except Exception as e:
+            msg = f"Không đọc được vị trí Playhead: {e}"
+            log(f" ❌ {msg}")
+            return {"ok": False, "status": "error", "applied": 0, "skipped": 0, "failed": 1, "clip_name": "", "track": 1, "message": msg}
+
+        total_tracks = int(timeline.GetTrackCount("video") or 0)
+        matching_clips: List[Tuple[int, Any]] = []
+        for t in range(1, total_tracks + 1):
+            items = timeline.GetItemListInTrack("video", t) or []
+            for it in items:
+                try:
+                    s = int(it.GetStart())
+                    e = int(it.GetEnd())
+                    if s <= rec_frame < e:
+                        matching_clips.append((t, it))
+                except Exception:
+                    continue
+
+        if not matching_clips:
+            msg = f"Không có clip video nào tại vị trí Playhead (frame {rec_frame})."
+            log(f" ❌ {msg}")
+            return {"ok": False, "status": "error", "applied": 0, "skipped": 0, "failed": 1, "clip_name": "", "track": 1, "message": msg}
+
+        if len(matching_clips) > 1:
+            if target_track is not None:
+                selected = next((c for c in matching_clips if c[0] == target_track), None)
+                if not selected:
+                    tracks_str = ", ".join(f"V{t}" for t, _ in matching_clips)
+                    msg = f"Không tìm thấy clip tại Playhead trên track V{target_track} (clip hiện có ở: {tracks_str})."
+                    log(f" ❌ {msg}")
+                    return {"ok": False, "status": "error", "applied": 0, "skipped": 0, "failed": 1, "clip_name": "", "track": target_track, "message": msg}
+            else:
+                v1_clip = next((c for c in matching_clips if c[0] == 1), None)
+                if v1_clip:
+                    selected = v1_clip
+                else:
+                    tracks_str = ", ".join(f"V{t}" for t, _ in matching_clips)
+                    msg = f"Có nhiều clip video chồng nhau tại Playhead ({tracks_str}). Vui lòng chỉ định track cụ thể."
+                    log(f" ⚠️ {msg}")
+                    return {"ok": False, "status": "error", "applied": 0, "skipped": 0, "failed": 1, "clip_name": "", "track": 1, "message": msg}
+        else:
+            selected = matching_clips[0]
+
+        track_idx, clip_item = selected
+        clip_name = ""
+        try:
+            clip_name = clip_item.GetName() or f"Clip_V{track_idx}"
+        except Exception:
+            clip_name = f"Clip_V{track_idx}"
+
+        try:
+            graph = clip_item.GetNodeGraph()
+        except Exception:
+            graph = None
+
+        if graph is None:
+            msg = f"Không truy cập được Color Node Graph của clip '{clip_name}'."
+            log(f" ❌ {msg}")
+            return {"ok": False, "status": "error", "applied": 0, "skipped": 0, "failed": 1, "clip_name": clip_name, "track": track_idx, "message": msg}
+
+        existing = self._graph_luts(graph)
+        if existing and skip_existing:
+            lut_base = os.path.basename(existing[0])
+            msg = f"Clip '{clip_name}' đã có LUT ({lut_base}), chưa thay đổi"
+            log(f" ⏭ {msg}")
+            return {"ok": False, "status": "skipped", "applied": 0, "skipped": 1, "failed": 0, "clip_name": clip_name, "track": track_idx, "message": msg}
+
+        lut_path = os.path.abspath(lut_path)
+        try:
+            if self.current_project:
+                self.current_project.RefreshLUTList()
+        except Exception:
+            pass
+
+        if self._set_lut(graph, lut_path):
+            lut_base = os.path.basename(lut_path)
+            msg = f"Đã áp LUT '{lut_base}' vào clip '{clip_name}' (V{track_idx})"
+            log(f" ✔ {msg}")
+            return {"ok": True, "status": "applied", "applied": 1, "skipped": 0, "failed": 0, "clip_name": clip_name, "track": track_idx, "message": msg}
+        else:
+            msg = f"Resolve không thể gắn LUT vào clip '{clip_name}'."
+            log(f" ❌ {msg}")
+            return {"ok": False, "status": "error", "applied": 0, "skipped": 0, "failed": 1, "clip_name": clip_name, "track": track_idx, "message": msg}
+
     def get_current_playhead_timecode(self) -> Optional[str]:
         """Lấy chuỗi timecode hiện tại của con trỏ (Playhead) trên Timeline đang mở."""
         timeline = self.get_active_timeline()
@@ -952,7 +1080,8 @@ class ResolveAutomation:
         target_track: int = 2,
         time_pos: Optional[float] = None,
         volume_offset_db: float = -12.0,
-        log_callback: Optional[Any] = None
+        log_callback: Optional[Any] = None,
+        record_frame: Optional[int] = None,
     ) -> bool:
         """
         Nạp file âm thanh SFX vào Media Pool và chèn vào Audio Track chỉ định.
@@ -1006,14 +1135,17 @@ class ResolveAutomation:
 
         if not sfx_item:
             log(f" ⚠️ Đã nạp SFX vào Media Pool. Vui lòng kéo thả '{os.path.basename(sfx_path)}' vào Timeline Audio Track {target_track}.")
-            return True
+            return False
 
         # 3. Append to timeline at track
         try:
+            rec_frame = (int(record_frame) if record_frame is not None
+                         else current_record_frame(timeline, self.current_project)[0])
             appended = media_pool.AppendToTimeline([{
                 "mediaPoolItem": sfx_item,
                 "trackIndex": target_track,
-                "mediaType": 2
+                "mediaType": 2,
+                "recordFrame": rec_frame,
             }])
             if appended:
                 log(f" ✔ Đã chèn thành công hiệu ứng âm thanh '{os.path.basename(sfx_path)}' vào Audio Track {target_track}!")
@@ -1021,8 +1153,8 @@ class ResolveAutomation:
         except Exception as e:
             log(f" ℹ Append to timeline: {str(e)}")
 
-        log(f" ✔ SFX '{os.path.basename(sfx_path)}' đã sẵn sàng trong Media Pool.")
-        return True
+        log(f" ⚠️ SFX '{os.path.basename(sfx_path)}' đã sẵn sàng trong Media Pool.")
+        return False
 
     def insert_media_at_playhead(
         self,
@@ -1156,7 +1288,7 @@ class ResolveAutomation:
                 append_spec = {
                     "mediaPoolItem": target_item,
                     "startFrame": 0,
-                    "endFrame": dur_frames - 1,
+                    "endFrame": dur_frames,
                     "recordFrame": rec_frame,
                     "trackIndex": target_track,
                     "mediaType": 1,

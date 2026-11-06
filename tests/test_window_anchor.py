@@ -64,3 +64,34 @@ def test_anchor_tracker_timer(qapp):
     tracker._check_anchor()
     assert len(emitted) == 2
     assert emitted[1] == (100, 100, 1280, 720)
+
+
+def test_anchor_loss_emits_none(qapp):
+    from src.ui.lux.window_anchor import ResolveWindowAnchor
+    tracker = ResolveWindowAnchor()
+    values = []
+    tracker.anchor_updated.connect(values.append)
+    tracker.get_rect = MagicMock(return_value=(100, 50, 1600, 900))
+    tracker._check_anchor()
+    tracker.get_rect.return_value = None
+    tracker._check_anchor()
+    assert values == [(100, 50, 1600, 900), None]
+
+
+def test_identity_parser_ignores_browser_and_prefers_main_window():
+    from src.ui.lux.window_anchor import _parse_wmctrl_output
+    output = '''0x01 0 100 400 300 900 600 google-chrome.Google-chrome host DaVinci Resolve - Google Chrome
+0x02 0 200 600 400 800 500 resolve.Resolve host DaVinci Resolve Dialog
+0x03 0 200 0 0 1920 1080 resolve.Resolve host DaVinci Resolve Studio
+'''
+    assert _parse_wmctrl_output(output, with_identity=True) == (0, 0, 1920, 1080)
+
+
+@pytest.mark.parametrize('anchor,want', [
+    ((1800, 1000, 400, 500), (1520, 1000, 400, 80)),
+    ((2500, 100, 1000, 800), (1520, 0, 400, 1080)),
+    ((-200, -100, 1600, 900), (1000, 0, 400, 800)),
+])
+def test_geometry_stays_inside_screen(anchor, want):
+    from src.ui.lux.window_anchor import calculate_dock_geometry
+    assert calculate_dock_geometry(anchor, (0, 0, 1920, 1080), 400) == want

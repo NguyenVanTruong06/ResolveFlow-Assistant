@@ -126,3 +126,78 @@ def test_stylesheets_no_fractional_px(qapp):
     assert not fractional_pattern.search(tab.suggestion_bar.styleSheet())
     if chips:
         assert not fractional_pattern.search(chips[0].styleSheet())
+
+
+def test_suggestion_ribbon_compact_height_and_close_reopen(qapp):
+    tab = TabAssets()
+    assert tab.suggestion_bar.maximumHeight() <= 40
+    assert not tab.suggestion_bar.isHidden()
+
+    # Close with × button
+    tab.btn_close_sug.click()
+    assert tab.suggestion_bar.isHidden()
+    assert not tab.btn_toggle_sug_bar.isChecked()
+
+    # Reopen from toolbar button
+    tab.btn_toggle_sug_bar.click()
+    assert not tab.suggestion_bar.isHidden()
+
+
+def test_suggestion_chip_switches_category_and_clears_filter(qapp):
+    tab = TabAssets()
+    tab._filter_by_rail("lut")
+    tab.txt_search.setText("xyz_random_search")
+
+    # Pick an sfx asset that exists in tab.all_assets
+    sfx_item = next(a for a in tab.all_assets if getattr(a, "tab", "") == "sfx")
+    tab._on_card_selected(sfx_item.id)
+
+    assert tab.current_rail_tab == "sfx"
+    assert tab.txt_search.text() == ""
+    assert tab.selected_asset is not None
+    assert tab.selected_asset.id == sfx_item.id
+
+
+def test_suggestion_missing_asset_warning(qapp, monkeypatch):
+    tab = TabAssets()
+    toasts = []
+    monkeypatch.setattr(tab, "_show_toast", lambda msg: toasts.append(msg))
+
+    orig_selected = tab.selected_asset
+    tab._on_card_selected("non_existent_asset_id_99999")
+
+    assert len(toasts) == 1
+    assert "không còn tồn tại trong kho" in toasts[0]
+    assert tab.selected_asset == orig_selected
+
+
+def test_dock_edit_suggest_block_compact_and_no_insert(qapp):
+    from unittest.mock import MagicMock
+    from src.ui.lux.context.special_blocks import EditSuggestBlock
+    from src.ui.lux.shell.edge_dock import EdgeDockWindow
+
+    block = EditSuggestBlock()
+    assert block.maximumHeight() <= 40
+
+    long_sentence = "Một câu thoại cực kỳ dài vượt quá chiều rộng của ribbon để kiểm tra tính năng elide text QFontMetrics"
+    block.set_suggestion("00:01:23", long_sentence)
+    assert len(block.lbl_text.text()) < len(long_sentence)
+    assert long_sentence in block.lbl_text.toolTip()
+
+    # Test that clicking suggestion in EdgeDock selects and previews, does NOT call insert_service.insert
+    mock_insert_service = MagicMock()
+    dock = EdgeDockWindow(insert_service=mock_insert_service)
+    dock.set_assets([
+        {"id": "sfx_whoosh", "name": "Whoosh", "category": "sfx", "tab": "sfx", "type": "sfx", "preview_path": "test.mp3"}
+    ])
+    dock.category_nav.select_category("text")
+
+    dock._on_suggested_asset("sfx_whoosh")
+
+    # Switched category to sfx
+    assert dock.category_nav.current_category == "sfx"
+    # Selected asset updated
+    assert dock._selected_asset is not None
+    assert dock._selected_asset["id"] == "sfx_whoosh"
+    # Did NOT auto-insert to timeline!
+    assert mock_insert_service.insert.call_count == 0

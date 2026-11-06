@@ -165,3 +165,59 @@ def test_search_real_600_assets_performance(tmp_path):
     avg_ms = sum(durations) / len(durations)
     print(f"\n[BENCHMARK] Indexed {len(flattened)} real assets. Avg search latency: {avg_ms:.3f}ms")
     assert avg_ms < 16.0
+
+
+def test_search_limit_default_positive_and_unlimited(tmp_path):
+    """G04-04B1-I: Kiểm tra tham số limit: mặc định 50, dương N, và explicit 0/None trả toàn bộ matches > 100."""
+    total_count = 125
+    assets = [
+        {
+            "id": f"cinematic_shot_{i:03d}",
+            "name": f"Cinematic Shot {i:03d}",
+            "category": "broll",
+            "tags": ["cinema", "film"],
+        }
+        for i in range(total_count)
+    ]
+    frecency_file = str(tmp_path / "frecency_limit.json")
+    idx = SearchIndex(assets, frecency_path=frecency_file)
+
+    # 1. Mặc định (không truyền limit): trả về đúng 50 kết quả
+    default_results = idx.search("Cinematic")
+    assert len(default_results) == 50, f"Kỳ vọng 50, nhận: {len(default_results)}"
+
+    # 2. Limit dương N (ví dụ limit=20): trả về đúng 20 kết quả, thứ tự khớp 20 phần tử đầu của default
+    limit_20 = idx.search("Cinematic", limit=20)
+    assert len(limit_20) == 20
+    assert [r["asset"]["id"] for r in limit_20] == [r["asset"]["id"] for r in default_results[:20]]
+
+    # 3. Limit explicit 0: trả về toàn bộ 125 kết quả không bị cắt
+    unlimited_0 = idx.search("Cinematic", limit=0)
+    assert len(unlimited_0) == total_count, f"Kỳ vọng {total_count}, nhận: {len(unlimited_0)}"
+    # 50 phần tử đầu của unlimited_0 phải trùng khớp 100% với default_results
+    assert [r["asset"]["id"] for r in unlimited_0[:50]] == [r["asset"]["id"] for r in default_results]
+
+    # 4. Limit None: cũng trả về toàn bộ 125 kết quả
+    unlimited_none = idx.search("Cinematic", limit=None)
+    assert len(unlimited_none) == total_count
+    assert [r["asset"]["id"] for r in unlimited_none] == [r["asset"]["id"] for r in unlimited_0]
+
+    # 5. G04-04B1-R1: Limit âm (-1, -2) bảo toàn ngữ nghĩa Python slicing results[:limit]
+    neg_1 = idx.search("Cinematic", limit=-1)
+    assert len(neg_1) == total_count - 1
+    assert [r["asset"]["id"] for r in neg_1] == [r["asset"]["id"] for r in unlimited_0[:-1]]
+
+    neg_2 = idx.search("Cinematic", limit=-2)
+    assert len(neg_2) == total_count - 2
+    assert [r["asset"]["id"] for r in neg_2] == [r["asset"]["id"] for r in unlimited_0[:-2]]
+
+    # 6. Phối hợp với limit_categories và prefix filter khi limit=0
+    mixed_assets = [
+        {"id": "broll_01", "name": "Aerial Shot 01", "category": "broll"},
+        {"id": "sfx_01", "name": "Aerial Sound 01", "category": "sfx"},
+    ]
+    idx_mixed = SearchIndex(mixed_assets, frecency_path=str(tmp_path / "frecency_mixed.json"))
+    res_broll = idx_mixed.search("Aerial", limit_categories=["broll"], limit=0)
+    assert len(res_broll) == 1
+    assert res_broll[0]["asset"]["category"] == "broll"
+

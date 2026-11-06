@@ -10,7 +10,7 @@ from src.services.search_index import SearchIndex
 from .command_registry import CommandRegistry, CommandItem
 from ..context.context_profiles import PROFILES
 
-logger = logging.getLogger("ResolveFlow.PaletteModel")
+logger = logging.getLogger("ChunDVC.PaletteModel")
 
 
 @dataclass

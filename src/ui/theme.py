@@ -7,73 +7,75 @@ from typing import Dict
 
 
 class ThemeColors:
-    # 1. Backgrounds (Nền)
-    BG_CANVAS = "#131316"       # --bg-0 (Màn hình desktop / Canvas tối)
-    BG_MAIN = "#18181b"         # --bg-1 (Nền chính của các cửa sổ)
-    BG_CARD = "#1e1e24"         # --bg-2 (Nền thẻ Card, GroupBox, Panel)
-    BG_INPUT = "#26262d"        # --bg-3 (Nền ô nhập liệu, button phụ)
-    BG_CARD_ACTIVE = "#2f2f37"  # --bg-4 (Nền khi active / hover)
-    BG_HEADER = "#18181b"       # Nền thanh tiêu đề
-    BG_CONSOLE = "#0e0e11"      # Nền khung nhật ký AI Console
+    # 1. Backgrounds (Nền chuẩn Studio NLE DaVinci Resolve 19 / Blackmagic Graphite)
+    BG_STUDIO_DEEP = "#111214"  # --bg-deep (Nền sâu chuẩn bàn dựng NLE)
+    BG_CANVAS = "#16171a"       # --bg-0 (Màn hình desktop / Canvas tối)
+    BG_MAIN = "#1c1d21"         # --bg-1 (Nền chính của các cửa sổ - Matte Graphite trung tính)
+    BG_CARD = "#23252a"         # --bg-2 (Nền thẻ Card, GroupBox, Panel)
+    BG_INPUT = "#151619"        # --bg-3 (Nền ô nhập liệu âm bản chuẩn NLE)
+    BG_CARD_ACTIVE = "#2c2f36"  # --bg-4 (Nền khi active / hover)
+    BG_HEADER = "#18191c"       # Nền thanh tiêu đề Topbar
+    BG_CONSOLE = "#101113"      # Nền khung nhật ký AI Console
 
-    # 2. Borders & Lines (Đường viền)
-    BORDER_DEFAULT = "#27272a"  # --line (Viền mặc định)
-    BORDER_HOVER = "#33333a"    # --line-2 (Viền khi rê chuột)
-    BORDER_FOCUS = "#8b5cf6"    # --violet-hi (Viền khi focus)
-    BORDER_LINE3 = "#45454e"    # --line-3 (Viền nổi)
-    BORDER_ACTIVE = "#7c3aed"   # --violet (Viền kích hoạt)
-    BORDER_ACTIVE_BLUE = "#06b6d4" # --cyan (Viền media / progress)
+    # 2. Borders & Lines (Đường viền chuẩn NLE 1px sắc nét)
+    BORDER_SUBTLE = "#25272c"   # Viền phân tách mảnh nội bộ
+    BORDER_DEFAULT = "#2e3138"  # --line (Viền mặc định chuẩn khung máy)
+    BORDER_HOVER = "#434752"    # --line-2 (Viền khi rê chuột)
+    BORDER_FOCUS = "#e05a47"    # --studio-coral (Viền khi focus)
+    BORDER_LINE3 = "#525764"    # --line-3 (Viền nổi)
+    BORDER_ACTIVE = "#d94f3d"   # --studio-coral (Viền kích hoạt)
+    BORDER_ACTIVE_BLUE = "#38bdf8" # --steel-blue (Viền media / timecode)
 
-    # 3. Typography Colors (Màu chữ)
-    TEXT_PRIMARY = "#ededf0"    # --text (Chữ chính)
-    TEXT_SECONDARY = "#a8a8b3"  # --text-2 (Chữ phụ)
-    TEXT_MUTED = "#74747f"      # --text-3 (Chữ mờ / chú thích)
-    TEXT_ACCENT = "#8b5cf6"     # --violet-hi (Chữ điểm nhấn)
-    TEXT_SUCCESS = "#86efac"    # Chữ xanh lá thành công
-    TEXT_WARNING = "#fcd34d"    # Chữ vàng cảnh báo
-    TEXT_ERROR = "#fca5a5"      # Chữ đỏ lỗi
+    # 3. Typography Colors (Màu chữ độ tương phản chuẩn phòng dựng)
+    TEXT_PRIMARY = "#e6e8ec"    # --text (Chữ chính trắng dịu mắt)
+    TEXT_SECONDARY = "#9da3ae"  # --text-2 (Chữ phụ xám bạc)
+    TEXT_MUTED = "#686e7a"      # --text-3 (Chữ mờ / chú thích)
+    TEXT_ACCENT = "#f59e0b"     # --studio-amber (Chữ điểm nhấn tungsten)
+    TEXT_SUCCESS = "#4ade80"    # Chữ xanh lá thành công
+    TEXT_WARNING = "#fbbf24"    # Chữ vàng cảnh báo
+    TEXT_ERROR = "#f87171"      # Chữ đỏ lỗi
 
-    # 4. Brand & Action (Tím Violet)
-    PRIMARY = "#7c3aed"         # --violet (Màu tím thương hiệu)
-    PRIMARY_HOVER = "#8b5cf6"   # --violet-hi
-    PRIMARY_PRESSED = "#6d28d9"
-    PRIMARY_TEXT = "#ffffff"    # Màu chữ trên nút tím
-    VIOLET = "#7c3aed"
-    VIOLET_HI = "#8b5cf6"
-    VIOLET_LO = "rgba(124, 58, 237, 0.16)"
+    # 4. Brand & Action (DaVinci Resolve Studio Coral Red & Tungsten Amber)
+    PRIMARY = "#d94f3d"         # Màu đỏ cam Studio Coral chuẩn nút hành động DaVinci Resolve
+    PRIMARY_HOVER = "#e86352"   # Sáng hơn khi hover
+    PRIMARY_PRESSED = "#b83f2f" # Đậm hơn khi nhấn
+    PRIMARY_TEXT = "#ffffff"    # Màu chữ trên nút chính
+    VIOLET = "#d94f3d"          # Alias tương thích ngược -> chuyển sang Studio Coral
+    VIOLET_HI = "#e86352"       # Alias tương thích ngược -> chuyển sang Studio Coral Hi
+    VIOLET_LO = "rgba(217, 79, 61, 0.14)"
 
-    # 5. Media, Progress & Playhead (Xanh Cyan)
-    CYAN = "#06b6d4"            # --cyan (Màu tiến độ, playhead)
-    CYAN_HI = "#22d3ee"         # --cyan-hi
-    CYAN_LO = "rgba(6, 182, 212, 0.15)"
+    # 5. Media, Progress & Playhead (Precision Steel Blue)
+    CYAN = "#0284c7"            # Màu tiến độ, playhead chuẩn NLE
+    CYAN_HI = "#38bdf8"         # Steel Blue sáng
+    CYAN_LO = "rgba(56, 189, 248, 0.14)"
 
     # 6. Status Colors (Trạng thái chức năng)
     GREEN = "#22c55e"
     AMBER = "#f59e0b"
     RED = "#ef4444"
-    PINK = "#ec4899"
+    PINK = "#e11d48"
 
     SUCCESS = "#22c55e"
     SUCCESS_HOVER = "#16a34a"
     SUCCESS_PRESSED = "#15803d"
-    SUCCESS_LIGHT = "#22d3ee"
+    SUCCESS_LIGHT = "#38bdf8"
 
-    DANGER = "#ef4444"
-    DANGER_HOVER = "#dc2626"
-    DANGER_PRESSED = "#b91c1c"
+    DANGER = "#dc2626"
+    DANGER_HOVER = "#ef4444"
+    DANGER_PRESSED = "#991b1b"
 
     ERROR = "#ef4444"
     ERROR_HOVER = "#dc2626"
-    INFO = "#06b6d4"
-    INFO_LIGHT = "#22d3ee"
+    INFO = "#0284c7"
+    INFO_LIGHT = "#38bdf8"
 
-    WARNING = "#f59e0b"
-    WARNING_HOVER = "#d97706"
+    WARNING = "#d97706"
+    WARNING_HOVER = "#f59e0b"
 
 
 class ThemeFonts:
-    FAMILY = "'Inter', 'Segoe UI Variable Text', 'Segoe UI', 'Ubuntu', 'Noto Sans', 'Cantarell', system-ui, sans-serif"
-    FAMILY_MONO = "'JetBrains Mono', 'Cascadia Mono', 'Fira Code', 'Consolas', 'DejaVu Sans Mono', monospace"
+    FAMILY = "'Geist', 'Inter', 'Outfit', 'Segoe UI Variable Text', 'Segoe UI', 'Ubuntu', 'Noto Sans', 'Cantarell', system-ui, sans-serif"
+    FAMILY_MONO = "'JetBrains Mono', 'Geist Mono', 'Cascadia Mono', 'Fira Code', 'Consolas', 'DejaVu Sans Mono', monospace"
 
     SIZE_TITLE = 16
     SIZE_SUBTITLE = 12
@@ -161,12 +163,12 @@ def get_application_stylesheet() -> str:
         border-radius: 3px;
     }}
     QScrollBar::handle:vertical {{
-        background-color: #33333a;
+        background-color: #363942;
         min-height: 20px;
         border-radius: 3px;
     }}
     QScrollBar::handle:vertical:hover {{
-        background-color: #8b5cf6;
+        background-color: {ThemeColors.PRIMARY_HOVER};
     }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         height: 0px;
@@ -182,12 +184,12 @@ def get_application_stylesheet() -> str:
         border-radius: 3px;
     }}
     QScrollBar::handle:horizontal {{
-        background-color: #33333a;
+        background-color: #363942;
         min-width: 20px;
         border-radius: 3px;
     }}
     QScrollBar::handle:horizontal:hover {{
-        background-color: #8b5cf6;
+        background-color: {ThemeColors.PRIMARY_HOVER};
     }}
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
         width: 0px;
@@ -200,7 +202,7 @@ def get_application_stylesheet() -> str:
     QGroupBox {{
         background-color: {ThemeColors.BG_CARD};
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
-        border-radius: 10px;
+        border-radius: 5px;
         margin-top: 14px;
         padding-top: 14px;
         padding-bottom: 10px;
@@ -218,7 +220,7 @@ def get_application_stylesheet() -> str:
         top: -8px;
         padding: 0px 8px;
         background-color: {ThemeColors.BG_MAIN};
-        color: {ThemeColors.TEXT_MUTED};
+        color: {ThemeColors.TEXT_SECONDARY};
         font-size: 11px;
         text-transform: uppercase;
         letter-spacing: 0.5px;
@@ -243,10 +245,10 @@ def get_application_stylesheet() -> str:
 
     /* --- INPUTS & COMBOBOXES --- */
     QLineEdit, QComboBox {{
-        background-color: {ThemeColors.BG_CANVAS};
+        background-color: {ThemeColors.BG_INPUT};
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
-        border-radius: 8px;
-        padding: 6px 10px;
+        border-radius: 4px;
+        padding: 5px 10px;
         color: {ThemeColors.TEXT_PRIMARY};
         font-size: 12.5px;
         min-height: 20px;
@@ -256,20 +258,20 @@ def get_application_stylesheet() -> str:
     }}
     QLineEdit:focus, QComboBox:focus {{
         border: 1px solid {ThemeColors.BORDER_FOCUS};
-        background-color: {ThemeColors.BG_CARD};
+        background-color: #191b1f;
     }}
     QComboBox::drop-down {{
         subcontrol-origin: padding;
         subcontrol-position: top right;
         width: 24px;
         border-left-width: 0px;
-        border-top-right-radius: 8px;
-        border-bottom-right-radius: 8px;
+        border-top-right-radius: 4px;
+        border-bottom-right-radius: 4px;
     }}
     QComboBox QAbstractItemView {{
         background-color: {ThemeColors.BG_CARD};
         border: 1px solid {ThemeColors.BORDER_HOVER};
-        border-radius: 8px;
+        border-radius: 4px;
         color: {ThemeColors.TEXT_PRIMARY};
         selection-background-color: {ThemeColors.PRIMARY};
         selection-color: #FFFFFF;
@@ -284,9 +286,9 @@ def get_application_stylesheet() -> str:
         font-size: 12.5px;
     }}
     QCheckBox::indicator {{
-        width: 16px;
-        height: 16px;
-        border-radius: 4px;
+        width: 15px;
+        height: 15px;
+        border-radius: 3px;
         border: 1px solid {ThemeColors.BORDER_HOVER};
         background-color: {ThemeColors.BG_INPUT};
     }}
@@ -299,9 +301,9 @@ def get_application_stylesheet() -> str:
     }}
 
     QRadioButton::indicator {{
-        width: 16px;
-        height: 16px;
-        border-radius: 8px;
+        width: 15px;
+        height: 15px;
+        border-radius: 7px;
         border: 1px solid {ThemeColors.BORDER_HOVER};
         background-color: {ThemeColors.BG_INPUT};
     }}
@@ -317,51 +319,51 @@ def get_application_stylesheet() -> str:
     QSlider::groove:horizontal {{
         border: none;
         height: 4px;
-        background: {ThemeColors.BG_CARD_ACTIVE};
+        background: {ThemeColors.BG_INPUT};
         border-radius: 2px;
     }}
     QSlider::sub-page:horizontal {{
-        background: {ThemeColors.PRIMARY_HOVER};
+        background: {ThemeColors.PRIMARY};
         border-radius: 2px;
     }}
     QSlider::handle:horizontal {{
-        background: #FFFFFF;
-        border: 3px solid {ThemeColors.PRIMARY_HOVER};
-        width: 14px;
-        height: 14px;
-        margin: -5px 0;
-        border-radius: 7px;
+        background: #e6e8ec;
+        border: 2px solid {ThemeColors.PRIMARY};
+        width: 12px;
+        height: 12px;
+        margin: -4px 0;
+        border-radius: 6px;
     }}
     QSlider::handle:horizontal:hover {{
         background: #FFFFFF;
-        border: 3px solid {ThemeColors.PRIMARY};
+        border: 2px solid {ThemeColors.PRIMARY_HOVER};
     }}
 
     /* --- BUTTONS --- */
     QPushButton {{
-        background-color: {ThemeColors.BG_INPUT};
+        background-color: #272930;
         color: {ThemeColors.TEXT_PRIMARY};
-        border: 1px solid {ThemeColors.BORDER_HOVER};
-        border-radius: 8px;
-        padding: 7px 14px;
-        font-weight: 500;
-        font-size: 12.5px;
+        border: 1px solid #353942;
+        border-radius: 4px;
+        padding: 6px 12px;
+        font-weight: 600;
+        font-size: 12px;
         min-height: 20px;
     }}
     QPushButton:hover {{
-        background-color: {ThemeColors.BG_CARD_ACTIVE};
-        border-color: {ThemeColors.BORDER_LINE3};
+        background-color: #30333c;
+        border-color: {ThemeColors.BORDER_HOVER};
     }}
     QPushButton:pressed {{
         background-color: {ThemeColors.BG_INPUT};
     }}
     QPushButton:disabled {{
-        background-color: {ThemeColors.BG_INPUT};
-        border-color: {ThemeColors.BORDER_DEFAULT};
+        background-color: #191a1e;
+        border-color: {ThemeColors.BORDER_SUBTLE};
         color: {ThemeColors.TEXT_MUTED};
     }}
 
-    /* Nút chính Primary (Tím Violet) */
+    /* Nút chính Primary (DaVinci Studio Coral) */
     QPushButton.primary, QPushButton#btn_primary {{
         background-color: {ThemeColors.PRIMARY};
         color: #FFFFFF;
@@ -378,35 +380,35 @@ def get_application_stylesheet() -> str:
     /* Nút Dừng Stop / Cancel */
     QPushButton.stop, QPushButton#btn_stop {{
         background-color: transparent;
-        border: 1px solid rgba(239, 68, 68, 0.35);
-        color: #fca5a5;
+        border: 1px solid rgba(239, 68, 68, 0.4);
+        color: #f87171;
     }}
     QPushButton.stop:hover, QPushButton#btn_stop:hover {{
         background-color: rgba(239, 68, 68, 0.14);
-        border-color: rgba(239, 68, 68, 0.6);
+        border-color: #ef4444;
     }}
 
     /* --- PROGRESS BAR --- */
     QProgressBar {{
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
-        border-radius: 4px;
+        border-radius: 3px;
         text-align: center;
-        background-color: {ThemeColors.BG_CARD_ACTIVE};
+        background-color: {ThemeColors.BG_INPUT};
         color: #FFFFFF;
         font-weight: bold;
         font-size: 11px;
         height: 6px;
     }}
     QProgressBar::chunk {{
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {ThemeColors.PRIMARY_HOVER}, stop:1 {ThemeColors.CYAN_HI});
-        border-radius: 4px;
+        background-color: {ThemeColors.PRIMARY};
+        border-radius: 2px;
     }}
 
     /* --- CONSOLE LOGS --- */
     QPlainTextEdit {{
         background-color: {ThemeColors.BG_CONSOLE};
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
-        border-radius: 10px;
+        border-radius: 4px;
         font-family: {ThemeFonts.FAMILY_MONO};
         color: {ThemeColors.TEXT_SECONDARY};
         font-size: 11.5px;
@@ -414,77 +416,87 @@ def get_application_stylesheet() -> str:
         line-height: 1.6;
     }}
 
-    /* --- TABLES --- */
-    QTableWidget {{
-        background-color: {ThemeColors.BG_CARD};
+    /* --- TABLES (Chuẩn NLE DaVinci Resolve / Premiere Pro) --- */
+    QTableWidget, QTableView {{
+        background-color: {ThemeColors.BG_CANVAS};
+        alternate-background-color: #191b1f;
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
-        border-radius: 8px;
-        gridline-color: {ThemeColors.BORDER_DEFAULT};
+        border-radius: 4px;
+        gridline-color: {ThemeColors.BORDER_SUBTLE};
         color: {ThemeColors.TEXT_PRIMARY};
+        selection-background-color: rgba(217, 79, 61, 0.25);
+        selection-color: #FFFFFF;
+        outline: none;
     }}
     QHeaderView::section {{
-        background-color: {ThemeColors.BG_INPUT};
+        background-color: #1e2025;
         color: {ThemeColors.TEXT_SECONDARY};
         font-weight: 600;
-        padding: 6px;
-        border: 1px solid {ThemeColors.BORDER_DEFAULT};
+        font-size: 11px;
+        padding: 5px 8px;
+        border: none;
+        border-right: 1px solid {ThemeColors.BORDER_DEFAULT};
+        border-bottom: 1px solid {ThemeColors.BORDER_DEFAULT};
     }}
-    QTableWidget::item:selected {{
-        background-color: {ThemeColors.PRIMARY};
+    QTableWidget::item:selected, QTableView::item:selected {{
+        background-color: rgba(217, 79, 61, 0.28);
         color: #FFFFFF;
+    }}
+    QTableWidget::item:hover, QTableView::item:hover {{
+        background-color: rgba(255, 255, 255, 0.03);
     }}
 
     /* --- TAB WIDGET & TAB BAR --- */
     QTabWidget::pane {{
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
         background-color: transparent;
-        border-radius: 8px;
+        border-radius: 4px;
         top: -1px;
     }}
     QTabBar::tab {{
         background-color: transparent;
         color: {ThemeColors.TEXT_SECONDARY};
         border: none;
-        padding: 10px 18px;
-        margin-right: 4px;
-        font-weight: 500;
-        font-size: 12.5px;
-        border-radius: 6px;
+        padding: 8px 16px;
+        margin-right: 2px;
+        font-weight: 600;
+        font-size: 12px;
+        border-radius: 4px;
     }}
     QTabBar::tab:hover {{
         color: {ThemeColors.TEXT_PRIMARY};
         background-color: {ThemeColors.BG_CARD};
     }}
     QTabBar::tab:selected {{
-        background-color: {ThemeColors.BG_INPUT};
+        background-color: {ThemeColors.BG_CARD_ACTIVE};
         color: {ThemeColors.TEXT_PRIMARY};
-        border-bottom: 2px solid {ThemeColors.PRIMARY_HOVER};
-        font-weight: 600;
+        border-bottom: 2px solid {ThemeColors.PRIMARY};
+        font-weight: 700;
     }}
 
     /* --- SPLITTER --- */
     QSplitter::handle:horizontal {{
-        background-color: transparent;
-        width: 4px;
+        background-color: {ThemeColors.BORDER_SUBTLE};
+        width: 2px;
         margin: 0px;
     }}
     QSplitter::handle:horizontal:hover {{
-        background-color: #8b5cf6;
+        background-color: {ThemeColors.PRIMARY_HOVER};
     }}
     QSplitter::handle:vertical {{
-        background-color: transparent;
-        height: 4px;
+        background-color: {ThemeColors.BORDER_SUBTLE};
+        height: 2px;
         margin: 0px;
     }}
     QSplitter::handle:vertical:hover {{
-        background-color: #8b5cf6;
+        background-color: {ThemeColors.PRIMARY_HOVER};
     }}
 
     /* --- SEMANTIC ROLES & PROPERTY SELECTORS --- */
     QFrame[role="card"] {{
         background-color: {ThemeColors.BG_CARD};
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
-        border-radius: 10px;
+        border-radius: 5px;
     }}
     QFrame[role="card"]:hover {{
         border-color: {ThemeColors.BORDER_HOVER};
@@ -493,84 +505,84 @@ def get_application_stylesheet() -> str:
     QFrame[role="panel"] {{
         background-color: {ThemeColors.BG_MAIN};
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
-        border-radius: 8px;
+        border-radius: 4px;
     }}
 
     QFrame[role="header"] {{
-        background-color: {ThemeColors.BG_MAIN};
+        background-color: {ThemeColors.BG_HEADER};
         border-bottom: 1px solid {ThemeColors.BORDER_DEFAULT};
     }}
 
     QPushButton[role="nav-switch"] {{
-        background-color: #26262d;
+        background-color: #25272d;
         color: {ThemeColors.TEXT_PRIMARY};
-        border: 1px solid #33333a;
-        border-radius: 6px;
+        border: 1px solid #353841;
+        border-radius: 4px;
         padding: 5px 12px;
         font-size: 12px;
         font-weight: 600;
     }}
     QPushButton[role="nav-switch"]:hover {{
-        background-color: rgba(124, 58, 237, 0.16);
-        border-color: #8b5cf6;
+        background-color: #2f323a;
+        border-color: {ThemeColors.PRIMARY_HOVER};
         color: #ffffff;
     }}
     QPushButton[role="nav-switch"]:pressed {{
-        background-color: rgba(124, 58, 237, 0.28);
+        background-color: {ThemeColors.BG_INPUT};
     }}
 
     /* --- HIGH-END CARDS & ISLAND BUTTONS --- */
     QFrame[role="card_nested"] {{
         background-color: {ThemeColors.BG_CARD};
         border: 1px solid {ThemeColors.BORDER_DEFAULT};
-        border-radius: 12px;
+        border-radius: 5px;
     }}
     QFrame[role="card_nested"]:hover {{
         border-color: {ThemeColors.BORDER_HOVER};
     }}
 
     QPushButton[role="btn_island"] {{
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {ThemeColors.PRIMARY}, stop:1 #0891b2);
+        background-color: {ThemeColors.PRIMARY};
         border: 1px solid {ThemeColors.PRIMARY_HOVER};
         color: #ffffff;
-        border-radius: 8px;
-        padding: 9px 18px;
+        border-radius: 4px;
+        padding: 8px 16px;
         font-weight: 600;
-        font-size: 13px;
+        font-size: 12.5px;
     }}
     QPushButton[role="btn_island"]:hover {{
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {ThemeColors.PRIMARY_HOVER}, stop:1 {ThemeColors.CYAN});
-        border-color: {ThemeColors.CYAN_HI};
+        background-color: {ThemeColors.PRIMARY_HOVER};
+        border-color: #f07b6b;
     }}
     QPushButton[role="btn_island"]:pressed {{
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {ThemeColors.PRIMARY_PRESSED}, stop:1 #0e7490);
+        background-color: {ThemeColors.PRIMARY_PRESSED};
     }}
 
     /* --- TOOLTIPS --- */
     QToolTip {{
-        background-color: #232329;
+        background-color: #23252a;
         color: {ThemeColors.TEXT_PRIMARY};
-        border: 1px solid {ThemeColors.BORDER_LINE3};
-        border-radius: 8px;
-        padding: 6px 10px;
-        font-size: 12px;
+        border: 1px solid {ThemeColors.BORDER_HOVER};
+        border-radius: 4px;
+        padding: 5px 8px;
+        font-size: 11.5px;
     }}
 
     /* --- CONTEXT MENUS --- */
     QMenu {{
-        background-color: #1a1a1e;
+        background-color: #1c1d21;
         color: {ThemeColors.TEXT_PRIMARY};
         border: 1px solid {ThemeColors.BORDER_HOVER};
-        border-radius: 8px;
+        border-radius: 4px;
         padding: 4px;
     }}
     QMenu::item {{
-        padding: 6px 20px;
-        border-radius: 6px;
+        padding: 6px 18px;
+        border-radius: 3px;
     }}
     QMenu::item:selected {{
-        background-color: {ThemeColors.BG_INPUT};
-        color: {ThemeColors.PRIMARY_HOVER};
+        background-color: {ThemeColors.PRIMARY};
+        color: #ffffff;
     }}
     """
 
@@ -580,7 +592,7 @@ def get_badge_style(color: str = ThemeColors.PRIMARY, bg_color: str = ThemeColor
     return f"""
         color: {color};
         background-color: {bg_color};
-        border-radius: 4px;
+        border-radius: 3px;
         padding: 2px 6px;
         font-size: {font_size}px;
         font-weight: 600;
@@ -591,12 +603,12 @@ def get_card_style(active: bool = False, accent_color: str = None) -> str:
     """Tạo stylesheet đồng bộ cho thẻ QFrame/SectionCard."""
     bg = ThemeColors.BG_CARD_ACTIVE if active else ThemeColors.BG_CARD
     border = ThemeColors.BORDER_ACTIVE if active else ThemeColors.BORDER_DEFAULT
-    border_left = f"border-left: 4px solid {accent_color};" if accent_color else f"border-left: 1px solid {border};"
+    border_left = f"border-left: 3px solid {accent_color};" if accent_color else f"border-left: 1px solid {border};"
     return f"""
         background-color: {bg};
         border: 1px solid {border};
         {border_left}
-        border-radius: 8px;
+        border-radius: 5px;
     """
 
 
@@ -607,14 +619,14 @@ def get_button_style(variant: str = "secondary") -> str:
             QPushButton {{
                 background-color: {ThemeColors.PRIMARY};
                 color: {ThemeColors.PRIMARY_TEXT};
-                border: 1px solid {ThemeColors.PRIMARY};
-                border-radius: 6px;
+                border: 1px solid {ThemeColors.PRIMARY_HOVER};
+                border-radius: 4px;
                 padding: 6px 14px;
                 font-weight: 600;
             }}
             QPushButton:hover {{
                 background-color: {ThemeColors.PRIMARY_HOVER};
-                border-color: {ThemeColors.PRIMARY_HOVER};
+                border-color: #f07b6b;
             }}
             QPushButton:pressed {{
                 background-color: {ThemeColors.PRIMARY_PRESSED};
@@ -623,15 +635,15 @@ def get_button_style(variant: str = "secondary") -> str:
     elif variant == "gradient":
         return f"""
             QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 {ThemeColors.PRIMARY_HOVER}, stop:1 {ThemeColors.PRIMARY});
+                background-color: {ThemeColors.PRIMARY};
                 color: #ffffff;
-                border: none;
-                border-radius: 8px;
+                border: 1px solid {ThemeColors.PRIMARY_HOVER};
+                border-radius: 4px;
                 padding: 6px 14px;
                 font-weight: 600;
             }}
             QPushButton:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #a78bfa, stop:1 {ThemeColors.PRIMARY_HOVER});
+                background-color: {ThemeColors.PRIMARY_HOVER};
             }}
             QPushButton:pressed {{
                 background-color: {ThemeColors.PRIMARY_PRESSED};
@@ -643,7 +655,7 @@ def get_button_style(variant: str = "secondary") -> str:
                 background-color: {ThemeColors.DANGER};
                 color: #ffffff;
                 border: 1px solid {ThemeColors.DANGER};
-                border-radius: 6px;
+                border-radius: 4px;
                 padding: 6px 14px;
                 font-weight: 600;
             }}
@@ -657,10 +669,10 @@ def get_button_style(variant: str = "secondary") -> str:
     else:  # secondary
         return f"""
             QPushButton {{
-                background-color: {ThemeColors.BG_INPUT};
+                background-color: #272930;
                 color: {ThemeColors.TEXT_PRIMARY};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                border-radius: 6px;
+                border-radius: 4px;
                 padding: 6px 14px;
             }}
             QPushButton:hover {{
@@ -668,6 +680,6 @@ def get_button_style(variant: str = "secondary") -> str:
                 border-color: {ThemeColors.BORDER_HOVER};
             }}
             QPushButton:pressed {{
-                background-color: {ThemeColors.BG_CARD};
+                background-color: {ThemeColors.BG_INPUT};
             }}
         """

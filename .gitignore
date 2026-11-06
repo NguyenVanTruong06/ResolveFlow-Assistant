@@ -74,3 +74,10 @@ data/
 _TIMELINE_IMPORT/
 drive_assets/
 assets/starter_pack/
+# File Bridge
+.bridge/
+auto_relay.py
+task.md
+task/
+*.bak
+*.bak_original

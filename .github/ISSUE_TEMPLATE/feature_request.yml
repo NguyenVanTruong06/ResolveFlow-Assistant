@@ -1,0 +1,56 @@
+name: Feature Request
+description: Suggest an idea or enhancement for ChunDVC
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We appreciate your ideas and feedback to make ChunDVC even better!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Is your feature request related to a problem?
+      description: A clear and concise description of the workflow limitation or challenge you face.
+      placeholder: I am always frustrated when...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the Solution You'd Like
+      description: A clear and concise description of what you want to happen.
+      placeholder: Add an option to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Describe Alternatives You've Considered
+      description: Any alternative solutions or workarounds you've explored.
+      placeholder: Currently I work around this by...
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Relevant Studio Pillar
+      description: Which part of ChunDVC would this feature impact?
+      options:
+        - Luxury EdgeDock Overlay (src/ui/lux/)
+        - Studio Asset Hub & Pack Management (src/ui/studio/)
+        - 4-Step AI Director Pipeline (src/ui/director/)
+        - DaVinci Resolve Timeline Integration & Gateway
+        - Local AI Models (Faster-Whisper / Vision)
+        - Standalone Packaging & Distribution
+        - Documentation / Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Add any screenshots, mockups, or reference links to assist discussion.

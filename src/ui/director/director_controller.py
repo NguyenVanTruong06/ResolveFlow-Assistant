@@ -4,8 +4,11 @@ Bộ điều khiển trung gian (Adapter) giữa ChunDVC Director và hệ thố
 Quản lý trạng thái, kết nối PipelineWorker & LLMDirectorWorker mà KHÔNG viết lại pipeline core.
 """
 
+import logging
 from typing import Any, Dict, List, Optional
 from PySide6.QtCore import QObject, Signal, Slot
+
+logger = logging.getLogger(__name__)
 from src.ui.director.director_state import (
     DirectorConfig, FEAT_HOOK, FEAT_PUNCH_IN, FEAT_BROLL, FEAT_SFX,
     FEAT_REFRAME, FEAT_KARAOKE, FEAT_WEB_BROLL, FEAT_SAFE_ZONE
@@ -118,20 +121,60 @@ class DirectorController(QObject):
         }
         return kwargs
 
+    def _is_worker_busy(self) -> bool:
+        """Kiểm tra an toàn trạng thái bận của worker hiện tại.
+        Nếu worker.isRunning ném ngoại lệ hoặc không xác định được, coi là bận để bảo vệ tiến trình."""
+        if self.worker is None:
+            return False
+        try:
+            is_running = getattr(self.worker, "isRunning", None)
+            if callable(is_running):
+                return bool(is_running())
+            return False
+        except Exception as exc:
+            logger.warning("Không thể truy vấn trạng thái worker (%s), coi worker là đang bận.", exc)
+            return True
+
     def start_pipeline(self, phase: int = 0) -> bool:
         """Khởi chạy PipelineWorker theo phase (0: All, 1: STT/Review, 2: Build)."""
+        is_busy = self._is_worker_busy()
+
+        # 1. Strict phase int validation (loại trừ bool, string, unknown)
+        if type(phase) is not int or isinstance(phase, bool):
+            logger.warning("Từ chối start_pipeline: phase phải là int chuẩn (nhận %r kiểu %s).", phase, type(phase).__name__)
+            if not is_busy:
+                self.pipeline_finished.emit(False, f"Tham số phase không hợp lệ: {phase!r}")
+            return False
+
+        # 2. Chặn độc lập phase 0 và phase 2 trước khi tạo PipelineWorker / nạp models / dựng kwargs
+        if phase in (0, 2):
+            msg = "Đường dựng timeline cũ (phase 0/2) đã bị chặn. Yêu cầu phê duyệt biên tập và cơ chế thi công G07."
+            logger.warning("start_pipeline bị từ chối: %s", msg)
+            if not is_busy:
+                self.pipeline_finished.emit(False, msg)
+            return False
+
+        if phase != 1:
+            msg = f"Phase không được hỗ trợ: {phase}"
+            logger.warning("start_pipeline bị từ chối: %s", msg)
+            if not is_busy:
+                self.pipeline_finished.emit(False, msg)
+            return False
+
+        # Phase 1: Phân tích nguồn tương thích
         if not self.config.video_paths:
-            self.pipeline_finished.emit(False, "Chưa chọn tệp video nguồn nào.")
+            if not is_busy:
+                self.pipeline_finished.emit(False, "Chưa chọn tệp video nguồn nào.")
             return False
 
         if PipelineWorker is None:
-            # Fallback mô phỏng cho unit test
-            self.log_received.emit("Mô phỏng khởi chạy pipeline...")
-            self.step_status_changed.emit("validate", "done")
-            self.step_status_changed.emit("export", "done")
-            self.progress_changed.emit(100)
-            self.pipeline_finished.emit(True, "Mô phỏng pipeline thành công!")
-            return True
+            if not is_busy:
+                self.pipeline_finished.emit(False, "Không nạp được PipelineWorker. Kiểm tra phụ thuộc và log khởi động.")
+            return False
+
+        if is_busy:
+            logger.warning("start_pipeline: Worker hiện tại đang chạy/bận, từ chối khởi chạy chồng lấn.")
+            return False
 
         kwargs = self.build_pipeline_kwargs(phase=phase)
         try:
@@ -143,21 +186,30 @@ class DirectorController(QObject):
             self.worker.start()
             return True
         except Exception as e:
-            self.pipeline_finished.emit(False, f"Lỗi khởi tạo worker: {str(e)}")
+            if not is_busy:
+                self.pipeline_finished.emit(False, f"Lỗi khởi tạo worker: {str(e)}")
             return False
 
     def cancel_pipeline(self):
         """Hủy an toàn worker đang chạy."""
-        if self.worker and self.worker.isRunning():
-            if hasattr(self.worker, "stop"):
-                self.worker.stop()
-            self.worker.requestInterruption()
-            self.log_received.emit("Đã gửi yêu cầu hủy tiến trình pipeline.")
+        if self._is_worker_busy():
+            try:
+                if hasattr(self.worker, "stop"):
+                    self.worker.stop()
+                if hasattr(self.worker, "requestInterruption"):
+                    self.worker.requestInterruption()
+                self.log_received.emit("Đã gửi yêu cầu hủy tiến trình pipeline.")
+            except Exception as exc:
+                logger.warning("Lỗi khi hủy worker: %s", exc)
 
     def run_ai_script(self, prompt: str):
         """Gọi LLMDirectorWorker để lấy kịch bản từ Ollama hoặc Cloud API."""
         if LLMDirectorWorker is None:
-            self.ai_script_finished.emit(True, "Mô phỏng AI kịch bản thành công!", "{}")
+            self.ai_script_finished.emit(
+                False,
+                "Không nạp được LLMDirectorWorker: Thành phần AI kịch bản không khả dụng.",
+                "",
+            )
             return
 
         cfg = self.config

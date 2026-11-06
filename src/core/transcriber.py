@@ -1,7 +1,9 @@
 import gc
 import re
 import os
-from typing import Literal, Optional, List, Dict, Any, Callable
+import wave
+from typing import Literal, Optional, List, Dict, Any, Callable, Union
+import numpy as np
 from src.core import transcript_quality
 from src.core.whisper_cleaner import is_whisper_hallucination
 from pydantic import BaseModel, Field
@@ -103,6 +105,80 @@ def register_nvidia_dll_dirs() -> List[str]:
     return added
 
 
+def load_audio_waveform(audio_input: Union[str, np.ndarray]) -> np.ndarray:
+    """
+    Tải và chuẩn hóa âm thanh về mảng float32 1D 16kHz mono trong khoảng [-1.0, 1.0].
+    Tương thích hoàn toàn với PyAV 19+ (không gọi faster_whisper.decode_audio với metadata_errors).
+    Hỗ trợ:
+    - np.ndarray: Đã là mảng float32 1D (kiểm tra shape, dtype, finite).
+    - str (đường dẫn):
+      + WAV 16kHz mono 16-bit PCM: Giải mã qua wave stdlib siêu tốc.
+      + WAV/Container khác: Giải mã qua PyAV với AudioResampler(rate=16000, layout='mono', format='s16')
+        không truyền keyword metadata_errors đã bị PyAV 19 loại bỏ.
+    """
+    if isinstance(audio_input, np.ndarray):
+        if audio_input.ndim != 1:
+            raise ValueError(f"Mảng âm thanh phải là 1D mono, nhận được ndim={audio_input.ndim}")
+        if not np.all(np.isfinite(audio_input)):
+            raise ValueError("Mảng âm thanh chứa giá trị non-finite (NaN hoặc Inf).")
+        return audio_input.astype(np.float32, copy=False)
+
+    if isinstance(audio_input, str):
+        norm_path = os.path.normpath(audio_input)
+        if not os.path.exists(norm_path):
+            raise FileNotFoundError(f"Không tìm thấy tệp âm thanh: {norm_path}")
+        if os.path.getsize(norm_path) == 0:
+            raise ValueError(f"Tệp âm thanh rỗng (0 bytes): {norm_path}")
+
+        # Đường dẫn 1: Thử wave stdlib cho WAV 16kHz mono 16-bit PCM
+        try:
+            with wave.open(norm_path, "rb") as w:
+                comptype = w.getcomptype()
+                sampwidth = w.getsampwidth()
+                n_channels = w.getnchannels()
+                framerate = w.getframerate()
+                n_frames = w.getnframes()
+                if comptype == "NONE" and sampwidth == 2 and n_channels == 1 and framerate == 16000:
+                    raw_bytes = w.readframes(n_frames)
+                    audio_data = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+                    if not np.all(np.isfinite(audio_data)):
+                        raise ValueError("Tệp âm thanh chứa giá trị non-finite (NaN hoặc Inf).")
+                    return audio_data
+        except (wave.Error, EOFError):
+            pass
+
+        # Đường dẫn 2: PyAV decode & resample không dùng metadata_errors
+        try:
+            import av
+            import io
+            resampler = av.audio.resampler.AudioResampler(
+                format="s16",
+                layout="mono",
+                rate=16000,
+            )
+            raw_buffer = io.BytesIO()
+            with av.open(norm_path, mode="r") as container:
+                if not container.streams.audio:
+                    raise ValueError(f"Tệp không có luồng âm thanh: {norm_path}")
+                for frame in container.decode(audio=0):
+                    resampled = resampler.resample(frame)
+                    if resampled:
+                        for r in (resampled if isinstance(resampled, list) else [resampled]):
+                            raw_buffer.write(r.to_ndarray())
+            del resampler
+            raw_bytes = raw_buffer.getvalue()
+            if not raw_bytes:
+                raise ValueError(f"Không thể giải mã luồng âm thanh hoặc luồng âm thanh rỗng: {norm_path}")
+            audio_data = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            if not np.all(np.isfinite(audio_data)):
+                raise ValueError("Dữ liệu âm thanh giải mã chứa giá trị non-finite (NaN hoặc Inf).")
+            return audio_data
+        except Exception as exc:
+            raise ValueError(f"Lỗi giải mã âm thanh từ '{norm_path}': {exc}") from exc
+
+    raise TypeError(f"Đầu vào âm thanh không được hỗ trợ (cần str hoặc np.ndarray): {type(audio_input)}")
+
+
 class ResolveTranscriber:
     """
     Lớp điều khiển tải mô hình và dịch âm thanh ngoại tuyến sử dụng faster-whisper.
@@ -120,10 +196,11 @@ class ResolveTranscriber:
         """Kiểm tra xem mô hình Whisper đã được tải về máy trước đó chưa."""
         return is_model_on_disk(self.config.model_size)
 
-    def load_model(self, log_callback: Optional[Callable[[str], None]] = None) -> None:
+    def load_model(self, log_callback: Optional[Callable[[str], None]] = None, local_files_only: bool = False) -> None:
         """
         Tải mô hình Whisper lên thiết bị chỉ định (GPU CUDA hoặc CPU).
         Tự động kiểm tra và chuyển về CPU nếu GPU không hỗ trợ CUDA.
+        local_files_only: bool = False (nếu True, chỉ dùng model có sẵn trong cache local, không download qua mạng).
         """
         from faster_whisper import WhisperModel
 
@@ -164,7 +241,8 @@ class ResolveTranscriber:
         self.model = WhisperModel(
             self.config.model_size,
             device=device,
-            compute_type=compute_type
+            compute_type=compute_type,
+            local_files_only=local_files_only,
         )
 
         # Thiếu thư viện CUDA (cuBLAS/cuDNN) chỉ lộ ra ở lần suy luận đầu tiên, nên chạy thử 1 lần ngay tại đây
@@ -179,7 +257,12 @@ class ResolveTranscriber:
                 else:
                     print(f" Warn: {msg}")
                 device, compute_type = "cpu", "int8"
-                self.model = WhisperModel(self.config.model_size, device=device, compute_type=compute_type)
+                self.model = WhisperModel(
+                    self.config.model_size,
+                    device=device,
+                    compute_type=compute_type,
+                    local_files_only=local_files_only,
+                )
         self.active_device = device
         self.active_compute_type = compute_type
 
@@ -188,7 +271,7 @@ class ResolveTranscriber:
 
     def transcribe(
         self,
-        audio_path: str,
+        audio_path: Union[str, np.ndarray],
         language: Optional[str] = None,
         is_cancelled_callback: Optional[Callable[[], bool]] = None,
         progress_callback: Optional[Callable[[float, str], None]] = None,
@@ -199,7 +282,7 @@ class ResolveTranscriber:
         fill_gaps=True: quét bổ sung các khoảng dài có âm thanh lớn mà lần quét đầu không ra chữ (chậm hơn).
 
         Args:
-            audio_path (str): Đường dẫn tệp âm thanh đầu vào (.wav).
+            audio_path (str | np.ndarray): Đường dẫn tệp âm thanh đầu vào hoặc mảng sóng âm float32 1D 16kHz.
             language (str, optional): Mã ngôn ngữ đích.
             is_cancelled_callback (Callable, optional): Hàm kiểm tra yêu cầu hủy luồng.
             progress_callback (Callable, optional): Hàm callback báo tiến độ (timestamp, text).
@@ -210,8 +293,10 @@ class ResolveTranscriber:
         if self.model is None:
             self.load_model()
 
+        audio_waveform = load_audio_waveform(audio_path)
+
         segments, info = self.model.transcribe(
-            audio_path,
+            audio_waveform,
             language=language,
             beam_size=5,
             vad_filter=True,
@@ -261,7 +346,9 @@ class ResolveTranscriber:
 
         results = transcript_quality.split_stretched_segments(results)
         if fill_gaps and not (is_cancelled_callback and is_cancelled_callback()):
-            results = self.fill_uncovered_gaps(audio_path, results, language, is_cancelled_callback, progress_callback)
+            results = self.fill_uncovered_gaps(
+                audio_path, results, language, is_cancelled_callback, progress_callback, audio_waveform=audio_waveform
+            )
         return results
 
     def transcribe_slice(
@@ -301,13 +388,18 @@ class ResolveTranscriber:
 
     def fill_uncovered_gaps(
         self,
-        audio_path: str,
+        audio_path: Union[str, np.ndarray],
         results: List[Dict[str, Any]],
         language: Optional[str] = None,
         is_cancelled_callback: Optional[Callable[[], bool]] = None,
-        progress_callback: Optional[Callable[[float, str], None]] = None
+        progress_callback: Optional[Callable[[float, str], None]] = None,
+        audio_waveform: Optional[np.ndarray] = None
     ) -> List[Dict[str, Any]]:
-        audio, sr = transcript_quality.read_wav_mono(audio_path)
+        if audio_waveform is not None:
+            audio, sr = audio_waveform, 16000
+        else:
+            audio = load_audio_waveform(audio_path)
+            sr = 16000
         gaps = transcript_quality.find_uncovered_gaps(results, audio, sr)
         extra: List[Dict[str, Any]] = []
         for n, (a, b) in enumerate(gaps, 1):

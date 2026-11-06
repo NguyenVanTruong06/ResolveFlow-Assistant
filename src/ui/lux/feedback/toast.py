@@ -15,7 +15,7 @@ from PySide6.QtCore import (
 
 from src.ui.lux.window_anchor import get_resolve_window_rect
 
-logger = logging.getLogger("ResolveFlow.Toast")
+logger = logging.getLogger("ChunDVC.Toast")
 
 
 class ChunDVCToast(QWidget):
@@ -238,6 +238,11 @@ class ChunDVCToast(QWidget):
             self._dismiss_timer.start(duration_ms)
         else:
             self._dismiss_timer.stop()
+
+    def show_toast(self, message: str, level: str = "info", duration_ms: int = 4000):
+        """Compatibility alias for show_message."""
+        icon = "⚠" if level in ("warning", "error") else "✓"
+        self.show_message(message=message, icon=icon, level=level, duration_ms=duration_ms)
 
     def show_error(
         self,

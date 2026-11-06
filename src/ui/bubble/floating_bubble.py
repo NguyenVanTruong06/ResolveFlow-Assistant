@@ -38,6 +38,7 @@ class BubbleTrayPopup(QWidget):
     """
     open_auto_requested = pyqtSignal()
     open_studio_requested = pyqtSignal()
+    open_dock_requested = pyqtSignal()
     insert_timeline_requested = pyqtSignal()
 
     def __init__(self, bubble):
@@ -287,6 +288,7 @@ class FloatingBubbleWidget(QWidget):
     """
     open_auto_requested = pyqtSignal()
     open_studio_requested = pyqtSignal()
+    open_dock_requested = pyqtSignal()
     insert_timeline_requested = pyqtSignal()
     stop_requested = pyqtSignal()
     pause_requested = pyqtSignal()
@@ -616,7 +618,7 @@ class FloatingBubbleWidget(QWidget):
         self.hide_timer.start(400)
         super().leaveEvent(event)
 
-    def snap_to_edge(self):
+    def snap_to_edge(self, edge=None):
         """Hút dính mép màn hình (Edge Snapping) đa màn hình, tự né taskbar/dock với availableGeometry."""
         screen = QApplication.screenAt(self.pos()) or QApplication.primaryScreen()
         if not screen:
@@ -626,18 +628,26 @@ class FloatingBubbleWidget(QWidget):
         cur_x = self.x()
         cur_y = max(avail.top() + 16, min(avail.bottom() - self.height() - 16, self.y()))
 
-        # Khoảng cách tới mép trái và mép phải của màn hình hiện tại
-        dist_left = cur_x - avail.left()
-        dist_right = avail.right() - (cur_x + self.width())
-
-        if dist_left < 50:
+        if edge == "left":
             target_x = avail.left() + 16
-        elif dist_right < 50:
+        elif edge == "right":
             target_x = avail.right() - self.width() - 16
         else:
-            target_x = max(avail.left() + 16, min(avail.right() - self.width() - 16, cur_x))
+            # Khoảng cách tới mép trái và mép phải của màn hình hiện tại
+            dist_left = cur_x - avail.left()
+            dist_right = avail.right() - (cur_x + self.width())
+
+            if dist_left < 50:
+                target_x = avail.left() + 16
+            elif dist_right < 50:
+                target_x = avail.right() - self.width() - 16
+            else:
+                target_x = max(avail.left() + 16, min(avail.right() - self.width() - 16, cur_x))
 
         self.move(target_x, cur_y)
+        from PySide6.QtCore import QSettings
+        settings = QSettings("ChunDVC", "ResolveFlow")
+        settings.setValue("bubble_y", cur_y)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -696,6 +706,9 @@ class FloatingBubbleWidget(QWidget):
                 color: #FFFFFF;
             }}
         """)
+        action_dock = menu.addAction("✨ Mở Thanh Dock")
+        action_dock.triggered.connect(self.open_dock_requested.emit)
+
         action_auto = menu.addAction("🤖 Mở AI Director")
         action_auto.triggered.connect(self._on_open_auto)
 
@@ -704,7 +717,7 @@ class FloatingBubbleWidget(QWidget):
 
         menu.addSeparator()
 
-        action_quit = menu.addAction("❌ Thoát ResolveFlow")
+        action_quit = menu.addAction("❌ Thoát ChunDVC")
         action_quit.triggered.connect(QApplication.instance().quit)
         menu.exec(event.globalPos())
 

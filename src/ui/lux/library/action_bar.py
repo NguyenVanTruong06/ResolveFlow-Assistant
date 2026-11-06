@@ -28,7 +28,7 @@ class DockActionBar(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setFixedHeight(60)
+        self.setMinimumHeight(60)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._current_asset: Optional[Dict[str, Any]] = None
         self._is_fav: bool = False
@@ -43,6 +43,7 @@ class DockActionBar(QWidget):
         # Line 1: Asset Info Label
         self.lbl_info = QLabel("Chọn một mẫu · double-click hoặc kéo ra timeline để chèn")
         self.lbl_info.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        self.lbl_info.setWordWrap(True)
         self.lbl_info.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout.addWidget(self.lbl_info)
 
@@ -147,6 +148,19 @@ class DockActionBar(QWidget):
         # Default disabled when nothing selected
         self.set_asset(None)
 
+    def minimumSizeHint(self) -> QSize:
+        return QSize(240, 56)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        w = self.width()
+        if w < 380:
+            self.btn_tune.setText(" Tab")
+            self.btn_primary.setText("Chèn ⏎")
+        else:
+            self.btn_tune.setText(" Tinh chỉnh (Tab)")
+            self.btn_primary.setText("Chèn tại playhead  ⏎")
+
     def set_asset(self, asset: Optional[Any], is_fav: bool = False, timecode: str = "00:00:00:00"):
         if asset is not None and not isinstance(asset, dict):
             if hasattr(asset, "model_dump") and callable(asset.model_dump):
@@ -164,6 +178,7 @@ class DockActionBar(QWidget):
         if not asset:
             self.lbl_info.setText("Chọn một mẫu · double-click hoặc kéo ra timeline để chèn")
             self.btn_primary.setEnabled(False)
+            self.btn_primary.setToolTip("")
             self.btn_tune.setEnabled(False)
             self.btn_more.setEnabled(False)
             return
@@ -181,14 +196,37 @@ class DockActionBar(QWidget):
         else:
             track_hint = "track video trống"
 
-        self.lbl_info.setText(f"{name}{dur_str} · {track_hint} · {timecode}")
-        self.btn_primary.setEnabled(True)
-        self.btn_tune.setEnabled(True)
-        self.btn_more.setEnabled(True)
+        avail = str(asset.get("availability") or "online").lower().strip()
+        is_available = avail not in ("offline", "missing", "staging")
 
-    def _show_more_menu(self):
+        if not is_available:
+            if avail == "offline":
+                reason = "Kho Offline — hãy kết nối lại ổ đĩa trước khi chèn"
+            elif avail == "missing":
+                reason = "File nguồn không tồn tại trên đĩa"
+            elif avail == "staging":
+                reason = "Đang đồng bộ / nạp tài nguyên — chưa sẵn sàng chèn"
+            else:
+                reason = "Tài nguyên tạm thời không khả dụng"
+
+            self.lbl_info.setText(f"{name}{dur_str} · ⚠ {reason}")
+            self.btn_primary.setEnabled(False)
+            self.btn_primary.setToolTip(reason)
+            self.btn_tune.setEnabled(True)
+            self.btn_more.setEnabled(True)
+        else:
+            self.lbl_info.setText(f"{name}{dur_str} · {track_hint} · {timecode}")
+            self.btn_primary.setEnabled(True)
+            self.btn_primary.setToolTip("")
+            self.btn_tune.setEnabled(True)
+            self.btn_more.setEnabled(True)
+
+    def _build_more_menu(self) -> Optional[QMenu]:
         if not self._current_asset:
-            return
+            return None
+
+        avail = str(self._current_asset.get("availability") or "online").lower().strip()
+        is_available = avail not in ("offline", "missing", "staging")
 
         menu = QMenu(self)
         menu.setStyleSheet("""
@@ -220,17 +258,26 @@ class DockActionBar(QWidget):
 
         if is_fusion_applicable:
             act_paste = menu.addAction(get_vector_icon("bolt", "#f59e0b", 16), "Dán vào Fusion (Shift+Enter)")
+            act_paste.setEnabled(is_available)
+            if not is_available:
+                act_paste.setToolTip("Tài nguyên không khả dụng")
             act_paste.triggered.connect(self.paste_fusion_triggered.emit)
 
             act_copy = menu.addAction(get_vector_icon("copy", "#a1a1aa", 16), "Sao chép code Fusion")
             act_copy.triggered.connect(self.copy_code_triggered.emit)
 
             act_install = menu.addAction(get_vector_icon("download", "#38bdf8", 16), "Cài vào thư mục Fusion")
+            act_install.setEnabled(is_available)
+            if not is_available:
+                act_install.setToolTip("Tài nguyên không khả dụng")
             act_install.triggered.connect(self.install_fusion_triggered.emit)
 
             menu.addSeparator()
 
         act_newtrack = menu.addAction(get_vector_icon("plus", "#34d399", 16), "Chèn trên track mới")
+        act_newtrack.setEnabled(is_available)
+        if not is_available:
+            act_newtrack.setToolTip("Tài nguyên không khả dụng")
         act_newtrack.triggered.connect(self.new_track_triggered.emit)
 
         menu.addSeparator()
@@ -242,6 +289,13 @@ class DockActionBar(QWidget):
 
         act_folder = menu.addAction(get_vector_icon("folder", "#fbbf24", 16), "Mở thư mục chứa")
         act_folder.triggered.connect(self.open_folder_triggered.emit)
+
+        return menu
+
+    def _show_more_menu(self):
+        menu = self._build_more_menu()
+        if not menu:
+            return
 
         self.menu_visibility_changed.emit(True)
         menu.aboutToHide.connect(lambda: self.menu_visibility_changed.emit(False))

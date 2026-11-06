@@ -1,0 +1,5 @@
+# G04-04C3 — Quyết định preview invalidation
+
+Evidence code: SharedHoverPreview chỉconnect scrollbar.valueChanged vàviewport events, chưabind model reset/layout/removal. AssetGridView tạo hovercontroller mộtlần nhưng chưa override setModel. _on_media_status_changed EndOfMedia đangplay lại vôđiềukiện khi cóplayer.
+Scope đượcgiao: lifecycle only, two modules hover_preview.py/asset_grid.py. Stop pendingtimer/player/overlay khi model invalidation, replacement, viewhidden/close/destroy; không autoplay lại từ callbackqueued sau stop. Giữlazy player/audio router, mộtcontroller/player mỗiview, không phải singletonplayer toànapp. Không guard preview/drag availability intents hay sửaInsertService.
+Public minimal API PROPOSED SharedHoverPreview.bind_model(model), AssetGridView.setModel wrapper gọi bind sau super. Old connections phải disconnected vàrefs cleared; duplicatebind không nối lặp. Qt signalargs adapter không làm stop signature lỗi. Tests actual Qt model/proxy, player fake, zero hardware/network.
