@@ -60,6 +60,18 @@ class PackManager:
 
     INSTALLED_PACKS_FILE = Path("data") / "installed_packs.json"
 
+    COMMUNITY_PACK_ALIASES: Dict[str, List[str]] = {
+        "acidbite_elements_sfx": ["acidbite", "elements", "sfx"],
+        "davinci_speed_ramp_transitions": ["speed_ramp", "speedramp", "seamless"],
+        "davinci_gr44_seamless_transitions": ["gr44", "gr-44", "gr_44"],
+        "fusion_skin_retouching_macros": ["skin_retouching", "retouching", "skin"],
+        "davinci_unfold_paper_animator": ["unfold_paper", "paper_animator", "unfold", "paper"],
+        "secret_sauce_cinema_luts": ["secret_sauce", "secret sauce", "secret"],
+        "iphone_cinematic_luts": ["iphone", "apple_log", "apple log", "applelog"],
+        "green_screen_memes_109": ["109", "green_screen", "greenscreen", "tong_hop_meme", "meme_109"],
+        "dehancer_pro_ofx_plugin": ["dehancer"],
+    }
+
     @classmethod
     def get_installed_packs(cls, verify_files: bool = True) -> Dict[str, Any]:
         """Lấy danh sách các gói đã cài đặt trên máy từ data/installed_packs.json.
@@ -97,11 +109,17 @@ class PackManager:
         if pack_id in installed:
             return True
         target = str(pack_id).strip().lower()
+        aliases = [a.lower() for a in cls.COMMUNITY_PACK_ALIASES.get(target, [])]
+
         for installed_id, entry in installed.items():
-            if target == str(installed_id).strip().lower():
+            iid = str(installed_id).strip().lower()
+            if target == iid or target in iid or iid in target:
                 return True
             entry_name = str(entry.get("name", "")).strip().lower()
-            if target == entry_name:
+            entry_folder = str(entry.get("folder_name", "")).strip().lower()
+            if target == entry_name or target in entry_name or entry_name in target:
+                return True
+            if aliases and any(a in entry_name or a in entry_folder for a in aliases):
                 return True
 
         # Dự phòng: Kiểm tra thêm trong StorageManager (registry packs)
@@ -113,10 +131,22 @@ class PackManager:
                 for p in reg.get('packs', []):
                     pid = str(p.get('id', '')).strip().lower()
                     pname = str(p.get('name', '')).strip().lower()
-                    if target == pid or target in pid or pid in target or target == pname or target in pname:
-                        folder_rel = p.get('folder', '')
-                        if folder_rel and (sm.root / folder_rel).exists():
-                            return True
+                    folder_rel = str(p.get('folder', '')).strip()
+                    pfolder = folder_rel.lower()
+
+                    matched = False
+                    if target == pid or target in pid or pid in target:
+                        matched = True
+                    elif target == pname or target in pname or pname in target:
+                        matched = True
+                    elif aliases and any(a in pname or a in pfolder for a in aliases):
+                        matched = True
+
+                    if matched and folder_rel and (sm.root / folder_rel).exists():
+                        # Tự động đồng bộ vào installed_packs.json để cache lâu dài
+                        pack_files = [str(f) for f in (sm.root / folder_rel).glob("**/*") if f.is_file()][:10]
+                        cls.record_installed_pack(pack_id, folder_name=p.get('name', pack_id), installed_paths=pack_files)
+                        return True
         except Exception:
             pass
         return False

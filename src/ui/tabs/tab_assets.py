@@ -7637,7 +7637,8 @@ class TabAssets(QWidget):
             from src.services.resolve_gateway import ResolveGateway
             from src.services.insert_service import InsertService
             self._gateway = ResolveGateway(self)
-            self._insert_service = InsertService(self._gateway, self)
+            state_svc = getattr(parent, "state_service", None) if parent else None
+            self._insert_service = InsertService(self._gateway, state_service=state_svc, parent=self)
             return self._insert_service
         except Exception as e:
             logger.warning("Không thể khởi tạo InsertService trong TabAssets: %s", e)

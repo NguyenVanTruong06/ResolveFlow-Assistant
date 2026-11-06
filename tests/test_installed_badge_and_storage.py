@@ -80,3 +80,53 @@ def test_pack_ingest_wizard_silent_default_storage(tmp_path: Path, qapp):
     assert wizard.storage.online is True
     assert wizard.storage.root.exists()
     wizard.close()
+
+
+def test_green_screen_memes_alias_installed_matching(tmp_path: Path, monkeypatch):
+    test_installed_file = tmp_path / "data" / "installed_packs.json"
+    monkeypatch.setattr(PackManager, "INSTALLED_PACKS_FILE", test_installed_file)
+
+    config_dir = tmp_path / "config"
+    lib_dir = tmp_path / "lib"
+    sm = StorageManager(config_dir=config_dir)
+    sm.configure(lib_dir)
+
+    monkeypatch.setattr("src.core.storage_manager.StorageManager", lambda *args, **kwargs: sm)
+
+    pack_folder = lib_dir / "02_cloud_downloads" / "packs" / "Tong_Hop_Meme_Green_Screen_109Clips_1.0_b8de7a8c74f944efae8cf85def72253f"
+    pack_folder.mkdir(parents=True, exist_ok=True)
+    (pack_folder / "meme.mp4").write_text("dummy")
+
+    with sm.lock():
+        reg = sm.registry()
+        reg["packs"].append({
+            "id": "b8de7a8c74f944efae8cf85def72253f",
+            "name": "Tong_Hop_Meme_Green_Screen_109Clips",
+            "version": "1.0",
+            "folder": str(pack_folder.relative_to(lib_dir).as_posix())
+        })
+        import json
+        with open(sm.meta / "registry.json", "w", encoding="utf-8") as f:
+            json.dump(reg, f)
+
+    assert PackManager.is_pack_installed("green_screen_memes_109") is True
+    installed = PackManager.get_installed_packs()
+    assert "green_screen_memes_109" in installed
+
+
+def test_storage_settings_dialog_has_confirm_button(qapp, tmp_path):
+    from src.ui.widgets.pack_ingest_wizard import StorageSettingsDialog
+    config_dir = tmp_path / "config"
+    sm = StorageManager(config_dir=config_dir)
+    
+    dialog = StorageSettingsDialog(storage=sm)
+    assert hasattr(dialog, "btn_confirm")
+    assert "Xác Nhận" in dialog.btn_confirm.text()
+
+    emitted = []
+    dialog.library_changed.connect(lambda: emitted.append(True))
+    dialog.btn_confirm.click()
+
+    assert len(emitted) >= 1
+    assert dialog.result() == 1
+    dialog.deleteLater()

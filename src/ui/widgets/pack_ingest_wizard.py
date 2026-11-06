@@ -580,28 +580,118 @@ class StorageSettingsDialog(QDialog):
     library_changed = Signal()
 
     def __init__(self, storage=None, parent=None):
-        super().__init__(parent); self.storage = storage or StorageManager(); self.worker = None; self._closing=False
-        self.setWindowTitle('ChunDVC · Kho Chính & Liên kết'); self.resize(680,320); self.setStyleSheet(STYLE)
-        layout = QVBoxLayout(self); self.status = QLabel(); self.status.setWordWrap(True); layout.addWidget(self.status)
-        for text, slot in [('Chọn / Tạo Thư mục Kho Chính',self._choose), ('Di chuyển kho sang ổ khác (xác minh bản sao)',self._migrate),
-                           ('Nhập kho legacy từ thư mục cũ sang ổ khác',self._migrate_legacy), ('Liên kết thư mục có sẵn (không copy)',self._link)]:
-            button=QPushButton(text); button.clicked.connect(slot); layout.addWidget(button)
+        super().__init__(parent)
+        self.storage = storage or StorageManager()
+        self.worker = None
+        self._closing = False
+        self.setWindowTitle('ChunDVC · Kho Chính & Liên kết')
+        self.resize(700, 360)
+        self.setStyleSheet(STYLE)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+        
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("""
+            background: #111214;
+            border: 1px solid #2e3138;
+            border-radius: 6px;
+            padding: 10px;
+            font-size: 12px;
+            color: #38bdf8;
+            font-weight: 500;
+        """)
+        layout.addWidget(self.status)
+        
+        for text, slot in [
+            ('📁 Chọn / Tạo Thư mục Kho Chính', self._choose),
+            ('🚚 Di chuyển kho sang ổ khác (xác minh bản sao)', self._migrate),
+            ('📦 Nhập kho legacy từ thư mục cũ sang ổ khác', self._migrate_legacy),
+            ('🔗 Liên kết thư mục có sẵn (không copy)', self._link)
+        ]:
+            button = QPushButton(text)
+            button.setCursor(Qt.PointingHandCursor)
+            button.setFixedHeight(34)
+            button.clicked.connect(slot)
+            layout.addWidget(button)
+            
         self.cleanup_old = QCheckBox('Dọn media kho cũ sau xác minh (chỉ kho do ChunDVC quản lý)')
         layout.addWidget(self.cleanup_old)
-        layout.addWidget(QLabel('Di chuyển chỉ đổi kho sau khi xác minh. Nguồn cũ được giữ nếu chưa chọn dọn media.\nKhông tự di chuyển model AI, Whisper hay project Resolve.'))
-        self.timer=QTimer(self); self.timer.timeout.connect(self._status); self.timer.start(2000); self._status()
+        
+        lbl_hint = QLabel('Di chuyển chỉ đổi kho sau khi xác minh. Nguồn cũ được giữ nếu chưa chọn dọn media.\nKhông tự di chuyển model AI, Whisper hay project Resolve.')
+        lbl_hint.setStyleSheet("color: #71717a; font-size: 11px;")
+        layout.addWidget(lbl_hint)
+        
+        # Thanh nút xác nhận & đóng ở dưới cùng
+        btn_box = QHBoxLayout()
+        btn_box.setContentsMargins(0, 8, 0, 0)
+        btn_box.addStretch(1)
+        
+        self.btn_confirm = QPushButton("✔ Xác Nhận & Đóng")
+        self.btn_confirm.setCursor(Qt.PointingHandCursor)
+        self.btn_confirm.setFixedHeight(36)
+        self.btn_confirm.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff4757, stop:1 #e0283b);
+                color: #ffffff;
+                font-weight: 700;
+                font-size: 13px;
+                border: 1px solid #ff6b81;
+                border-radius: 6px;
+                padding: 0 28px;
+            }
+            QPushButton:hover {
+                background: #ff5252;
+                border-color: #ff7979;
+            }
+            QPushButton:pressed {
+                background: #d63031;
+            }
+        """)
+        self.btn_confirm.clicked.connect(self._confirm_and_close)
+        btn_box.addWidget(self.btn_confirm)
+        layout.addLayout(btn_box)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._status)
+        self.timer.start(2000)
+        self._status()
 
     def _status(self):
         if self.worker: return
-        root=self.storage._config.get('root','Chưa chọn kho')
-        self.status.setText(('Online' if self.storage.online else 'Offline — chỉ duyệt metadata') + '\n' + root)
+        root = self.storage._config.get('root', 'Chưa chọn kho')
+        status_text = '🟢 Trực tuyến (Online)' if self.storage.online else '🔴 Ngoại tuyến (Offline — chỉ duyệt metadata)'
+        self.status.setText(f"{status_text}\n📂 Đường dẫn kho: {root}")
 
     def _choose(self):
         if self.worker: return
-        path=QFileDialog.getExistingDirectory(self,'Chọn thư mục kho (chỉ tạo khi bạn xác nhận)')
-        if not path:return
-        try:self.storage.configure(path); self._status(); self.library_changed.emit()
-        except Exception as exc:QMessageBox.warning(self,'Không đổi được kho',str(exc))
+        path = QFileDialog.getExistingDirectory(self, 'Chọn thư mục kho lưu trữ chính')
+        if not path: return
+        try:
+            self.storage.configure(path)
+            self._status()
+            self.library_changed.emit()
+            QMessageBox.information(
+                self,
+                'Đã Kết Nối Kho Lưu Trữ',
+                f"Đã chọn và thiết lập kho lưu trữ chính thành công:\n{path}\n\nNhấn 'Xác Nhận & Đóng' để áp dụng thay đổi."
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, 'Không đổi được kho', str(exc))
+
+    def _confirm_and_close(self):
+        if self.worker:
+            self._closing = True
+            self.worker.requestInterruption()
+            return
+        self.library_changed.emit()
+        self.accept()
+
+    def accept(self):
+        self.library_changed.emit()
+        super().accept()
 
     def _run(self, operation):
         if self.worker:return
@@ -637,7 +727,11 @@ class StorageSettingsDialog(QDialog):
 
     def reject(self):
         if self.worker:self._closing=True; self.worker.requestInterruption(); return
+        self.library_changed.emit()
         super().reject()
+
     def closeEvent(self,event):
         if self.worker:event.ignore(); self.reject()
-        else:event.accept()
+        else:
+            self.library_changed.emit()
+            event.accept()

@@ -906,7 +906,7 @@ class InsertService(QObject):
             return
 
         # Pause poller during worker run to avoid fusionscript IPC contention
-        if self._state_service:
+        if self._state_service and hasattr(self._state_service, "pause_polling"):
             self._state_service.pause_polling()
 
         tid = title_id or name
@@ -928,7 +928,7 @@ class InsertService(QObject):
             output_chunks.append(data)
 
         def _on_finished(exit_code: int, exit_status: QProcess.ExitStatus):
-            if self._state_service:
+            if self._state_service and hasattr(self._state_service, "resume_polling"):
                 self._state_service.resume_polling()
 
             full_output = "".join(output_chunks)
