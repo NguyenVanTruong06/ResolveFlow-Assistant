@@ -280,6 +280,7 @@ class AssetHubWidget(QWidget):
         self._pack_cards: Dict[str, CloudPackCard] = {}
 
         self._init_ui()
+        self._library_refreshed()
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)

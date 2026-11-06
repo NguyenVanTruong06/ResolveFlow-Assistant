@@ -585,7 +585,8 @@ class StorageSettingsDialog(QDialog):
         self.worker = None
         self._closing = False
         self.setWindowTitle('ChunDVC · Kho Chính & Liên kết')
-        self.resize(700, 360)
+        self.resize(720, 500)
+        self.setMinimumHeight(480)
         self.setStyleSheet(STYLE)
         
         layout = QVBoxLayout(self)

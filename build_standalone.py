@@ -19,6 +19,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 
 APP_NAME = "ResolveFlow-Assistant"
 APP_VERSION = "1.0.0"
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 ENTRY_POINT = os.path.join("src", "main.py")
 
 def get_data_separator() -> str:

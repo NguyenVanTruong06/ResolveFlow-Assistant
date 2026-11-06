@@ -332,6 +332,18 @@ def start_app():
     elif auto_open or "--director" in sys.argv or "--auto" in sys.argv:
         dock.open_director()
 
+    # 8. Tự động kiểm tra bản cập nhật mới nhất từ GitHub trong chế độ nền (Silent Auto-Update Toast "như Orca")
+    def _trigger_background_update_check():
+        try:
+            from src.services.update_service import AutoUpdateController
+            update_ctrl = AutoUpdateController(parent=dock)
+            dock._update_controller = update_ctrl
+            update_ctrl.start_silent_check()
+        except Exception as e:
+            logger.debug("Auto update silent check error: %s", e)
+
+    QTimer.singleShot(3500, _trigger_background_update_check)
+
     def cleanup():
         try:
             resolve_state.pause_polling()

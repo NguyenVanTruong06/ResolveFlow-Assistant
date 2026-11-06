@@ -13,7 +13,8 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QRadioButton, QButtonGroup, QCheckBox,
-    QFrame, QGridLayout, QSlider, QScrollArea, QMessageBox
+    QFrame, QGridLayout, QSlider, QScrollArea, QMessageBox,
+    QProgressBar
 )
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import Qt, Signal as pyqtSignal, QSettings, QSize, QUrl
@@ -21,7 +22,10 @@ from src.ui.icons import get_vector_icon
 from src.ui.theme import ThemeColors
 from src.services.multi_screen_service import get_multi_screen_service
 from src.core.storage_manager import StorageManager
-from src.services.update_service import UpdateCheckWorker, CURRENT_VERSION, GITHUB_REPO
+from src.services.update_service import (
+    UpdateCheckWorker, UpdateDownloadAndInstallWorker,
+    restart_app, CURRENT_VERSION, GITHUB_REPO
+)
 
 
 class DockSettingsDialog(QDialog):
@@ -401,6 +405,25 @@ class DockSettingsDialog(QDialog):
         self.lbl_update_status.setStyleSheet("font-size: 11.5px; color: #a1a1aa;")
         sec5_up_layout.addWidget(self.lbl_update_status)
 
+        self.update_prog_bar = QProgressBar()
+        self.update_prog_bar.setFixedHeight(6)
+        self.update_prog_bar.setRange(0, 100)
+        self.update_prog_bar.setValue(0)
+        self.update_prog_bar.setTextVisible(False)
+        self.update_prog_bar.setStyleSheet("""
+            QProgressBar {
+                background: #27272a;
+                border: none;
+                border-radius: 3px;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff4757, stop:1 #f59e0b);
+                border-radius: 3px;
+            }
+        """)
+        self.update_prog_bar.hide()
+        sec5_up_layout.addWidget(self.update_prog_bar)
+
         self.btn_check_update = QPushButton("🔄 Kiểm Tra Bản Cập Nhật Mới...")
         self.btn_check_update.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_check_update.setStyleSheet(f"""
@@ -658,24 +681,98 @@ class DockSettingsDialog(QDialog):
         self._update_worker.start()
 
     def _on_update_found(self, info: dict):
-        self.btn_check_update.setText("🎉 Có Bản Mới!")
+        self._latest_update_info = info
         latest = info.get("latest_version")
-        url = info.get("html_url")
-        self.lbl_update_status.setText(f"🟢 <b>Đã có bản phát hành mới: v{latest}!</b>")
+        self.lbl_update_status.setText(f"🟢 <b>Đã có bản phát hành mới: v{latest}!</b> Sẵn sàng nâng cấp 1-click.")
+        self.btn_check_update.setText(f"🚀 Cập Nhật Ngay Lên v{latest} (1-Click)")
+        self.btn_check_update.setEnabled(True)
+        self.btn_check_update.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff4757, stop:1 #e0283b);
+                color: #ffffff;
+                font-weight: 700;
+                font-size: 12px;
+                border: 1px solid #ff6b81;
+                border-radius: 6px;
+                padding: 7px 16px;
+            }
+            QPushButton:hover {
+                background: #ff5252;
+            }
+        """)
+        try:
+            self.btn_check_update.clicked.disconnect()
+        except Exception:
+            pass
+        self.btn_check_update.clicked.connect(self._start_inapp_update)
 
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Bản Cập Nhật Mới!")
-        msg.setIcon(QMessageBox.Icon.Information)
-        msg.setText(f"<h3>🎉 Phiên bản mới v{latest} đã sẵn sàng!</h3>")
-        body_text = info.get("body", "")
-        if body_text:
-            msg.setInformativeText(f"<b>Nội dung cập nhật:</b>\n{body_text[:300]}...")
-        btn_download = msg.addButton("⬇️ Tải Ngay (Mở GitHub)", QMessageBox.ButtonRole.AcceptRole)
-        msg.addButton("Đóng", QMessageBox.ButtonRole.RejectRole)
-        msg.exec()
+    def _start_inapp_update(self):
+        if getattr(self, "_update_ready_to_restart", False):
+            restart_app()
+            return
 
-        if msg.clickedButton() == btn_download and url:
-            QDesktopServices.openUrl(QUrl(url))
+        if not hasattr(self, "_latest_update_info") or not self._latest_update_info:
+            return
+
+        self.btn_check_update.setEnabled(False)
+        self.btn_check_update.setText("⏳ Đang tải & cài đặt...")
+        self.update_prog_bar.show()
+        self.update_prog_bar.setValue(0)
+        self.lbl_update_status.setText("Đang chuẩn bị tải gói cập nhật...")
+
+        self._download_worker = UpdateDownloadAndInstallWorker(self._latest_update_info, self)
+        self._download_worker.progress_changed.connect(self._on_inapp_progress_changed)
+        self._download_worker.status_changed.connect(self.lbl_update_status.setText)
+        self._download_worker.install_finished.connect(self._on_inapp_install_finished)
+        self._download_worker.start()
+
+    def _on_inapp_progress_changed(self, percent: float, msg: str):
+        self.update_prog_bar.setValue(int(percent))
+        self.lbl_update_status.setText(f"Đang tải: {msg}")
+
+    def _on_inapp_install_finished(self, success: bool, msg: str):
+        if success:
+            self._update_ready_to_restart = True
+            self.update_prog_bar.setValue(100)
+            self.update_prog_bar.setStyleSheet("""
+                QProgressBar {
+                    background: #27272a;
+                    border: none;
+                    border-radius: 3px;
+                }
+                QProgressBar::chunk {
+                    background: #10b981;
+                    border-radius: 3px;
+                }
+            """)
+            self.lbl_update_status.setStyleSheet("color: #34d399; font-size: 11.5px; font-weight: 600;")
+            self.lbl_update_status.setText("✔ Cập nhật thành công! Nhấn nút bên dưới để khởi động lại.")
+            self.btn_check_update.setText("🔄 Khởi Động Lại Ngay")
+            self.btn_check_update.setEnabled(True)
+            self.btn_check_update.setStyleSheet("""
+                QPushButton {
+                    background: #10b981;
+                    color: #ffffff;
+                    border: none;
+                    border-radius: 6px;
+                    padding: 7px 16px;
+                    font-size: 12px;
+                    font-weight: 700;
+                }
+                QPushButton:hover {
+                    background: #059669;
+                }
+            """)
+            try:
+                self.btn_check_update.clicked.disconnect()
+            except Exception:
+                pass
+            self.btn_check_update.clicked.connect(restart_app)
+        else:
+            self.lbl_update_status.setStyleSheet("color: #f87171; font-size: 11.5px; font-weight: 500;")
+            self.lbl_update_status.setText(f"✕ {msg}")
+            self.btn_check_update.setText("Thử Lại Cập Nhật")
+            self.btn_check_update.setEnabled(True)
 
     def _on_up_to_date(self, msg: str):
         self.btn_check_update.setText("✔ Đang Ở Bản Mới Nhất")
