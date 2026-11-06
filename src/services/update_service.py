@@ -212,8 +212,26 @@ class UpdateDownloadAndInstallWorker(QThread):
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
                 if proc.returncode == 0:
                     installed_ok = True
+                else:
+                    logger.debug("pkexec dpkg -i returned %s, stderr: %s", proc.returncode, proc.stderr)
             except Exception as e:
                 logger.debug("pkexec dpkg -i không thực thi được: %s", e)
+
+            # Xác thực kép: Nếu pkexec đã chạy và dpkg đã cài đặt gói lên hệ thống
+            if not installed_ok:
+                try:
+                    chk = subprocess.run(
+                        ["dpkg-query", "-W", "-f=${Version} ${Status}", "resolveflow-assistant"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if chk.returncode == 0 and "install ok installed" in chk.stdout:
+                        clean_ver = ver.lstrip("v")
+                        if clean_ver in chk.stdout:
+                            installed_ok = True
+                except Exception as e:
+                    logger.debug("dpkg-query check failed: %s", e)
 
             # Dự phòng: Nếu pkexec bị hủy hoặc không có quyền root, nhưng /opt/resolveflow-assistant ghi được
             opt_dir = "/opt/resolveflow-assistant"
@@ -226,12 +244,18 @@ class UpdateDownloadAndInstallWorker(QThread):
                     subprocess.run(["dpkg-deb", "-x", tmp_deb, extract_tmp], check=True)
                     extracted_opt = os.path.join(extract_tmp, "opt", "resolveflow-assistant")
                     if os.path.exists(extracted_opt):
-                        for item in os.listdir(extracted_opt):
-                            s = os.path.join(extracted_opt, item)
-                            d = os.path.join(opt_dir, item)
-                            if os.path.isdir(s):
-                                shutil.copytree(s, d, dirs_exist_ok=True)
-                            else:
+                        for root_dir, dirs, files in os.walk(extracted_opt):
+                            rel = os.path.relpath(root_dir, extracted_opt)
+                            target_sub = os.path.join(opt_dir, rel) if rel != "." else opt_dir
+                            os.makedirs(target_sub, exist_ok=True)
+                            for f in files:
+                                s = os.path.join(root_dir, f)
+                                d = os.path.join(target_sub, f)
+                                try:
+                                    if os.path.exists(d):
+                                        os.remove(d)
+                                except Exception:
+                                    pass
                                 shutil.copy2(s, d)
                         installed_ok = True
                 except Exception as e:
