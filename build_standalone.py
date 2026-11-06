@@ -469,11 +469,11 @@ def post_build_setup(dist_app_dir: str):
 # {APP_NAME} v{APP_VERSION} - Standalone Linux Launcher
 # ==============================================================================
 set -e
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 
-export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
-export QT_MEDIA_BACKEND="${QT_MEDIA_BACKEND:-ffmpeg}"
-export RESOLVE_SCRIPT_API="${RESOLVE_SCRIPT_API:-/opt/resolve/Developer/Scripting}"
+export QT_QPA_PLATFORM="${{QT_QPA_PLATFORM:-xcb}}"
+export QT_MEDIA_BACKEND="${{QT_MEDIA_BACKEND:-ffmpeg}}"
+export RESOLVE_SCRIPT_API="${{RESOLVE_SCRIPT_API:-/opt/resolve/Developer/Scripting}}"
 
 if [ -z "$RESOLVE_SCRIPT_LIB" ]; then
     for cand in \\
@@ -486,16 +486,16 @@ if [ -z "$RESOLVE_SCRIPT_LIB" ]; then
             break
         fi
     done
-    export RESOLVE_SCRIPT_LIB="${RESOLVE_SCRIPT_LIB:-/opt/resolve/libs/Fusion/fusionscript.so}"
+    export RESOLVE_SCRIPT_LIB="${{RESOLVE_SCRIPT_LIB:-/opt/resolve/libs/Fusion/fusionscript.so}}"
 fi
 
 if [ -d "/opt/resolve/libs" ]; then
-    export LD_LIBRARY_PATH="/opt/resolve/libs:${SCRIPT_DIR}:${LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH="/opt/resolve/libs:${{SCRIPT_DIR}}:${{LD_LIBRARY_PATH}}"
 else
-    export LD_LIBRARY_PATH="${SCRIPT_DIR}:${LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH="${{SCRIPT_DIR}}:${{LD_LIBRARY_PATH}}"
 fi
 
-exec "${SCRIPT_DIR}/{APP_NAME}" "$@"
+exec "${{SCRIPT_DIR}}/{APP_NAME}" "$@"
 """
         with open(launcher_sh, "w", encoding="utf-8") as f:
             f.write(sh_content)
