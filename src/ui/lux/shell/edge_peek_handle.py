@@ -1,16 +1,18 @@
 """
-EdgePeekHandle: Nút mũi tên nhỏ nhô ra từ cạnh màn hình khi rê chuột lại gần.
-Thiết kế chuyên dụng cho quy trình dựng phim trên DaVinci Resolve:
-- Khi thu gọn Dock: ẩn hoàn toàn (0px trên màn hình, không vướng Inspector hay Timeline).
-- Khi chuột di chuyển tới sát mép màn hình đã neo: mũi tên nhỏ nhô mượt ra từ cạnh màn hình.
-- Khi bấm chuột trái vào mũi tên: mở toàn bộ thanh EdgeDock (420px).
-- Khi chuột rời xa vùng cạnh màn hình: tự động thụt ẩn hoàn toàn vào mép.
+EdgePeekHandle & EdgeSensorStrip:
+Hệ thống cảm biến cạnh màn hình (tương thích 100% Wayland/XWayland, X11, Windows & Đa màn hình)
+và nút mũi tên nhỏ nhô ra khi rê chuột lại gần:
+- Khi thu gọn Dock: ẩn hoàn toàn giao diện (0px hiển thị trực quan, không vướng Inspector/Timeline).
+- EdgeSensorStrip (dải cảm biến trong suốt 99%, rộng 4-8px sát mép): nhận trực tiếp sự kiện trỏ chuột
+  từ Wayland/XWayland/OS ngay cả khi chuột lướt nhanh qua ranh giới giữa 2 màn hình (Dual Monitor Seam).
+- Khi chuột chạm dải cảm biến: nút mũi tên nhỏ EdgePeekHandle (28x72px) trượt mượt ra ngay tầm mắt.
+- Khi chuột rời đi: tự động thụt ẩn hoàn toàn (giữ 1.3s ở ranh giới giữa 2 màn hình để dễ kéo chuột lại bấm).
 - Tuyệt đối không chiếm tiêu điểm bàn phím (WA_ShowWithoutActivating + NoFocus).
 """
 from typing import Optional
 
 from PySide6.QtCore import (
-    Qt, QPointF, QRectF, QVariantAnimation, QEasingCurve, Signal as pyqtSignal
+    Qt, QPoint, QPointF, QRectF, QVariantAnimation, QEasingCurve, Signal as pyqtSignal
 )
 from PySide6.QtGui import (
     QColor, QPainter, QPainterPath, QPen, QLinearGradient, QMouseEvent
@@ -18,18 +20,78 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget, QMenu
 
 
+class EdgeSensorStrip(QWidget):
+    """
+    Dải cảm biến cạnh màn hình siêu mảnh và trong suốt gần như tuyệt đối (alpha=3/255).
+    Giải quyết triệt để 2 bài toán thực tế:
+    1. Trên Linux Wayland (XWayland): QCursor.pos() bị đóng băng khi trỏ chuột nằm trên cửa sổ Wayland.
+       Dải cảm biến nhận trực tiếp sự kiện wl_pointer.enter / motion / leave từ Wayland compositor.
+    2. Trên hệ thống 2 màn hình (Dual Monitor): Bắt nhạy ngay khoảnh khắc chuột lướt qua khe nối
+       giữa 2 màn hình để nhô mũi tên ra kịp thời trước khi chuột trôi sang màn bên cạnh.
+    """
+    edge_triggered = pyqtSignal(QPoint)
+    edge_left = pyqtSignal()
+    open_dock_requested = pyqtSignal()
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(
+            parent,
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus,
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setMinimumSize(1, 1)
+        self.setMouseTracking(True)
+        self.is_hovered = False
+
+    def enterEvent(self, event):
+        super().enterEvent(event)
+        self.is_hovered = True
+        pos = event.globalPosition().toPoint() if hasattr(event, "globalPosition") else self.mapToGlobal(QPoint(0, self.height() // 2))
+        self.edge_triggered.emit(pos)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        super().mouseMoveEvent(event)
+        self.is_hovered = True
+        self.edge_triggered.emit(event.globalPosition().toPoint())
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        self.is_hovered = False
+        self.edge_left.emit()
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.open_dock_requested.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        # Alpha = 3/255 (~1%): Mắt thường hoàn toàn không nhìn thấy (trong suốt),
+        # nhưng Wayland/XWayland/Windows vẫn ghi nhận hit-test cho sự kiện rê chuột.
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 3))
+
+
 class EdgePeekHandle(QWidget):
     """
-    Nút mũi tên nhỏ gọn (26x64px) nhô ra sát mép màn hình khi chuột tiến lại gần.
+    Nút mũi tên nhỏ gọn (28x72px) nhô ra sát mép màn hình khi chuột tiến lại gần.
     """
-    HANDLE_WIDTH = 26
-    HANDLE_HEIGHT = 64
+    HANDLE_WIDTH = 28
+    HANDLE_HEIGHT = 72
 
     open_dock_requested = pyqtSignal()
     open_director_requested = pyqtSignal()
     open_studio_requested = pyqtSignal()
     settings_requested = pyqtSignal()
     edge_switch_requested = pyqtSignal(str)
+    handle_entered = pyqtSignal()
+    handle_left = pyqtSignal()
 
     def __init__(self, edge: str = "right", parent: Optional[QWidget] = None):
         super().__init__(
@@ -61,6 +123,10 @@ class EdgePeekHandle(QWidget):
     @property
     def dock_edge(self) -> str:
         return self._edge
+
+    @property
+    def is_hovered(self) -> bool:
+        return self._hovered
 
     def set_dock_edge(self, edge: str):
         if edge not in ("left", "right"):
@@ -101,6 +167,7 @@ class EdgePeekHandle(QWidget):
         """Thu mũi tên vào trong cạnh màn hình rồi ẩn hoàn toàn (0px)."""
         if not self.isVisible():
             self._hiding = False
+            self._hovered = False
             return
 
         self._hovered = False
@@ -136,12 +203,14 @@ class EdgePeekHandle(QWidget):
             self._hiding = False
             self._anim.stop()
             self._slide_progress = 1.0
+        self.handle_entered.emit()
         self.update()
 
     def leaveEvent(self, event):
         super().leaveEvent(event)
         self._hovered = False
         self._pressed = False
+        self.handle_left.emit()
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent):
@@ -207,12 +276,14 @@ class EdgePeekHandle(QWidget):
             act_edge = menu.addAction(f"⇄ {edge_lbl}")
             act_edge.triggered.connect(lambda: self.edge_switch_requested.emit(target_edge))
 
-            act_settings = menu.addAction("⚙ Cài đặt Thanh Dock")
+            act_settings = menu.addAction("⚙ Cài đặt Thanh Dock & Chọn Màn Hình")
             act_settings.triggered.connect(self.settings_requested.emit)
 
             menu.exec(event.globalPos())
         finally:
             self.is_menu_open = False
+            if not self._hovered:
+                self.handle_left.emit()
 
     def _build_tab_path(self, rect: QRectF, radius: float) -> QPainterPath:
         """Tạo hình thẻ bo tròn hướng vào trong màn hình, phẳng tuyệt đối ở cạnh ngoài."""
@@ -256,33 +327,33 @@ class EdgePeekHandle(QWidget):
             painter.translate(-offset_px, 0.0)
             body_rect = QRectF(0.0, 1.5, w - 1.5, h - 3.0)
 
-        tab_path = self._build_tab_path(body_rect, radius=10.0)
+        tab_path = self._build_tab_path(body_rect, radius=11.0)
 
-        # Nền Studio Dark + Studio Coral subtle gradient khi hover
+        # Nền Studio Dark + Studio Coral nổi bật rõ trên cả màn đơn lẫn khe nối 2 màn hình
         grad = QLinearGradient(body_rect.topLeft(), body_rect.bottomRight())
         if self._pressed:
-            grad.setColorAt(0.0, QColor(42, 26, 25, 248))
-            grad.setColorAt(1.0, QColor(28, 28, 32, 248))
+            grad.setColorAt(0.0, QColor(52, 28, 26, 250))
+            grad.setColorAt(1.0, QColor(30, 30, 35, 250))
         elif self._hovered:
-            grad.setColorAt(0.0, QColor(38, 33, 36, 246))
-            grad.setColorAt(1.0, QColor(24, 24, 28, 246))
+            grad.setColorAt(0.0, QColor(46, 34, 36, 248))
+            grad.setColorAt(1.0, QColor(26, 26, 30, 248))
         else:
-            grad.setColorAt(0.0, QColor(27, 28, 32, 236))
-            grad.setColorAt(1.0, QColor(18, 19, 22, 236))
+            grad.setColorAt(0.0, QColor(30, 31, 36, 242))
+            grad.setColorAt(1.0, QColor(20, 21, 25, 242))
 
         painter.fillPath(tab_path, grad)
 
-        # Viền mảnh Studio Coral (#d94f3d)
-        border_color = QColor("#e05a47") if self._hovered else QColor(217, 79, 61, 155)
-        border_pen = QPen(border_color, 1.4 if self._hovered else 1.1)
+        # Viền mảnh Studio Coral (#d94f3d) sáng rõ để dễ nhận diện bằng mắt
+        border_color = QColor("#ff6b57") if self._hovered else QColor(217, 79, 61, 205)
+        border_pen = QPen(border_color, 1.6 if self._hovered else 1.3)
         painter.setPen(border_pen)
         painter.drawPath(tab_path)
 
         # Vạch nhấn dọc nhỏ bên mép trong
-        accent_y1 = h * 0.30
-        accent_y2 = h * 0.70
-        accent_x = body_rect.left() + 2.2 if self._edge == "right" else body_rect.right() - 2.2
-        accent_pen = QPen(QColor("#d94f3d" if not self._hovered else "#ff6b57"), 2.0)
+        accent_y1 = h * 0.28
+        accent_y2 = h * 0.72
+        accent_x = body_rect.left() + 2.5 if self._edge == "right" else body_rect.right() - 2.5
+        accent_pen = QPen(QColor("#d94f3d" if not self._hovered else "#ff7a66"), 2.2)
         accent_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(accent_pen)
         painter.drawLine(QPointF(accent_x, accent_y1), QPointF(accent_x, accent_y2))
@@ -290,23 +361,21 @@ class EdgePeekHandle(QWidget):
         # Mũi tên Chevron sắc nét ở tâm (‹ khi neo phải, › khi neo trái)
         cx = body_rect.center().x() + (1.5 if self._edge == "right" else -1.5)
         cy = body_rect.center().y()
-        arm_x = 4.2
-        arm_y = 6.2
+        arm_x = 4.6
+        arm_y = 6.8
 
         arrow_path = QPainterPath()
         if self._edge == "right":
-            # Mũi tên trỏ sang trái ‹ (mở ra từ cạnh phải)
             arrow_path.moveTo(cx + arm_x * 0.55, cy - arm_y)
             arrow_path.lineTo(cx - arm_x * 0.65, cy)
             arrow_path.lineTo(cx + arm_x * 0.55, cy + arm_y)
         else:
-            # Mũi tên trỏ sang phải › (mở ra từ cạnh trái)
             arrow_path.moveTo(cx - arm_x * 0.55, cy - arm_y)
             arrow_path.lineTo(cx + arm_x * 0.65, cy)
             arrow_path.lineTo(cx - arm_x * 0.55, cy + arm_y)
 
-        arrow_color = QColor("#ffffff") if self._hovered else QColor("#e4e4e7")
-        arrow_pen = QPen(arrow_color, 2.2)
+        arrow_color = QColor("#ffffff") if self._hovered else QColor("#f4f4f5")
+        arrow_pen = QPen(arrow_color, 2.4)
         arrow_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         arrow_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(arrow_pen)

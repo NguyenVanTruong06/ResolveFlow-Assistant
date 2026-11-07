@@ -37,7 +37,7 @@ from .dock_state import DockState, DockStateMachine
 from .dock_rail import DockRailWidget
 from .dock_header import DockHeaderWidget
 from .dock_status import DockStatusBar
-from .edge_peek_handle import EdgePeekHandle
+from .edge_peek_handle import EdgePeekHandle, EdgeSensorStrip
 from ..library.category_nav import CategoryNavWidget, DEFAULT_CATEGORIES
 from src.core.contracts.asset_dto import (
     CANONICAL_STORAGE_CATEGORIES,
@@ -88,7 +88,8 @@ class EdgeDockWindow(QWidget):
     EDGE_TRIGGER_PX = 24
     EDGE_KEEP_PX = 68
     EDGE_POLL_INTERVAL_MS = 80
-    PEEK_HIDE_DELAY_MS = 280
+    PEEK_HIDE_DELAY_MS = 420
+    PEEK_SEAM_HIDE_DELAY_MS = 1350
 
     expanded_changed = pyqtSignal(bool)
     state_changed = pyqtSignal(str)
@@ -185,6 +186,14 @@ class EdgeDockWindow(QWidget):
         self.peek_handle.open_studio_requested.connect(self.restore_standard_window_requested.emit)
         self.peek_handle.settings_requested.connect(self.open_settings)
         self.peek_handle.edge_switch_requested.connect(self.set_dock_edge)
+        self.peek_handle.handle_entered.connect(self._on_peek_handle_entered)
+        self.peek_handle.handle_left.connect(self._schedule_peek_hide_if_left)
+
+        # Dải cảm biến trong suốt 99% sát mép màn hình (hỗ trợ Wayland/XWayland & khe nối 2 màn hình)
+        self.edge_sensor = EdgeSensorStrip(parent=None)
+        self.edge_sensor.edge_triggered.connect(self._on_edge_sensor_triggered)
+        self.edge_sensor.edge_left.connect(self._schedule_peek_hide_if_left)
+        self.edge_sensor.open_dock_requested.connect(lambda: self.open_dock(animated=True))
 
         # Bộ cảm biến tọa độ chuột sát mép màn hình (chỉ kích hoạt khi Dock đang thu ẩn)
         self._edge_poll_timer = QTimer(self)
@@ -728,6 +737,8 @@ class EdgeDockWindow(QWidget):
             self.fsm.set_resolve_width(rect[2])
         self.palette.set_anchor_rect(rect)
         self._update_dock_position(target_w=self.width(), animated=False)
+        if not self.fsm.is_open and not getattr(self, "_use_bubble_mode", False):
+            self._sync_edge_sensor_geometry()
 
     def open_palette(self, command_mode: bool = False):
         """Opens Quick Command Palette HUD."""
@@ -748,6 +759,9 @@ class EdgeDockWindow(QWidget):
         was_collapsed = (not self.isVisible()) or (not self.fsm.is_open)
         self._edge_poll_timer.stop()
         self._peek_hide_timer.stop()
+        if hasattr(self, "edge_sensor") and self.edge_sensor:
+            self.edge_sensor.is_hovered = False
+            self.edge_sensor.hide()
         if hasattr(self, "peek_handle") and self.peek_handle:
             self.peek_handle.hide_animated(animated=False)
         if hasattr(self, "bubble") and self.bubble:
@@ -831,33 +845,144 @@ class EdgeDockWindow(QWidget):
 
         if getattr(self, "_use_bubble_mode", False):
             self._edge_poll_timer.stop()
+            if hasattr(self, "edge_sensor") and self.edge_sensor:
+                self.edge_sensor.hide()
             if hasattr(self, "peek_handle") and self.peek_handle:
                 self.peek_handle.hide_animated(animated=False)
             self._show_bubble_at_edge()
         else:
-            # Mặc định: Thu ẩn hoàn toàn vào cạnh màn hình, chỉ nhô mũi tên nhỏ khi chuột lại gần
+            # Mặc định: Thu ẩn hoàn toàn vào cạnh màn hình, bật dải cảm biến trong suốt sát mép
             if hasattr(self, "bubble") and self.bubble:
                 self.bubble.hide()
             if hasattr(self, "peek_handle") and self.peek_handle:
                 self.peek_handle.hide_animated(animated=False)
             if was_open:
                 self._collapse_cooldown_until = time.monotonic() + 0.35
-            if not self._edge_poll_timer.isActive():
-                self._edge_poll_timer.start()
+            self._sync_edge_sensor_geometry()
+            if not self._is_wayland_session():
+                if not self._edge_poll_timer.isActive():
+                    self._edge_poll_timer.start()
+            else:
+                # Trên Wayland, QCursor.pos() bị đóng băng ở ngoài cửa sổ X11;
+                # EdgeSensorStrip xử lý 100% qua sự kiện trỏ chuột thời gian thực của compositor.
+                self._edge_poll_timer.stop()
+
+    @staticmethod
+    def _is_wayland_session() -> bool:
+        return (
+            os.environ.get("XDG_SESSION_TYPE", "").strip().lower() == "wayland"
+            or bool(os.environ.get("WAYLAND_DISPLAY"))
+        )
+
+    def _is_shared_monitor_seam(self) -> bool:
+        """Kiểm tra cạnh đang neo có phải khe nối tiếp giáp sang màn hình thứ 2 hay không."""
+        app = QApplication.instance()
+        if not app:
+            return False
+        screens = app.screens()
+        if len(screens) < 2:
+            return False
+        sx, sy, sw, sh = self._get_screen_rect()
+        edge = getattr(self, "dock_edge", "right")
+        probe_x = (sx - 24) if edge == "left" else (sx + sw + 24)
+        probe_y = sy + sh // 2
+        return app.screenAt(QPoint(probe_x, probe_y)) is not None
+
+    def _sync_edge_sensor_geometry(self):
+        """Đặt dải cảm biến trong suốt dọc theo cạnh màn hình đang neo (tránh góc [X] & Taskbar)."""
+        if not hasattr(self, "edge_sensor") or not self.edge_sensor:
+            return
+        if self.fsm.is_open or self.isVisible() or getattr(self, "_use_bubble_mode", False):
+            self.edge_sensor.hide()
+            return
+
+        sx, sy, sw, sh = self._get_screen_rect()
+        safe_top = sy + 56
+        safe_h = max(120, sh - 112)
+        edge = getattr(self, "dock_edge", "right")
+        is_seam = self._is_shared_monitor_seam()
+
+        if is_seam:
+            # Khe nối giữa 2 màn hình: dải cảm biến 8px nằm trọn bên trong mép màn hình đang neo
+            # (không vượt qua ranh giới sang màn bên cạnh để tránh Mutter/WM tự dịch cửa sổ)
+            strip_w = 8
+        else:
+            # Cạnh vật lý ngoài cùng: chuột tự dừng ở mép nên chỉ cần 4px sát viền
+            strip_w = 4
+        strip_x = sx if edge == "left" else (sx + sw - strip_w)
+
+        self.edge_sensor.setMinimumSize(1, 1)
+        self.edge_sensor.setMaximumSize(strip_w, safe_h)
+        self.edge_sensor.setGeometry(strip_x, safe_top, strip_w, safe_h)
+        if not self.edge_sensor.isVisible():
+            self.edge_sensor.show()
+        self.edge_sensor.raise_()
+
+    def _on_edge_sensor_triggered(self, global_pos: QPoint):
+        """Sự kiện trực tiếp từ EdgeSensorStrip (hoạt động tức thì trên cả Wayland & Dual Monitor)."""
+        if self.fsm.is_open or self.isVisible() or getattr(self, "_use_bubble_mode", False):
+            return
+        if time.monotonic() < getattr(self, "_collapse_cooldown_until", 0.0):
+            return
+        if QApplication.activeModalWidget() is not None:
+            return
+
+        self._peek_hide_timer.stop()
+        sx, sy, sw, sh = self._get_screen_rect()
+        hw = self.peek_handle.width()
+        hh = self.peek_handle.height()
+        safe_top = sy + 56
+        safe_bottom = sy + max(safe_top + hh, sh - 56)
+        edge = getattr(self, "dock_edge", "right")
+        target_x = sx if edge == "left" else (sx + sw - hw)
+        clamped_y = max(safe_top, min(safe_bottom - hh, global_pos.y() - hh // 2))
+
+        if not self.peek_handle.isVisible() or getattr(self.peek_handle, "_hiding", False):
+            self.peek_handle.set_dock_edge(edge)
+            self.peek_handle.show_at(target_x, clamped_y, animated=True)
+        else:
+            center_y = self.peek_handle.geometry().center().y()
+            if abs(global_pos.y() - center_y) > 96:
+                self.peek_handle.move(target_x, clamped_y)
+                self.peek_handle.raise_()
+
+    def _on_peek_handle_entered(self):
+        self._peek_hide_timer.stop()
+
+    def _schedule_peek_hide_if_left(self):
+        """Hẹn giờ thu mũi tên khi trỏ chuột đã rời cả dải cảm biến lẫn nút mũi tên."""
+        sensor_in = bool(hasattr(self, "edge_sensor") and self.edge_sensor and self.edge_sensor.is_hovered)
+        handle_in = bool(
+            hasattr(self, "peek_handle")
+            and self.peek_handle
+            and (self.peek_handle.is_hovered or self.peek_handle.is_menu_open)
+        )
+        if sensor_in or handle_in:
+            self._peek_hide_timer.stop()
+            return
+        if hasattr(self, "peek_handle") and self.peek_handle and self.peek_handle.isVisible():
+            delay = self.PEEK_SEAM_HIDE_DELAY_MS if self._is_shared_monitor_seam() else self.PEEK_HIDE_DELAY_MS
+            self._peek_hide_timer.start(delay)
 
     def _on_edge_poll_timeout(self):
-        self._check_edge_proximity(cursor_pos=None)
+        if not self._is_wayland_session():
+            self._check_edge_proximity(cursor_pos=None)
 
     def _on_peek_hide_timeout(self):
-        if hasattr(self, "peek_handle") and self.peek_handle and not self.peek_handle.is_menu_open:
+        sensor_in = bool(hasattr(self, "edge_sensor") and self.edge_sensor and self.edge_sensor.is_hovered)
+        handle_in = bool(
+            hasattr(self, "peek_handle")
+            and self.peek_handle
+            and (self.peek_handle.is_hovered or self.peek_handle.is_menu_open)
+        )
+        if not sensor_in and not handle_in and hasattr(self, "peek_handle") and self.peek_handle:
             self.peek_handle.hide_animated(animated=True)
 
     def _check_edge_proximity(self, cursor_pos: Optional[QPoint] = None) -> bool:
         """
-        Kiểm tra vị trí chuột so với cạnh màn hình đang neo:
-        - Khi chuột tiến sát cạnh (<= 24px): nhô ra mũi tên nhỏ (EdgePeekHandle).
-        - Khi chuột rời xa (> 68px): tự động thụt ẩn mũi tên (0px trên màn hình).
-        Trả về True nếu vùng cảm biến cạnh đang được kích hoạt.
+        Kiểm tra vị trí chuột so với cạnh màn hình đang neo (hỗ trợ cả khe nối 2 màn hình):
+        - Khi chuột tiến sát cạnh (<= 24px, hoặc vừa trôi qua khe nối 2 màn hình <= 36px): nhô mũi tên nhỏ.
+        - Khi chuột rời xa vùng giữ: tự động thụt ẩn mũi tên (0px hiển thị).
         """
         if self.fsm.is_open or self.isVisible() or getattr(self, "_use_bubble_mode", False):
             if hasattr(self, "peek_handle") and self.peek_handle and self.peek_handle.isVisible():
@@ -888,8 +1013,12 @@ class EdgeDockWindow(QWidget):
             dist_x = (sx + sw) - pos.x()
             target_x = sx + sw - hw
 
-        in_trigger = in_vertical and (-8 <= dist_x <= self.EDGE_TRIGGER_PX)
-        in_keep = (sy + 16 <= pos.y() <= sy + sh - 16) and (-12 <= dist_x <= self.EDGE_KEEP_PX)
+        is_seam = self._is_shared_monitor_seam()
+        overshoot_trigger = -36 if is_seam else -8
+        overshoot_keep = -120 if is_seam else -16
+
+        in_trigger = in_vertical and (overshoot_trigger <= dist_x <= self.EDGE_TRIGGER_PX)
+        in_keep = (sy + 16 <= pos.y() <= sy + sh - 16) and (overshoot_keep <= dist_x <= self.EDGE_KEEP_PX)
 
         if not self.peek_handle.isVisible() or getattr(self.peek_handle, "_hiding", False):
             if in_trigger:
@@ -905,8 +1034,8 @@ class EdgeDockWindow(QWidget):
             return False
 
         # Mũi tên đang hiển thị: giữ cố định vị trí Y khi chuột tiến vào để dễ bấm
-        handle_zone = self.peek_handle.geometry().adjusted(-20, -36, 20, 36)
-        if handle_zone.contains(pos) or self.peek_handle.is_menu_open:
+        handle_zone = self.peek_handle.geometry().adjusted(-24, -36, 24, 36)
+        if handle_zone.contains(pos) or self.peek_handle.is_menu_open or self.peek_handle.is_hovered:
             self._peek_hide_timer.stop()
             return True
 
@@ -926,7 +1055,8 @@ class EdgeDockWindow(QWidget):
             self._peek_hide_timer.stop()
             self.peek_handle.hide_animated(animated=False)
         elif not self._peek_hide_timer.isActive():
-            self._peek_hide_timer.start()
+            delay = self.PEEK_SEAM_HIDE_DELAY_MS if is_seam else self.PEEK_HIDE_DELAY_MS
+            self._peek_hide_timer.start(delay)
         return False
 
     def _show_bubble_at_edge(self):
@@ -1085,6 +1215,9 @@ class EdgeDockWindow(QWidget):
         if hasattr(self, "bubble") and self.bubble and self.bubble.isVisible():
             self._show_bubble_at_edge()
 
+        if not self.fsm.is_open and not getattr(self, "_use_bubble_mode", False):
+            self._sync_edge_sensor_geometry()
+
         self._update_dock_position(target_w=self.width(), animated=False)
 
     def open_settings(self):
@@ -1106,6 +1239,8 @@ class EdgeDockWindow(QWidget):
         svc = get_multi_screen_service()
         svc.set_preferred_dock_screen(index)
         self._update_dock_position(animated=False)
+        if not self.fsm.is_open and not getattr(self, "_use_bubble_mode", False):
+            self._sync_edge_sensor_geometry()
 
     def _on_hover_audio_changed(self, enabled: bool):
         self.grid.hover_controller.set_audio_preview_enabled(enabled)
@@ -1835,6 +1970,11 @@ class EdgeDockWindow(QWidget):
             self._edge_poll_timer.stop()
         if hasattr(self, "_peek_hide_timer") and self._peek_hide_timer:
             self._peek_hide_timer.stop()
+        if hasattr(self, "edge_sensor") and self.edge_sensor:
+            try:
+                self.edge_sensor.close()
+            except Exception:
+                pass
         if hasattr(self, "peek_handle") and self.peek_handle:
             try:
                 self.peek_handle.close()

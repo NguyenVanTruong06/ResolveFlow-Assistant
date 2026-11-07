@@ -571,7 +571,7 @@ def test_dock_edge_auto_hide_and_proximity_peek_arrow(qapp):
     """
     from PySide6.QtCore import QPoint, QPointF
     from PySide6.QtGui import QMouseEvent
-    from src.ui.lux.shell.edge_peek_handle import EdgePeekHandle
+    from src.ui.lux.shell.edge_peek_handle import EdgePeekHandle, EdgeSensorStrip
 
     dock = EdgeDockWindow(edge_side="right")
     dock._auto_collapse_on_leave = False
@@ -579,16 +579,19 @@ def test_dock_edge_auto_hide_and_proximity_peek_arrow(qapp):
     dock.set_dock_edge("right")
     assert hasattr(dock, "peek_handle")
     assert isinstance(dock.peek_handle, EdgePeekHandle)
+    assert hasattr(dock, "edge_sensor")
+    assert isinstance(dock.edge_sensor, EdgeSensorStrip)
 
-    # Kiểm tra Focus safety của mũi tên (không bao giờ cướp phím tắt của DaVinci Resolve)
-    pflags = dock.peek_handle.windowFlags()
-    assert bool(pflags & Qt.WindowType.FramelessWindowHint) is True
-    assert bool(pflags & Qt.WindowType.WindowStaysOnTopHint) is True
-    assert bool(pflags & Qt.WindowType.Tool) is True
-    assert dock.peek_handle.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating) is True
-    assert dock.peek_handle.focusPolicy() == Qt.FocusPolicy.NoFocus
+    # Kiểm tra Focus safety của mũi tên và dải cảm biến (không bao giờ cướp phím tắt của DaVinci Resolve)
+    for w in (dock.peek_handle, dock.edge_sensor):
+        wflags = w.windowFlags()
+        assert bool(wflags & Qt.WindowType.FramelessWindowHint) is True
+        assert bool(wflags & Qt.WindowType.WindowStaysOnTopHint) is True
+        assert bool(wflags & Qt.WindowType.Tool) is True
+        assert w.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating) is True
+        assert w.focusPolicy() == Qt.FocusPolicy.NoFocus
 
-    # 1. Ban đầu mở Dock 420px: Dock hiện, mũi tên & bong bóng đều ẩn
+    # 1. Ban đầu mở Dock 420px: Dock hiện, mũi tên, cảm biến & bong bóng đều ẩn
     dock.show()
     dock.open_dock(animated=False)
     qapp.processEvents()
@@ -596,15 +599,42 @@ def test_dock_edge_auto_hide_and_proximity_peek_arrow(qapp):
     assert dock.fsm.is_open is True
     assert dock.width() == 420
     assert dock.peek_handle.isVisible() is False
+    assert dock.edge_sensor.isVisible() is False
     assert dock.bubble.isVisible() is False
 
-    # 2. Thu ẩn Dock vào cạnh phải: 0px trên màn hình khi chuột ở giữa màn hình
+    # 2. Thu ẩn Dock vào cạnh phải: 0px hiển thị trực quan, dải cảm biến EdgeSensorStrip bật sẵn
     dock.collapse_dock(to_strip=True, animated=False)
+    dock._collapse_cooldown_until = 0.0
     qapp.processEvents()
     assert dock.isVisible() is False
     assert dock.bubble.isVisible() is False
     assert dock.peek_handle.isVisible() is False
-    assert dock._edge_poll_timer.isActive() is True
+    assert dock.edge_sensor.isVisible() is True
+    assert dock._edge_poll_timer.isActive() is (not dock._is_wayland_session())
+
+    # 2b. Kiểm tra sự kiện trực tiếp từ EdgeSensorStrip (Wayland + Dual Monitor Seam)
+    dock._is_shared_monitor_seam = lambda: True
+    dock._sync_edge_sensor_geometry()
+    assert dock.edge_sensor.width() == 8
+    assert dock.edge_sensor.x() == 1920 - 8
+
+    dock._on_edge_sensor_triggered(QPoint(1916, 520))
+    qapp.processEvents()
+    assert dock.peek_handle.isVisible() is True
+    assert dock.peek_handle.x() == 1920 - dock.peek_handle.width()
+    assert abs(dock.peek_handle.geometry().center().y() - 520) <= 4
+
+    # Khi chuột trượt qua khe nối sang màn hình 2, mũi tên giữ hiển thị 1350ms để dễ kéo lại bấm
+    dock.edge_sensor.is_hovered = False
+    dock._schedule_peek_hide_if_left()
+    assert dock._peek_hide_timer.isActive() is True
+    assert dock._peek_hide_timer.interval() == dock.PEEK_SEAM_HIDE_DELAY_MS
+    dock._peek_hide_timer.stop()
+    dock.peek_handle.hide_animated(animated=False)
+    dock._is_shared_monitor_seam = lambda: False
+    dock._sync_edge_sensor_geometry()
+    assert dock.edge_sensor.width() == 4
+    assert dock.edge_sensor.x() == 1920 - 4
 
     # Chuột ở giữa màn hình (960, 540) -> vẫn ẩn hoàn toàn
     assert dock._check_edge_proximity(QPoint(960, 540)) is False
@@ -652,6 +682,7 @@ def test_dock_edge_auto_hide_and_proximity_peek_arrow(qapp):
     qapp.processEvents()
 
     assert dock.peek_handle.isVisible() is False
+    assert dock.edge_sensor.isVisible() is False
     assert dock.isVisible() is True
     assert dock.fsm.is_open is True
     assert dock.width() == 420
@@ -662,6 +693,8 @@ def test_dock_edge_auto_hide_and_proximity_peek_arrow(qapp):
     qapp.processEvents()
     assert dock.isVisible() is False
     assert dock.peek_handle.isVisible() is False
+    assert dock.edge_sensor.isVisible() is True
+    assert dock.edge_sensor.x() == 0
 
     assert dock._check_edge_proximity(QPoint(6, 420)) is True
     assert dock.peek_handle.isVisible() is True
@@ -675,6 +708,7 @@ def test_dock_edge_auto_hide_and_proximity_peek_arrow(qapp):
     qapp.processEvents()
     assert dock.bubble.isVisible() is True
     assert dock.peek_handle.isVisible() is False
+    assert dock.edge_sensor.isVisible() is False
 
     # Dọn dẹp
     dock._anim.stop()
