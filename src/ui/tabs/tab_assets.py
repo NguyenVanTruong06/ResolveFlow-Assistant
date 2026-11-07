@@ -1376,7 +1376,7 @@ class TransitionLoopWidget(QWidget):
 
 class IconMemePreviewWidget(QWidget):
     """Widget xem trước Icon vector hoặc Meme video reaction có trình phát video thực tế được bảo vệ qua ActionGuard."""
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, bundled_root: Optional[str] = None):
         super().__init__(parent)
         self._current_asset: Any = None
         self._playback_epoch: int = 0
@@ -1395,7 +1395,7 @@ class IconMemePreviewWidget(QWidget):
         self._pixmap = None
         self._duration_ms = 0
         self._position_ms = 0
-        self._bundled_root = None
+        self._bundled_root = bundled_root
 
         self.setFixedHeight(175)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -1582,6 +1582,22 @@ class IconMemePreviewWidget(QWidget):
                 return
             self._on_player_error(err, err_str, epoch=epoch)
 
+        def on_media_status(status):
+            if epoch != self._playback_epoch or not self._is_active_playback:
+                return
+            try:
+                from PySide6.QtMultimedia import QMediaPlayer
+                if (
+                    status == QMediaPlayer.MediaStatus.EndOfMedia
+                    and self._is_active_playback
+                    and str(self.item_type).lower() in ("trans", "transition", "transitions")
+                    and self._player is not None
+                ):
+                    self._player.setPosition(0)
+                    self._player.play()
+            except Exception:
+                pass
+
         if hasattr(self._player, "positionChanged"):
             c1 = self._player.positionChanged.connect(on_pos)
             self._player_conns.append(c1)
@@ -1591,9 +1607,12 @@ class IconMemePreviewWidget(QWidget):
         if hasattr(self._player, "playbackStateChanged"):
             c3 = self._player.playbackStateChanged.connect(on_state)
             self._player_conns.append(c3)
-        if hasattr(self._player, "errorOccurred"):
-            c4 = self._player.errorOccurred.connect(on_err)
+        if hasattr(self._player, "mediaStatusChanged"):
+            c4 = self._player.mediaStatusChanged.connect(on_media_status)
             self._player_conns.append(c4)
+        if hasattr(self._player, "errorOccurred"):
+            c5 = self._player.errorOccurred.connect(on_err)
+            self._player_conns.append(c5)
 
         source = QUrl.fromLocalFile(self.resolved_file_path)
         if self._player.source() != source:
@@ -1752,6 +1771,23 @@ class IconMemePreviewWidget(QWidget):
         }
         self.set_asset(legacy_asset, sub=sub)
 
+    def _set_audio_volume(self, volume: float) -> None:
+        if self._audio_output is not None:
+            try:
+                self._audio_output.setVolume(volume)
+            except Exception:
+                pass
+
+    def start_auto_preview(self, muted: bool = True):
+        """Khởi động phát xem trước tự động cho video (vd: chuyển cảnh), tuân thủ ActionGuard."""
+        if not self.resolved_file_path or not os.path.isfile(self.resolved_file_path):
+            return
+        if not self._recheck_action_time_guard():
+            return
+        self._ensure_player()
+        self._set_audio_volume(0.0 if muted else 0.9)
+        self._start_session(reset_pos=True)
+
     def _browse_file(self):
         """Safe no-op: Tính năng liên kết tệp trực tiếp tạm thời vô hiệu hóa."""
         pass
@@ -1766,6 +1802,7 @@ class IconMemePreviewWidget(QWidget):
                 self.btn_play.setText("▶ Tiếp tục")
                 self.btn_play.setToolTip("Tiếp tục phát video")
             else:
+                self._set_audio_volume(0.9)
                 self._start_session(reset_pos=False)
         else:
             self.stop_playback()
@@ -1775,6 +1812,7 @@ class IconMemePreviewWidget(QWidget):
             if not self._recheck_action_time_guard():
                 return
             self._ensure_player()
+            self._set_audio_volume(0.9)
             self._start_session(reset_pos=False)
         else:
             self.stop_playback()
@@ -1784,6 +1822,7 @@ class IconMemePreviewWidget(QWidget):
             if not self._recheck_action_time_guard():
                 return
             self._ensure_player()
+            self._set_audio_volume(0.9)
             self._start_session(reset_pos=True)
         else:
             self.stop_playback()
@@ -7527,6 +7566,8 @@ class TabAssets(QWidget):
                 self.inspector_trans_viewport.hide()
                 self.inspector_icon_viewport.show()
                 self.icon_meme_widget.set_asset(preview_asset_payload, sub=sub)
+                if getattr(self.icon_meme_widget, "resolved_file_path", "") and self.isVisible():
+                    self.icon_meme_widget.start_auto_preview(muted=True)
                 if not getattr(self.icon_meme_widget, "resolved_file_path", ""):
                     self.icon_meme_widget.stop_playback()
                     self.inspector_trans_viewport.show()

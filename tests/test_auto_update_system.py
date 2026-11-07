@@ -98,3 +98,60 @@ def test_update_toast_widget_ui(qapp):
 
     # Simulate close
     toast.close()
+
+
+def test_current_version_v1_0_14():
+    """Xác nhận phiên bản hệ thống đã nâng đồng bộ lên v1.0.14."""
+    from src.core.branding import APP_VERSION
+    assert CURRENT_VERSION == "1.0.14"
+    assert APP_VERSION == "v1.0.14"
+
+
+def test_restart_app_clean_env_and_guard(qapp, monkeypatch):
+    """Kiểm tra restart_app dọn sạch biến môi trường PyInstaller và mở khóa shutdown guard."""
+    import os
+    import subprocess
+    from PySide6.QtCore import QTimer
+    from src.services.update_service import restart_app
+
+    called_kwargs = {}
+    exit_calls = []
+    os_exit_calls = []
+    single_shot_calls = []
+
+    def mock_popen(args, **kwargs):
+        called_kwargs.update(kwargs)
+        mock_proc = MagicMock()
+        return mock_proc
+
+    monkeypatch.setattr(subprocess, "Popen", mock_popen)
+    monkeypatch.setattr(sys, "exit", lambda code=0: exit_calls.append(code))
+    monkeypatch.setattr(os, "_exit", lambda code=0: os_exit_calls.append(code))
+    monkeypatch.setattr(QTimer, "singleShot", lambda ms, cb: single_shot_calls.append((ms, cb)))
+    monkeypatch.setattr(qapp, "quit", lambda: None)
+
+    monkeypatch.setenv("_MEIPASS2", "/tmp/_MEI999")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/chundvc/_internal:/usr/lib")
+
+    guard_mock = MagicMock()
+    guard_mock._allowed = False
+    monkeypatch.setattr(qapp, "_source_shutdown_guard", guard_mock, raising=False)
+
+    restart_app()
+
+    env = called_kwargs.get("env", {})
+    assert "_MEIPASS2" not in env
+    assert env.get("PYINSTALLER_RESET_ENVIRONMENT") == "1"
+    assert "_internal" not in env.get("LD_LIBRARY_PATH", "")
+    assert "/usr/lib" in env.get("LD_LIBRARY_PATH", "")
+
+    if os.name == "posix":
+        assert called_kwargs.get("start_new_session") is True
+
+    assert guard_mock._allowed is True
+    assert exit_calls == [0]
+    assert len(single_shot_calls) == 1
+    assert single_shot_calls[0][0] == 250
+    single_shot_calls[0][1]()
+    assert os_exit_calls == [0]
+

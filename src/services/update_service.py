@@ -19,7 +19,7 @@ from PySide6.QtCore import QObject, QThread, Signal, QSettings
 
 logger = logging.getLogger("ChunDVC.UpdateService")
 
-CURRENT_VERSION = "1.0.13"
+CURRENT_VERSION = "1.0.14"
 GITHUB_REPO = "NguyenVanTruong06/ResolveFlow-Assistant"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -358,7 +358,26 @@ del "%~f0"
 def restart_app():
     """Khởi động lại ứng dụng một cách an toàn và dứt điểm."""
     from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QTimer
     app = QApplication.instance()
+
+    clean_env = os.environ.copy()
+    clean_env.pop("_MEIPASS2", None)
+    clean_env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+
+    if "LD_LIBRARY_PATH_ORIG" in clean_env:
+        clean_env["LD_LIBRARY_PATH"] = clean_env.pop("LD_LIBRARY_PATH_ORIG")
+    elif "LD_LIBRARY_PATH" in clean_env:
+        orig_ld = clean_env["LD_LIBRARY_PATH"]
+        parts = [p for p in orig_ld.split(os.pathsep) if p and "_internal" not in p and "_MEI" not in p]
+        if parts:
+            clean_env["LD_LIBRARY_PATH"] = os.pathsep.join(parts)
+        else:
+            clean_env.pop("LD_LIBRARY_PATH", None)
+
+    popen_kwargs = {"env": clean_env}
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True
 
     try:
         if sys.platform.startswith("linux"):
@@ -369,23 +388,34 @@ def restart_app():
                 launcher = "/opt/resolveflow-assistant/launch_resolveflow.sh"
 
             if os.path.exists(launcher):
-                subprocess.Popen([launcher])
+                subprocess.Popen([launcher], **popen_kwargs)
             elif getattr(sys, 'frozen', False):
-                subprocess.Popen([sys.executable] + sys.argv[1:])
+                subprocess.Popen([sys.executable] + sys.argv[1:], **popen_kwargs)
             else:
-                subprocess.Popen([sys.executable] + sys.argv)
+                subprocess.Popen([sys.executable] + sys.argv, **popen_kwargs)
         elif sys.platform.startswith("win"):
             updater_bat = os.path.join(tempfile.gettempdir(), "chundvc_apply_update.bat")
             if os.path.exists(updater_bat):
-                subprocess.Popen(["cmd.exe", "/c", updater_bat], shell=False)
+                subprocess.Popen(["cmd.exe", "/c", updater_bat], shell=False, **popen_kwargs)
             elif getattr(sys, 'frozen', False):
-                subprocess.Popen([sys.executable] + sys.argv[1:])
+                subprocess.Popen([sys.executable] + sys.argv[1:], **popen_kwargs)
             else:
-                subprocess.Popen([sys.executable] + sys.argv)
+                subprocess.Popen([sys.executable] + sys.argv, **popen_kwargs)
         else:
-            subprocess.Popen([sys.executable] + sys.argv)
+            subprocess.Popen([sys.executable] + sys.argv, **popen_kwargs)
     except Exception as exc:
         logger.error("Lỗi khi khởi động lại ứng dụng: %s", exc)
+
+    if app is not None and hasattr(app, "_source_shutdown_guard") and app._source_shutdown_guard is not None:
+        try:
+            app._source_shutdown_guard._allowed = True
+        except Exception:
+            pass
+
+    try:
+        QTimer.singleShot(250, lambda: os._exit(0))
+    except Exception:
+        pass
 
     if app:
         app.quit()

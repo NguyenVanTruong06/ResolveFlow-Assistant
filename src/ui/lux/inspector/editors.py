@@ -786,15 +786,18 @@ class MacroEditor(QWidget):
             return True
         try:
             from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-            from PySide6.QtMultimediaWidgets import QVideoWidget
+            from src.ui.lux.library.hover_preview import _SoftwareVideoCanvas
             if self._video_widget is None:
-                self._video_widget = QVideoWidget(self.preview_stack)
+                self._video_widget = _SoftwareVideoCanvas(self.preview_stack)
                 self.preview_stack.addWidget(self._video_widget)
             self._player = QMediaPlayer(self)
             self._audio_output = QAudioOutput(self)
             self._audio_output.setVolume(0.0)
             self._player.setAudioOutput(self._audio_output)
-            self._player.setVideoOutput(self._video_widget)
+            if hasattr(self._player, "setVideoSink") and hasattr(self._video_widget, "video_sink"):
+                self._player.setVideoSink(self._video_widget.video_sink)
+            else:
+                self._player.setVideoOutput(self._video_widget)
             self._player.mediaStatusChanged.connect(self._on_media_status_changed)
             return True
         except Exception:
@@ -841,6 +844,8 @@ class MacroEditor(QWidget):
                 self._player.stop()
             except Exception:
                 pass
+        if self._video_widget is not None and hasattr(self._video_widget, "clear_frame"):
+            self._video_widget.clear_frame()
 
     def showEvent(self, event) -> None:
         if self.is_video_preview:

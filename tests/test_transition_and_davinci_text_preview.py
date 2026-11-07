@@ -386,3 +386,160 @@ def test_real_transition_media_priority_over_procedural(tmp_path, qapp):
     preserved = build_verified_video_preview_payload(foreign_asset, str(real_png))
     assert preserved["origin_library_id"] == "foreign-lib-999"
     assert preserved["availability"] == "offline"
+
+
+def test_software_video_canvas_and_video_sink(qapp):
+    """Kiểm tra canvas QVideoSink phần mềm phục vụ EdgeDockWindow trong suốt và tránh lỗi black box."""
+    from PySide6.QtGui import QImage, QColor
+    from PySide6.QtMultimedia import QVideoSink, QVideoFrame, QMediaPlayer
+    from src.ui.lux.library.hover_preview import _SoftwareVideoCanvas, HoverPreviewOverlay
+
+    canvas = _SoftwareVideoCanvas()
+    assert hasattr(canvas, "video_sink")
+    assert isinstance(canvas.video_sink, QVideoSink)
+
+    # Zero-dimension paint guard & valid resize paint check
+    img = QImage(32, 32, QImage.Format.Format_ARGB32)
+    img.fill(QColor("#22c55e"))
+    canvas._current_image = img
+    canvas.resize(0, 0)
+    canvas.repaint()
+    canvas.resize(160, 90)
+    canvas.repaint()
+
+    # Frame clear
+    canvas.clear_frame()
+    assert canvas._current_image is None
+
+    # Test overlay integration
+    overlay = HoverPreviewOverlay()
+    vw = overlay.ensure_video_widget()
+    assert isinstance(vw, _SoftwareVideoCanvas)
+    assert overlay.video_widget is vw
+    overlay.stop_all()
+
+
+def test_icon_meme_preview_widget_start_auto_preview(tmp_path, qapp):
+    """Kiểm tra tính năng start_auto_preview, auto-loop và khôi phục âm lượng khi chuyển sang Meme."""
+    import pytest
+    from PySide6.QtMultimedia import QMediaPlayer
+    from src.ui.tabs.tab_assets import IconMemePreviewWidget
+
+    vid_path = tmp_path / "test_trans.mp4"
+    vid_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    meme_path = tmp_path / "test_meme.mp4"
+    meme_path.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    widget = IconMemePreviewWidget(bundled_root=str(tmp_path))
+    asset = {
+        "id": "trans_loop_test",
+        "name": "Loop Transition",
+        "tab": "trans",
+        "category": "trans",
+        "source_kind": "builtin",
+        "file_path": str(vid_path),
+        "preview_path": str(vid_path),
+    }
+    widget.set_asset(asset)
+    assert widget.resolved_file_path == str(vid_path.resolve())
+
+    # Gọi start_auto_preview(muted=True) cho chuyển cảnh
+    widget.start_auto_preview(muted=True)
+    assert widget._is_active_playback is True
+    assert widget._audio_output is not None
+    assert widget._audio_output.volume() == 0.0
+
+    # Chuyển sang Meme và phát thủ công -> âm lượng phải khôi phục về ~0.9 (không bị kẹt mute)
+    meme_asset = {
+        "id": "meme_sound_test",
+        "name": "Meme With Audio",
+        "tab": "meme",
+        "category": "meme",
+        "source_kind": "builtin",
+        "file_path": str(meme_path),
+        "preview_path": str(meme_path),
+    }
+    widget.set_asset(meme_asset)
+    widget._start_playback()
+    assert widget._audio_output.volume() == pytest.approx(0.9, abs=1e-2)
+
+    # Dừng phát để giải phóng tài nguyên
+    widget.stop_playback()
+    assert widget._is_active_playback is False
+
+
+def test_asset_indexer_fallback_and_oserror_guard(tmp_path, monkeypatch):
+    """Kiểm tra AssetIndexer ưu tiên _MEIPASS/assets khi đóng gói PyInstaller và bọc OSError trong ensure_dirs."""
+    import sys
+    from src.core.asset_indexer import AssetIndexer
+    from pathlib import Path
+
+    # Đổi cwd sang tmp_path để giả lập môi trường cwd không có thư mục assets/ (như khi chạy từ /opt)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+
+    # 1. Giả lập thư mục assets ứng viên cạnh executable (khi không có _MEIPASS)
+    mock_assets = tmp_path / "app_bundle" / "assets"
+    mock_assets.mkdir(parents=True)
+    (mock_assets / "luts").mkdir()
+
+    monkeypatch.setattr("sys.executable", str(tmp_path / "app_bundle" / "ResolveFlow-Assistant"))
+    indexer = AssetIndexer(base_dir="assets")
+    assert indexer.base_dir.resolve() == mock_assets.resolve()
+
+    # 2. Giả lập môi trường /opt PyInstaller: tồn tại cả app_bundle/assets rỗng (kể cả khi cwd=app_bundle)
+    # và _MEIPASS/assets thật -> phải ưu tiên _MEIPASS/assets khớp với ActionGuard bundled_root
+    meipass_root = tmp_path / "app_bundle" / "_internal"
+    meipass_assets = meipass_root / "assets"
+    (meipass_assets / "luts").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path / "app_bundle")
+    monkeypatch.setattr(sys, "_MEIPASS", str(meipass_root), raising=False)
+
+    indexer_frozen = AssetIndexer(base_dir="assets")
+    assert indexer_frozen.base_dir.resolve() == meipass_assets.resolve()
+
+    # Kiểm tra ensure_dirs không văng lỗi khi thư mục chỉ đọc
+    def mock_mkdir_fail(*args, **kwargs):
+        raise OSError("Read-only file system")
+
+    monkeypatch.setattr(Path, "mkdir", mock_mkdir_fail)
+    indexer_frozen.ensure_dirs()
+
+
+def test_scan_transitions_managed_mp4_provenance_for_action_guard(tmp_path, monkeypatch):
+    """Đảm bảo video .mp4 chuyển cảnh độc lập trong StorageManager được gắn đủ provenance cho ActionGuard."""
+    import sys
+    from src.core.action_guard import check_action_availability
+    from src.core.asset_indexer import AssetIndexer
+    from src.core.storage_manager import StorageManager
+
+    meipass_root = tmp_path / "frozen_bundle" / "_internal"
+    (meipass_root / "assets" / "templates" / "transitions").mkdir(parents=True)
+    monkeypatch.setattr(sys, "_MEIPASS", str(meipass_root), raising=False)
+
+    sm = StorageManager(config_dir=tmp_path / "sm_cfg", reserve_bytes=0)
+    sm_root = tmp_path / "managed_kho"
+    sm.configure(sm_root)
+    pack_preview_dir = sm_root / "02_cloud_downloads" / "packs" / "GR44_Pack" / "Preview Transitions"
+    pack_preview_dir.mkdir(parents=True, exist_ok=True)
+    mp4_file = pack_preview_dir / "Whip Pan Standalone.mp4"
+    mp4_file.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    monkeypatch.setattr("src.core.storage_manager.StorageManager", lambda: sm)
+    AssetIndexer.clear_cache()
+
+    indexer = AssetIndexer(base_dir="assets", settings_scope="ResolveFlowManagedTransTest")
+    results = indexer.scan_transitions(force_refresh=True)
+    matched = [r for r in results if r["name"] == "Whip Pan Standalone"]
+    assert len(matched) == 1
+    item = matched[0]
+    assert item.get("source_kind") == "managed"
+    assert item.get("storage_managed") is True
+    assert item.get("origin_library_id") == sm._config["library_id"]
+    assert item.get("origin_root") == str(sm_root.resolve())
+    assert item.get("library_path") == "02_cloud_downloads/packs/GR44_Pack/Preview Transitions/Whip Pan Standalone.mp4"
+
+    guard_res = check_action_availability(item, intent="preview", bundled_root=str(meipass_root / "assets"))
+    assert guard_res.allowed is True
+    assert guard_res.resolved_path == str(mp4_file.resolve())
+

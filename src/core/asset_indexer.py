@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
@@ -21,7 +22,23 @@ class AssetIndexer:
 
     def __init__(self, base_dir: str = "assets", settings_scope: str = "ResolveFlow"):
         self.settings_scope = settings_scope
+        self._is_default_base = (str(base_dir) == "assets")
         self.base_dir = Path(base_dir)
+        if self._is_default_base:
+            meipass = getattr(sys, "_MEIPASS", "")
+            meipass_assets = Path(meipass) / "assets" if meipass else None
+            if meipass_assets and meipass_assets.is_dir():
+                self.base_dir = meipass_assets
+            elif not ((Path("assets") / "luts").exists() or (Path("assets") / "templates").exists()):
+                exe_dir = Path(sys.executable).resolve().parent
+                cand_internal = exe_dir / "_internal" / "assets"
+                cand_a = exe_dir / "assets"
+                cand_c = Path(__file__).resolve().parents[2] / "assets"
+                for cand in (cand_internal, cand_a, cand_c):
+                    if cand.is_dir():
+                        self.base_dir = cand
+                        break
+
         if (self.base_dir / "assets").is_dir():
             target_base = self.base_dir / "assets"
         else:
@@ -101,15 +118,25 @@ class AssetIndexer:
         return False
 
     def ensure_dirs(self):
-        self.sfx_dir.mkdir(parents=True, exist_ok=True)
-        self.luts_dir.mkdir(parents=True, exist_ok=True)
-        self.memes_dir.mkdir(parents=True, exist_ok=True)
-        self.titles_dir.mkdir(parents=True, exist_ok=True)
-        self.transitions_dir.mkdir(parents=True, exist_ok=True)
-        self.overlays_dir.mkdir(parents=True, exist_ok=True)
-        self.music_dir.mkdir(parents=True, exist_ok=True)
+        dirs = [
+            self.sfx_dir,
+            self.luts_dir,
+            self.memes_dir,
+            self.titles_dir,
+            self.transitions_dir,
+            self.overlays_dir,
+            self.music_dir,
+        ]
+        for d in dirs:
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
         for mood in ["chill_vlog", "upbeat_trend", "cinematic", "funny"]:
-            (self.music_dir / mood).mkdir(parents=True, exist_ok=True)
+            try:
+                (self.music_dir / mood).mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
 
     def _generate_id(self, path: Path) -> str:
         # Use a deterministic hash for stable IDs
@@ -441,26 +468,42 @@ class AssetIndexer:
         if not force_refresh and key in _GLOBAL_ASSET_CACHE:
             return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
         seen = set()
+        seen_stems = set()
         res = []
         target_dirs = list(getattr(self, "transitions_dirs", [self.transitions_dir]))
         active_sm_root: Optional[Path] = None
         active_sm_lib_id: str = ""
-        try:
-            from src.core.storage_manager import StorageManager
-            sm = StorageManager()
-            if sm.online and sm.root:
-                active_sm_root = Path(sm.root).resolve()
-                active_sm_lib_id = str(sm.library_id or "")
-                packs_dir = sm.root / "02_cloud_downloads" / "packs"
-                if packs_dir.exists() and packs_dir not in target_dirs:
-                    target_dirs.append(packs_dir)
-        except Exception:
-            pass
+        if getattr(self, "_is_default_base", True):
+            try:
+                from src.core.storage_manager import StorageManager
+                sm = StorageManager()
+                if sm.online and sm.root:
+                    active_sm_root = Path(sm.root).resolve()
+                    cfg = getattr(sm, "_config", None)
+                    active_sm_lib_id = str((cfg.get("library_id") if isinstance(cfg, dict) else getattr(sm, "library_id", "")) or "")
+                    packs_dir = sm.root / "02_cloud_downloads" / "packs"
+                    if packs_dir.exists() and packs_dir not in target_dirs:
+                        target_dirs.append(packs_dir)
+            except Exception:
+                pass
 
         import zipfile
         previews_base = self.transitions_dir / "previews"
         installed_base = self.transitions_dir / "installed"
-        installed_base.mkdir(parents=True, exist_ok=True)
+        try:
+            installed_base.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+        if getattr(self, "_is_default_base", True) and not (installed_base.exists() and os.access(installed_base, os.W_OK)):
+            user_installed = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local" / "share"))) / "ChunDVC" / "transitions" / "installed"
+            try:
+                user_installed.mkdir(parents=True, exist_ok=True)
+                installed_base = user_installed
+                if installed_base.parent not in target_dirs:
+                    target_dirs.append(installed_base.parent)
+            except OSError:
+                pass
 
         # 1. Unpack any .drfx bundles into installed/<pack_name>/ if not already unpacked
         for tdir in target_dirs:
@@ -519,6 +562,7 @@ class AssetIndexer:
                 if item_key in seen:
                     continue
                 seen.add(item_key)
+                seen_stems.add(stem.lower())
 
                 # Thumbnail lookup (hỗ trợ cả tìm sâu trong thư mục con)
                 thumb = self._find_thumbnail(file_path)
@@ -606,7 +650,7 @@ class AssetIndexer:
                 v_posix = v_path.as_posix().lower()
                 if not any(k in v_posix for k in ("transition", "chuyển cảnh", "preview transitions")):
                     continue
-                if any(v_stem.lower() in s.lower() for s in seen):
+                if v_stem.lower() in seen_stems:
                     continue
                 if any(k in v_stem.lower() for k in ["tutorial", "readme", "instruction", "install", "how-to", "how_to"]):
                     continue
@@ -622,7 +666,7 @@ class AssetIndexer:
                     continue
                 seen.add(item_key)
                 thumb_v = self._find_thumbnail(v_path) or str(v_path)
-                res.append({
+                mp4_item = {
                     "id": self._generate_id(v_path),
                     "name": v_stem,
                     "tab": "trans",
@@ -636,7 +680,18 @@ class AssetIndexer:
                     "duration": 0.8,
                     "is_external": False,
                     "source_folder": str(v_path.parent),
-                })
+                }
+                if active_sm_root is not None and active_sm_lib_id:
+                    try:
+                        rel_lib = v_path.resolve().relative_to(active_sm_root).as_posix()
+                        mp4_item["source_kind"] = "managed"
+                        mp4_item["storage_managed"] = True
+                        mp4_item["origin_library_id"] = active_sm_lib_id
+                        mp4_item["origin_root"] = str(active_sm_root)
+                        mp4_item["library_path"] = rel_lib
+                    except Exception:
+                        pass
+                res.append(mp4_item)
 
         # 3. External folders
         ext_trans = self._scan_external_for_category("transitions", [".setting"], find_thumb=True)

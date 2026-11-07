@@ -16,9 +16,9 @@ from collections.abc import Mapping
 from typing import Optional, Any, Dict, List, Tuple
 
 from PySide6.QtCore import Qt, QObject, QTimer, QUrl, QRect, QRectF, QPoint, QEvent, QSettings, Signal
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainter, QImage, QColor
 from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QStackedWidget, QListView
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink, QVideoFrame
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from src.ui.lux.library.asset_model import PreviewPathRole, CategoryRole, IdRole, FilePathRole, AssetObjRole
@@ -85,8 +85,58 @@ class _ProceduralCanvas(QWidget):
             painter.end()
 
 
+class _SoftwareVideoCanvas(QWidget):
+    """
+    Software QVideoSink canvas for transparent EdgeDockWindow (WA_TranslucentBackground).
+    Hardware QVideoWidget produces solid black boxes on translucent / layered windows.
+    QVideoSink receives frames directly and paints them via QPainter with high quality scaling.
+    """
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._sink = QVideoSink(self)
+        self._sink.videoFrameChanged.connect(self._on_frame_changed)
+        self._current_image: Optional[QImage] = None
+
+    @property
+    def video_sink(self) -> QVideoSink:
+        return self._sink
+
+    def _on_frame_changed(self, frame: QVideoFrame) -> None:
+        if frame.isValid():
+            self._current_image = frame.toImage()
+            self.update()
+
+    def clear_frame(self) -> None:
+        self._current_image = None
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        if not painter.isActive():
+            return
+        painter.fillRect(self.rect(), QColor("#09090b"))
+        if self._current_image and not self._current_image.isNull():
+            w = self.width()
+            h = self.height()
+            if w > 0 and h > 0:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                scaled = self._current_image.scaled(
+                    w,
+                    h,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                if not scaled.isNull():
+                    sx = max(0, (scaled.width() - w) // 2)
+                    sy = max(0, (scaled.height() - h) // 2)
+                    painter.drawImage(0, 0, scaled, sx, sy, w, h)
+        painter.end()
+
+
 class HoverPreviewOverlay(QFrame):
-    """Floating borderless frame hosting the single QVideoWidget and 30fps procedural_canvas."""
+    """Floating borderless frame hosting the single _SoftwareVideoCanvas and 30fps procedural_canvas."""
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -97,7 +147,7 @@ class HoverPreviewOverlay(QFrame):
                 border-radius: 6px;
             }
         """)
-        self._video_widget: Optional[QVideoWidget] = None
+        self._video_widget: Optional[_SoftwareVideoCanvas] = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
@@ -121,20 +171,19 @@ class HoverPreviewOverlay(QFrame):
         self.hide()
 
     @property
-    def video_widget(self) -> Optional[QVideoWidget]:
+    def video_widget(self) -> Optional[_SoftwareVideoCanvas]:
         return self._video_widget
 
-    def ensure_video_widget(self) -> QVideoWidget:
+    def ensure_video_widget(self) -> _SoftwareVideoCanvas:
         self._proc_timer.stop()
         if self._video_widget is None:
-            self._video_widget = QVideoWidget(self.stack)
-            self._video_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            self._video_widget = _SoftwareVideoCanvas(self.stack)
             self.stack.addWidget(self._video_widget)
         self.stack.setCurrentWidget(self._video_widget)
         return self._video_widget
 
-    def preview_video(self, video_path: str = "", name: str = "", sub: str = "") -> QVideoWidget:
-        """Switches stack to the QVideoWidget page and stops procedural timer."""
+    def preview_video(self, video_path: str = "", name: str = "", sub: str = "") -> _SoftwareVideoCanvas:
+        """Switches stack to the _SoftwareVideoCanvas page and stops procedural timer."""
         return self.ensure_video_widget()
 
     def preview_procedural(self, asset: Any, category: str, name: str = "", sub: str = "") -> None:
@@ -232,6 +281,8 @@ class HoverPreviewOverlay(QFrame):
     def stop_all(self) -> None:
         self._proc_timer.stop()
         self._proc_asset = None
+        if self._video_widget is not None:
+            self._video_widget.clear_frame()
         self.hide()
 
 
@@ -661,7 +712,10 @@ class SharedHoverPreview(QObject):
 
         overlay = self._ensure_overlay()
         vw = overlay.preview_video(video_path)
-        player.setVideoOutput(vw)
+        if isinstance(player, QMediaPlayer) and hasattr(player, "setVideoSink") and hasattr(vw, "video_sink"):
+            player.setVideoSink(vw.video_sink)
+        else:
+            player.setVideoOutput(vw)
 
         pad = 4
         pw = visual_rect.width() - (pad * 2)
