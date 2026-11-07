@@ -109,8 +109,8 @@ def test_asset_model_async_thumbnail_update(qapp, sample_raw_assets):
     idx_1 = model.index(1, 0)  # Transition: có sẵn procedural thumbnail 16:9
     assert model.data(idx_1, ThumbnailRole) is not None
 
-    idx_4 = model.index(4, 0)  # LUT: chưa có thumbnail file, trả về None
-    assert model.data(idx_4, ThumbnailRole) is None
+    idx_4 = model.index(4, 0)  # LUT: tự động sinh Before/After 3D LUT thumbnail 16:9
+    assert model.data(idx_4, ThumbnailRole) is not None
 
     # Create dummy pixmap and deliver it via update_thumbnail for tr_shake
     dummy_pix = QPixmap(100, 100)

@@ -270,6 +270,7 @@ def get_hidden_imports() -> List[str]:
         "src.ui.lux.library.asset_model",
         "src.ui.lux.library.category_nav",
         "src.ui.lux.library.hover_preview",
+        "src.ui.lux.library.lut_preview_generator",
         "src.ui.lux.library.text_preview_generator",
         "src.ui.lux.library.transition_preview_generator",
         "src.ui.lux.lux_effects",

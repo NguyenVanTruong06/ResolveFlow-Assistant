@@ -36,6 +36,7 @@ VIDEO_EXTS = (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v")
 _THUMB_PIXMAP_CACHE: Dict[str, QPixmap] = {}
 _GENERATED_THUMB_CACHE: Dict[str, QPixmap] = {}
 _PACK_VIDEO_INDEX_CACHE: Dict[str, Tuple[Dict[str, str], str]] = {}
+_CLOUD_PACKS_VIDEO_CACHE: Dict[Tuple[str, int], Tuple[Dict[str, str], Dict[str, str]]] = {}
 
 
 def _get_attr(obj: Any, *keys: str, default: Any = "") -> Any:
@@ -235,11 +236,61 @@ def _index_pack_videos(pack_root: Path) -> Tuple[Dict[str, str], str]:
     return by_stem, fallback_video
 
 
+def _norm_stem(s: str) -> str:
+    return "".join(ch for ch in s.lower() if ch.isalnum())
+
+
+def _index_all_cloud_pack_videos() -> Tuple[Dict[str, str], Dict[str, str]]:
+    """
+    Indexes companion .mp4/.mov/.webm preview videos across active StorageManager
+    02_cloud_downloads/packs/ so extracted .setting files in assets/templates/transitions/installed/
+    cleanly link back to their real Preview Transitions/*.mp4 videos.
+    """
+    try:
+        from src.core.storage_manager import StorageManager
+        sm = StorageManager()
+        if not sm.online or not sm.root:
+            return {}, {}
+        packs_dir = Path(str(sm.root)) / "02_cloud_downloads" / "packs"
+        if not packs_dir.is_dir():
+            return {}, {}
+        try:
+            st = packs_dir.stat()
+            mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
+        except OSError:
+            mtime_ns = 0
+        cache_key = (str(packs_dir.resolve()), mtime_ns)
+        if cache_key in _CLOUD_PACKS_VIDEO_CACHE:
+            return _CLOUD_PACKS_VIDEO_CACHE[cache_key]
+
+        exact_map: Dict[str, str] = {}
+        norm_map: Dict[str, str] = {}
+        for pack_sub in sorted(packs_dir.iterdir()):
+            if not pack_sub.is_dir() or pack_sub.name.startswith("."):
+                continue
+            by_stem, _ = _index_pack_videos(pack_sub)
+            for stem_l, vid_path in by_stem.items():
+                if stem_l in ("tutorial", "how-to-use", "how_to_use", "demo", "preview"):
+                    continue
+                exact_map.setdefault(stem_l, vid_path)
+                n_stem = _norm_stem(stem_l)
+                if n_stem:
+                    norm_map.setdefault(n_stem, vid_path)
+
+        if len(_CLOUD_PACKS_VIDEO_CACHE) > 8:
+            _CLOUD_PACKS_VIDEO_CACHE.clear()
+        _CLOUD_PACKS_VIDEO_CACHE[cache_key] = (exact_map, norm_map)
+        return exact_map, norm_map
+    except Exception:
+        return {}, {}
+
+
 def resolve_transition_preview_video(asset: Any) -> str:
     """
     Resolves a playable companion .mp4/.mov/.webm video for a transition asset:
     1. Direct preview_path or file_path if it is a playable video file on disk.
     2. Matching <stem>.mp4 inside the pack's Preview Transitions/ folder or companion tutorial .mp4.
+    3. Cross-reference against active StorageManager cloud packs for extracted .drfx/.setting items.
     """
     if asset is None or isinstance(asset, str):
         return ""
@@ -250,47 +301,127 @@ def resolve_transition_preview_video(asset: Any) -> str:
             return os.path.abspath(val)
 
     master_p = _resolve_master_disk_path(asset)
-    if not master_p:
-        return ""
-
-    pack_root = _find_pack_root(master_p)
-    if pack_root is None:
-        # Check sibling .mp4 next to master_p
-        master_path = Path(master_p)
-        for ext in VIDEO_EXTS:
-            sib = master_path.with_suffix(ext)
-            if sib.is_file():
-                return str(sib.resolve())
-        return ""
-
-    prev_rel = str(_get_attr(asset, "preview_relative_path", default="") or "").strip()
-    if prev_rel:
-        cand = pack_root / prev_rel
-        if cand.is_file() and cand.suffix.lower() in VIDEO_EXTS:
-            return str(cand.resolve())
-
-    by_stem, fallback_video = _index_pack_videos(pack_root)
-    master_stem = Path(master_p).stem.lower().strip()
+    master_stem = Path(master_p).stem.lower().strip() if master_p else ""
     asset_name = str(_get_attr(asset, "name", default=master_stem) or master_stem).lower().strip()
 
-    for candidate_key in (master_stem, asset_name):
-        if candidate_key and candidate_key in by_stem and os.path.isfile(by_stem[candidate_key]):
-            return by_stem[candidate_key]
+    if master_p:
+        pack_root = _find_pack_root(master_p)
+        if pack_root is not None:
+            prev_rel = str(_get_attr(asset, "preview_relative_path", default="") or "").strip()
+            if prev_rel:
+                cand = pack_root / prev_rel
+                if cand.is_file() and cand.suffix.lower() in VIDEO_EXTS:
+                    return str(cand.resolve())
 
-    # Normalized stem comparison (collapse spaces/hyphens/underscores)
-    def _norm(s: str) -> str:
-        return "".join(ch for ch in s.lower() if ch.isalnum())
+            by_stem, fallback_video = _index_pack_videos(pack_root)
+            for candidate_key in (master_stem, asset_name):
+                if candidate_key and candidate_key in by_stem and os.path.isfile(by_stem[candidate_key]):
+                    return by_stem[candidate_key]
 
-    norm_targets = {_norm(master_stem), _norm(asset_name)} - {""}
-    for stem_k, vid_path in by_stem.items():
-        if _norm(stem_k) in norm_targets and os.path.isfile(vid_path):
-            return vid_path
+            norm_targets = {_norm_stem(master_stem), _norm_stem(asset_name)} - {""}
+            for stem_k, vid_path in by_stem.items():
+                if _norm_stem(stem_k) in norm_targets and os.path.isfile(vid_path):
+                    return vid_path
 
-    # If the asset is a .drfx bundle or the pack has a companion tutorial/preview video
-    if fallback_video and os.path.isfile(fallback_video):
-        return fallback_video
+            # Use pack-level tutorial/demo video when asset is a .drfx bundle or small pack without per-item stems
+            if fallback_video and os.path.isfile(fallback_video):
+                if master_p.lower().endswith(".drfx") or len(by_stem) <= 3:
+                    return fallback_video
+
+        else:
+            # Check sibling .mp4 next to master_p
+            master_path = Path(master_p)
+            for ext in VIDEO_EXTS:
+                sib = master_path.with_suffix(ext)
+                if sib.is_file():
+                    return str(sib.resolve())
+
+    # Cross-reference extracted .setting transitions against active cloud packs (e.g. GR-44 1,005 .mp4s)
+    exact_cloud, norm_cloud = _index_all_cloud_pack_videos()
+    if exact_cloud:
+        for candidate_key in (master_stem, asset_name):
+            if candidate_key and candidate_key in exact_cloud and os.path.isfile(exact_cloud[candidate_key]):
+                return exact_cloud[candidate_key]
+        for candidate_key in (master_stem, asset_name):
+            nk = _norm_stem(candidate_key)
+            if nk and nk in norm_cloud and os.path.isfile(norm_cloud[nk]):
+                return norm_cloud[nk]
 
     return ""
+
+
+def build_verified_video_preview_payload(base_asset: Any, video_path: str) -> Dict[str, Any]:
+    """
+    Constructs an ActionGuard-compliant preview payload for a resolved companion video
+    without mutating insert/drag metadata on the original asset and without weakening ActionGuard:
+    - Preserves original provenance/offline/staging fields if base_asset is already storage-attributed.
+    - Attributes local extracted templates to the active online StorageManager ONLY when
+      `video_path` genuinely resides inside the active StorageManager root.
+    """
+    if isinstance(base_asset, Mapping):
+        payload: Dict[str, Any] = dict(base_asset)
+        if "_raw_obj" not in payload:
+            payload["_raw_obj"] = base_asset
+    else:
+        payload = {
+            "id": _get_attr(base_asset, "id", "name", default=""),
+            "name": _get_attr(base_asset, "name", default=""),
+            "category": _get_attr(base_asset, "category", "tab", default=""),
+            "tab": _get_attr(base_asset, "tab", "category", default=""),
+            "sub": _get_attr(base_asset, "sub", default=""),
+            "badge_icon": _get_attr(base_asset, "badge_icon", default="🎬"),
+            "color_hex": _get_attr(base_asset, "color_hex", default="#06b6d4"),
+            "thumbnail_path": _get_attr(base_asset, "thumbnail_path", default=""),
+            "template_type": _get_attr(base_asset, "template_type", default=None),
+            "source_kind": _get_attr(base_asset, "source_kind", default=None),
+            "origin_library_id": _get_attr(base_asset, "origin_library_id", default=None),
+            "origin_root": _get_attr(base_asset, "origin_root", default=None),
+            "storage_managed": _get_attr(base_asset, "storage_managed", default=None),
+            "library_path": _get_attr(base_asset, "library_path", default=None),
+            "relative_path": _get_attr(base_asset, "relative_path", default=None),
+            "external_path": _get_attr(base_asset, "external_path", default=None),
+            "file_path": _get_attr(base_asset, "file_path", "path", default=""),
+            "path": _get_attr(base_asset, "path", "file_path", default=""),
+            "availability": _get_attr(base_asset, "availability", default=None),
+            "_raw_obj": base_asset,
+        }
+
+    payload["preview_path"] = video_path
+    if not video_path:
+        return payload
+
+    # Never override provenance for assets that already declare managed/foreign/offline/staging state
+    has_existing_provenance = bool(
+        payload.get("origin_library_id")
+        or payload.get("origin_root")
+        or payload.get("availability") in ("offline", "staging")
+        or str(payload.get("source_kind") or "").lower() == "managed"
+    )
+    if has_existing_provenance:
+        return payload
+
+    try:
+        from src.core.storage_manager import StorageManager
+        sm = StorageManager()
+        cfg = getattr(sm, "_config", None)
+        lib_id = cfg.get("library_id") if isinstance(cfg, Mapping) else getattr(sm, "library_id", None)
+        if sm.online and sm.root and lib_id:
+            real_root = Path(os.path.realpath(str(sm.root)))
+            real_vid = Path(os.path.realpath(video_path))
+            rel_vid = real_vid.relative_to(real_root).as_posix()
+            payload["source_kind"] = "managed"
+            payload["storage_managed"] = True
+            payload["origin_library_id"] = str(lib_id)
+            payload["origin_root"] = str(sm.root)
+            payload["library_path"] = rel_vid
+            payload["relative_path"] = rel_vid
+            payload["file_path"] = str(real_vid)
+            payload["path"] = str(real_vid)
+            payload["preview_path"] = str(real_vid)
+    except Exception:
+        pass
+
+    return payload
 
 
 def infer_transition_kind(asset_or_name: Any, kind_hint: str = "") -> str:

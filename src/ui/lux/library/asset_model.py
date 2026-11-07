@@ -83,7 +83,9 @@ def extract_asset_info(item: Any) -> Dict[str, Any]:
         "audio": "SFX",
         "sound": "SFX",
         "bgm": "Nhạc nền",
+        # Map category to display kind label
         "lut": "LUT",
+        "luts": "LUT",
         "color": "LUT",
         "fx": "Fusion Node",
         "icon": "Sticker",
@@ -221,7 +223,23 @@ class AssetListModel(QAbstractListModel):
             except Exception:
                 pass
 
-        # Nếu có thumbnail_path trực tiếp là ảnh hợp lệ, nạp và cache ngay
+        if cat in ("lut", "luts", "color"):
+            thumb_lut = info.get("thumbnail_path")
+            if thumb_lut and os.path.isfile(thumb_lut):
+                pix = QPixmap(thumb_lut)
+                if not pix.isNull():
+                    self._thumb_cache[asset_id] = pix
+                    return pix
+            try:
+                from src.ui.lux.library.lut_preview_generator import generate_lut_thumbnail
+                pix = generate_lut_thumbnail(asset_obj, 256, 144)
+                if pix and not pix.isNull():
+                    self._thumb_cache[asset_id] = pix
+                    return pix
+            except Exception:
+                pass
+
+        # 1. Nếu có thumbnail_path trực tiếp là ảnh thật trên đĩa (vd: PNG từ gói DRFX), nạp và cache ngay
         thumb_p = info.get("thumbnail_path")
         if not thumb_p and cat in ("trans", "transition", "transitions"):
             try:
@@ -233,13 +251,43 @@ class AssetListModel(QAbstractListModel):
             except Exception:
                 pass
 
-        if thumb_p and os.path.isfile(thumb_p) and cat not in ("trans", "transition", "transitions"):
+        if thumb_p and os.path.isfile(thumb_p):
             pix = QPixmap(thumb_p)
             if not pix.isNull():
                 self._thumb_cache[asset_id] = pix
                 return pix
 
+        # 2. Với Chuyển cảnh & Media có video thật (.mp4/.mov/.webm), trích xuất khung hình video thật
+        cand_p = info.get("preview_path") or info.get("file_path")
         if cat in ("trans", "transition", "transitions"):
+            _vid_exts = (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v")
+            if not (cand_p and str(cand_p).lower().endswith(_vid_exts) and os.path.isfile(str(cand_p))):
+                try:
+                    from src.ui.lux.library.transition_preview_generator import resolve_transition_preview_video
+                    resolved_vid = resolve_transition_preview_video(asset_obj)
+                    if resolved_vid and os.path.isfile(resolved_vid):
+                        cand_p = resolved_vid
+                        info["preview_path"] = resolved_vid
+                except Exception:
+                    pass
+
+            if cand_p and str(cand_p).lower().endswith(_vid_exts) and os.path.isfile(str(cand_p)):
+                # Nếu khung hình video đã có sẵn trong đĩa cache AssetCache thì nạp tức thì
+                try:
+                    from src.core.asset_cache import get_file_hash_key, get_thumb_cache_dir
+                    cached_jpg = os.path.join(get_thumb_cache_dir(), f"{get_file_hash_key(cand_p)}.jpg")
+                    if os.path.isfile(cached_jpg):
+                        pix = QPixmap(cached_jpg)
+                        if not pix.isNull():
+                            self._thumb_cache[asset_id] = pix
+                            return pix
+                except Exception:
+                    pass
+                if cand_p not in self._pending_thumb_requests:
+                    self._request_async_thumbnail(asset_id, cand_p)
+                return None
+
+            # 3. CHỈ fallback sang vẽ mô phỏng khi chuyển cảnh hoàn toàn KHÔNG có ảnh hay video thật trên đĩa
             try:
                 from src.ui.lux.library.transition_preview_generator import generate_transition_thumbnail
                 pix = generate_transition_thumbnail(asset_obj, 256, 144)
@@ -248,15 +296,10 @@ class AssetListModel(QAbstractListModel):
                     return pix
             except Exception:
                 pass
-            if thumb_p and os.path.isfile(thumb_p):
-                pix = QPixmap(thumb_p)
-                if not pix.isNull():
-                    self._thumb_cache[asset_id] = pix
-                    return pix
+            return None
 
-        # Thử nạp từ preview_path hoặc file_path
-        cand_p = thumb_p or info.get("preview_path") or info.get("file_path")
-        if cand_p and cand_p not in self._pending_thumb_requests:
+        # Thử nạp bất đồng bộ từ preview_path hoặc file_path cho các loại media khác (Meme, Overlay...)
+        if cand_p and os.path.isfile(str(cand_p)) and cand_p not in self._pending_thumb_requests:
             self._request_async_thumbnail(asset_id, cand_p)
         return None
 

@@ -2,12 +2,13 @@
 Modular Property Editors for Sheet Inspector.
 Tailored for Text+, SFX/Audio, LUT, and Macro assets.
 """
+import os
 from typing import Dict, Any, Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QSlider, QPushButton, QComboBox, QFrame
+    QSlider, QPushButton, QComboBox, QFrame, QStackedWidget
 )
-from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal as pyqtSignal
+from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, QUrl, Signal as pyqtSignal
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath
 
 
@@ -499,14 +500,89 @@ class AudioEditor(QWidget):
         }
 
 
-class LutEditor(QWidget):
-    """Parameter editor for LUT and Color assets."""
-    def __init__(self, asset: Dict[str, Any], parent: Optional[QWidget] = None):
+class LutPreviewCanvas(QFrame):
+    """Khung xem trước màu 3D .cube LUT Before / After Split Wipe chuẩn DaVinci Color Gallery."""
+    def __init__(self, asset: Any = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self._asset: Any = asset if asset is not None else {}
+        self.split_pct: float = 34.0
+        self.strength: float = 1.0
+        self.setFixedHeight(124)
+        self.setCursor(Qt.CursorShape.SplitHCursor)
+        self.setToolTip("Kéo chuột trái/phải để so sánh màu GỐC | SAU khi áp 3D LUT")
+        self.setStyleSheet("""
+            QFrame {
+                background-color: #09090b;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+            }
+        """)
+
+    def set_asset(self, asset: Any) -> None:
+        self._asset = asset if asset is not None else {}
+        self.update()
+
+    def set_split(self, pct: float) -> None:
+        self.split_pct = max(2.0, min(98.0, float(pct)))
+        self.update()
+
+    def set_strength(self, strength: float) -> None:
+        self.strength = max(0.0, min(1.0, float(strength)))
+        self.update()
+
+    def _scrub_from_event(self, event) -> None:
+        w = max(1, self.width())
+        pos_x = event.position().x() if hasattr(event, "position") else float(event.pos().x())
+        self.set_split((pos_x / w) * 100.0)
+
+    def mousePressEvent(self, event) -> None:
+        if event is not None and event.button() == Qt.MouseButton.LeftButton:
+            self._scrub_from_event(event)
+        if event is not None:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if event is not None and (event.buttons() & Qt.MouseButton.LeftButton):
+            self._scrub_from_event(event)
+        if event is not None:
+            super().mouseMoveEvent(event)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        if not painter.isActive():
+            return
+        rect = QRectF(3, 3, max(12, self.width() - 6), max(12, self.height() - 6))
+        try:
+            from src.ui.lux.library.lut_preview_generator import draw_lut_preview_frame
+            draw_lut_preview_frame(
+                painter,
+                rect,
+                self._asset,
+                split_pct=self.split_pct,
+                strength=self.strength,
+                show_hud=True,
+                show_swatches=True,
+                corner_radius=5.0,
+            )
+        except Exception:
+            painter.fillRect(rect, QColor("#18181b"))
+
+
+class LutEditor(QWidget):
+    """Parameter editor for LUT and Color assets with interactive 3D .cube Split Wipe."""
+    def __init__(self, asset: Any = None, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._asset = asset if asset is not None else {}
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
+
+        # 0. Interactive 3D .cube Before/After Split Wipe Canvas
+        self.lut_preview_canvas = LutPreviewCanvas(self._asset, self)
+        self.preview_canvas = self.lut_preview_canvas
+        layout.addWidget(self.lut_preview_canvas)
 
         # 1. Strength slider
         row_str = QHBoxLayout()
@@ -524,8 +600,8 @@ class LutEditor(QWidget):
         self.lbl_str_val = QLabel("100%")
         self.lbl_str_val.setFixedWidth(36)
         self.lbl_str_val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.lbl_str_val.setStyleSheet("color: #71717a; font-family: monospace; font-size: 11px;")
-        self.slider_str.valueChanged.connect(lambda v: self.lbl_str_val.setText(f"{v}%"))
+        self.lbl_str_val.setStyleSheet("color: #06b6d4; font-family: monospace; font-size: 11px; font-weight: bold;")
+        self.slider_str.valueChanged.connect(self._on_strength_changed)
 
         row_str.addWidget(self.slider_str, stretch=1)
         row_str.addWidget(self.lbl_str_val)
@@ -550,6 +626,14 @@ class LutEditor(QWidget):
         self.seg_skip = SegmentedControl(["Có", "Không"], default_idx=0)
         row_skip.addWidget(self.seg_skip, stretch=1)
         layout.addLayout(row_skip)
+
+    def _on_strength_changed(self, v: int) -> None:
+        self.lbl_str_val.setText(f"{v}%")
+        self.lut_preview_canvas.set_strength(v / 100.0)
+
+    def bind(self, asset: Any) -> None:
+        self._asset = asset if asset is not None else {}
+        self.lut_preview_canvas.set_asset(self._asset)
 
     def get_params(self) -> Dict[str, Any]:
         return {
@@ -656,8 +740,15 @@ class TransitionPreviewCanvas(QWidget):
 
 class MacroEditor(QWidget):
     """Parameter editor for transitions, memes, overlays, and Fusion macros."""
+    _VIDEO_EXTS = (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v")
+
     def __init__(self, asset: Any = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self._player: Any = None
+        self._audio_output: Any = None
+        self._video_widget: Optional[QWidget] = None
+        self.resolved_video_path: str = ""
+        self.is_video_preview: bool = False
         if asset is None:
             self._asset = {"id": "whip_pan_left", "name": "Whip Pan Left", "frames": 24}
         elif isinstance(asset, dict):
@@ -671,6 +762,96 @@ class MacroEditor(QWidget):
             }
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._setup_ui()
+        self._refresh_preview_source(asset if asset is not None else self._asset)
+
+    def _resolve_verified_video(self, target_asset: Any) -> str:
+        try:
+            from src.core.action_guard import check_action_availability
+            from src.ui.lux.library.transition_preview_generator import (
+                resolve_transition_preview_video,
+                build_verified_video_preview_payload,
+            )
+            cand_vid = resolve_transition_preview_video(target_asset)
+            if cand_vid and os.path.isfile(cand_vid) and cand_vid.lower().endswith(self._VIDEO_EXTS):
+                payload = build_verified_video_preview_payload(target_asset, cand_vid)
+                guard = check_action_availability(payload, intent="preview")
+                if guard.allowed and guard.resolved_path and guard.resolved_path.lower().endswith(self._VIDEO_EXTS):
+                    return guard.resolved_path
+        except Exception:
+            pass
+        return ""
+
+    def _ensure_video_player(self) -> bool:
+        if self._player is not None and self._video_widget is not None:
+            return True
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+            from PySide6.QtMultimediaWidgets import QVideoWidget
+            if self._video_widget is None:
+                self._video_widget = QVideoWidget(self.preview_stack)
+                self.preview_stack.addWidget(self._video_widget)
+            self._player = QMediaPlayer(self)
+            self._audio_output = QAudioOutput(self)
+            self._audio_output.setVolume(0.0)
+            self._player.setAudioOutput(self._audio_output)
+            self._player.setVideoOutput(self._video_widget)
+            self._player.mediaStatusChanged.connect(self._on_media_status_changed)
+            return True
+        except Exception:
+            self._player = None
+            return False
+
+    def _on_media_status_changed(self, status: Any) -> None:
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            if self.is_video_preview and status == QMediaPlayer.MediaStatus.EndOfMedia and self._player is not None:
+                self._player.setPosition(0)
+                self._player.play()
+        except Exception:
+            pass
+
+    def _refresh_preview_source(self, target_asset: Any) -> None:
+        self.stop_preview()
+        vid_path = self._resolve_verified_video(target_asset)
+        if vid_path and self._ensure_video_player():
+            self.resolved_video_path = vid_path
+            self.is_video_preview = True
+            self.trans_preview_canvas._anim_timer.stop()
+            self.preview_stack.setCurrentWidget(self._video_widget)
+            if self.isVisible():
+                self.start_video_preview()
+        else:
+            self.resolved_video_path = ""
+            self.is_video_preview = False
+            self.preview_stack.setCurrentWidget(self.trans_preview_canvas)
+            if self.isVisible() and not self.trans_preview_canvas._anim_timer.isActive():
+                self.trans_preview_canvas._anim_timer.start()
+
+    def start_video_preview(self) -> None:
+        if self.is_video_preview and self.resolved_video_path and self._player is not None:
+            try:
+                self._player.setSource(QUrl.fromLocalFile(os.path.abspath(self.resolved_video_path)))
+                self._player.play()
+            except Exception:
+                pass
+
+    def stop_preview(self) -> None:
+        if self._player is not None:
+            try:
+                self._player.stop()
+            except Exception:
+                pass
+
+    def showEvent(self, event) -> None:
+        if self.is_video_preview:
+            self.start_video_preview()
+        if event is not None:
+            super().showEvent(event)
+
+    def hideEvent(self, event) -> None:
+        self.stop_preview()
+        if event is not None:
+            super().hideEvent(event)
 
     def bind(self, asset: Any):
         if isinstance(asset, dict):
@@ -685,16 +866,22 @@ class MacroEditor(QWidget):
         self.trans_preview_canvas._asset = asset if asset is not None else self._asset
         self.trans_preview_canvas._name = self._asset.get("name", "Transition")
         self.trans_preview_canvas.set_frames(int(self._asset.get("frames", 24) or 24))
+        self._refresh_preview_source(asset if asset is not None else self._asset)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        # 0. Live Transition Preview Canvas at the top
-        self.trans_preview_canvas = TransitionPreviewCanvas(self._asset, self)
+        # 0. Live Video / Fallback Transition Preview Stack at the top
+        self.preview_stack = QStackedWidget(self)
+        self.preview_stack.setFixedHeight(128)
+        self.preview_stack.setStyleSheet("background-color: #09090b; border: 1px solid #27272a; border-radius: 6px;")
+
+        self.trans_preview_canvas = TransitionPreviewCanvas(self._asset, self.preview_stack)
         self.preview_canvas = self.trans_preview_canvas
-        layout.addWidget(self.trans_preview_canvas)
+        self.preview_stack.addWidget(self.trans_preview_canvas)
+        layout.addWidget(self.preview_stack)
 
         # 1. Frame Duration slider (Thời lượng: 24 frames)
         row_frames = QHBoxLayout()

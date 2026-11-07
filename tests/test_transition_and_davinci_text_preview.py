@@ -236,3 +236,153 @@ def test_inspector_and_hover_widgets_integration(qapp):
     hover.preview_procedural({"name": "Whip Pan Left", "category": "trans"}, "trans", "Whip Pan Left", "Pan")
     hover.grab()
     hover.stop_all()
+
+
+def test_davinci_3d_cube_lut_preview_engine_and_inspector(tmp_path, qapp):
+    """Kiểm tra bộ đọc 3D .cube LUT chuẩn DaVinci Resolve (Trilinear + Before/After Split Wipe + LutEditor + LutSplitWidget)."""
+    import numpy as np
+    from src.ui.lux.library.lut_preview_generator import (
+        parse_cube_lut,
+        apply_lut_to_rgb,
+        extract_lut_palette,
+        generate_lut_thumbnail,
+    )
+    from src.ui.lux.library.asset_model import AssetListModel, ThumbnailRole
+    from src.ui.lux.inspector.editors import LutEditor
+    from src.ui.lux.inspector.inspector_host import SheetInspector
+    from src.ui.tabs.tab_assets import LutSplitWidget
+    from PySide6.QtWidgets import QWidget
+
+    # Sinh file .cube 3D 4^3 đẩy mạnh kênh Đỏ và hạ Xanh dương
+    lines = ['TITLE "Warm Test 3D LUT"', "LUT_3D_SIZE 4", "DOMAIN_MIN 0.0 0.0 0.0", "DOMAIN_MAX 1.0 1.0 1.0"]
+    for bi in range(4):
+        b = bi / 3.0
+        for gi in range(4):
+            g = gi / 3.0
+            for ri in range(4):
+                r = ri / 3.0
+                out_r = min(1.0, r * 0.7 + 0.30)
+                out_g = g * 0.85
+                out_b = b * 0.35
+                lines.append(f"{out_r:.6f} {out_g:.6f} {out_b:.6f}")
+
+    cube_file = tmp_path / "Morocco_Warm_Test.cube"
+    cube_file.write_text("\n".join(lines), encoding="utf-8")
+
+    lut_info = parse_cube_lut(str(cube_file))
+    assert lut_info is not None and lut_info["kind"] == "3d"
+    assert lut_info["table"].shape == (4, 4, 4, 3)
+
+    sample_rgb = np.array([[[0.4, 0.5, 0.6]]], dtype=np.float32)
+    graded_rgb = apply_lut_to_rgb(sample_rgb, lut_info)
+    assert float(graded_rgb[0, 0, 0]) > float(sample_rgb[0, 0, 0])
+    assert float(graded_rgb[0, 0, 2]) < float(sample_rgb[0, 0, 2])
+
+    lut_asset = {
+        "id": "lut_morocco_test",
+        "name": "Morocco Warm Test",
+        "tab": "lut",
+        "category": "cinema",
+        "file_path": str(cube_file),
+    }
+    swatches = extract_lut_palette(lut_asset)
+    assert len(swatches) == 4 and all(s.startswith("#") and len(s) == 7 for s in swatches)
+
+    thumb = generate_lut_thumbnail(lut_asset, 256, 144)
+    assert isinstance(thumb, QPixmap) and not thumb.isNull()
+    qimg = thumb.toImage()
+    # Vùng GỐC bên trái (x=24) và vùng SAU bên phải (x=210) phải khác màu sau khi áp 3D LUT
+    c_left = qimg.pixelColor(24, 72)
+    c_right = qimg.pixelColor(210, 72)
+    assert (c_left.red(), c_left.blue()) != (c_right.red(), c_right.blue())
+
+    # AssetListModel tự động tạo thumbnail 3D LUT cho danh mục lut/color
+    model = AssetListModel([lut_asset])
+    idx = model.index(0, 0)
+    model_pix = model.data(idx, ThumbnailRole)
+    assert isinstance(model_pix, QPixmap) and not model_pix.isNull()
+
+    # HoverPreviewOverlay hỗ trợ quét Before/After trực tiếp cho LUT
+    hover = HoverPreviewOverlay(None)
+    hover.resize(256, 144)
+    hover.preview_procedural(lut_asset, "lut", "Morocco Warm Test", "LUT")
+    assert hover._proc_category == "lut"
+    hover.grab()
+    hover.stop_all()
+
+    # SheetInspector định tuyến đúng cả tài nguyên có tab="lut", category="cinema" vào LutEditor
+    host_parent = QWidget()
+    host_parent.resize(400, 600)
+    sheet = SheetInspector(host_parent)
+    sheet.open_sheet(lut_asset)
+    assert isinstance(sheet._editor_widget, LutEditor)
+    sheet._editor_widget.slider_str.setValue(65)
+    assert abs(sheet._editor_widget.lut_preview_canvas.strength - 0.65) < 1e-6
+    sheet.close_sheet(animated=False)
+
+    # Studio LutSplitWidget
+    split_w = LutSplitWidget()
+    split_w.resize(300, 140)
+    split_w.set_lut("Morocco Warm Test", None, asset=lut_asset)
+    split_w.set_split(40)
+    split_w.grab()
+
+
+def test_real_transition_media_priority_over_procedural(tmp_path, qapp):
+    """Đảm bảo chuyển cảnh có ảnh/video thật luôn ưu tiên hiển thị ảnh & phát video gốc, không bị ghi đè bởi hình vẽ giả lập."""
+    from pathlib import Path
+    from src.ui.lux.library.asset_model import AssetListModel, ThumbnailRole
+    from src.ui.lux.library.transition_preview_generator import build_verified_video_preview_payload
+
+    # 1. Tạo ảnh PNG thật màu Đỏ thuần để kiểm chứng AssetListModel giữ nguyên ảnh thật của gói chuyển cảnh
+    real_png = tmp_path / "Real_Pack_Frame.png"
+    img = QImage(128, 72, QImage.Format_ARGB32)
+    img.fill(0xFFDC2626)  # #DC2626 pure red
+    img.save(str(real_png), "PNG")
+
+    trans_with_real_png = {
+        "id": "tr_real_png",
+        "name": "3D Box Bounce - Down",
+        "category": "trans",
+        "thumbnail_path": str(real_png),
+    }
+    model = AssetListModel([trans_with_real_png])
+    pix = model.data(model.index(0, 0), ThumbnailRole)
+    assert isinstance(pix, QPixmap) and not pix.isNull()
+    mid_col = pix.toImage().pixelColor(64, 36)
+    assert mid_col.red() > 200 and mid_col.green() < 60, "Thumbnail thật của chuyển cảnh không được bị ghi đè bởi procedural!"
+
+    # 2. Chuyển cảnh có video .mp4 hợp lệ trong assets/ phải kích hoạt chế độ video thật trong MacroEditor
+    proj_assets = Path(__file__).resolve().parents[1] / "assets"
+    bundled_tmp_vid = proj_assets / "_tmp_test_trans_preview.mp4"
+    try:
+        bundled_tmp_vid.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+        trans_with_vid = {
+            "id": "tr_real_mp4",
+            "name": "Real Video Transition",
+            "category": "trans",
+            "source_kind": "builtin",
+            "file_path": str(bundled_tmp_vid),
+            "preview_path": str(bundled_tmp_vid),
+        }
+        ed_vid = MacroEditor(trans_with_vid)
+        assert ed_vid.is_video_preview is True
+        assert ed_vid.resolved_video_path == str(bundled_tmp_vid.resolve())
+        ed_vid.stop_preview()
+    finally:
+        if bundled_tmp_vid.exists():
+            bundled_tmp_vid.unlink()
+
+    # 3. Bảo mật ActionGuard: build_verified_video_preview_payload không được ghi đè provenance của tài nguyên offline/foreign
+    foreign_asset = {
+        "id": "tr_foreign",
+        "name": "Foreign Transition",
+        "category": "trans",
+        "source_kind": "managed",
+        "origin_library_id": "foreign-lib-999",
+        "origin_root": "/nonexistent/foreign/kho",
+        "availability": "offline",
+    }
+    preserved = build_verified_video_preview_payload(foreign_asset, str(real_png))
+    assert preserved["origin_library_id"] == "foreign-lib-999"
+    assert preserved["availability"] == "offline"

@@ -9,6 +9,7 @@ Activates after 150ms debounce and stops immediately on mouse leave or viewport 
 from __future__ import annotations
 
 import inspect
+import math
 import os
 import logging
 from collections.abc import Mapping
@@ -139,7 +140,13 @@ class HoverPreviewOverlay(QFrame):
     def preview_procedural(self, asset: Any, category: str, name: str = "", sub: str = "") -> None:
         """Switches stack to procedural_canvas and starts live 30fps rendering."""
         self._proc_asset = asset
-        self._proc_category = "text" if category in ("text", "title", "titles") else "trans"
+        cat_l = str(category or "").lower()
+        if cat_l in ("text", "title", "titles", "chu", "subtitle"):
+            self._proc_category = "text"
+        elif cat_l in ("lut", "luts", "color"):
+            self._proc_category = "lut"
+        else:
+            self._proc_category = "trans"
         self._proc_name = str(name or "")
         self._proc_sub = str(sub or "")
         self._proc_progress = 0.15
@@ -159,6 +166,25 @@ class HoverPreviewOverlay(QFrame):
         if rect_f.width() <= 2 or rect_f.height() <= 2:
             return
         p = min(1.0, max(0.0, self._proc_progress))
+
+        if self._proc_category == "lut":
+            try:
+                from src.ui.lux.library.lut_preview_generator import draw_lut_preview_frame
+                phase = (self._proc_progress / 1.25) * 2.0 * math.pi
+                split_pct = 50.0 - 38.0 * math.cos(phase)
+                draw_lut_preview_frame(
+                    painter,
+                    rect_f,
+                    self._proc_asset if self._proc_asset is not None else self._proc_name,
+                    split_pct=split_pct,
+                    strength=1.0,
+                    show_hud=True,
+                    show_swatches=True,
+                )
+                return
+            except Exception as exc:
+                logger.debug("Procedural LUT paint error: %s", exc)
+                return
 
         if self._proc_category == "trans":
             try:
@@ -418,6 +444,11 @@ class SharedHoverPreview(QObject):
             cat in ("text", "title", "titles")
             or (cat == "templates" and tt in ("text", "title", "titles"))
         )
+        is_lut = (
+            cat in ("lut", "luts", "color")
+            or str(payload.get("tab") or "").strip().lower() in ("lut", "luts", "color")
+            or (raw_obj is not None and str(getattr(raw_obj, "tab", "")).strip().lower() in ("lut", "luts", "color"))
+        )
 
         from src.core.action_guard import check_action_availability
         guard_res = check_action_availability(payload, intent="preview")
@@ -428,17 +459,52 @@ class SharedHoverPreview(QObject):
             or os.path.splitext(guard_res.resolved_path or "")[1].lower() not in VIDEO_EXTS
         ):
             try:
-                from src.ui.lux.library.transition_preview_generator import resolve_transition_preview_video
+                from src.ui.lux.library.transition_preview_generator import (
+                    resolve_transition_preview_video,
+                    build_verified_video_preview_payload,
+                )
                 cand_vid = resolve_transition_preview_video(raw if raw is not None else payload)
                 if cand_vid:
-                    cand_payload = dict(payload)
-                    cand_payload["preview_path"] = cand_vid
+                    cand_payload = build_verified_video_preview_payload(payload, cand_vid)
                     cand_guard = check_action_availability(cand_payload, intent="preview")
                     if cand_guard.allowed:
                         payload = cand_payload
                         guard_res = cand_guard
             except Exception:
                 pass
+
+        # Handle Color / LUTs (video if available & verified, otherwise live 30fps Before/After 3D .cube wipe)
+        if is_lut:
+            if guard_res.allowed:
+                target_file = guard_res.resolved_path
+                ext = os.path.splitext(target_file)[1].lower() if target_file else ""
+                if target_file and ext in VIDEO_EXTS and os.path.isfile(target_file):
+                    self._play_video(idx, target_file)
+                    return
+                self._play_procedural(
+                    idx,
+                    raw if raw is not None else payload,
+                    "lut",
+                    asset_name or "LUT",
+                    "Màu LUT • Before/After",
+                )
+                return
+            if (
+                guard_res.result_code in ("ERR_FILE_NOT_FOUND", "ERR_MEDIA_PATH_EMPTY")
+                and payload.get("availability") not in ("offline", "staging")
+                and not payload.get("origin_library_id")
+                and not payload.get("origin_root")
+            ):
+                self._play_procedural(
+                    idx,
+                    raw if raw is not None else payload,
+                    "lut",
+                    asset_name or "LUT",
+                    "Màu LUT • Before/After",
+                )
+                return
+            self.stop()
+            return
 
         # Handle Transitions (video if available & verified, otherwise live 30fps procedural preview)
         if is_trans:

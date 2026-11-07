@@ -226,6 +226,22 @@ class AssetCardDelegate(QStyledItemDelegate):
                 draw_text_preset_preview(painter, rect, asset_obj if asset_obj is not None else asset_id)
             return
 
+        if category in ("lut", "luts", "color"):
+            try:
+                from src.ui.lux.library.lut_preview_generator import draw_lut_preview_frame
+                draw_lut_preview_frame(
+                    painter,
+                    rect,
+                    asset_obj if asset_obj is not None else name,
+                    split_pct=32.0,
+                    strength=1.0,
+                    show_hud=False,
+                    show_swatches=True,
+                )
+                return
+            except Exception:
+                pass
+
         if category in ("trans", "transition", "transitions"):
             try:
                 from src.ui.lux.library.transition_preview_generator import draw_transition_frame
@@ -244,7 +260,7 @@ class AssetCardDelegate(QStyledItemDelegate):
         if category in ("trans", "transition", "transitions"):
             grad.setColorAt(0.0, QColor("#2a1816"))
             grad.setColorAt(1.0, QColor("#111827"))
-        elif category in ("lut", "color"):
+        elif category in ("lut", "luts", "color"):
             grad.setColorAt(0.0, QColor("#064e3b"))
             grad.setColorAt(1.0, QColor("#022c22"))
         else:

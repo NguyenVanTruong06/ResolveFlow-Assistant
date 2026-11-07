@@ -420,27 +420,89 @@ class WaveformCanvas(QWidget):
 
 
 class LutSplitWidget(QWidget):
-    """Widget so sánh Before / After chia đôi màn hình với thanh trượt split."""
+    """Widget so sánh Before / After 3D .cube LUT chuẩn DaVinci Resolve Color Gallery."""
+    split_changed = pyqtSignal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.split_pct = 50
+        self.split_pct = 35
+        self.strength = 1.0
         self.lut_colors = ["#1f2937", "#64748b", "#cbd5e1", "#f8fafc"]
         self.lut_name = "Clean Rec.709"
-        self.setFixedHeight(130)
+        self._asset: Any = None
+        self.setFixedHeight(140)
+        self.setCursor(Qt.SplitHCursor)
+        self.setToolTip("Kéo thanh gạt trực tiếp trên khung hình để so sánh màu GỐC | SAU")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def set_split(self, pct: int):
-        self.split_pct = max(0, min(100, pct))
+        self.split_pct = max(0, min(100, int(pct)))
         self.update()
 
-    def set_lut(self, name: str, colors: Optional[List[str]] = None):
-        self.lut_name = name
-        self.lut_colors = colors or ["#1f2937", "#64748b", "#cbd5e1", "#f8fafc"]
+    def set_strength(self, strength: float):
+        self.strength = max(0.0, min(1.0, float(strength)))
         self.update()
+
+    def set_lut(self, name: str, colors: Optional[List[str]] = None, asset: Any = None):
+        self.lut_name = name
+        self._asset = asset
+        if colors and len(colors) >= 4:
+            self.lut_colors = list(colors[:4])
+        elif asset is not None:
+            try:
+                from src.ui.lux.library.lut_preview_generator import extract_lut_palette
+                self.lut_colors = extract_lut_palette(asset)
+            except Exception:
+                self.lut_colors = ["#1f2937", "#64748b", "#cbd5e1", "#f8fafc"]
+        else:
+            self.lut_colors = ["#1f2937", "#64748b", "#cbd5e1", "#f8fafc"]
+        self.update()
+
+    def _scrub_mouse(self, event):
+        w = max(1, self.width())
+        pos_x = event.position().x() if hasattr(event, "position") else float(event.pos().x())
+        new_pct = max(0, min(100, int(round((pos_x / w) * 100.0))))
+        if new_pct != self.split_pct:
+            self.split_pct = new_pct
+            self.split_changed.emit(new_pct)
+            self.update()
+
+    def mousePressEvent(self, event):
+        if event is not None and event.button() == Qt.LeftButton:
+            self._scrub_mouse(event)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event is not None and (event.buttons() & Qt.LeftButton):
+            self._scrub_mouse(event)
+        super().mouseMoveEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        if not painter.isActive():
+            return
         painter.setRenderHint(QPainter.Antialiasing)
+
+        try:
+            from src.ui.lux.library.lut_preview_generator import draw_lut_preview_frame
+            target_asset = (
+                self._asset
+                if self._asset is not None
+                else {"name": self.lut_name, "pal": self.lut_colors}
+            )
+            draw_lut_preview_frame(
+                painter,
+                QRectF(0, 0, self.width(), self.height()),
+                target_asset,
+                split_pct=float(self.split_pct),
+                strength=float(self.strength),
+                show_hud=True,
+                show_swatches=True,
+                corner_radius=8.0,
+            )
+            return
+        except Exception:
+            pass
 
         w = self.width()
         h = self.height()
@@ -3243,10 +3305,14 @@ class AssetCard(QFrame):
         h_top.addStretch()
         th_layout.addLayout(h_top)
 
-        # 4-stripe palette
+        # 4-stripe palette (trích xuất trực tiếp từ .cube 3D LUT nếu chưa có pal)
         pal = getattr(self.preset, "pal", None)
         if not pal or len(pal) < 4:
-            pal = ["#1f2937", "#64748b", "#cbd5e1", "#f8fafc"]
+            try:
+                from src.ui.lux.library.lut_preview_generator import extract_lut_palette
+                pal = extract_lut_palette(self.preset)
+            except Exception:
+                pal = ["#1f2937", "#64748b", "#cbd5e1", "#f8fafc"]
         pal = pal[:4]
 
         stripe_container = QWidget(self.thumb)
@@ -4542,6 +4608,7 @@ class TabAssets(QWidget):
             }}
         """)
         self.lut_split_slider.valueChanged.connect(self._on_lut_split_slider_changed)
+        self.lut_split_widget.split_changed.connect(self.lut_split_slider.setValue)
         lut_v_layout.addWidget(self.lut_split_slider)
         self.insp_vbox.addWidget(self.inspector_lut_viewport)
 
@@ -7333,7 +7400,7 @@ class TabAssets(QWidget):
             self.lbl_track_hint.setText("Áp màu LUT điện ảnh lên Node cấp Timeline hoặc Clip.")
 
             pal = getattr(self.selected_asset, "pal", [])
-            self.lut_split_widget.set_lut(name, pal)
+            self.lut_split_widget.set_lut(name, pal, asset=self.selected_asset)
             self.btn_insert_title_playhead.setText("🎨 Áp LUT lên Timeline")
 
         elif is_sfx or is_bgm:
@@ -7452,25 +7519,15 @@ class TabAssets(QWidget):
                 self.slide_trans_frames.setValue(frames)
 
             if has_playable_video:
-                orig_prev_path = prev_path
-                if isinstance(self.selected_asset, dict):
-                    self.selected_asset["preview_path"] = video_file
-                else:
-                    try:
-                        setattr(self.selected_asset, "preview_path", video_file)
-                    except Exception:
-                        pass
+                try:
+                    from src.ui.lux.library.transition_preview_generator import build_verified_video_preview_payload
+                    preview_asset_payload = build_verified_video_preview_payload(self.selected_asset, video_file)
+                except Exception:
+                    preview_asset_payload = self.selected_asset
                 self.inspector_trans_viewport.hide()
                 self.inspector_icon_viewport.show()
-                self.icon_meme_widget.set_asset(self.selected_asset, sub=sub)
+                self.icon_meme_widget.set_asset(preview_asset_payload, sub=sub)
                 if not getattr(self.icon_meme_widget, "resolved_file_path", ""):
-                    if isinstance(self.selected_asset, dict):
-                        self.selected_asset["preview_path"] = orig_prev_path
-                    else:
-                        try:
-                            setattr(self.selected_asset, "preview_path", orig_prev_path)
-                        except Exception:
-                            pass
                     self.icon_meme_widget.stop_playback()
                     self.inspector_trans_viewport.show()
                     self.inspector_icon_viewport.hide()

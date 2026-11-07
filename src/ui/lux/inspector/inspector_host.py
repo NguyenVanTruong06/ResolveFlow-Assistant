@@ -175,6 +175,11 @@ class SheetInspector(QWidget):
         if not self._is_open:
             return
         self._is_open = False
+        if self._editor_widget is not None and hasattr(self._editor_widget, "stop_preview"):
+            try:
+                self._editor_widget.stop_preview()
+            except Exception:
+                pass
         self.closed.emit()
 
         if not animated or not self.isVisible():
@@ -239,17 +244,29 @@ class SheetInspector(QWidget):
         # Clear old editor widgets
         while self.body_layout.count():
             item = self.body_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            w = item.widget()
+            if w:
+                if hasattr(w, "stop_preview"):
+                    try:
+                        w.stop_preview()
+                    except Exception:
+                        pass
+                w.deleteLater()
 
-        cat = asset.get("category", "text")
-        is_audio = cat in ("sfx", "bgm")
+        tab_val = str(asset.get("tab") or "").strip().lower()
+        cat_val = str(asset.get("category") or "text").strip().lower()
+        eff_cat = (
+            tab_val
+            if tab_val in ("text", "sfx", "bgm", "audio", "sound", "lut", "luts", "color", "trans", "transition", "transitions", "meme", "overlay", "icon")
+            else cat_val
+        )
+        is_audio = eff_cat in ("sfx", "bgm", "audio", "sound")
 
-        if cat == "text":
+        if eff_cat in ("text", "title", "titles", "chu", "subtitle"):
             self._editor_widget = TextPresetEditor(asset, self.body_container)
         elif is_audio:
             self._editor_widget = AudioEditor(asset, self.body_container)
-        elif cat == "lut":
+        elif eff_cat in ("lut", "luts", "color"):
             self._editor_widget = LutEditor(asset, self.body_container)
         else:
             self._editor_widget = MacroEditor(asset, self.body_container)
