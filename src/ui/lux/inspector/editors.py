@@ -7,13 +7,14 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QSlider, QPushButton, QComboBox, QFrame
 )
-from PySide6.QtCore import Qt, QRectF, Signal as pyqtSignal
-from PySide6.QtGui import QPainter
+from PySide6.QtCore import Qt, QRectF, QPointF, QTimer, Signal as pyqtSignal
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPainterPath
 
 
 class SegmentedControl(QWidget):
     """Segmented toggle buttons [ Option 1 | Option 2 | Option 3 ]"""
     value_changed = pyqtSignal(str)
+    selection_changed = pyqtSignal(str)
 
     def __init__(self, options: list[str], default_idx: int = 0, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -59,6 +60,7 @@ class SegmentedControl(QWidget):
         for btn in self._buttons:
             btn.setStyleSheet(self._btn_style(btn.text() == self._current))
         self.value_changed.emit(self._current)
+        self.selection_changed.emit(self._current)
 
     def get_value(self) -> str:
         return self._current
@@ -119,7 +121,7 @@ class SafeTrackSelector(QWidget):
             QComboBox QAbstractItemView {
                 background: #18181b;
                 color: #f4f4f5;
-                selection-background-color: #7c3aed;
+                selection-background-color: #d94f3d;
             }
         """)
 
@@ -137,13 +139,31 @@ class SafeTrackSelector(QWidget):
 
 
 class TextPresetPreviewCanvas(QFrame):
-    """Khung xem trước phong cách chữ nghệ thuật trong Inspector."""
-    def __init__(self, preset_id: str, name: str, initial_text: str = "ResolveFlow Studio", parent=None):
+    """Khung xem trước phong cách chữ nghệ thuật động (~30 FPS) trong Inspector."""
+    def __init__(
+        self,
+        preset_id: str = "",
+        name: str = "",
+        initial_text: str = "ResolveFlow Studio",
+        parent: Optional[QWidget] = None,
+        asset: Any = None,
+    ):
         super().__init__(parent)
+        if isinstance(preset_id, dict) and asset is None:
+            asset = preset_id
+            preset_id = str(asset.get("id") or "")
+            name = name or str(asset.get("name") or "")
         self.preset_id = preset_id
         self.name = name
         self.custom_text = initial_text
+        self._asset: Any = asset if asset is not None else {"id": preset_id, "name": name}
+        self._progress: float = 0.0
+        self._overrides: Dict[str, Any] = {
+            "text": self.custom_text,
+            "id": self.preset_id,
+        }
         self.setFixedHeight(88)
+        self.setCursor(Qt.PointingHandCursor)
         self.setStyleSheet("""
             QFrame {
                 background-color: #09090b;
@@ -152,35 +172,107 @@ class TextPresetPreviewCanvas(QFrame):
             }
         """)
 
+        self._anim_timer = QTimer(self)
+        self.anim_timer = self._anim_timer
+        self._anim_timer.setInterval(33)  # ~30 FPS
+        self._anim_timer.timeout.connect(self._on_tick)
+        self._anim_timer.start()
+
+    def _on_tick(self):
+        self._progress += 0.025
+        if self._progress > 1.35:
+            self._progress = 0.0
+        self.update()
+
+    def showEvent(self, event):
+        if hasattr(self, "_anim_timer") and not self._anim_timer.isActive():
+            self._anim_timer.start()
+        if event is not None:
+            super().showEvent(event)
+
+    def hideEvent(self, event):
+        if hasattr(self, "_anim_timer") and self._anim_timer.isActive():
+            self._anim_timer.stop()
+        if event is not None:
+            super().hideEvent(event)
+
+    def mousePressEvent(self, event):
+        self._progress = 0.0
+        self.update()
+        if event is not None:
+            super().mousePressEvent(event)
+
     def set_text(self, text: str):
-        self.custom_text = text.strip() if text.strip() else "ResolveFlow Studio"
+        self.custom_text = text.strip() if text and text.strip() else "ResolveFlow Studio"
+        self._overrides["text"] = self.custom_text
+        self.update()
+
+    def set_overrides(self, **kwargs):
+        for k, v in kwargs.items():
+            if v is not None:
+                self._overrides[k] = v
+        if "text" in kwargs:
+            txt = kwargs.get("text") or ""
+            self.custom_text = txt.strip() if str(txt).strip() else "ResolveFlow Studio"
+            self._overrides["text"] = self.custom_text
         self.update()
 
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
-        rect = QRectF(4, 4, self.width() - 8, self.height() - 8)
+        if not painter.isActive():
+            return
+        rect = QRectF(4, 4, max(10, self.width() - 8), max(10, self.height() - 8))
+        try:
+            from src.ui.lux.library.text_preview_generator import draw_davinci_text_frame
+            draw_davinci_text_frame(
+                painter,
+                rect,
+                self._asset,
+                progress=min(1.0, max(0.0, self._progress)),
+                aspect_ratio="16:9",
+                show_hud=True,
+                overrides=self._overrides,
+            )
+            return
+        except Exception:
+            pass
         from src.ui.lux.library.text_preview_generator import draw_text_preset_preview
-        draw_text_preset_preview(painter, rect, self.preset_id, self.name, self.custom_text)
+        try:
+            draw_text_preset_preview(painter, rect, self.preset_id, self.name, self.custom_text)
+        except TypeError:
+            draw_text_preset_preview(painter, rect, self._asset)
 
 
 class TextPresetEditor(QWidget):
     """Parameter editor for Text+ and Title presets."""
-    def __init__(self, asset: Dict[str, Any], parent: Optional[QWidget] = None):
+    def __init__(self, asset: Any = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        if asset is None:
+            self._asset = {"id": "kinetic_hormozi", "name": "ResolveFlow Studio"}
+        elif isinstance(asset, dict):
+            self._asset = asset
+        else:
+            self._asset = {
+                "id": str(getattr(asset, "id", "") or asset),
+                "name": str(getattr(asset, "name", "") or asset),
+                "size": int(getattr(asset, "size", 54) or 54),
+                "_raw_obj": asset,
+            }
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
         # 0. Live visual style preview box
-        asset_id = asset.get("id", "")
-        asset_name = asset.get("name", "")
+        asset_id = self._asset.get("id", "")
+        asset_name = self._asset.get("name", "")
         self.preview_canvas = TextPresetPreviewCanvas(
             preset_id=asset_id,
             name=asset_name,
             initial_text="ResolveFlow Studio",
-            parent=self
+            parent=self,
+            asset=self._asset,
         )
         layout.addWidget(self.preview_canvas)
 
@@ -204,10 +296,11 @@ class TextPresetEditor(QWidget):
                 font-size: 11.5px;
             }
             QLineEdit:focus {
-                border-color: #7c3aed;
+                border-color: #d94f3d;
             }
         """)
         self.txt_content.textChanged.connect(self.preview_canvas.set_text)
+        self.txt_content.textChanged.connect(self._sync_live_preview)
         row_txt.addWidget(self.txt_content, stretch=1)
         layout.addLayout(row_txt)
 
@@ -218,7 +311,7 @@ class TextPresetEditor(QWidget):
         lbl_sz.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
         row_sz.addWidget(lbl_sz)
 
-        default_sz = int(asset.get("size", 54) or 54)
+        default_sz = int(self._asset.get("size", 54) or 54)
         self.slider_sz = QSlider(Qt.Orientation.Horizontal)
         self.slider_sz.setRange(24, 140)
         self.slider_sz.setValue(default_sz)
@@ -230,6 +323,7 @@ class TextPresetEditor(QWidget):
         self.lbl_sz_val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.lbl_sz_val.setStyleSheet("color: #06b6d4; font-family: monospace; font-size: 11px; font-weight: bold;")
         self.slider_sz.valueChanged.connect(lambda v: self.lbl_sz_val.setText(f"{v} px"))
+        self.slider_sz.valueChanged.connect(self._sync_live_preview)
 
         row_sz.addWidget(self.slider_sz, stretch=1)
         row_sz.addWidget(self.lbl_sz_val)
@@ -242,7 +336,7 @@ class TextPresetEditor(QWidget):
         lbl_dur.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
         row_dur.addWidget(lbl_dur)
 
-        default_dur = asset.get("duration", 3.0) or 3.0
+        default_dur = self._asset.get("duration", 3.0) or 3.0
         self.slider_dur = QSlider(Qt.Orientation.Horizontal)
         self.slider_dur.setRange(10, 100)  # 1.0s to 10.0s
         self.slider_dur.setValue(int(default_dur * 10))
@@ -255,6 +349,7 @@ class TextPresetEditor(QWidget):
         self.lbl_dur_val.setStyleSheet("color: #71717a; font-family: monospace; font-size: 11px;")
 
         self.slider_dur.valueChanged.connect(lambda v: self.lbl_dur_val.setText(f"{v / 10.0:.1f}s"))
+        self.slider_dur.valueChanged.connect(self._sync_live_preview)
 
         row_dur.addWidget(self.slider_dur, stretch=1)
         row_dur.addWidget(self.lbl_dur_val)
@@ -267,6 +362,7 @@ class TextPresetEditor(QWidget):
         lbl_mot.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
         row_mot.addWidget(lbl_mot)
         self.seg_motion = SegmentedControl(["Pop", "Bounce", "Gõ chữ"], default_idx=0)
+        self.seg_motion.selection_changed.connect(self._on_motion_or_curve_changed)
         row_mot.addWidget(self.seg_motion, stretch=1)
         layout.addLayout(row_mot)
 
@@ -277,8 +373,48 @@ class TextPresetEditor(QWidget):
         lbl_curve.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
         row_curve.addWidget(lbl_curve)
         self.seg_curve = SegmentedControl(["Spring", "Ease", "Linear"], default_idx=0)
+        self.seg_curve.selection_changed.connect(self._on_motion_or_curve_changed)
         row_curve.addWidget(self.seg_curve, stretch=1)
         layout.addLayout(row_curve)
+
+        self._sync_live_preview()
+
+    def _on_motion_or_curve_changed(self, _val: str = ""):
+        self.preview_canvas._progress = 0.0
+        self._sync_live_preview()
+
+    def _sync_live_preview(self, *args):
+        mot_raw = self.seg_motion.get_value() if hasattr(self, "seg_motion") else "Pop"
+        mot_map = {
+            "pop": "pop",
+            "bounce": "bounce",
+            "gõ chữ": "typewriter",
+            "typewriter": "typewriter",
+        }
+        anim = mot_map.get(mot_raw.lower(), mot_raw.lower())
+        curve = (self.seg_curve.get_value() if hasattr(self, "seg_curve") else "Spring").lower()
+        self.preview_canvas.set_overrides(
+            text=self.txt_content.text(),
+            font_size=self.slider_sz.value(),
+            duration=self.slider_dur.value() / 10.0,
+            animation=anim,
+            timing_curve=curve,
+        )
+
+    def bind(self, asset: Any):
+        if isinstance(asset, dict):
+            self._asset = asset
+        else:
+            self._asset = {
+                "id": str(getattr(asset, "id", "") or asset),
+                "name": str(getattr(asset, "name", "") or asset),
+                "size": int(getattr(asset, "size", 54) or 54),
+                "_raw_obj": asset,
+            }
+        self.preview_canvas._asset = asset if asset is not None else self._asset
+        self.preview_canvas.preset_id = self._asset.get("id", "")
+        self.preview_canvas.name = self._asset.get("name", "")
+        self._sync_live_preview()
 
     def get_params(self) -> Dict[str, Any]:
         return {
@@ -423,23 +559,167 @@ class LutEditor(QWidget):
         }
 
 
+class TransitionPreviewCanvas(QWidget):
+    """Khung xem trước chuyển cảnh động (~30 FPS) trong SheetInspector."""
+    def __init__(self, asset: Any = None, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._asset = asset if asset is not None else {}
+        if isinstance(self._asset, dict):
+            self._frames = int(self._asset.get("frames") or 24)
+            self._name = str(self._asset.get("name") or self._asset.get("id") or "Transition")
+            self._kind = str(self._asset.get("sub") or self._asset.get("category") or "transform")
+            self._thumb_path = str(self._asset.get("thumbnail_path") or "")
+        else:
+            self._frames = int(getattr(self._asset, "frames", 24) or 24)
+            self._name = str(getattr(self._asset, "name", "") or getattr(self._asset, "id", "Transition"))
+            self._kind = str(getattr(self._asset, "sub", "") or getattr(self._asset, "category", "transform"))
+            self._thumb_path = str(getattr(self._asset, "thumbnail_path", "") or "")
+
+        self._progress: float = 0.0
+        self.setFixedHeight(128)
+        self.setCursor(Qt.PointingHandCursor)
+
+        self._anim_timer = QTimer(self)
+        self.anim_timer = self._anim_timer
+        self._anim_timer.setInterval(33)  # ~30 FPS
+        self._anim_timer.timeout.connect(self._on_tick)
+        self._anim_timer.start()
+
+    def set_frames(self, frames: int):
+        self._frames = max(1, int(frames))
+        self.update()
+
+    def _on_tick(self):
+        self._progress += 0.03
+        if self._progress > 1.3:
+            self._progress = 0.0
+        self.update()
+
+    def showEvent(self, event):
+        if hasattr(self, "_anim_timer") and not self._anim_timer.isActive():
+            self._anim_timer.start()
+        if event is not None:
+            super().showEvent(event)
+
+    def hideEvent(self, event):
+        if hasattr(self, "_anim_timer") and self._anim_timer.isActive():
+            self._anim_timer.stop()
+        if event is not None:
+            super().hideEvent(event)
+
+    def mousePressEvent(self, event):
+        self._progress = 0.0
+        self.update()
+        if event is not None:
+            super().mousePressEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        if not painter.isActive():
+            return
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(0, 0, self.width(), self.height())
+        try:
+            from src.ui.lux.library.transition_preview_generator import draw_transition_frame
+            draw_transition_frame(
+                painter,
+                rect,
+                self._asset,
+                progress=min(1.0, max(0.0, self._progress)),
+                frames=self._frames,
+                kind=self._kind,
+                thumb_path=self._thumb_path,
+                show_hud=True,
+            )
+            return
+        except Exception:
+            pass
+
+        w = self.width()
+        h = self.height()
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(0, 0, w, h, 8, 8)
+        painter.setClipPath(clip_path)
+        painter.fillRect(0, 0, w, h, QColor("#1c1917"))
+        p = min(1.0, max(0.0, self._progress))
+        bx = int(w * (1.0 - p))
+        painter.fillRect(bx, 0, w - bx, h, QColor("#083344"))
+        if 0.05 < p < 0.95:
+            painter.setPen(QPen(QColor("#06b6d4"), 2))
+            painter.drawLine(bx, 0, bx, h)
+        painter.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        painter.setPen(QColor("#06b6d4"))
+        painter.drawText(QRectF(8, 8, w - 16, 18), Qt.AlignmentFlag.AlignRight, f"{self._frames} frames")
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(QRectF(10, h - 24, w - 20, 18), Qt.AlignmentFlag.AlignLeft, f"🔁 {self._name}")
+
+
 class MacroEditor(QWidget):
     """Parameter editor for transitions, memes, overlays, and Fusion macros."""
-    def __init__(self, asset: Dict[str, Any], parent: Optional[QWidget] = None):
+    def __init__(self, asset: Any = None, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        if asset is None:
+            self._asset = {"id": "whip_pan_left", "name": "Whip Pan Left", "frames": 24}
+        elif isinstance(asset, dict):
+            self._asset = asset
+        else:
+            self._asset = {
+                "id": str(getattr(asset, "id", "") or asset),
+                "name": str(getattr(asset, "name", "") or asset),
+                "frames": int(getattr(asset, "duration_frames", getattr(asset, "frames", 24)) or 24),
+                "_raw_obj": asset,
+            }
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._setup_ui()
+
+    def bind(self, asset: Any):
+        if isinstance(asset, dict):
+            self._asset = asset
+        else:
+            self._asset = {
+                "id": str(getattr(asset, "id", "") or asset),
+                "name": str(getattr(asset, "name", "") or asset),
+                "frames": int(getattr(asset, "duration_frames", getattr(asset, "frames", 24)) or 24),
+                "_raw_obj": asset,
+            }
+        self.trans_preview_canvas._asset = asset if asset is not None else self._asset
+        self.trans_preview_canvas._name = self._asset.get("name", "Transition")
+        self.trans_preview_canvas.set_frames(int(self._asset.get("frames", 24) or 24))
+
+    def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        # Duration
+        # 0. Live Transition Preview Canvas at the top
+        self.trans_preview_canvas = TransitionPreviewCanvas(self._asset, self)
+        self.preview_canvas = self.trans_preview_canvas
+        layout.addWidget(self.trans_preview_canvas)
+
+        # 1. Frame Duration slider (Thời lượng: 24 frames)
+        row_frames = QHBoxLayout()
+        default_frames = int(self._asset.get("frames", 24) or 24)
+        self.lbl_frames_title = QLabel(f"Thời lượng: {default_frames} frames")
+        self.lbl_frames_title.setStyleSheet("color: #06b6d4; font-size: 11px; font-weight: 600;")
+        row_frames.addWidget(self.lbl_frames_title)
+
+        self.slider_frames = QSlider(Qt.Orientation.Horizontal)
+        self.slider_frames.setRange(6, 60)
+        self.slider_frames.setValue(default_frames)
+        self.slider_frames.setFixedHeight(20)
+        self.slider_frames.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.slider_frames.valueChanged.connect(self._on_frames_changed)
+        row_frames.addWidget(self.slider_frames, stretch=1)
+        layout.addLayout(row_frames)
+
+        # 2. Duration (seconds)
         row_dur = QHBoxLayout()
         lbl_dur = QLabel("Thời lượng")
         lbl_dur.setFixedWidth(70)
         lbl_dur.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
         row_dur.addWidget(lbl_dur)
 
-        default_dur = asset.get("duration", 1.0) or 1.0
+        default_dur = self._asset.get("duration", 1.0) or 1.0
         self.slider_dur = QSlider(Qt.Orientation.Horizontal)
         self.slider_dur.setRange(2, 50)  # 0.2s to 5.0s
         self.slider_dur.setValue(int(default_dur * 10))
@@ -450,13 +730,13 @@ class MacroEditor(QWidget):
         self.lbl_dur_val.setFixedWidth(36)
         self.lbl_dur_val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.lbl_dur_val.setStyleSheet("color: #71717a; font-family: monospace; font-size: 11px;")
-        self.slider_dur.valueChanged.connect(lambda v: self.lbl_dur_val.setText(f"{v / 10.0:.1f}s"))
+        self.slider_dur.valueChanged.connect(self._on_dur_changed)
 
         row_dur.addWidget(self.slider_dur, stretch=1)
         row_dur.addWidget(self.lbl_dur_val)
         layout.addLayout(row_dur)
 
-        # Intensity
+        # 3. Intensity
         row_int = QHBoxLayout()
         lbl_int = QLabel("Cường độ")
         lbl_int.setFixedWidth(70)
@@ -479,8 +759,22 @@ class MacroEditor(QWidget):
         row_int.addWidget(self.lbl_int_val)
         layout.addLayout(row_int)
 
+    def _on_frames_changed(self, val: int):
+        self.lbl_frames_title.setText(f"Thời lượng: {val} frames")
+        self.trans_preview_canvas.set_frames(val)
+
+    def _on_dur_changed(self, val: int):
+        self.lbl_dur_val.setText(f"{val / 10.0:.1f}s")
+        frames = max(6, min(60, int(round((val / 10.0) * 24))))
+        self.slider_frames.blockSignals(True)
+        self.slider_frames.setValue(frames)
+        self.slider_frames.blockSignals(False)
+        self.lbl_frames_title.setText(f"Thời lượng: {frames} frames")
+        self.trans_preview_canvas.set_frames(frames)
+
     def get_params(self) -> Dict[str, Any]:
         return {
             "duration": self.slider_dur.value() / 10.0,
+            "frames": self.slider_frames.value(),
             "intensity": self.slider_int.value() / 100.0,
         }

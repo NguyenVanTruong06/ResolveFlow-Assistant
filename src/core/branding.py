@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QLabel
 
 APP_BRAND = "ChunDVC"
 APP_NAME = "ChunDVC"
-APP_VERSION = "v1.0.4"
+APP_VERSION = "v1.0.11"
 APP_AUTHOR = "By Truong"
 
 # Badge chuẩn: "ChunDVC Studio v1.0 • By Truong"
@@ -34,9 +34,9 @@ def create_brand_badge(compact: bool = False, parent: Optional[object] = None) -
     lbl = QLabel(text, parent)
     lbl.setStyleSheet("""
         QLabel {
-            background: rgba(124, 58, 237, 0.18);
-            color: #c4b5fd;
-            border: 1px solid rgba(124, 58, 237, 0.45);
+            background: rgba(217, 79, 61, 0.18);
+            color: #f8b4a8;
+            border: 1px solid rgba(217, 79, 61, 0.45);
             border-radius: 4px;
             padding: 2px 7px;
             font-size: 11px;

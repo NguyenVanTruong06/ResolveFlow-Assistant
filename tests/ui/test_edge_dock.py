@@ -369,17 +369,25 @@ def test_dock_toggle_multi_cycle_snapshot_restore_and_guards(qapp):
     dock._selected_asset = assets[0]
     dock.action_bar.set_asset(assets[0])
 
-    # Thu gọn bằng hotkey signal -> Dock ẩn hoàn toàn, Quả cầu nổi hiện
+    # Thu gọn bằng hotkey signal -> Dock ẩn hoàn toàn (0px trên màn hình, không hiện bong bóng)
     dock.hotkey_service.dock_toggle_requested.emit()
     qapp.processEvents()
     assert dock.isVisible() is False
-    assert dock.bubble.isVisible() is True
+    assert dock.bubble.isVisible() is False
+    assert dock.peek_handle.isVisible() is False
 
-    # Mở lại qua click quả cầu nổi
-    dock.bubble.open_dock_requested.emit()
+    # Rê chuột lại gần cạnh phải -> mũi tên nhỏ nhô ra -> click mở lại toàn bộ Dock
+    dock._get_screen_rect = lambda: (0, 0, 1920, 1080)
+    dock.set_dock_edge("right")
+    from PySide6.QtCore import QPoint
+    assert dock._check_edge_proximity(QPoint(1914, 520)) is True
+    assert dock.peek_handle.isVisible() is True
+
+    dock.peek_handle.open_dock_requested.emit()
     if dock._anim.state() == QVariantAnimation.State.Running:
         dock._anim.setCurrentTime(dock._anim.totalDuration())
     qapp.processEvents()
+    assert dock.peek_handle.isVisible() is False
     assert dock.isVisible() is True
     assert dock.fsm.is_open is True
     assert dock.category_nav.current_category == "sfx"
@@ -400,14 +408,17 @@ def test_dock_toggle_multi_cycle_snapshot_restore_and_guards(qapp):
     dock._selected_asset = assets[1]
     dock.action_bar.set_asset(assets[1])
 
-    # Thu gọn bằng hotkey signal lần 2 -> Dock ẩn hoàn toàn, Quả cầu nổi hiện
+    # Thu gọn bằng hotkey signal lần 2 -> Dock ẩn hoàn toàn vào cạnh màn hình
     dock.hotkey_service.dock_toggle_requested.emit()
     qapp.processEvents()
     assert dock.isVisible() is False
-    assert dock.bubble.isVisible() is True
+    assert dock.bubble.isVisible() is False
+    assert dock.peek_handle.isVisible() is False
 
-    # Mở lại qua click quả cầu nổi lần 2
-    dock.bubble.open_dock_requested.emit()
+    # Rê chuột gần cạnh phải & click mũi tên mở lại lần 2
+    assert dock._check_edge_proximity(QPoint(1916, 480)) is True
+    assert dock.peek_handle.isVisible() is True
+    dock.peek_handle.open_dock_requested.emit()
     if dock._anim.state() == QVariantAnimation.State.Running:
         dock._anim.setCurrentTime(dock._anim.totalDuration())
     qapp.processEvents()
@@ -493,13 +504,14 @@ def test_dock_builtin_presets_multi_cycle_restore_and_filter_change(qapp):
     assert isinstance(dock._selected_asset, dict)
     assert dock._selected_asset["id"] == preset1.id
 
-    # --- CHU KỲ 1: Thu gọn qua hotkey -> mở lại qua click quả cầu nổi ---
+    # --- CHU KỲ 1: Thu gọn qua hotkey -> ẩn hoàn toàn -> mở lại qua click mũi tên cạnh ---
     dock.hotkey_service.dock_toggle_requested.emit()
     qapp.processEvents()
     assert dock.isVisible() is False
-    assert dock.bubble.isVisible() is True
+    assert dock.bubble.isVisible() is False
+    assert dock.peek_handle.isVisible() is False
 
-    dock.bubble.open_dock_requested.emit()
+    dock.peek_handle.open_dock_requested.emit()
     if dock._anim.state() == QVariantAnimation.State.Running:
         dock._anim.setCurrentTime(dock._anim.totalDuration())
     qapp.processEvents()
@@ -508,13 +520,13 @@ def test_dock_builtin_presets_multi_cycle_restore_and_filter_change(qapp):
     assert isinstance(dock._selected_asset, dict), f"Phải là dict, không được là {type(dock._selected_asset)}"
     assert dock._selected_asset["id"] == preset1.id
 
-    # --- CHU KỲ 2: Thu gọn qua hotkey -> mở lại qua click quả cầu nổi lần 2 ---
+    # --- CHU KỲ 2: Thu gọn qua hotkey -> mở lại qua click mũi tên cạnh lần 2 ---
     dock.hotkey_service.dock_toggle_requested.emit()
     qapp.processEvents()
     assert dock.isVisible() is False
-    assert dock.bubble.isVisible() is True
+    assert dock.bubble.isVisible() is False
 
-    dock.bubble.open_dock_requested.emit()
+    dock.peek_handle.open_dock_requested.emit()
     if dock._anim.state() == QVariantAnimation.State.Running:
         dock._anim.setCurrentTime(dock._anim.totalDuration())
     qapp.processEvents()
@@ -548,54 +560,124 @@ def test_dock_builtin_presets_multi_cycle_restore_and_filter_change(qapp):
     dock.palette.close()
 
 
-def test_dock_collapses_to_floating_bubble_and_no_strip(qapp):
-    """Kiểm tra tính năng thu nhỏ EdgeDock:
-    Khi thu nhỏ: Dock ẩn hoàn toàn (TUYỆT ĐỐI KHÔNG HIỆN DẢI STRIP DỌC ĐEN),
-    chỉ có DUY NHẤT Quả cầu nổi 56px (FloatingBubbleWidget) ở mép màn hình.
-    Click quả cầu thì bung lại Dock to 420px đầy đủ.
+def test_dock_edge_auto_hide_and_proximity_peek_arrow(qapp):
+    """Kiểm tra tính năng thu ẩn hoàn toàn EdgeDock vào cạnh màn hình:
+    1. Khi thu nhỏ: Dock, Strip và Bong bóng đều ẩn hoàn toàn (0px chiếm dụng màn hình).
+    2. Khi chuột tiến lại gần cạnh màn hình (<= 24px): Mũi tên nhỏ (EdgePeekHandle) nhô ra sát mép.
+    3. Khi chuột ở góc trên cùng nút [X] cửa sổ: Không nhô mũi tên gây vướng.
+    4. Khi chuột rời xa vùng cạnh (> 68px): Mũi tên tự động thụt ẩn hoàn toàn.
+    5. Khi bấm chuột trái vào mũi tên: Mũi tên ẩn đi và mở toàn bộ thanh Dock 420px.
+    6. Tương thích cả cạnh Phải ('right'), cạnh Trái ('left') và cờ tùy chọn '--bubble'.
     """
-    from src.ui.bubble.floating_bubble import FloatingBubbleWidget
+    from PySide6.QtCore import QPoint, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from src.ui.lux.shell.edge_peek_handle import EdgePeekHandle
 
     dock = EdgeDockWindow(edge_side="right")
     dock._auto_collapse_on_leave = False
     dock._get_screen_rect = lambda: (0, 0, 1920, 1080)
-    assert hasattr(dock, "bubble")
-    assert isinstance(dock.bubble, FloatingBubbleWidget)
+    dock.set_dock_edge("right")
+    assert hasattr(dock, "peek_handle")
+    assert isinstance(dock.peek_handle, EdgePeekHandle)
 
-    # 1. Ban đầu mở Dock: Dock to 420px hiển thị đầy đủ, Bubble ẩn
+    # Kiểm tra Focus safety của mũi tên (không bao giờ cướp phím tắt của DaVinci Resolve)
+    pflags = dock.peek_handle.windowFlags()
+    assert bool(pflags & Qt.WindowType.FramelessWindowHint) is True
+    assert bool(pflags & Qt.WindowType.WindowStaysOnTopHint) is True
+    assert bool(pflags & Qt.WindowType.Tool) is True
+    assert dock.peek_handle.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating) is True
+    assert dock.peek_handle.focusPolicy() == Qt.FocusPolicy.NoFocus
+
+    # 1. Ban đầu mở Dock 420px: Dock hiện, mũi tên & bong bóng đều ẩn
     dock.show()
     dock.open_dock(animated=False)
     qapp.processEvents()
     assert dock.isVisible() is True
     assert dock.fsm.is_open is True
     assert dock.width() == 420
+    assert dock.peek_handle.isVisible() is False
     assert dock.bubble.isVisible() is False
 
-    # 2. Thu gọn Dock: Dock ẩn hoàn toàn khỏi màn hình, Quả cầu nổi hiện ở mép phải
+    # 2. Thu ẩn Dock vào cạnh phải: 0px trên màn hình khi chuột ở giữa màn hình
     dock.collapse_dock(to_strip=True, animated=False)
     qapp.processEvents()
     assert dock.isVisible() is False
-    assert dock.bubble.isVisible() is True
-    assert dock.bubble.x() >= 1920 - dock.bubble.width() - 30
+    assert dock.bubble.isVisible() is False
+    assert dock.peek_handle.isVisible() is False
+    assert dock._edge_poll_timer.isActive() is True
 
-    # 3. Kéo trượt di chuyển quả cầu lên xuống dọc mép
-    dock.bubble.move(dock.bubble.x(), 450)
-    qapp.processEvents()
-    assert dock.bubble.y() == 450
+    # Chuột ở giữa màn hình (960, 540) -> vẫn ẩn hoàn toàn
+    assert dock._check_edge_proximity(QPoint(960, 540)) is False
+    assert dock.peek_handle.isVisible() is False
 
-    # 4. Click vào quả cầu -> Quả cầu ẩn, Dock mở lại to 420px đầy đủ
-    dock.bubble.open_dock_requested.emit()
+    # 3. Chuột ở sát góc trên cùng nút đóng [X] cửa sổ (1915, 12) -> KHÔNG nhô mũi tên gây vướng
+    assert dock._check_edge_proximity(QPoint(1915, 12)) is False
+    assert dock.peek_handle.isVisible() is False
+
+    # 4. Chuột tiến sát cạnh phải (1912, 500) -> Mũi tên nhỏ nhô ra sát mép phải
+    assert dock._check_edge_proximity(QPoint(1912, 500)) is True
+    assert dock.peek_handle.isVisible() is True
+    assert dock.peek_handle.x() == 1920 - dock.peek_handle.width()
+    assert abs(dock.peek_handle.geometry().center().y() - 500) <= 4
+
+    # 5. Chuột rời xa vùng cạnh phải về giữa timeline (1500, 500) -> Mũi tên tự động ẩn hoàn toàn
+    assert dock._check_edge_proximity(QPoint(1500, 500)) is False
+    assert dock.peek_handle.isVisible() is False
+
+    # 6. Đưa chuột lại gần cạnh phải (1915, 560) rồi bấm chuột trái thật vào mũi tên -> Mở hẳn Dock 420px
+    assert dock._check_edge_proximity(QPoint(1915, 560)) is True
+    assert dock.peek_handle.isVisible() is True
+    local_center = QPointF(dock.peek_handle.width() / 2, dock.peek_handle.height() / 2)
+    global_center = QPointF(dock.peek_handle.mapToGlobal(local_center.toPoint()))
+    press_ev = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        local_center,
+        global_center,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    release_ev = QMouseEvent(
+        QMouseEvent.Type.MouseButtonRelease,
+        local_center,
+        global_center,
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    dock.peek_handle.mousePressEvent(press_ev)
+    dock.peek_handle.mouseReleaseEvent(release_ev)
     if dock._anim.state() == QVariantAnimation.State.Running:
         dock._anim.setCurrentTime(dock._anim.totalDuration())
     qapp.processEvents()
-    assert dock.bubble.isVisible() is False
+
+    assert dock.peek_handle.isVisible() is False
     assert dock.isVisible() is True
     assert dock.fsm.is_open is True
     assert dock.width() == 420
 
+    # 7. Kiểm tra chế độ neo cạnh Trái ('left')
+    dock.set_dock_edge("left")
+    dock.collapse_dock(animated=False)
+    qapp.processEvents()
+    assert dock.isVisible() is False
+    assert dock.peek_handle.isVisible() is False
+
+    assert dock._check_edge_proximity(QPoint(6, 420)) is True
+    assert dock.peek_handle.isVisible() is True
+    assert dock.peek_handle.x() == 0
+    assert dock.peek_handle.dock_edge == "left"
+
+    # 8. Tương thích ngược với cờ --bubble khi được bật tường minh
+    dock.set_dock_edge("right")
+    dock.set_bubble_mode(True)
+    dock.collapse_dock(animated=False)
+    qapp.processEvents()
+    assert dock.bubble.isVisible() is True
+    assert dock.peek_handle.isVisible() is False
+
     # Dọn dẹp
     dock._anim.stop()
-    dock.bubble.close()
     dock.close()
     dock.palette.close()
 

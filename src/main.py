@@ -179,8 +179,7 @@ class _StudioSyncCoordinator:
     def _on_return_to_dock(self):
         if self.studio_window:
             self.studio_window.hide()
-        self.dock.show()
-        self.dock.fsm.open_dock(animated=False)
+        self.dock.open_dock(animated=False)
 
     def _on_studio_assets_updated(self, new_assets):
         self.dock.set_assets(new_assets)
@@ -307,7 +306,6 @@ def start_app():
     storage_timer = QTimer(dock)
     storage_timer.timeout.connect(lambda: poll_storage_status(None, dock, storage_signature))
     storage_timer.start(2500)
-    dock.show()
 
     # 5. Khởi tạo Tray Icon trong khay hệ thống
     tray = ChunDVCTrayIcon()
@@ -318,14 +316,23 @@ def start_app():
     tray.quit_requested.connect(source_shutdown.request_quit)
     tray.show()
 
-    # 6. Hỗ trợ khởi động thẳng ở trạng thái Quả cầu nổi qua cờ --bubble
-    if "--bubble" in sys.argv:
-        dock.collapse_dock(to_strip=True, animated=False)
-
-    # 7. Khởi chạy giao diện chính:
+    # 6. Khởi chạy giao diện chính & trạng thái ẩn mép mặc định của EdgeDock:
     from PySide6.QtCore import QSettings
     settings = QSettings("ChunDVC", "ResolveFlow")
     auto_open = settings.value("auto_open_director", True, type=bool)
+    pinned_default = settings.value("pinned_by_default", False, type=bool)
+
+    if "--bubble" in sys.argv:
+        dock.set_bubble_mode(True)
+        dock.collapse_dock(to_strip=True, animated=False)
+    elif "--dock-only" in sys.argv or pinned_default:
+        dock.open_dock(animated=False)
+        if pinned_default and not dock.is_pinned:
+            dock.fsm.toggle_pin()
+    else:
+        # Mặc định thu ẩn hoàn toàn vào cạnh màn hình (0px không gây vướng),
+        # khi rê chuột gần cạnh sẽ nhô mũi tên nhỏ để bấm mở toàn bộ thanh Dock.
+        dock.collapse_dock(to_strip=True, animated=False)
 
     if "--studio" in sys.argv:
         open_studio()

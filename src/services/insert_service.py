@@ -331,9 +331,17 @@ class InsertService(QObject):
         except Exception:
             fusion_size = 0.08
 
-        # Colors
+        # Colors & Stroke
         color_hex = str(extra.get("color") or asset_dict.get("standard_color") or "#FFFFFF")
         accent_hex = str(extra.get("highlight_color") or extra.get("box_glow_hex") or asset_dict.get("highlight_color") or "#FFD400")
+        stroke_color = str(extra.get("stroke_color") or asset_dict.get("outline_color") or "#000000")
+        try:
+            stroke_width = float(extra.get("stroke_width", asset_dict.get("outline_width", 0.12)))
+        except Exception:
+            stroke_width = 0.12
+        box_color = extra.get("box_glow_hex") or asset_dict.get("box_color")
+        glow_color = extra.get("box_glow_hex") or asset_dict.get("glow_color")
+        timing_curve = str(extra.get("timing_curve") or extra.get("curve") or asset_dict.get("timing_curve") or "spring")
 
         # Style mapping:
         anim = str(extra.get("animation") or asset_dict.get("animation") or "pop").lower()
@@ -393,6 +401,11 @@ class InsertService(QObject):
                 "size": fusion_size,
                 "color": color_hex,
                 "accent": accent_hex,
+                "outline_color": stroke_color,
+                "outline_width": stroke_width,
+                "box_color": box_color,
+                "glow_color": glow_color,
+                "timing_curve": timing_curve,
                 "duration_frames": dur_frames,
             }
 

@@ -125,16 +125,16 @@ class SheetInspector(QWidget):
         self.btn_insert.setCursor(Qt.PointingHandCursor)
         self.btn_insert.setStyleSheet("""
             QPushButton {
-                background: #7c3aed;
+                background: #d94f3d;
                 color: #ffffff;
                 font-size: 12.5px;
                 font-weight: 600;
-                border: 1px solid #8b5cf6;
+                border: 1px solid #e86352;
                 border-radius: 6px;
             }
             QPushButton:hover {
-                background: #6d28d9;
-                border-color: #a78bfa;
+                background: #e86352;
+                border-color: #f07b6b;
             }
         """)
         self.btn_insert.clicked.connect(self._on_insert_clicked)

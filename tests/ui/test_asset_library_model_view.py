@@ -106,8 +106,11 @@ def test_asset_model_async_thumbnail_update(qapp, sample_raw_assets):
     idx_0 = model.index(0, 0)  # Text preset: có sẵn pixmap phong cách
     assert model.data(idx_0, ThumbnailRole) is not None
 
-    idx_1 = model.index(1, 0)  # Transition: chưa có thumbnail, trả về None
-    assert model.data(idx_1, ThumbnailRole) is None
+    idx_1 = model.index(1, 0)  # Transition: có sẵn procedural thumbnail 16:9
+    assert model.data(idx_1, ThumbnailRole) is not None
+
+    idx_4 = model.index(4, 0)  # LUT: chưa có thumbnail file, trả về None
+    assert model.data(idx_4, ThumbnailRole) is None
 
     # Create dummy pixmap and deliver it via update_thumbnail for tr_shake
     dummy_pix = QPixmap(100, 100)
@@ -122,6 +125,7 @@ def test_asset_model_async_thumbnail_update(qapp, sample_raw_assets):
     assert data_changed_emitted[0][0] == 1
     assert ThumbnailRole in data_changed_emitted[0][1]
     assert model.data(idx_1, ThumbnailRole) is not None
+    assert model.data(idx_1, ThumbnailRole).width() == 100
 
 
 def test_asset_filter_category_and_search(qapp, sample_raw_assets):
@@ -220,9 +224,9 @@ def test_asset_grid_column_calculation_and_drag_mime(qapp, sample_raw_assets):
     assert gs.width() > 0
     assert gs.height() > 0
 
-    # Test drag mime data generation
-    raw_title = sample_raw_assets[0]
-    mime = create_asset_mime_data(raw_title, sample_text="ChunDVC Test")
+    # Test drag mime data generation with real procedural TextStylePreset
+    from src.core.text_preset import BUILTIN_PRESETS
+    mime = create_asset_mime_data(BUILTIN_PRESETS[0], sample_text="ChunDVC Test")
     assert mime is not None
     assert mime.hasText() or mime.hasUrls()
 

@@ -443,10 +443,14 @@ class AssetIndexer:
         seen = set()
         res = []
         target_dirs = list(getattr(self, "transitions_dirs", [self.transitions_dir]))
+        active_sm_root: Optional[Path] = None
+        active_sm_lib_id: str = ""
         try:
             from src.core.storage_manager import StorageManager
             sm = StorageManager()
-            if sm.online:
+            if sm.online and sm.root:
+                active_sm_root = Path(sm.root).resolve()
+                active_sm_lib_id = str(sm.library_id or "")
                 packs_dir = sm.root / "02_cloud_downloads" / "packs"
                 if packs_dir.exists() and packs_dir not in target_dirs:
                     target_dirs.append(packs_dir)
@@ -463,10 +467,10 @@ class AssetIndexer:
             if not tdir.exists():
                 continue
             for root, dirs, files in os.walk(tdir):
-                if "previews" in root or "installed" in root:
+                if "previews" in root or "installed" in root or "__MACOSX" in root:
                     continue
                 for f in files:
-                    if f.endswith(".drfx"):
+                    if f.endswith(".drfx") and not f.startswith("._"):
                         drfx_file = Path(root) / f
                         pack_name = drfx_file.stem
                         dest_pack = installed_base / pack_name
@@ -477,6 +481,8 @@ class AssetIndexer:
                             try:
                                 with zipfile.ZipFile(drfx_file, "r") as z:
                                     for m in z.namelist():
+                                        if "__MACOSX" in m or Path(m).name.startswith("._"):
+                                            continue
                                         if m.endswith(".setting") or m.endswith(".png"):
                                             z.extract(m, dest_pack)
                             except Exception as exc:
@@ -548,6 +554,15 @@ class AssetIndexer:
                                 if cand_flat:
                                     preview_video = str(cand_flat[0])
 
+                if not preview_video:
+                    try:
+                        from src.ui.lux.library.transition_preview_generator import resolve_transition_preview_video
+                        cand_mp4 = resolve_transition_preview_video({"name": stem, "file_path": str(file_path)})
+                        if cand_mp4 and os.path.isfile(cand_mp4):
+                            preview_video = cand_mp4
+                    except Exception:
+                        pass
+
                 if not thumb and preview_video:
                     thumb = preview_video
 
@@ -566,6 +581,16 @@ class AssetIndexer:
                     "is_external": False,
                     "source_folder": str(file_path.parent),
                 }
+                if active_sm_root is not None and active_sm_lib_id:
+                    try:
+                        rel_lib = file_path.resolve().relative_to(active_sm_root).as_posix()
+                        item["source_kind"] = "managed"
+                        item["storage_managed"] = True
+                        item["origin_library_id"] = active_sm_lib_id
+                        item["origin_root"] = str(active_sm_root)
+                        item["library_path"] = rel_lib
+                    except Exception:
+                        pass
                 res.append(item)
 
         # 2b. Quét các video minh họa chuyển cảnh độc lập (.mp4 / .mov)

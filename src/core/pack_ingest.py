@@ -81,36 +81,72 @@ def _discover_manifest_candidate(payload: Path, cancel: Callable[[], bool]) -> O
     return candidate_paths[0]
 
 
+def _is_macos_junk(rel: Path) -> bool:
+    """Nhận diện tệp rác hệ thống macOS/Windows (__MACOSX, ._* AppleDouble, .DS_Store, Thumbs.db)."""
+    return (
+        '__MACOSX' in rel.parts
+        or rel.name.startswith('._')
+        or rel.name.lower() in ('.ds_store', 'thumbs.db', 'desktop.ini')
+    )
+
+
 def guess(path: Path):
     name = path.as_posix().lower(); ext = path.suffix.lower()
     category = 'broll'; excluded = False
     parts_lower = {p.lower() for p in path.parts}
     if parts_lower & {'previews', 'thumbnails'}:
-        category, excluded = 'templates', False
-    elif parts_lower & {'tutorials', 'docs'}:
+        category, excluded = 'templates', True
+    elif parts_lower & {'tutorials', 'docs', 'help'}:
         category, excluded = 'docs', True
     elif ext == '.cube': category = 'luts'
     elif ext in {'.setting', '.drfx', '.comp'}: category = 'templates'
     elif ext in AUDIO: category = 'bgm' if any(s in name for s in ('bgm', 'music', 'nhạc', 'chill', 'lofi')) else 'sfx'
     elif ext in VIDEO | IMAGES:
-        if any(s in name for s in ('transition', 'chuyển cảnh')): category, excluded = 'templates', False
+        if any(s in name for s in ('transition', 'chuyển cảnh')): category, excluded = 'templates', True
         elif any(s in name for s in ('meme', 'reaction')): category = 'memes'
         elif any(s in name for s in ('overlay', 'grain', 'light_leak', 'light leak', 'vhs', 'dust')): category = 'overlays'
     else: excluded = True
     return category, excluded
 
 
+def _has_nearby_macro_file(path: Path, root: Path) -> bool:
+    """Kiểm tra thư mục cha hoặc thư mục anh em có chứa file .setting / .drfx hay không."""
+    curr = path.parent
+    while True:
+        try:
+            for child in curr.iterdir():
+                if child.is_file() and child.suffix.lower() in {'.setting', '.drfx', '.comp'}:
+                    return True
+        except OSError:
+            pass
+        if curr == root or curr.parent == curr:
+            break
+        curr = curr.parent
+    return False
+
+
 def inspect_tree(root: Path, source_id: str, cancel=lambda: False):
     result = []
     for directory, dirs, files in os.walk(root, followlinks=False):
-        dirs[:] = sorted(d for d in dirs if not (Path(directory) / d).is_symlink())
+        dirs[:] = sorted(
+            d for d in dirs
+            if d != '__MACOSX' and not (Path(directory) / d).is_symlink()
+        )
         for name in sorted(files):
             if cancel(): raise InterruptedError('Đã hủy kiểm tra gói.')
             path = Path(directory) / name
             if path.is_symlink(): raise ValueError('Không nhập symlink trong pack.')
             rel = path.relative_to(root)
+            if _is_macos_junk(rel):
+                continue
             if name in ('manifest.json', 'pack_manifest.json'): continue
             category, excluded = guess(rel)
+            ext = path.suffix.lower()
+            if ext in IMAGES and (
+                re.search(r'_[0-9]{3}$', path.stem)
+                or path.stem.lower() in ('paper', 'texture', 'mask')
+            ) and _has_nearby_macro_file(path, root):
+                excluded = True
             result.append({'id': uuid.uuid5(uuid.NAMESPACE_URL, source_id + ':' + rel.as_posix()).hex,
                            'relative_path': rel.as_posix(), 'name': path.stem, 'category': category,
                            'subcategory': rel.parent.name if rel.parent != Path('.') else '', 'tags': [],
@@ -546,20 +582,28 @@ class PackIngestService:
 
         # Tự động dò tìm và liên kết video / ảnh minh họa (companion preview) cho các template (.setting, .drfx)
         # Giúp bảo toàn video minh họa chuyển cảnh cho các gói zip cộng đồng không có manifest.json
-        candidate_previews: Dict[str, str] = {}
-        candidate_thumbs: Dict[str, str] = {}
-        for r in records:
-            p_rel = r['relative_path']
-            ext_l = Path(p_rel).suffix.lower()
-            stem_l = Path(p_rel).stem.lower().strip()
-            if ext_l in VIDEO:
-                candidate_previews[stem_l] = p_rel
-            elif ext_l in IMAGES:
-                candidate_thumbs[stem_l] = p_rel
+        if candidate_path is None:
+            candidate_previews: dict[str, str] = {}
+            candidate_thumbs: dict[str, str] = {}
+            tutorial_videos: list[str] = []
+            template_masters = [
+                r for r in records
+                if Path(r['relative_path']).suffix.lower() in {'.setting', '.drfx', '.comp'}
+            ]
+            for r in records:
+                p_rel = r['relative_path']
+                ext_l = Path(p_rel).suffix.lower()
+                stem_l = Path(p_rel).stem.lower().strip()
+                if ext_l in VIDEO:
+                    candidate_previews[stem_l] = p_rel
+                    if any(k in stem_l for k in ('tutorial', 'how-to-use', 'how_to_use', 'preview', 'demo')):
+                        tutorial_videos.append(p_rel)
+                elif ext_l in IMAGES:
+                    if not re.search(r'_[0-9]{3}$', stem_l) and stem_l not in ('paper', 'texture', 'mask'):
+                        candidate_thumbs[stem_l] = p_rel
 
-        auto_matched_companions = set()
-        for r in records:
-            if r.get('category') == 'templates':
+            auto_matched_companions = set()
+            for r in template_masters:
                 stem_l = Path(r['relative_path']).stem.lower().strip()
                 if not r.get('preview_relative_path'):
                     if stem_l in candidate_previews:
@@ -567,24 +611,28 @@ class PackIngestService:
                         auto_matched_companions.add(candidate_previews[stem_l])
                     else:
                         for c_stem, c_rel in candidate_previews.items():
-                            if stem_l in c_stem or c_stem in stem_l:
+                            if len(stem_l) >= 6 and len(c_stem) >= 6 and (stem_l in c_stem or c_stem in stem_l):
                                 r['preview_relative_path'] = c_rel
                                 auto_matched_companions.add(c_rel)
                                 break
+                        if not r.get('preview_relative_path') and len(template_masters) <= 3 and len(tutorial_videos) == 1:
+                            r['preview_relative_path'] = tutorial_videos[0]
+                            auto_matched_companions.add(tutorial_videos[0])
+
                 if not r.get('thumbnail_relative_path'):
                     if stem_l in candidate_thumbs:
                         r['thumbnail_relative_path'] = candidate_thumbs[stem_l]
                         auto_matched_companions.add(candidate_thumbs[stem_l])
                     else:
                         for c_stem, c_rel in candidate_thumbs.items():
-                            if stem_l in c_stem or c_stem in stem_l:
+                            if len(stem_l) >= 6 and len(c_stem) >= 6 and (stem_l in c_stem or c_stem in stem_l):
                                 r['thumbnail_relative_path'] = c_rel
                                 auto_matched_companions.add(c_rel)
                                 break
 
-        if auto_matched_companions:
-            # Loại bỏ các file companion đã được master tham chiếu để tránh lặp card
-            records = [r for r in records if r['relative_path'] not in auto_matched_companions]
+            if auto_matched_companions:
+                # Loại bỏ các file companion đã được master tham chiếu để tránh lặp card
+                records = [r for r in records if r['relative_path'] not in auto_matched_companions]
 
         # Kiểm tra gói trùng lặp theo cặp (name, version) trong registry của kho
         try:
@@ -726,16 +774,35 @@ class PackIngestService:
             if cancel():
                 raise InterruptedError('Đã hủy trước khi nhập kho.')
             atomic_json(payload / 'pack_manifest.json', manifest)
-            # Loại file bị exclude khỏi payload trước commit, giữ các master đã chọn VÀ companions của chúng
+            # Loại file bị exclude khỏi payload trước commit, giữ các master đã chọn, companions VÀ tài nguyên nội bộ của macro (.setting / .drfx)
             keep = {safe_relative(a['relative_path']).as_posix() for a in chosen} | {safe_relative(c).as_posix() for c in referenced_companions} | {'pack_manifest.json'}
+            chosen_setting_dirs = {
+                (payload / safe_relative(a['relative_path'])).parent
+                for a in chosen
+                if Path(a['relative_path']).suffix.lower() == '.setting'
+            }
+            has_chosen_drfx = any(Path(a['relative_path']).suffix.lower() == '.drfx' for a in chosen)
             for path in payload.rglob('*'):
                 if path.is_file():
-                    p_posix = path.relative_to(payload).as_posix()
-                    # Bảo vệ toàn diện: Tuyệt đối không xóa bất kỳ video hay hình ảnh minh họa preview nào trong gói!
-                    is_visual_preview = path.suffix.lower() in (VIDEO | IMAGES) and any(
-                        k in p_posix.lower() for k in ('preview', 'thumb', 'trans', 'demo', 'sample')
+                    rel = path.relative_to(payload)
+                    if _is_macos_junk(rel):
+                        path.unlink()
+                        continue
+                    p_posix = rel.as_posix()
+                    rel_parts_lower = {pt.lower() for pt in rel.parts}
+                    # Bảo toàn các file ảnh/texture con nằm cạnh .setting macro (như paper.jpg, Center/*.png, Rect/*.png)
+                    is_macro_support = (
+                        path.suffix.lower() in IMAGES
+                        and not (rel_parts_lower & {'previews', 'thumbnails'})
+                        and any(s_dir in path.parents for s_dir in chosen_setting_dirs)
                     )
-                    if p_posix not in keep and not is_visual_preview:
+                    # Bảo toàn kho preview đi kèm gói .drfx (như Preview Transitions/*.mp4, Help/How-To-Use.mp4)
+                    is_drfx_preview = (
+                        has_chosen_drfx
+                        and path.suffix.lower() in (VIDEO | IMAGES)
+                        and any(k in p_posix.lower() for k in ('preview', 'thumb', 'tutorial', 'how-to-use', 'help'))
+                    )
+                    if p_posix not in keep and not is_macro_support and not is_drfx_preview:
                         path.unlink()
             check_identity()
             renamed = False

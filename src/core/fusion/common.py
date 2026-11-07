@@ -40,6 +40,11 @@ class TitleParams:
     position: Tuple[float, float] = (0.5, 0.5)
     fade_in_frames: float = 0.0
     fade_out_frames: float = 8.0
+    outline_color: object = "#000000"
+    outline_width: float = 0.06
+    box_color: Optional[object] = None
+    glow_color: Optional[object] = None
+    timing_curve: str = "spring"
 
     @classmethod
     def from_dict(cls, d: dict) -> "TitleParams":
@@ -91,6 +96,23 @@ def text_tool(name: str, p: TitleParams, *, text_value: Optional[str] = None,
         "Center": Inp(Pt(*center)),
         "Red1": Inp(r), "Green1": Inp(g), "Blue1": Inp(b), "Alpha1": Inp(1.0),
     }
+    try:
+        ow = float(p.outline_width) if p.outline_width is not None else 0.0
+    except Exception:
+        ow = 0.0
+    if ow > 0 and (not extra or "Enabled2" not in extra):
+        or_r, or_g, or_b = parse_color(p.outline_color or "#000000")
+        thick = round(max(0.005, min(0.15, ow * 0.35)), 4)
+        inputs.update({
+            "Enabled2": Inp(1),
+            "ElementShape2": Inp(1),
+            "Thickness2": Inp(thick),
+            "Red2": Inp(or_r),
+            "Green2": Inp(or_g),
+            "Blue2": Inp(or_b),
+            "Alpha2": Inp(1.0),
+            "JoinStyle2": Inp(2),
+        })
     if extra:
         inputs.update(extra)
     return Tool(name, "TextPlus", inputs, pos=pos, controls=controls or [])

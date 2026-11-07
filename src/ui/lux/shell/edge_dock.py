@@ -9,6 +9,7 @@ Features:
 """
 import logging
 import os
+import time
 from typing import Optional, Tuple, Dict, Any, List
 
 from PySide6.QtWidgets import (
@@ -19,7 +20,7 @@ from PySide6.QtCore import (
     Qt, QRect, QPoint, QSize, Signal as pyqtSignal, QVariantAnimation,
     QEasingCurve, QTimer, QSettings
 )
-from PySide6.QtGui import QKeyEvent, QScreen, QKeySequence, QShortcut
+from PySide6.QtGui import QKeyEvent, QScreen, QKeySequence, QShortcut, QCursor
 
 from src.ui.lux.lux_effects import get_luxury_dark_stylesheet
 from src.ui.lux.window_anchor import (
@@ -36,6 +37,7 @@ from .dock_state import DockState, DockStateMachine
 from .dock_rail import DockRailWidget
 from .dock_header import DockHeaderWidget
 from .dock_status import DockStatusBar
+from .edge_peek_handle import EdgePeekHandle
 from ..library.category_nav import CategoryNavWidget, DEFAULT_CATEGORIES
 from src.core.contracts.asset_dto import (
     CANONICAL_STORAGE_CATEGORIES,
@@ -80,8 +82,14 @@ class AdaptiveStackedWidget(QStackedWidget):
 class EdgeDockWindow(QWidget):
     """
     Floating Luxury Edge Dock docking to DaVinci Resolve right edge.
-    Supports 6 states: Hidden, Rail (44px), Peek (56px), Open (320-420px), Pinned, Wide (760px).
+    Supports complete edge auto-hide (0px obstruction) with proximity peek arrow handle,
+    plus Open (320-420px), Pinned, and Wide (760px) states.
     """
+    EDGE_TRIGGER_PX = 24
+    EDGE_KEEP_PX = 68
+    EDGE_POLL_INTERVAL_MS = 80
+    PEEK_HIDE_DELAY_MS = 280
+
     expanded_changed = pyqtSignal(bool)
     state_changed = pyqtSignal(str)
     asset_inserted = pyqtSignal(dict, dict)
@@ -162,12 +170,33 @@ class EdgeDockWindow(QWidget):
 
         # Read saved preferences
         settings = QSettings("ChunDVC", "ResolveFlow")
-        self.dock_edge = str(settings.value("dock_edge", "right"))
+        default_edge = edge_side if edge_side in ("left", "right") else "right"
+        self.dock_edge = str(settings.value("dock_edge", default_edge))
         if self.dock_edge not in ("left", "right"):
-            self.dock_edge = "right"
+            self.dock_edge = default_edge
         self._auto_collapse_on_leave = bool(settings.value("auto_collapse_on_leave", False, type=bool))
+        self._use_bubble_mode = False
+        self._collapse_cooldown_until = 0.0
 
-        # Floating Bubble quả cầu nổi 56px thay thế cho thanh strip khi thu gọn dock
+        # Mũi tên nhỏ nhô ra ở cạnh màn hình khi rê chuột lại gần (Auto-Hide Edge Peek Handle)
+        self.peek_handle = EdgePeekHandle(edge=self.dock_edge, parent=None)
+        self.peek_handle.open_dock_requested.connect(lambda: self.open_dock(animated=True))
+        self.peek_handle.open_director_requested.connect(self.open_director)
+        self.peek_handle.open_studio_requested.connect(self.restore_standard_window_requested.emit)
+        self.peek_handle.settings_requested.connect(self.open_settings)
+        self.peek_handle.edge_switch_requested.connect(self.set_dock_edge)
+
+        # Bộ cảm biến tọa độ chuột sát mép màn hình (chỉ kích hoạt khi Dock đang thu ẩn)
+        self._edge_poll_timer = QTimer(self)
+        self._edge_poll_timer.setInterval(self.EDGE_POLL_INTERVAL_MS)
+        self._edge_poll_timer.timeout.connect(self._on_edge_poll_timeout)
+
+        self._peek_hide_timer = QTimer(self)
+        self._peek_hide_timer.setSingleShot(True)
+        self._peek_hide_timer.setInterval(self.PEEK_HIDE_DELAY_MS)
+        self._peek_hide_timer.timeout.connect(self._on_peek_hide_timeout)
+
+        # Tương thích tùy chọn --bubble qua CLI
         from src.ui.bubble.floating_bubble import FloatingBubbleWidget
         self.bubble = FloatingBubbleWidget(parent=None)
         self.bubble.open_dock_requested.connect(lambda: self.open_dock(animated=True))
@@ -711,12 +740,30 @@ class EdgeDockWindow(QWidget):
         self.fsm.set_sheet_open(True)
         self.sheet.open_sheet(asset)
 
+    def set_bubble_mode(self, enabled: bool):
+        """Chuyển đổi giữa chế độ Ẩn cạnh màn hình + Mũi tên (mặc định) và Quả cầu nổi (--bubble)."""
+        self._use_bubble_mode = bool(enabled)
+
     def open_dock(self, animated: bool = True):
+        was_collapsed = (not self.isVisible()) or (not self.fsm.is_open)
+        self._edge_poll_timer.stop()
+        self._peek_hide_timer.stop()
+        if hasattr(self, "peek_handle") and self.peek_handle:
+            self.peek_handle.hide_animated(animated=False)
         if hasattr(self, "bubble") and self.bubble:
             self.bubble.hide()
+
+        if animated and was_collapsed:
+            self.setGeometry(self._calc_target_geometry(28))
+
         self.show()
         self.raise_()
-        self.fsm.open_dock(animated=animated)
+        if self.fsm.is_open and animated and was_collapsed:
+            target_w = self.fsm.get_width_for_state(self.fsm.state)
+            self._update_dock_position(target_w=target_w, duration=self.fsm.OPEN_ANIM_DURATION, animated=True)
+        else:
+            self.fsm.open_dock(animated=animated)
+
         # Khôi phục trạng thái trước đó (category, search, scroll, selected asset)
         if getattr(self, "_saved_category", None) and hasattr(self, "category_nav") and self.category_nav:
             self.category_nav.select_category(self._saved_category)
@@ -757,6 +804,7 @@ class EdgeDockWindow(QWidget):
             QTimer.singleShot(60, lambda: self.grid.verticalScrollBar().setValue(val))
 
     def collapse_dock(self, to_strip: bool = True, animated: bool = True):
+        was_open = self.fsm.is_open and self.isVisible()
         # Lưu trạng thái trước khi thu gọn nếu chưa bị thu gọn
         if self.fsm.is_open:
             if hasattr(self, "category_nav") and self.category_nav:
@@ -768,13 +816,118 @@ class EdgeDockWindow(QWidget):
                 self._saved_scroll = self.grid.verticalScrollBar().value()
             self._saved_selected_asset = to_asset_dict(self._selected_asset) if self._selected_asset else None
 
-        # Dừng animation và ẩn hoàn toàn cửa sổ Dock (xóa bỏ hoàn toàn thanh strip dọc 28px)
-        self._anim.stop()
-        self.hide()
-        self.fsm.collapse_dock(to_strip=to_strip, animated=False)
+        # Tắt hover preview (nếu đang mở) để không bị treo lơ lửng
+        if hasattr(self, "grid") and self.grid and hasattr(self.grid, "hover_controller"):
+            try:
+                self.grid.hover_controller.stop()
+            except Exception:
+                pass
 
-        # Hiển thị Quả cầu nổi (Bong bóng tròn 56px) tại mép màn hình
-        self._show_bubble_at_edge()
+        # Dừng animation và ẩn hoàn toàn cửa sổ Dock (0px chiếm dụng màn hình)
+        self._anim.stop()
+        self._peek_hide_timer.stop()
+        self.hide()
+        self.fsm.collapse_dock(to_hidden=True, animated=False)
+
+        if getattr(self, "_use_bubble_mode", False):
+            self._edge_poll_timer.stop()
+            if hasattr(self, "peek_handle") and self.peek_handle:
+                self.peek_handle.hide_animated(animated=False)
+            self._show_bubble_at_edge()
+        else:
+            # Mặc định: Thu ẩn hoàn toàn vào cạnh màn hình, chỉ nhô mũi tên nhỏ khi chuột lại gần
+            if hasattr(self, "bubble") and self.bubble:
+                self.bubble.hide()
+            if hasattr(self, "peek_handle") and self.peek_handle:
+                self.peek_handle.hide_animated(animated=False)
+            if was_open:
+                self._collapse_cooldown_until = time.monotonic() + 0.35
+            if not self._edge_poll_timer.isActive():
+                self._edge_poll_timer.start()
+
+    def _on_edge_poll_timeout(self):
+        self._check_edge_proximity(cursor_pos=None)
+
+    def _on_peek_hide_timeout(self):
+        if hasattr(self, "peek_handle") and self.peek_handle and not self.peek_handle.is_menu_open:
+            self.peek_handle.hide_animated(animated=True)
+
+    def _check_edge_proximity(self, cursor_pos: Optional[QPoint] = None) -> bool:
+        """
+        Kiểm tra vị trí chuột so với cạnh màn hình đang neo:
+        - Khi chuột tiến sát cạnh (<= 24px): nhô ra mũi tên nhỏ (EdgePeekHandle).
+        - Khi chuột rời xa (> 68px): tự động thụt ẩn mũi tên (0px trên màn hình).
+        Trả về True nếu vùng cảm biến cạnh đang được kích hoạt.
+        """
+        if self.fsm.is_open or self.isVisible() or getattr(self, "_use_bubble_mode", False):
+            if hasattr(self, "peek_handle") and self.peek_handle and self.peek_handle.isVisible():
+                self.peek_handle.hide_animated(animated=False)
+            return False
+
+        if cursor_pos is None and time.monotonic() < getattr(self, "_collapse_cooldown_until", 0.0):
+            return False
+
+        if cursor_pos is None and QApplication.activeModalWidget() is not None:
+            return False
+
+        pos = cursor_pos if cursor_pos is not None else QCursor.pos()
+        sx, sy, sw, sh = self._get_screen_rect()
+        hw = self.peek_handle.width()
+        hh = self.peek_handle.height()
+
+        # Tránh vùng góc trên/dưới cùng (nút đóng cửa sổ [X] hoặc thanh Taskbar)
+        safe_top = sy + 56
+        safe_bottom = sy + max(safe_top + hh, sh - 56)
+        in_vertical = safe_top <= pos.y() <= safe_bottom
+
+        edge = getattr(self, "dock_edge", "right")
+        if edge == "left":
+            dist_x = pos.x() - sx
+            target_x = sx
+        else:
+            dist_x = (sx + sw) - pos.x()
+            target_x = sx + sw - hw
+
+        in_trigger = in_vertical and (-8 <= dist_x <= self.EDGE_TRIGGER_PX)
+        in_keep = (sy + 16 <= pos.y() <= sy + sh - 16) and (-12 <= dist_x <= self.EDGE_KEEP_PX)
+
+        if not self.peek_handle.isVisible() or getattr(self.peek_handle, "_hiding", False):
+            if in_trigger:
+                self._peek_hide_timer.stop()
+                clamped_y = max(safe_top, min(safe_bottom - hh, pos.y() - hh // 2))
+                self.peek_handle.set_dock_edge(edge)
+                self.peek_handle.show_at(
+                    target_x,
+                    clamped_y,
+                    animated=(cursor_pos is None),
+                )
+                return True
+            return False
+
+        # Mũi tên đang hiển thị: giữ cố định vị trí Y khi chuột tiến vào để dễ bấm
+        handle_zone = self.peek_handle.geometry().adjusted(-20, -36, 20, 36)
+        if handle_zone.contains(pos) or self.peek_handle.is_menu_open:
+            self._peek_hide_timer.stop()
+            return True
+
+        if in_trigger:
+            self._peek_hide_timer.stop()
+            center_y = self.peek_handle.geometry().center().y()
+            if abs(pos.y() - center_y) > 96:
+                clamped_y = max(safe_top, min(safe_bottom - hh, pos.y() - hh // 2))
+                self.peek_handle.move(target_x, clamped_y)
+            return True
+
+        if in_keep:
+            return True
+
+        # Chuột đã rời xa vùng cạnh màn hình -> rút ẩn mũi tên
+        if cursor_pos is not None:
+            self._peek_hide_timer.stop()
+            self.peek_handle.hide_animated(animated=False)
+        elif not self._peek_hide_timer.isActive():
+            self._peek_hide_timer.start()
+        return False
 
     def _show_bubble_at_edge(self):
         """Hiển thị quả cầu nổi 56px tại mép màn hình khi EdgeDock thu nhỏ."""
@@ -922,6 +1075,12 @@ class EdgeDockWindow(QWidget):
             self.header.set_dock_edge(self.dock_edge)
         if hasattr(self, "rail") and self.rail:
             self.rail.set_dock_edge(self.dock_edge)
+        if hasattr(self, "peek_handle") and self.peek_handle:
+            self.peek_handle.set_dock_edge(self.dock_edge)
+            if self.peek_handle.isVisible():
+                sx, sy, sw, sh = self._get_screen_rect()
+                hx = sx if self.dock_edge == "left" else (sx + sw - self.peek_handle.width())
+                self.peek_handle.move(hx, self.peek_handle.y())
 
         if hasattr(self, "bubble") and self.bubble and self.bubble.isVisible():
             self._show_bubble_at_edge()
@@ -1046,6 +1205,8 @@ class EdgeDockWindow(QWidget):
                 self.rail.set_strip_mode(True)
                 self.accent_line.hide()
                 self.frame.setStyleSheet("#lux_drawer_panel { border: none; border-radius: 4px; }")
+                if self.isVisible():
+                    QTimer.singleShot(0, lambda: self.collapse_dock(animated=False))
             else:
                 self.rail.set_strip_mode(False)
                 self.accent_line.show()
@@ -1094,7 +1255,12 @@ class EdgeDockWindow(QWidget):
 
     def leaveEvent(self, event):
         super().leaveEvent(event)
-        self.fsm.on_mouse_leave_dock()
+        if getattr(self, "_auto_collapse_on_leave", False):
+            self.fsm.on_mouse_leave_dock()
+        else:
+            self.fsm._is_in_dock = False
+            self.fsm._peek_timer.stop()
+            self.fsm._open_timer.stop()
         self.router.is_in_dock = False
         self.router.on_user_left_dock()
 
@@ -1663,6 +1829,15 @@ class EdgeDockWindow(QWidget):
         if hasattr(self, "_active_ingest_wizard") and self._active_ingest_wizard is not None:
             try:
                 self._active_ingest_wizard.reject()
+            except Exception:
+                pass
+        if hasattr(self, "_edge_poll_timer") and self._edge_poll_timer:
+            self._edge_poll_timer.stop()
+        if hasattr(self, "_peek_hide_timer") and self._peek_hide_timer:
+            self._peek_hide_timer.stop()
+        if hasattr(self, "peek_handle") and self.peek_handle:
+            try:
+                self.peek_handle.close()
             except Exception:
                 pass
         if hasattr(self, "bubble") and self.bubble:

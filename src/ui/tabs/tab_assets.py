@@ -571,6 +571,8 @@ class TextLivePreviewWidget(QWidget):
     """
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.asset_obj = None
+        self.file_path = ""
         self.text = "ResolveFlow Studio"
         self.preset_id = "kinetic_hormozi"
         self.font_family = "Montserrat"
@@ -667,6 +669,37 @@ class TextLivePreviewWidget(QWidget):
             return
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.TextAntialiasing)
+
+        try:
+            from src.ui.lux.library.text_preview_generator import draw_davinci_text_frame
+            overrides = {
+                "text": self.text,
+                "id": self.preset_id,
+                "font_family": self.font_family,
+                "font_size": self.font_size,
+                "weight": self.weight,
+                "standard_color": self.standard_color,
+                "highlight_color": self.highlight_color,
+                "stroke_color": self.stroke_color,
+                "stroke_width": self.stroke_width,
+                "box_color": self.box_color,
+                "glow_color": self.glow_color,
+                "animation": self.animation,
+                "timing_curve": self.timing_curve,
+                "file_path": self.file_path,
+            }
+            draw_davinci_text_frame(
+                painter,
+                QRectF(self.rect()),
+                self.asset_obj if self.asset_obj is not None else self.preset_id,
+                progress=min(1.0, max(0.0, self.progress)),
+                aspect_ratio=self.aspect_ratio,
+                show_hud=True,
+                overrides=overrides,
+            )
+            return
+        except Exception:
+            pass
 
         w = self.width()
         h = self.height()
@@ -1161,23 +1194,36 @@ class TransitionLoopWidget(QWidget):
     """Widget xem trước chuyển cảnh dạng lặp (Transition Visual Loop Preview)."""
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._asset: Any = None
+        self.thumb_path: str = ""
         self.trans_name = "Whip Pan Left"
         self.trans_kind = "transform"
         self.frames = 20
         self.progress = 0.0
         self.setFixedHeight(130)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Nhấp chuột để phát lại chuyển cảnh")
 
         self.anim_timer = QTimer(self)
-        self.anim_timer.setInterval(40)
+        self.anim_timer.setInterval(33)
         self.anim_timer.timeout.connect(self._on_tick)
         self.anim_timer.start()
 
-    def set_transition(self, name: str, kind: str, frames: int):
+    def set_transition(self, name: str, kind: str, frames: int, asset: Any = None, thumb_path: str = ""):
         self.trans_name = name
         self.trans_kind = kind
         self.frames = frames
+        if asset is not None:
+            self._asset = asset
+        if thumb_path is not None:
+            self.thumb_path = thumb_path
         self.update()
+
+    def mousePressEvent(self, event):
+        self.progress = 0.0
+        self.update()
+        super().mousePressEvent(event)
 
     def _on_tick(self):
         self.progress += 0.03
@@ -1187,7 +1233,25 @@ class TransitionLoopWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        if not painter.isActive():
+            return
         painter.setRenderHint(QPainter.Antialiasing)
+
+        try:
+            from src.ui.lux.library.transition_preview_generator import draw_transition_frame
+            draw_transition_frame(
+                painter,
+                QRectF(self.rect()),
+                self._asset if self._asset is not None else self.trans_name,
+                progress=min(1.0, max(0.0, self.progress)),
+                frames=self.frames,
+                kind=self.trans_kind,
+                thumb_path=self.thumb_path,
+                show_hud=True,
+            )
+            return
+        except Exception:
+            pass
 
         w = self.width()
         h = self.height()
@@ -6952,6 +7016,9 @@ class TabAssets(QWidget):
         self.trans_frames = val
         if hasattr(self, "lbl_trans_frames_val"):
             self.lbl_trans_frames_val.setText(f"{val} frames")
+        if hasattr(self, "trans_loop_widget"):
+            self.trans_loop_widget.frames = val
+            self.trans_loop_widget.update()
         self._update_trans_alignment_styles()
 
     def _toggle_inspector_aspect_ratio(self):
@@ -7334,26 +7401,89 @@ class TabAssets(QWidget):
             self.inspector_lut_viewport.hide()
             self.inspector_sfx_viewport.hide()
 
-            # Ưu tiên hiển thị ảnh thumbnail thực tế / video preview thay vì khung chữ
-            thumb_path = getattr(self.selected_asset, "thumbnail_path", "")
-            prev_path = getattr(self.selected_asset, "preview_path", "")
-            fpath = getattr(self.selected_asset, "file_path", "")
-            video_file = prev_path if (prev_path and prev_path.endswith((".mp4", ".mov", ".webm"))) else (fpath if fpath.endswith((".mp4", ".mov")) else "")
+            thumb_path = (
+                self.selected_asset.get("thumbnail_path", "")
+                if isinstance(self.selected_asset, dict)
+                else getattr(self.selected_asset, "thumbnail_path", "")
+            ) or ""
+            prev_path = (
+                self.selected_asset.get("preview_path", "")
+                if isinstance(self.selected_asset, dict)
+                else getattr(self.selected_asset, "preview_path", "")
+            ) or ""
+            fpath = (
+                self.selected_asset.get("file_path", "")
+                if isinstance(self.selected_asset, dict)
+                else getattr(self.selected_asset, "file_path", "")
+            ) or ""
 
-            if thumb_path or video_file:
+            video_file = ""
+            try:
+                from src.ui.lux.library.transition_preview_generator import (
+                    resolve_transition_preview_video,
+                    resolve_drfx_thumbnail,
+                )
+                video_file = resolve_transition_preview_video(self.selected_asset) or ""
+                if not thumb_path:
+                    thumb_path = resolve_drfx_thumbnail(self.selected_asset) or ""
+            except Exception:
+                pass
+
+            if not video_file:
+                _vid_exts = (".mp4", ".mov", ".webm", ".mkv", ".avi")
+                if prev_path and prev_path.lower().endswith(_vid_exts) and os.path.isfile(prev_path):
+                    video_file = prev_path
+                elif fpath and fpath.lower().endswith(_vid_exts) and os.path.isfile(fpath):
+                    video_file = fpath
+
+            has_playable_video = bool(video_file and os.path.isfile(video_file))
+
+            kind = (
+                self.selected_asset.get("category", "transform")
+                if isinstance(self.selected_asset, dict)
+                else getattr(self.selected_asset, "category", "transform")
+            )
+            frames = (
+                self.selected_asset.get("frames", getattr(self, "trans_frames", 12))
+                if isinstance(self.selected_asset, dict)
+                else getattr(self.selected_asset, "frames", getattr(self, "trans_frames", 12))
+            )
+            if hasattr(self, "slide_trans_frames"):
+                self.slide_trans_frames.setValue(frames)
+
+            if has_playable_video:
+                orig_prev_path = prev_path
+                if isinstance(self.selected_asset, dict):
+                    self.selected_asset["preview_path"] = video_file
+                else:
+                    try:
+                        setattr(self.selected_asset, "preview_path", video_file)
+                    except Exception:
+                        pass
                 self.inspector_trans_viewport.hide()
                 self.inspector_icon_viewport.show()
                 self.icon_meme_widget.set_asset(self.selected_asset, sub=sub)
+                if not getattr(self.icon_meme_widget, "resolved_file_path", ""):
+                    if isinstance(self.selected_asset, dict):
+                        self.selected_asset["preview_path"] = orig_prev_path
+                    else:
+                        try:
+                            setattr(self.selected_asset, "preview_path", orig_prev_path)
+                        except Exception:
+                            pass
+                    self.icon_meme_widget.stop_playback()
+                    self.inspector_trans_viewport.show()
+                    self.inspector_icon_viewport.hide()
+                    self.trans_loop_widget.set_transition(
+                        name, kind, frames, asset=self.selected_asset, thumb_path=thumb_path
+                    )
             else:
                 self.icon_meme_widget.stop_playback()
                 self.inspector_trans_viewport.show()
                 self.inspector_icon_viewport.hide()
-                kind = getattr(self.selected_asset, "category", "transform")
-                frames = getattr(self.selected_asset, "frames", getattr(self, "trans_frames", 12))
-                if hasattr(self, "slide_trans_frames"):
-                    self.slide_trans_frames.setValue(frames)
-                self.trans_loop_widget.set_transition(name, kind, frames)
-                self._update_trans_alignment_styles()
+                self.trans_loop_widget.set_transition(
+                    name, kind, frames, asset=self.selected_asset, thumb_path=thumb_path
+                )
 
             self.grp_params.show()
             if hasattr(self, "grp_sample_text"):
@@ -7371,11 +7501,9 @@ class TabAssets(QWidget):
             if hasattr(self, "grp_trans_pos"):
                 self.grp_trans_pos.show()
 
-            kind = getattr(self.selected_asset, "category", "transform")
-            frames = getattr(self.selected_asset, "frames", getattr(self, "trans_frames", 12))
-            if hasattr(self, "slide_trans_frames"):
-                self.slide_trans_frames.setValue(frames)
-            self.trans_loop_widget.set_transition(name, kind, frames)
+            self.trans_loop_widget.set_transition(
+                name, kind, frames, asset=self.selected_asset, thumb_path=thumb_path
+            )
             self._update_trans_alignment_styles()
             self.btn_insert_title_playhead.setText("➡️ Áp dụng vào Timeline")
 
@@ -7430,10 +7558,25 @@ class TabAssets(QWidget):
         self._on_card_selected(asset_id)
         if not self.selected_asset:
             return
-        tab_type = getattr(self.selected_asset, "tab", "")
-        if tab_type in ("meme", "overlay", "trans"):
+        tab_type = (
+            self.selected_asset.get("tab", "")
+            if isinstance(self.selected_asset, dict)
+            else getattr(self.selected_asset, "tab", "")
+        )
+        if tab_type in ("meme", "overlay"):
             if hasattr(self, "icon_meme_widget"):
                 self.icon_meme_widget._start_playback()
+        elif tab_type in ("trans", "transition", "transitions") or isinstance(self.selected_asset, TransitionStylePreset):
+            if (
+                hasattr(self, "inspector_icon_viewport")
+                and self.inspector_icon_viewport.isVisible()
+                and hasattr(self, "icon_meme_widget")
+                and getattr(self.icon_meme_widget, "resolved_file_path", "")
+            ):
+                self.icon_meme_widget._start_playback()
+            elif hasattr(self, "trans_loop_widget"):
+                self.trans_loop_widget.progress = 0.0
+                self.trans_loop_widget.update()
 
     def _on_font_changed(self, font_name: str):
         self.current_font = font_name
@@ -7629,6 +7772,12 @@ class TabAssets(QWidget):
 
         # 2. Cập nhật Text Live Preview Canvas (~30 FPS)
         if hasattr(self, "text_live_preview"):
+            self.text_live_preview.asset_obj = self.selected_asset
+            self.text_live_preview.file_path = (
+                self.selected_asset.get("file_path", "")
+                if isinstance(self.selected_asset, dict)
+                else getattr(self.selected_asset, "file_path", "")
+            ) or ""
             self.text_live_preview.set_params(
                 text=sample,
                 preset_id=pid,

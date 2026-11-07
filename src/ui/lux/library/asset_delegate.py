@@ -19,8 +19,11 @@ from PySide6.QtGui import (
 
 from src.ui.lux.library.asset_model import (
     IdRole, NameRole, KindRole, DurationRole, ThumbnailRole,
-    IsFavRole, CategoryRole, MotionRole
+    IsFavRole, CategoryRole, MotionRole, AssetObjRole
 )
+
+_COLOR_ACCENT = QColor("#d94f3d")
+_COLOR_BORDER_SELECTED = QColor("#e86352")
 
 
 class AssetCardDelegate(QStyledItemDelegate):
@@ -73,8 +76,8 @@ class AssetCardDelegate(QStyledItemDelegate):
 
         # Fill background
         if is_selected:
-            bg_color = QColor("#1e1b2e")  # Subtle luxury purple tint
-            border_color = QColor("#8b5cf6")  # Primary violet 2px
+            bg_color = QColor("#2a1816")  # Subtle Studio Coral tint
+            border_color = _COLOR_BORDER_SELECTED  # Studio Coral 2px
             border_w = 2.0
         elif is_hover:
             bg_color = QColor("#222228")
@@ -108,6 +111,7 @@ class AssetCardDelegate(QStyledItemDelegate):
 
         is_audio = category in ("sfx", "audio", "sound", "bgm", "nhac_nen")
         is_text = category in ("text", "title", "chu", "subtitle")
+        asset_obj = index.data(AssetObjRole)
 
         if is_audio:
             # Render Procedural Waveform
@@ -115,7 +119,10 @@ class AssetCardDelegate(QStyledItemDelegate):
         elif is_text:
             # Render Rich Text Preset Typography Preview
             from src.ui.lux.library.text_preview_generator import draw_text_preset_preview
-            draw_text_preset_preview(painter, preview_rect, asset_id, name)
+            try:
+                draw_text_preset_preview(painter, preview_rect, asset_obj if asset_obj is not None else asset_id, name)
+            except TypeError:
+                draw_text_preset_preview(painter, preview_rect, asset_obj if asset_obj is not None else asset_id)
         elif pixmap and isinstance(pixmap, QPixmap) and not pixmap.isNull():
             # Draw real loaded thumbnail (scaled to cover 16:9 without stretching)
             scaled = pixmap.scaled(
@@ -128,7 +135,7 @@ class AssetCardDelegate(QStyledItemDelegate):
             painter.drawPixmap(sx, sy, scaled)
         else:
             # Fallback procedural canvas
-            self._draw_procedural_canvas(painter, preview_rect, name, category, asset_id)
+            self._draw_procedural_canvas(painter, preview_rect, name, category, asset_id, asset_obj=asset_obj)
 
         painter.restore()
 
@@ -209,16 +216,33 @@ class AssetCardDelegate(QStyledItemDelegate):
             by = center_y - bh
             painter.drawRoundedRect(QRectF(bx, by, max(2.0, bar_w - 2.0), bh * 2), 1.0, 1.0)
 
-    def _draw_procedural_canvas(self, painter: QPainter, rect: QRectF, name: str, category: str, asset_id: str = ""):
+    def _draw_procedural_canvas(self, painter: QPainter, rect: QRectF, name: str, category: str, asset_id: str = "", asset_obj: Any = None):
         """Draws procedural placeholder canvas for templates without thumbnail."""
         if category in ("text", "title", "chu", "subtitle"):
             from src.ui.lux.library.text_preview_generator import draw_text_preset_preview
-            draw_text_preset_preview(painter, rect, asset_id, name)
+            try:
+                draw_text_preset_preview(painter, rect, asset_obj if asset_obj is not None else asset_id, name)
+            except TypeError:
+                draw_text_preset_preview(painter, rect, asset_obj if asset_obj is not None else asset_id)
             return
 
+        if category in ("trans", "transition", "transitions"):
+            try:
+                from src.ui.lux.library.transition_preview_generator import draw_transition_frame
+                draw_transition_frame(
+                    painter,
+                    rect,
+                    asset_obj if asset_obj is not None else name,
+                    progress=0.5,
+                    show_hud=True,
+                )
+                return
+            except Exception:
+                pass
+
         grad = QLinearGradient(rect.topLeft(), rect.bottomRight())
-        if category in ("trans", "transition"):
-            grad.setColorAt(0.0, QColor("#311042"))
+        if category in ("trans", "transition", "transitions"):
+            grad.setColorAt(0.0, QColor("#2a1816"))
             grad.setColorAt(1.0, QColor("#111827"))
         elif category in ("lut", "color"):
             grad.setColorAt(0.0, QColor("#064e3b"))
@@ -229,10 +253,9 @@ class AssetCardDelegate(QStyledItemDelegate):
 
         painter.fillRect(rect, grad)
 
-        if category in ("trans", "transition"):
-            # Biểu tượng chuyển cảnh điện ảnh tinh tế thay vì nhét chữ thô vào khung
+        if category in ("trans", "transition", "transitions"):
             painter.setFont(QFont("Segoe UI Emoji", 26))
-            painter.setPen(QColor(216, 180, 254, 180))
+            painter.setPen(QColor(232, 99, 82, 180))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "🎬")
         else:
             # Center typography hint

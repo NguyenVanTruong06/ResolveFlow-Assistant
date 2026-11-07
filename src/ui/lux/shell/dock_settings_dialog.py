@@ -197,7 +197,7 @@ class DockSettingsDialog(QDialog):
         self.chk_pin_default.toggled.connect(self._on_pin_default_toggled)
         sec2_layout.addWidget(self.chk_pin_default)
 
-        self.chk_auto_collapse = QCheckBox("Tự thu gọn khi rời Dock (về Mini Strip 28px)")
+        self.chk_auto_collapse = QCheckBox("Tự thu ẩn hoàn toàn vào cạnh màn hình khi rời thanh Dock")
         self.chk_auto_collapse.setCursor(Qt.CursorShape.PointingHandCursor)
         self.chk_auto_collapse.toggled.connect(self._on_auto_collapse_toggled)
         sec2_layout.addWidget(self.chk_auto_collapse)

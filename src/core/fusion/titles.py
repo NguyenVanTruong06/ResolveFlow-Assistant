@@ -26,7 +26,9 @@ def _outline(rgb=(0, 0, 0), thickness=0.06) -> dict:
 # 1 ---------------------------------------------------------------------------
 def spring_pop(p: TitleParams) -> Macro:
     """Hormozi-style pop: Scale 0 -> 1.25 -> 0.95 -> 1.0 on flat-tangent Bezier keys + motion blur."""
-    text = text_tool("Text1", p, pos=(0, 0), extra=_outline())
+    ow = float(p.outline_width) if p.outline_width is not None else 0.0
+    out_extra = _outline(parse_color(p.outline_color or "#000000"), max(0.01, min(0.15, ow * 0.35))) if ow > 0 else {}
+    text = text_tool("Text1", p, pos=(0, 0), extra=out_extra)
     size_curve = Spline("PopSize", smooth_keys([(0, 0.0), (6, 1.25), (10, 0.95), (14, 1.0)]))
     angle_curve = Spline("PopAngle", smooth_keys([(0, -8.0), (6, 3.0), (10, -1.0), (14, 0.0)]),
                          color=(0, 200, 255))
@@ -51,7 +53,7 @@ def spring_pop(p: TitleParams) -> Macro:
 # 2 ---------------------------------------------------------------------------
 def highlighter(p: TitleParams) -> Macro:
     """Marker box (Background + RectangleMask) wipes open left->right behind the text."""
-    acc = parse_color(p.accent)
+    acc = parse_color(p.box_color or p.accent)
     reveal = Spline("SwipeReveal", [
         Key(0, 0.0, rh=(4, 0.0)),
         Key(12, 1.0, lh=(7, 1.0)),
@@ -132,7 +134,7 @@ def typewriter(p: TitleParams) -> Macro:
 
 # 4 ---------------------------------------------------------------------------
 def neon_pulse(p: TitleParams) -> Macro:
-    acc = parse_color(p.accent if p.accent else p.color)
+    acc = parse_color(p.glow_color or p.accent or p.color)
     text = text_tool("Text1", p, pos=(0, 0), color=acc)
     wave = "(0.5 + 0.5 * sin(2 * pi * time / max(1, Glow1.Period)))"
     glow1 = Tool("Glow1", "SoftGlow", {

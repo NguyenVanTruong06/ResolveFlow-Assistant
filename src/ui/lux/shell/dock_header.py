@@ -251,22 +251,25 @@ class DockHeaderWidget(QWidget):
         layout.addWidget(self.btn_pin)
 
         # 5. Collapse button
-        self.btn_collapse = QPushButton()
-        self.btn_collapse.setIcon(get_vector_icon("collapse", "#a1a1aa", 16))
-        self.btn_collapse.setIconSize(QSize(16, 16))
+        self.btn_collapse = QPushButton("»")
         self.btn_collapse.setFixedSize(28, 28)
-        self.btn_collapse.setToolTip("Thu gọn về Rail (Esc)")
+        self.btn_collapse.setToolTip("Thu ẩn hoàn toàn vào cạnh màn hình (Esc / Ctrl+Alt+D)")
         self.btn_collapse.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_collapse.setCursor(Qt.PointingHandCursor)
         self.btn_collapse.setStyleSheet("""
             QPushButton {
-                background: transparent;
-                border: 1px solid transparent;
+                background: #1c1d21;
+                color: #d4d4d8;
+                border: 1px solid #2e3138;
                 border-radius: 6px;
+                font-size: 15px;
+                font-weight: 700;
+                padding-bottom: 2px;
             }
             QPushButton:hover {
-                background: #27272a;
-                border-color: #3f3f46;
+                background: rgba(217, 79, 61, 0.20);
+                border-color: #d94f3d;
+                color: #ffffff;
             }
         """)
         self.btn_collapse.clicked.connect(self.collapse_clicked.emit)
@@ -484,8 +487,8 @@ class DockHeaderWidget(QWidget):
         """Cập nhật biểu tượng mũi tên thu gọn dựa theo cạnh màn hình (trái/phải)."""
         if edge == "left":
             self.btn_collapse.setText("«")
-            self.btn_collapse.setToolTip("Thu gọn về mép trái (Esc)")
+            self.btn_collapse.setToolTip("Thu ẩn hoàn toàn vào cạnh trái (Esc / Ctrl+Alt+D)")
         else:
             self.btn_collapse.setText("»")
-            self.btn_collapse.setToolTip("Thu gọn về mép phải (Esc)")
+            self.btn_collapse.setToolTip("Thu ẩn hoàn toàn vào cạnh phải (Esc / Ctrl+Alt+D)")
 

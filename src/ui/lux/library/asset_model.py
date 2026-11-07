@@ -190,30 +190,74 @@ class AssetListModel(QAbstractListModel):
             return asset_id in self._favs
 
         if role == ThumbnailRole:
-            if asset_id in self._thumb_cache:
-                return self._thumb_cache[asset_id]
+            return self._load_or_generate_thumbnail(info)
 
-            if info["category"] in ("text", "title", "chu", "subtitle"):
+        return None
+
+    def _load_or_generate_thumbnail(self, info: Dict[str, Any]) -> Optional[QPixmap]:
+        """Loads or generates a rich 16:9 thumbnail for the given asset info dict."""
+        asset_id = info["id"]
+        if asset_id in self._thumb_cache:
+            return self._thumb_cache[asset_id]
+
+        cat = str(info.get("category") or "").lower()
+        asset_obj = info.get("obj") or info
+
+        if cat in ("text", "title", "chu", "subtitle"):
+            try:
+                from src.ui.lux.library.text_preview_generator import generate_text_preset_thumbnail
+                pix = generate_text_preset_thumbnail(asset_obj, 256, 144)
+                if pix and not pix.isNull():
+                    self._thumb_cache[asset_id] = pix
+                    return pix
+            except Exception:
+                pass
+            try:
                 from src.ui.lux.library.text_preview_generator import get_text_preset_pixmap
                 pix = get_text_preset_pixmap(asset_id, info["name"])
                 if pix and not pix.isNull():
                     self._thumb_cache[asset_id] = pix
                     return pix
+            except Exception:
+                pass
 
-            # Nếu có thumbnail_path trực tiếp là ảnh hợp lệ, nạp và cache ngay
-            thumb_p = info.get("thumbnail_path")
+        # Nếu có thumbnail_path trực tiếp là ảnh hợp lệ, nạp và cache ngay
+        thumb_p = info.get("thumbnail_path")
+        if not thumb_p and cat in ("trans", "transition", "transitions"):
+            try:
+                from src.ui.lux.library.transition_preview_generator import resolve_drfx_thumbnail
+                resolved_thumb = resolve_drfx_thumbnail(asset_obj)
+                if resolved_thumb and os.path.isfile(resolved_thumb):
+                    thumb_p = resolved_thumb
+                    info["thumbnail_path"] = resolved_thumb
+            except Exception:
+                pass
+
+        if thumb_p and os.path.isfile(thumb_p) and cat not in ("trans", "transition", "transitions"):
+            pix = QPixmap(thumb_p)
+            if not pix.isNull():
+                self._thumb_cache[asset_id] = pix
+                return pix
+
+        if cat in ("trans", "transition", "transitions"):
+            try:
+                from src.ui.lux.library.transition_preview_generator import generate_transition_thumbnail
+                pix = generate_transition_thumbnail(asset_obj, 256, 144)
+                if pix and not pix.isNull():
+                    self._thumb_cache[asset_id] = pix
+                    return pix
+            except Exception:
+                pass
             if thumb_p and os.path.isfile(thumb_p):
                 pix = QPixmap(thumb_p)
                 if not pix.isNull():
                     self._thumb_cache[asset_id] = pix
                     return pix
 
-            # Thử nạp từ preview_path hoặc file_path
-            cand_p = thumb_p or info.get("preview_path") or info.get("file_path")
-            if cand_p and cand_p not in self._pending_thumb_requests:
-                self._request_async_thumbnail(asset_id, cand_p)
-            return None
-
+        # Thử nạp từ preview_path hoặc file_path
+        cand_p = thumb_p or info.get("preview_path") or info.get("file_path")
+        if cand_p and cand_p not in self._pending_thumb_requests:
+            self._request_async_thumbnail(asset_id, cand_p)
         return None
 
     def set_assets(self, items: List[Any]):
