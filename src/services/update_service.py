@@ -19,7 +19,7 @@ from PySide6.QtCore import QObject, QThread, Signal, QSettings
 
 logger = logging.getLogger("ChunDVC.UpdateService")
 
-CURRENT_VERSION = "1.0.15"
+CURRENT_VERSION = "1.0.16"
 GITHUB_REPO = "NguyenVanTruong06/ResolveFlow-Assistant"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -142,6 +142,14 @@ class UpdateDownloadAndInstallWorker(QThread):
     def run(self):
         try:
             assets = self.update_info.get("assets", {})
+            if (sys.platform.startswith("linux") and not (assets.get("deb") or assets.get("linux_tar"))) or (
+                sys.platform.startswith("win") and not assets.get("windows_zip")
+            ):
+                fresh = check_for_updates_sync(timeout=8)
+                if fresh and fresh.get("assets"):
+                    self.update_info.update(fresh)
+                    assets = self.update_info.get("assets", {})
+
             tag = self.update_info.get("tag_name", "")
             ver = self.update_info.get("latest_version", "")
 

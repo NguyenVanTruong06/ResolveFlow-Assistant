@@ -3,8 +3,7 @@ name: Build & Release Standalone
 on:
   push:
     tags:
-      - "v*.*.*"
-      - "v*"
+      - "v1.*.*"
 
 permissions:
   contents: write
