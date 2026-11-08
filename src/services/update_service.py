@@ -12,8 +12,10 @@ import logging
 import tarfile
 import zipfile
 import tempfile
+import time
 import subprocess
 import urllib.request
+import urllib.error
 from typing import Optional, Dict, Any, Tuple
 from PySide6.QtCore import QObject, QThread, Signal, QSettings
 
@@ -164,39 +166,84 @@ class UpdateDownloadAndInstallWorker(QThread):
             logger.exception("Lỗi trong quá trình cập nhật tự động: %s", exc)
             self.install_finished.emit(False, f"Lỗi cập nhật: {exc}")
 
-    def _download_file(self, url: str, dest_path: str, expected_size: int = 0) -> bool:
-        """Tải file theo luồng chunk với báo cáo % tiến độ chính xác."""
-        self.status_changed.emit("Đang kết nối tới máy chủ...")
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": f"ChunDVC-ResolveFlow/{CURRENT_VERSION}"}
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            total_bytes = int(resp.headers.get("content-length") or expected_size or 0)
-            downloaded = 0
-            chunk_size = 65536  # 64KB
+    def _download_file(self, url: str, dest_path: str, expected_size: int = 0, max_retries: int = 4) -> bool:
+        """Tải file theo luồng chunk với báo cáo % tiến độ và cơ chế tự động thử lại khi gặp sự cố mạng/CDN timeout."""
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            if self._is_cancelled:
+                return False
+            try:
+                if attempt == 1:
+                    self.status_changed.emit("Đang kết nối tới máy chủ tải về...")
+                else:
+                    self.status_changed.emit(f"Máy chủ đang chuẩn bị gói, thử lại lần {attempt}/{max_retries}...")
 
-            with open(dest_path, "wb") as f_out:
-                while True:
-                    if self._is_cancelled:
-                        return False
-                    chunk = resp.read(chunk_size)
-                    if not chunk:
-                        break
-                    f_out.write(chunk)
-                    downloaded += len(chunk)
+                req = urllib.request.Request(
+                    url,
+                    headers={
+                        "User-Agent": f"ChunDVC-ResolveFlow/{CURRENT_VERSION}",
+                        "Accept": "application/octet-stream, */*"
+                    }
+                )
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    total_bytes = int(resp.headers.get("content-length") or expected_size or 0)
+                    downloaded = 0
+                    chunk_size = 65536  # 64KB
 
-                    if total_bytes > 0:
-                        percent = min(100.0, (downloaded / total_bytes) * 100.0)
-                        down_mb = downloaded / (1024 * 1024)
-                        tot_mb = total_bytes / (1024 * 1024)
-                        msg = f"{down_mb:.1f} MB / {tot_mb:.1f} MB ({percent:.0f}%)"
-                        self.progress_changed.emit(percent, msg)
-                    else:
-                        down_mb = downloaded / (1024 * 1024)
-                        self.progress_changed.emit(50.0, f"{down_mb:.1f} MB đã tải")
+                    with open(dest_path, "wb") as f_out:
+                        while True:
+                            if self._is_cancelled:
+                                if os.path.exists(dest_path):
+                                    try:
+                                        os.remove(dest_path)
+                                    except Exception:
+                                        pass
+                                return False
+                            chunk = resp.read(chunk_size)
+                            if not chunk:
+                                break
+                            f_out.write(chunk)
+                            downloaded += len(chunk)
 
-        return True
+                            if total_bytes > 0:
+                                percent = min(100.0, (downloaded / total_bytes) * 100.0)
+                                down_mb = downloaded / (1024 * 1024)
+                                tot_mb = total_bytes / (1024 * 1024)
+                                msg = f"{down_mb:.1f} MB / {tot_mb:.1f} MB ({percent:.0f}%)"
+                                self.progress_changed.emit(percent, msg)
+                            else:
+                                down_mb = downloaded / (1024 * 1024)
+                                self.progress_changed.emit(50.0, f"{down_mb:.1f} MB đã tải")
+
+                    # Kiểm tra tính toàn vẹn cơ bản dung lượng
+                    if total_bytes > 0 and downloaded < int(total_bytes * 0.95):
+                        raise IOError(f"Tải không trọn vẹn: nhận được {downloaded}/{total_bytes} bytes")
+
+                    return True
+
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                logger.warning("HTTP error %d khi tải file (lần %d/%d): %s", exc.code, attempt, max_retries, exc.reason)
+                # Các mã lỗi tạm thời của CDN/Gateway: 408, 429, 500, 502, 503, 504
+                if exc.code in (408, 429, 500, 502, 503, 504) and attempt < max_retries:
+                    backoff = attempt * 2.5
+                    self.status_changed.emit(f"Máy chủ bận ({exc.code}), đợi {backoff:.1f}s để thử lại...")
+                    time.sleep(backoff)
+                    continue
+                raise
+            except (urllib.error.URLError, TimeoutError, ConnectionResetError, IOError) as exc:
+                last_error = exc
+                logger.warning("Lỗi kết nối khi tải file (lần %d/%d): %s", attempt, max_retries, exc)
+                if attempt < max_retries:
+                    backoff = attempt * 2.0
+                    self.status_changed.emit(f"Kết nối gián đoạn, thử lại sau {backoff:.1f}s...")
+                    time.sleep(backoff)
+                    continue
+                raise
+
+        if last_error:
+            raise last_error
+        return False
 
     def _run_linux_update(self, assets: dict, tag: str, ver: str):
         deb_url = assets.get("deb")

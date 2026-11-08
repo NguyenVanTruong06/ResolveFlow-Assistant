@@ -155,3 +155,38 @@ def test_restart_app_clean_env_and_guard(qapp, monkeypatch):
     single_shot_calls[0][1]()
     assert os_exit_calls == [0]
 
+
+def test_download_file_retry_on_504_and_succeed(qapp, tmp_path, monkeypatch):
+    """Kiểm tra _download_file tự động thử lại khi gặp HTTP 504 và tải thành công ở lần sau."""
+    import urllib.error
+    import io
+
+    worker = UpdateDownloadAndInstallWorker({"latest_version": "1.0.17", "assets": {}})
+    dest = str(tmp_path / "test_download.deb")
+
+    attempts = 0
+    def mock_urlopen(req, timeout=45):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            # Lần đầu giả lập 504 Gateway Time-out
+            fp = io.BytesIO(b"Gateway Time-out")
+            raise urllib.error.HTTPError("https://example.com/asset.deb", 504, "Gateway Time-out", {}, fp)
+        # Lần hai trả về dữ liệu thành công
+        mock_resp = MagicMock()
+        payload = b"FAKE_DEB_DATA_1234567890"
+        mock_resp.headers = {"content-length": str(len(payload))}
+        mock_resp.read.side_effect = [payload, b""]
+        mock_resp.__enter__.return_value = mock_resp
+        return mock_resp
+
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+    monkeypatch.setattr("time.sleep", lambda s: None)  # Bỏ qua sleep để test chạy tức thì
+
+    ok = worker._download_file("https://example.com/asset.deb", dest, expected_size=24, max_retries=3)
+    assert ok is True
+    assert attempts == 2
+    with open(dest, "rb") as f:
+        assert f.read() == b"FAKE_DEB_DATA_1234567890"
+
+
