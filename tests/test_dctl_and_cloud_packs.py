@@ -153,6 +153,18 @@ def test_to_asset_dict_and_insert_service_install_dctl(tmp_path, monkeypatch):
 def test_community_packs_catalog_contains_structured_sfx_and_dctl_packs():
     by_id = {p.id: p for p in COMMUNITY_PACKS_CATALOG}
     expected = {
+        "acidbite_elements_sfx": 147,
+        "davinci_speed_ramp_transitions": 12,
+        "davinci_gr44_seamless_transitions": 1130,
+        "fusion_skin_retouching_macros": 6,
+        "davinci_unfold_paper_animator": 74,
+        "secret_sauce_cinema_luts": 8,
+        "iphone_cinematic_luts": 8,
+        "green_screen_memes_109": 109,
+        "dehancer_pro_ofx_plugin": 2,
+        "davinci_pre_animate_v2": 24,
+        "dvr_digital_effects_powergrades": 2,
+        "sony_canon_monitor_luts": 17,
         "urban_street_action_sfx": 140,
         "dctl_pfa_color_suite": 4,
         "dctl_pixeltools_bundle": 27,
@@ -160,10 +172,39 @@ def test_community_packs_catalog_contains_structured_sfx_and_dctl_packs():
         "dctl_mononodes_v4": 149,
         "dctl_qazi_toolkit_vietsub": 26,
     }
+    assert len(COMMUNITY_PACKS_CATALOG) == len(expected)
     for pid, count in expected.items():
         assert pid in by_id, f"Missing {pid} in COMMUNITY_PACKS_CATALOG"
         pack = by_id[pid]
         assert pack.item_count == count
-        assert pack.download_url and pack.download_url.startswith("https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/")
+        assert (
+            pack.download_url
+            == f"https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/{pid}.rfpack"
+        )
         assert pack.size_mb and pack.size_mb > 0
+
+
+def test_powergrade_drx_excludes_companion_dpx_card_and_preserves_on_commit(tmp_path):
+    lib_root = tmp_path / "KhoPG"
+    sm = StorageManager(config_dir=tmp_path / "cfg_pg", reserve_bytes=0)
+    sm.configure(lib_root)
+
+    zip_path = tmp_path / "powergrade_test.zip"
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("A2 DIGITAL EFFECTS/VINTAGE LENS BLUR.drx", "<ResolvePowerGrade/>")
+        zf.writestr("A2 DIGITAL EFFECTS/VINTAGE LENS BLUR.dpx", b"DPX_STILL_BINARY")
+
+    svc = PackIngestService(sm)
+    job = svc.prepare(zip_path, pack_id="dvr_digital_effects_powergrades", pack_name="A2 Digital Effects")
+    chosen = [a for a in job["assets"] if not a["excluded"]]
+    assert len(chosen) == 1
+    assert chosen[0]["relative_path"].endswith("VINTAGE LENS BLUR.drx")
+
+    res = svc.commit(job)
+    assert res["count"] == 1
+    pack_dirs = list((lib_root / "02_cloud_downloads" / "packs").iterdir())
+    assert len(pack_dirs) == 1
+    assert list(pack_dirs[0].rglob("VINTAGE LENS BLUR.drx"))
+    assert list(pack_dirs[0].rglob("VINTAGE LENS BLUR.dpx"))
+
 

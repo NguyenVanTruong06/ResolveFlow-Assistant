@@ -76,6 +76,9 @@ class PackManager:
         "dctl_filmverse_2_1": ["filmverse", "filmverse_2_1", "colorist_foundry"],
         "dctl_mononodes_v4": ["mononodes", "mono_llp", "look_lab_print"],
         "dctl_qazi_toolkit_vietsub": ["qazi", "qt_bundle", "qazis_toolkit"],
+        "davinci_pre_animate_v2": ["pre_animate", "pre-animate", "preanimate"],
+        "dvr_digital_effects_powergrades": ["digital_effects", "a2_digital", "lens_blur", "rgb_split"],
+        "sony_canon_monitor_luts": ["monitor_luts", "a4_monitor", "slog3", "clog3", "vlog"],
     }
 
     @classmethod
@@ -476,7 +479,7 @@ class PackManager:
         return [p.model_copy() for p in COMMUNITY_PACKS_CATALOG]
 
 
-# Danh mục các bộ Pack cộng đồng tuyển chọn trực tiếp từ Google Drive Kho ChunnDVC
+# Danh mục các bộ Pack cộng đồng tuyển chọn trên GitHub Releases (đồng bộ với Google Drive Kho ChunnDVC)
 COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
     PackManifest(
         id="acidbite_elements_sfx",
@@ -487,7 +490,7 @@ COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
         categories=["sfx"],
         item_count=147,
         size_mb=962.3,
-        download_url="https://drive.google.com/file/d/1kva0qYbZF1tOJ7P_DObbkP7b_HPN-7V1/view?usp=sharing",
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/acidbite_elements_sfx.rfpack",
         tags=["sfx", "whoosh", "cinematic", "impact", "wav"]
     ),
     PackManifest(
@@ -499,7 +502,7 @@ COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
         categories=["transitions"],
         item_count=12,
         size_mb=97.5,
-        download_url="https://drive.google.com/file/d/16zqeF1TClWTAC-53MaTtrYu3odfeb18K/view?usp=sharing",
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/davinci_speed_ramp_transitions.rfpack",
         tags=["transitions", "drfx", "speedramp", "seamless", "davinci"]
     ),
     PackManifest(
@@ -511,7 +514,7 @@ COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
         categories=["transitions", "sfx"],
         item_count=1130,
         size_mb=288.1,
-        download_url="https://drive.google.com/file/d/12mouRJ7wbsJIe4bhABnoxo-MhOHw6wU9/view?usp=sharing",
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/davinci_gr44_seamless_transitions.rfpack",
         tags=["transitions", "gr44", "sfx", "motion", "davinci"]
     ),
     PackManifest(
@@ -523,7 +526,7 @@ COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
         categories=["titles"],
         item_count=6,
         size_mb=0.9,
-        download_url="https://drive.google.com/file/d/11Sk70Y_kfhpb1uU14kp_EJsDL3NzW-12/view?usp=sharing",
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/fusion_skin_retouching_macros.rfpack",
         tags=["fusion", "macro", "skin", "retouch", "beauty"]
     ),
     PackManifest(
@@ -535,7 +538,7 @@ COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
         categories=["transitions", "overlays"],
         item_count=74,
         size_mb=17.1,
-        download_url="https://drive.google.com/file/d/1Tkr6b0yaNrF9e-jpAIN3pIgC7J8F1Mg5/view?usp=sharing",
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/davinci_unfold_paper_animator.rfpack",
         tags=["paper", "stopmotion", "texture", "drfx", "davinci"]
     ),
     PackManifest(
@@ -547,7 +550,7 @@ COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
         categories=["luts"],
         item_count=8,
         size_mb=21.2,
-        download_url="https://drive.google.com/file/d/15S4dumr_su0OJGY7nuf-MQ4RB3FwIRwC/view?usp=sharing",
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/secret_sauce_cinema_luts.rfpack",
         tags=["luts", "color", "cinema", "ferrari", "cube"]
     ),
     PackManifest(
@@ -559,7 +562,7 @@ COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
         categories=["luts"],
         item_count=8,
         size_mb=9.7,
-        download_url="https://drive.google.com/file/d/17Nl7vS-KcPrrMJquAg2Rs11_oXDfuUtZ/view?usp=sharing",
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/iphone_cinematic_luts.rfpack",
         tags=["iphone", "applelog", "lut", "mobile", "cube"]
     ),
     PackManifest(
@@ -571,7 +574,7 @@ COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
         categories=["memes"],
         item_count=109,
         size_mb=307.7,
-        download_url="https://drive.google.com/file/d/1D7ay6vf6c1GOg4JTxuRMoCesg-GQCmbB/view?usp=sharing",
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/green_screen_memes_109.rfpack",
         tags=["meme", "greenscreen", "countdown", "viral", "keyer"]
     ),
     PackManifest(
@@ -583,8 +586,44 @@ COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
         categories=["luts"],
         item_count=2,
         size_mb=661.7,
-        download_url="https://drive.google.com/file/d/17Ysow6gRJITEOEbgnkU-xHk9cVDLn_ad/view?usp=sharing",
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/dehancer_pro_ofx_plugin.rfpack",
         tags=["dehancer", "ofx", "plugin", "film", "grain"]
+    ),
+    PackManifest(
+        id="davinci_pre_animate_v2",
+        name="Bộ Hiệu Ứng Chuyển Động Nhanh Pre-Animate V2 (DaVinci Resolve)",
+        version="2.0.0",
+        author="ChunnDVC Vault",
+        description="23 hiệu ứng chuyển động & zoom nhanh (Fast/Smooth Up, Down, Left, Right, Zoom In/Out V2) dạng Fusion .setting và gói .drfx kèm ảnh minh họa & video demo.",
+        categories=["titles", "transitions"],
+        item_count=24,
+        size_mb=6.0,
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/davinci_pre_animate_v2.rfpack",
+        tags=["pre-animate", "drfx", "animation", "fusion", "davinci"]
+    ),
+    PackManifest(
+        id="dvr_digital_effects_powergrades",
+        name="Gói PowerGrades Hiệu Ứng Ống Kính & Tách Màu RGB (A2 Digital Effects)",
+        version="1.0.0",
+        author="ChunnDVC Vault",
+        description="Bộ PowerGrades (.drx/.dpx) chuyên dụng tạo hiệu ứng Vintage Lens Blur & RGB Split trực tiếp trong Color Gallery của DaVinci Resolve.",
+        categories=["luts"],
+        item_count=2,
+        size_mb=9.6,
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/dvr_digital_effects_powergrades.rfpack",
+        tags=["powergrade", "drx", "lens_blur", "rgb_split", "color"]
+    ),
+    PackManifest(
+        id="sony_canon_monitor_luts",
+        name="Bộ Bảng Màu Monitor LUTs (Sony S-Log3 / Canon C-Log3 / Panasonic V-Log)",
+        version="1.0.0",
+        author="ChunnDVC Vault",
+        description="17 bảng màu Monitor & Rec.709 Conversion chuẩn .cube tối ưu cho Sony S-Log3 (Exposure -1.0 / -1.7), Canon C-Log3 và Panasonic V-Log.",
+        categories=["luts"],
+        item_count=17,
+        size_mb=20.5,
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/sony_canon_monitor_luts.rfpack",
+        tags=["luts", "monitor", "sony", "slog3", "canon", "clog3", "panasonic", "vlog"]
     ),
     PackManifest(
         id="urban_street_action_sfx",

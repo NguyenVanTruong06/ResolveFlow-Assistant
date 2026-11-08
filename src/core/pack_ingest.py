@@ -165,6 +165,10 @@ def inspect_tree(root: Path, source_id: str, cancel=lambda: False):
                 or path.stem.lower() in ('paper', 'texture', 'mask')
             ) and _has_nearby_macro_file(path, root):
                 excluded = True
+            elif ext == '.dpx' and any(
+                f.lower() == f"{path.stem.lower()}.drx" for f in files
+            ):
+                excluded = True
             result.append({'id': uuid.uuid5(uuid.NAMESPACE_URL, source_id + ':' + rel.as_posix()).hex,
                            'relative_path': rel.as_posix(), 'name': path.stem, 'category': category,
                            'subcategory': rel.parent.name if rel.parent != Path('.') else '', 'tags': [],

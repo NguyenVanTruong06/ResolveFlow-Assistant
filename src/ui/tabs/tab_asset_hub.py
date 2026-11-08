@@ -392,7 +392,7 @@ class AssetHubWidget(QWidget):
         drive_layout.addWidget(lbl_drive_icon)
 
         self.txt_drive_url = QLineEdit()
-        self.txt_drive_url.setPlaceholderText("Dán liên kết Google Drive gói .rfpack hoặc thư mục meme/sfx tại đây...")
+        self.txt_drive_url.setPlaceholderText("Dán liên kết GitHub Releases / Google Drive gói .rfpack hoặc thư mục meme/sfx tại đây...")
         self.txt_drive_url.setStyleSheet(f"""
             QLineEdit {{
                 background: {ThemeColors.BG_INPUT};
