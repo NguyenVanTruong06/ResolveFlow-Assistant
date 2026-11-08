@@ -100,11 +100,11 @@ def test_update_toast_widget_ui(qapp):
     toast.close()
 
 
-def test_current_version_v1_0_14():
-    """Xác nhận phiên bản hệ thống đã nâng đồng bộ lên v1.0.14."""
+def test_current_version_v1_0_15():
+    """Xác nhận phiên bản hệ thống đã nâng đồng bộ lên v1.0.15."""
     from src.core.branding import APP_VERSION
-    assert CURRENT_VERSION == "1.0.14"
-    assert APP_VERSION == "v1.0.14"
+    assert CURRENT_VERSION == "1.0.15"
+    assert APP_VERSION == "v1.0.15"
 
 
 def test_restart_app_clean_env_and_guard(qapp, monkeypatch):

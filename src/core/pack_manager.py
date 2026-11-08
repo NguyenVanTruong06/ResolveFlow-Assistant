@@ -62,6 +62,7 @@ class PackManager:
 
     COMMUNITY_PACK_ALIASES: Dict[str, List[str]] = {
         "acidbite_elements_sfx": ["acidbite", "elements", "sfx"],
+        "urban_street_action_sfx": ["urban_sfx", "urban", "street_sfx", "action_sfx"],
         "davinci_speed_ramp_transitions": ["speed_ramp", "speedramp", "seamless"],
         "davinci_gr44_seamless_transitions": ["gr44", "gr-44", "gr_44"],
         "fusion_skin_retouching_macros": ["skin_retouching", "retouching", "skin"],
@@ -70,6 +71,11 @@ class PackManager:
         "iphone_cinematic_luts": ["iphone", "apple_log", "apple log", "applelog"],
         "green_screen_memes_109": ["109", "green_screen", "greenscreen", "tong_hop_meme", "meme_109"],
         "dehancer_pro_ofx_plugin": ["dehancer"],
+        "dctl_pfa_color_suite": ["pfa_color", "pfa", "skinmatch", "filmfade"],
+        "dctl_pixeltools_bundle": ["pixeltools", "pixel_tools", "hueshift", "splittone"],
+        "dctl_filmverse_2_1": ["filmverse", "filmverse_2_1", "colorist_foundry"],
+        "dctl_mononodes_v4": ["mononodes", "mono_llp", "look_lab_print"],
+        "dctl_qazi_toolkit_vietsub": ["qazi", "qt_bundle", "qazis_toolkit"],
     }
 
     @classmethod
@@ -372,7 +378,7 @@ class PackManager:
                 elif ext in [".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac"]:
                     sub_dir = Path("sfx")
                     cat_key = "sfx"
-                elif ext in [".cube"]:
+                elif ext in [".cube", ".3dl", ".dctl", ".dctle"]:
                     sub_dir = Path("luts")
                     cat_key = "luts"
                 elif ext in [".drx", ".dpx"]:
@@ -452,7 +458,7 @@ class PackManager:
         settings = QSettings("ChunDVC", "ResolveFlow")
         url = remote_url or str(settings.value(
             "hub/catalog_url",
-            "https://raw.githubusercontent.com/chundvc/resolveflow-packs/main/catalog.json"
+            "https://raw.githubusercontent.com/NguyenVanTruong06/resolveflow-packs/main/catalog.json"
         ))
 
         if url and url.startswith("http"):
@@ -579,5 +585,77 @@ COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
         size_mb=661.7,
         download_url="https://drive.google.com/file/d/17Ysow6gRJITEOEbgnkU-xHk9cVDLn_ad/view?usp=sharing",
         tags=["dehancer", "ofx", "plugin", "film", "grain"]
-    )
+    ),
+    PackManifest(
+        id="urban_street_action_sfx",
+        name="Kho Âm Hiệu Đường Phố & Hành Động (Urban Action SFX)",
+        version="1.0.0",
+        author="ChunnDVC Vault",
+        description="140 âm thanh đường phố, va chạm, kim loại, xe cộ, bước chuyển & không gian đô thị (8 nhóm: Atmos, Doors, Hits, Metal & Debris, Risers, Textures, Vehicles, Whooshes) chuẩn WAV.",
+        categories=["sfx"],
+        item_count=140,
+        size_mb=305.8,
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/urban_street_action_sfx.rfpack",
+        tags=["sfx", "urban", "action", "whooshes", "hits", "vehicles", "atmos"]
+    ),
+    PackManifest(
+        id="dctl_pfa_color_suite",
+        name="Bộ DCTL Chỉnh Màu Điện Ảnh PFA Color Suite 2.0",
+        version="2.0.0",
+        author="ChunnDVC Vault",
+        description="4 công cụ DCTL tinh chỉnh màu da và mật độ phim: PFA SkinMatch 2.0, Movie Density 2.0, FilmFade & Color Slider 2.0.",
+        categories=["luts"],
+        item_count=4,
+        size_mb=0.1,
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/dctl_pfa_color_suite.rfpack",
+        tags=["dctl", "luts", "pfa", "skinmatch", "filmfade", "color"]
+    ),
+    PackManifest(
+        id="dctl_pixeltools_bundle",
+        name="Bộ Công Cụ Màu Chuyên Nghiệp PixelTools DCTL Bundle",
+        version="2.1.0",
+        author="ChunnDVC Vault",
+        description="27 DCTL cao cấp từ PixelTools (Exposure Tool, Filmic Contrast, Hue Shift, Prime Grade, Split Tone, Three Strip) hỗ trợ Windows, Linux và macOS.",
+        categories=["luts"],
+        item_count=27,
+        size_mb=1.9,
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/dctl_pixeltools_bundle.rfpack",
+        tags=["dctl", "luts", "pixeltools", "hueshift", "splittone", "primegrade"]
+    ),
+    PackManifest(
+        id="dctl_filmverse_2_1",
+        name="Bộ Giả Lập Phim Điện Ảnh Filmverse 2.1 Pro DCTL & PowerGrades",
+        version="2.1.0",
+        author="ChunnDVC Vault",
+        description="15 DCTL & PowerGrades (.drx) giả lập màu phim điện ảnh Filmverse Pro 2.1 / 2.0 / 1.2 kèm tài liệu hướng dẫn Tiếng Việt và ảnh mẫu.",
+        categories=["luts"],
+        item_count=15,
+        size_mb=79.6,
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/dctl_filmverse_2_1.rfpack",
+        tags=["dctl", "luts", "filmverse", "powergrade", "drx", "filmemulation"]
+    ),
+    PackManifest(
+        id="dctl_mononodes_v4",
+        name="Bộ DCTL Chuyên Sâu MonoNodes Look / Lab / Print V4 (Kèm Video Vietsub)",
+        version="4.0.0",
+        author="ChunnDVC Vault",
+        description="Trọn bộ 149 công cụ MonoNodes Look/Lab/Print v4, Film Elements v2, Color Shift v4, Shaper, Hue Twist, RGB Split, Utility & Crop Pro kèm 19 video hướng dẫn (có Vietsub).",
+        categories=["luts", "titles"],
+        item_count=149,
+        size_mb=834.3,
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/dctl_mononodes_v4.rfpack",
+        tags=["dctl", "luts", "mononodes", "looklabprint", "colorshift", "vietsub"]
+    ),
+    PackManifest(
+        id="dctl_qazi_toolkit_vietsub",
+        name="Bộ Qazi's Toolkit (QT Bundle) DCTL + Video Hướng Dẫn Vietsub & Footage",
+        version="1.1.0",
+        author="ChunnDVC Vault",
+        description="16 plugin DCTL Qazi's Toolkit (Skin Compressor, Skin Juice, Look DNA, Film Density, Halation, Sat Control, Color Compressor, Charts) kèm video Masterclass Vietsub và 10 clip RAW/Log thực hành (ARRI Alexa 35/Mini, Sony FX3, BMD).",
+        categories=["luts", "memes"],
+        item_count=26,
+        size_mb=1733.8,
+        download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/dctl_qazi_toolkit_vietsub.rfpack",
+        tags=["dctl", "luts", "qazi", "qtbundle", "vietsub", "practice_footage"]
+    ),
 ]

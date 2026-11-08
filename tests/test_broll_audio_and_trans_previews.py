@@ -67,23 +67,71 @@ def test_asset_indexer_scan_transitions_finds_preview_videos(tmp_path):
 
 
 def test_resolve_api_insert_media_preserves_audio():
-    """Kiểm tra insert_media_at_playhead cho phép chèn cả video và âm thanh (không khóa mediaType: 1)."""
+    """
+    Kiểm tra insert_media_at_playhead với thuộc tính chuẩn của DaVinci Resolve thực tế:
+    - GetClipProperty('Audio Channels') trả rỗng '', nhưng GetAudioMapping() / 'Audio Ch' / 'Type' báo có stereo audio.
+    - TimelineItem thực tế KHÔNG có hàm GetMediaType() (chỉ có GetTrackTypeAndIndex / GetLinkedItems).
+    - Tạo track audio 'stereo' (không dùng mặc định mono), chèn đồng bộ cả Video (V3) + Audio (A2) tại recordFrame,
+      không truyền endFrame gây cắt cụt sample âm thanh khi chèn nguyên clip, và liên kết clip qua SetClipsLinked.
+    """
     api = ResolveAutomation()
-    
+
     mock_timeline = MagicMock()
     mock_timeline.GetCurrentTimecode.return_value = "01:00:00:00"
     mock_timeline.GetStartFrame.return_value = 86400
-    mock_timeline.GetTrackCount.return_value = 2
+    audio_tracks = [1]  # Ban đầu chỉ có A1 (thoại chính)
+
+    def _get_track_count(track_type):
+        return 3 if track_type == "video" else audio_tracks[0]
+
+    def _add_track(track_type, *args):
+        if track_type == "audio":
+            audio_tracks[0] += 1
+        return True
+
+    mock_timeline.GetTrackCount.side_effect = _get_track_count
+    mock_timeline.AddTrack.side_effect = _add_track
+    mock_timeline.GetIsTrackLocked.return_value = False
+    mock_timeline.GetTrackSubType.return_value = "stereo"
+    mock_timeline.GetItemListInTrack.return_value = []
 
     mock_media_pool = MagicMock()
     mock_item = MagicMock()
-    mock_item.GetClipProperty.return_value = "2"  # 2 channels audio
+    real_props = {
+        "File Path": "/dummy/broll_with_sound.mp4",
+        "Frames": "180",
+        "FPS": "30.0",
+        "Audio Ch": "2",
+        "Audio Codec": "AAC",
+        "Type": "Video + Audio",
+    }
+    mock_item.GetClipProperty.side_effect = lambda prop=None: (
+        dict(real_props) if not prop else real_props.get(prop, "")
+    )
+    mock_item.GetAudioMapping.return_value = '{"embedded_audio_channels": 2, "track_mapping": {"1": {"type": "Stereo"}}}'
     mock_item.GetName.return_value = "broll_with_sound.mp4"
-    mock_media_pool.ImportMedia.return_value = [mock_item]
 
-    placed_item = MagicMock()
-    placed_item.GetMediaType.return_value = 1  # placed video
-    mock_media_pool.AppendToTimeline.return_value = [placed_item]
+    # TimelineItem thật trong Resolve KHÔNG có GetMediaType()
+    class FakeResolveTimelineItem:
+        def __init__(self, track_type: str, track_idx: int):
+            self._track_type = track_type
+            self._track_idx = track_idx
+
+        def GetTrackTypeAndIndex(self):
+            return [self._track_type, self._track_idx]
+
+        def GetLinkedItems(self):
+            return []
+
+        def GetDuration(self):
+            return 180
+
+    placed_video_item = FakeResolveTimelineItem("video", 3)
+    placed_audio_item = FakeResolveTimelineItem("audio", 2)
+    mock_media_pool.AppendToTimeline.side_effect = [
+        [placed_video_item],
+        [placed_audio_item],
+    ]
 
     mock_project = MagicMock()
     mock_project.GetMediaPool.return_value = mock_media_pool
@@ -95,19 +143,148 @@ def test_resolve_api_insert_media_preserves_audio():
          patch.object(api, "get_media_pool_clips", return_value=[mock_item]), \
          patch("src.core.resolve_api.current_record_frame", return_value=(86400, "01:00:00:00")), \
          patch("os.path.exists", return_value=True), \
-         patch("os.path.isfile", return_value=True):
-        
-        ok = api.insert_media_at_playhead("/dummy/broll_with_sound.mp4", target_track=2)
+         patch("os.path.isfile", return_value=False):
+
+        ok = api.insert_media_at_playhead("/dummy/broll_with_sound.mp4", target_track=3, duration_sec=None)
         assert ok is True
-        
-        # Verify AppendToTimeline was called
+
+        # Phải tạo track audio stereo thay vì mono mặc định
+        mock_timeline.AddTrack.assert_any_call("audio", "stereo")
+
         calls = mock_media_pool.AppendToTimeline.call_args_list
-        assert len(calls) >= 1
-        first_call_specs = calls[0][0][0]
-        # Primary spec should not force mediaType: 1 when has_audio is True
-        assert "mediaType" not in first_call_specs[0] or first_call_specs[0].get("mediaType") == 0
-        
-        # If placed clip was video-only, it should have called AppendToTimeline with mediaType: 2 for audio
-        if len(calls) > 1:
-            second_call_specs = calls[1][0][0]
-            assert second_call_specs[0].get("mediaType") == 2
+        assert len(calls) == 2
+
+        video_spec = calls[0][0][0][0]
+        assert video_spec["trackIndex"] == 3
+        assert video_spec["recordFrame"] == 86400
+        assert video_spec["mediaType"] == 1
+
+        audio_spec = calls[1][0][0][0]
+        assert audio_spec["trackIndex"] == 2
+        assert audio_spec["recordFrame"] == 86400
+        assert audio_spec["mediaType"] == 2
+        assert "startFrame" not in audio_spec
+        assert "endFrame" not in audio_spec
+
+        # Phải liên kết Video + Audio giống hành vi kéo thả trực tiếp
+        mock_timeline.SetClipsLinked.assert_called_once_with([placed_video_item, placed_audio_item], True)
+
+
+def test_resolve_api_insert_media_skips_busy_or_mono_audio_track():
+    """Khi A2 đang bận hoặc là mono, âm thanh của B-roll/Meme phải sang A3 stereo trống thay vì ghi đè A2/A1."""
+    api = ResolveAutomation()
+
+    mock_timeline = MagicMock()
+    mock_timeline.GetCurrentTimecode.return_value = "01:00:00:00"
+    mock_timeline.GetStartFrame.return_value = 86400
+    mock_timeline.GetTrackCount.side_effect = lambda t: 3 if t == "video" else 3
+    mock_timeline.GetIsTrackLocked.return_value = False
+    mock_timeline.GetTrackSubType.side_effect = lambda t, idx: "mono" if idx == 2 else "stereo"
+
+    busy_clip = MagicMock()
+    busy_clip.GetStart.return_value = 86390
+    busy_clip.GetDuration.return_value = 100
+    mock_timeline.GetItemListInTrack.side_effect = lambda t, idx: [busy_clip] if (t == "audio" and idx == 2) else []
+
+    mock_media_pool = MagicMock()
+    mock_item = MagicMock()
+    mock_item.GetClipProperty.side_effect = lambda prop=None: {
+        "File Path": "/dummy/meme.mp4",
+        "Frames": "120",
+        "Audio Ch": "2",
+    }.get(prop, "") if prop else {"File Path": "/dummy/meme.mp4", "Frames": "120", "Audio Ch": "2"}
+    mock_item.GetAudioMapping.return_value = '{"embedded_audio_channels": 2}'
+    mock_item.GetName.return_value = "meme.mp4"
+
+    v_item = MagicMock()
+    a_item = MagicMock()
+    mock_media_pool.AppendToTimeline.side_effect = [[v_item], [a_item]]
+
+    mock_project = MagicMock()
+    mock_project.GetMediaPool.return_value = mock_media_pool
+    api.current_project = mock_project
+
+    with patch.object(api, "is_connected", return_value=True), \
+         patch.object(api, "get_active_timeline", return_value=mock_timeline), \
+         patch.object(api, "import_media_to_media_pool", return_value=None), \
+         patch.object(api, "get_media_pool_clips", return_value=[mock_item]), \
+         patch("src.core.resolve_api.current_record_frame", return_value=(86400, "01:00:00:00")), \
+         patch("os.path.exists", return_value=True), \
+         patch("os.path.isfile", return_value=False):
+
+        ok = api.insert_media_at_playhead("/dummy/meme.mp4", target_track=3, duration_sec=None)
+        assert ok is True
+
+        audio_spec = mock_media_pool.AppendToTimeline.call_args_list[1][0][0][0]
+        assert audio_spec["trackIndex"] == 3
+        assert audio_spec["mediaType"] == 2
+        mock_timeline.SetClipsLinked.assert_called_once_with([v_item, a_item], True)
+
+
+def test_studio_and_edgedock_meme_insert_do_not_truncate_full_clip_to_3s(qapp, tmp_path):
+    """
+    Đảm bảo cả StudioAsset (TabAssets) lẫn EdgeDock / InsertService.insert(meme_dict)
+    KHÔNG cắt cụt video Meme/B-roll về 3.0s mặc định mà truyền duration_sec=None (trọn vẹn clip & âm thanh).
+    """
+    from src.ui.tabs.tab_assets import TabAssets, StudioAsset
+    from src.services.insert_service import InsertService
+    from src.services.resolve_gateway import ResolveGateway
+
+    meme_file = tmp_path / "viral_meme_8s.mp4"
+    meme_file.write_bytes(b"FAKE_MP4_WITH_AUDIO")
+
+    auto_mock = MagicMock()
+    auto_mock.insert_media_at_playhead.return_value = True
+
+    gateway = MagicMock(spec=ResolveGateway)
+
+    def fake_submit(task, callback=None, errback=None):
+        resolve = MagicMock()
+        tl = MagicMock()
+        tl.GetCurrentTimecode.return_value = "01:00:00:00"
+        tl.GetTrackCount.return_value = 3
+        auto_mock.get_active_timeline.return_value = tl
+        with patch("src.core.resolve_api.ResolveAutomation", return_value=auto_mock):
+            res_dict = task(resolve)
+            if callback:
+                callback(res_dict)
+
+    gateway.submit.side_effect = fake_submit
+    gateway._worker = MagicMock()
+    gateway._worker.get_automation.return_value = auto_mock
+    gateway._worker.get_resolve_object.return_value = MagicMock()
+
+    service = InsertService(gateway)
+
+    # 1. Luồng EdgeDock (gọi service.insert không truyền duration)
+    res_dock = service.insert(
+        {
+            "id": "meme_dock_01",
+            "name": "Viral Meme 8s",
+            "tab": "meme",
+            "category": "meme",
+            "file_path": str(meme_file),
+            "availability": "online",
+        },
+        mode="auto",
+    )
+    assert res_dock.ok is True
+    assert auto_mock.insert_media_at_playhead.call_args[1]["duration_sec"] is None
+
+    # 2. Luồng Studio TabAssets với StudioAsset quét từ ổ đĩa (mặc định duration hiển thị = 3.0, duration_sec = None)
+    auto_mock.insert_media_at_playhead.reset_mock()
+    tab = TabAssets(headless=True)
+    try:
+        tab._insert_service = service
+        tab.selected_asset = StudioAsset(
+            id="meme_studio_01",
+            name="Viral Meme 8s Studio",
+            tab="meme",
+            category="trending",
+            file_path=str(meme_file),
+        )
+        tab._insert_at_playhead()
+        assert auto_mock.insert_media_at_playhead.called
+        assert auto_mock.insert_media_at_playhead.call_args[1]["duration_sec"] is None
+    finally:
+        tab.close()

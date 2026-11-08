@@ -362,14 +362,32 @@ class AssetIndexer:
         _GLOBAL_ASSET_CACHE[key] = res
         return [dict(x) for x in res]
 
+    @staticmethod
+    def _is_dctl_divider_name(name: str, file_path: str = "") -> bool:
+        ext = Path(file_path).suffix.lower() if file_path else ""
+        if ext not in (".dctl", ".dctle"):
+            return False
+        stem = (name or "").strip()
+        if not stem or not stem.strip("-=_~* "):
+            return True
+        if (stem.startswith(("---", "===", "___")) and stem.endswith(("---", "===", "___"))) or (
+            stem.startswith("==") and stem.endswith("==")
+        ):
+            return True
+        return False
+
     def scan_luts(self, force_refresh: bool = False) -> list[dict]:
         key = self._get_cache_key("luts")
         if not force_refresh and key in _GLOBAL_ASSET_CACHE:
             return [dict(x) for x in _GLOBAL_ASSET_CACHE[key]]
-        res = self._scan_dir(self.luts_dir, ['.cube'])
+        lut_exts = ['.cube', '.3dl', '.dctl', '.dctle', '.drx']
+        raw_res = self._scan_dir(self.luts_dir, lut_exts)
+        res = [x for x in raw_res if not self._is_dctl_divider_name(x.get("name", ""), x.get("file_path", ""))]
         seen_names = {x["name"] for x in res}
-        ext_luts = self._scan_external_for_category("luts", ['.cube'])
+        ext_luts = self._scan_external_for_category("luts", lut_exts)
         for item in ext_luts:
+            if self._is_dctl_divider_name(item.get("name", ""), item.get("file_path", "")):
+                continue
             if item["name"] not in seen_names:
                 seen_names.add(item["name"])
                 res.append(item)

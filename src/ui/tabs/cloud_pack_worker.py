@@ -63,36 +63,69 @@ class CloudPackInstallWorker(QThread):
             if not self.drive_url:
                 raise ValueError("Không có đường dẫn tải về hoặc tệp cài đặt hợp lệ.")
 
-            resource_info = parse_google_drive_url(self.drive_url)
-            if not resource_info:
-                raise ValueError(f"Không nhận diện được liên kết Google Drive: {self.drive_url}")
-
             download_tmp_dir = Path(tempfile.gettempdir()) / "resolveflow_pack_cache"
+            try:
+                from src.core.storage_manager import StorageManager
+                sm = StorageManager()
+                if sm.online:
+                    download_tmp_dir = sm.meta / "staging" / "cloud_pack_cache"
+            except Exception:
+                pass
             download_tmp_dir.mkdir(parents=True, exist_ok=True)
 
-            self.progress_signal.emit(5.0, "Đang kết nối tới Google Drive...")
+            resource_info = parse_google_drive_url(self.drive_url)
 
             def on_progress(p: DownloadProgress):
                 if not self.is_cancelled:
                     msg = f"Đang tải {p.filename}: {p.percent:.1f}% ({p.speed_mb_s:.1f} MB/s)"
                     self.progress_signal.emit(p.percent, msg)
 
-            if resource_info.resource_type == "folder":
-                downloaded_target = GoogleDriveDownloader.download_folder(
-                    folder_id=resource_info.resource_id,
-                    output_dir=str(download_tmp_dir),
-                    progress_callback=on_progress,
-                    cancel_checker=lambda: self.is_cancelled
-                )
+            if resource_info:
+                self.progress_signal.emit(5.0, "Đang kết nối tới Google Drive...")
+                if resource_info.resource_type == "folder":
+                    downloaded_target = GoogleDriveDownloader.download_folder(
+                        folder_id=resource_info.resource_id,
+                        output_dir=str(download_tmp_dir),
+                        progress_callback=on_progress,
+                        cancel_checker=lambda: self.is_cancelled
+                    )
+                else:
+                    downloaded_target = GoogleDriveDownloader.download_file(
+                        file_id=resource_info.resource_id,
+                        output_dir=str(download_tmp_dir),
+                        progress_callback=on_progress,
+                        cancel_checker=lambda: self.is_cancelled
+                    )
+            elif self.drive_url.startswith(("http://", "https://")):
+                import urllib.request
+                from urllib.parse import urlparse, unquote
+                parsed = urlparse(self.drive_url)
+                fname = Path(unquote(parsed.path)).name or "cloud_pack.rfpack"
+                dest_file = download_tmp_dir / fname
+                self.progress_signal.emit(5.0, f"Đang kết nối tới máy chủ tải {fname}...")
+                req = urllib.request.Request(self.drive_url, headers={"User-Agent": "ResolveFlow/1.0"})
+                with urllib.request.urlopen(req, timeout=30) as resp, open(dest_file, "wb") as out_f:
+                    total_bytes = int(resp.headers.get("Content-Length") or 0)
+                    downloaded = 0
+                    while not self.is_cancelled:
+                        chunk = resp.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        out_f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_bytes > 0:
+                            pct = min(88.0, 5.0 + (downloaded / total_bytes) * 83.0)
+                            self.progress_signal.emit(pct, f"Đang tải {fname}: {downloaded / (1024**2):.1f}/{total_bytes / (1024**2):.1f} MB")
+                downloaded_target = str(dest_file)
             else:
-                downloaded_target = GoogleDriveDownloader.download_file(
-                    file_id=resource_info.resource_id,
-                    output_dir=str(download_tmp_dir),
-                    progress_callback=on_progress,
-                    cancel_checker=lambda: self.is_cancelled
-                )
+                raise ValueError(f"Không nhận diện được liên kết tải: {self.drive_url}")
 
             if self.is_cancelled:
+                try:
+                    if os.path.isfile(downloaded_target):
+                        os.unlink(downloaded_target)
+                except OSError:
+                    pass
                 self.finished_signal.emit(False, "Đã hủy tải gói.", {})
                 return
 
@@ -106,6 +139,11 @@ class CloudPackInstallWorker(QThread):
                     pack_manifest=self.pack_manifest,
                     isolate_pack_folder=True
                 )
+                try:
+                    if os.path.isfile(downloaded_target):
+                        os.unlink(downloaded_target)
+                except OSError:
+                    pass
             else:
                 counts = {"custom": 1}
 

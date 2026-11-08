@@ -141,7 +141,8 @@ class StudioAsset:
         file_path: str = "",
         thumbnail_path: str = "",
         pack_name: str = "",
-        preview_path: str = ""
+        preview_path: str = "",
+        duration_sec: Optional[float] = None
     ):
         self.id = id
         self.name = name
@@ -152,6 +153,7 @@ class StudioAsset:
         self.badge_icon = badge_icon
         self.pal = pal or []
         self.duration = duration
+        self.duration_sec = duration_sec
         self.frames = frames
         self.color_hex = color_hex
         self.svg_path = svg_path
@@ -3987,7 +3989,8 @@ class TabAssets(QWidget):
                     file_path=d.get("file_path", ""),
                     thumbnail_path=d.get("thumbnail_path", ""),
                     preview_path=d.get("preview_path", ""),
-                    pack_name=d.get("pack_name", "")
+                    pack_name=d.get("pack_name", ""),
+                    duration_sec=d.get("duration_sec"),
                 ) for d in dicts
             ]
         
@@ -7033,7 +7036,8 @@ class TabAssets(QWidget):
                     file_path=d.get("file_path", ""),
                     thumbnail_path=d.get("thumbnail_path", ""),
                     preview_path=d.get("preview_path", ""),
-                    pack_name=d.get("pack_name", "")
+                    pack_name=d.get("pack_name", ""),
+                    duration_sec=d.get("duration_sec"),
                 ) for d in dicts
             ]
         scanned_titles = indexer.scan_titles()
@@ -7985,7 +7989,7 @@ class TabAssets(QWidget):
         is_video = not is_trans and (tab in ("meme", "overlay", "broll", "video", "sticker", "green_screen") or ext in (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".png", ".jpg", ".jpeg", ".webp", ".svg"))
         is_sfx = tab == "sfx" or ext in (".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a")
         is_bgm = tab == "bgm"
-        is_lut = tab == "lut" or ext in (".cube", ".3dl")
+        is_lut = tab == "lut" or ext in (".cube", ".3dl", ".dctl", ".dctle", ".drx", ".dpx")
         is_text = tab == "text" or isinstance(self.selected_asset, TextStylePreset) or (not is_trans and not is_video and not is_sfx and not is_bgm and not is_lut)
 
         # 1. Các danh mục chuyển đổi sang InsertService (G04-04C4-I / G04-04C4-R1)

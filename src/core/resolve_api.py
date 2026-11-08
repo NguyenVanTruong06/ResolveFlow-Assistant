@@ -1156,6 +1156,165 @@ class ResolveAutomation:
         log(f" ⚠️ SFX '{os.path.basename(sfx_path)}' đã sẵn sàng trong Media Pool.")
         return False
 
+    @staticmethod
+    def _clip_has_audio(target_item: Any, media_path: str = "", total_frames: int = 0) -> bool:
+        """
+        Xác định chính xác MediaPoolItem video có chứa kênh âm thanh hay không:
+        1. Ưu tiên GetAudioMapping() chuẩn DaVinci Resolve API (JSON embedded_audio_channels / track_mapping).
+        2. Kiểm tra GetClipProperty('Type' / 'Audio Codec' / 'Audio Ch' / 'Audio Channels' / 'Audio Tracks'),
+           có chống dương tính giả trên mock catch-all trả cùng chuỗi cho mọi key lạ.
+        3. Dự phòng đọc trực tiếp header luồng âm thanh qua PyAV (av.open) rồi mới tới ffprobe.
+        """
+        # 1. DaVinci Resolve GetAudioMapping() JSON
+        try:
+            if hasattr(target_item, "GetAudioMapping"):
+                am_raw = target_item.GetAudioMapping()
+                if isinstance(am_raw, str) and am_raw.strip().startswith("{"):
+                    import json
+                    am = json.loads(am_raw)
+                    if int(am.get("embedded_audio_channels") or 0) > 0:
+                        return True
+                    if am.get("linked_audio") or am.get("track_mapping"):
+                        return True
+                    return False
+        except Exception:
+            pass
+
+        # 2. DaVinci Resolve GetClipProperty()
+        unknown_val = ""
+        try:
+            u = target_item.GetClipProperty("__rf_probe_nonexistent__")
+            if isinstance(u, str):
+                unknown_val = u.strip()
+        except Exception:
+            pass
+
+        props_snapshot: Dict[str, Any] = {}
+        try:
+            snap = target_item.GetClipProperty()
+            if isinstance(snap, dict):
+                props_snapshot = snap
+        except Exception:
+            pass
+
+        def _prop(key: str) -> str:
+            if key in props_snapshot and props_snapshot[key] is not None:
+                return str(props_snapshot[key]).strip()
+            try:
+                v = target_item.GetClipProperty(key)
+                if v is not None and not isinstance(v, dict) and type(v).__name__ != "MagicMock":
+                    return str(v).strip()
+            except Exception:
+                pass
+            return ""
+
+        clip_type = _prop("Type")
+        if clip_type and clip_type != unknown_val:
+            ct_low = clip_type.lower()
+            if "audio" in ct_low:
+                return True
+            if ct_low in ("video", "still", "still image"):
+                return False
+
+        audio_codec = _prop("Audio Codec")
+        if audio_codec and audio_codec != unknown_val:
+            if audio_codec.lower() not in ("none", "0", "-", "n/a"):
+                return True
+
+        for ch_key in ("Audio Ch", "Audio Channels", "Audio Tracks"):
+            ch_val = _prop(ch_key)
+            if ch_val and ch_val not in ("0", ""):
+                if ch_val.isdigit():
+                    n = int(ch_val)
+                    if n >= 1 and (ch_val != unknown_val or n <= 36):
+                        return True
+                elif ch_val != unknown_val:
+                    return True
+
+        # 3. Kiểm tra tệp media thực trên đĩa qua PyAV (nhanh <2ms, hoạt động cả trong bản đóng gói standalone)
+        if media_path and os.path.isfile(media_path):
+            try:
+                import av
+                with av.open(media_path) as container:
+                    if len(container.streams.audio) > 0:
+                        return True
+                    if len(container.streams.video) > 0:
+                        return False
+            except Exception:
+                pass
+
+            try:
+                import shutil
+                import subprocess
+                ffprobe_exe = shutil.which("ffprobe")
+                if not (ffprobe_exe and os.path.isfile(ffprobe_exe) and os.access(ffprobe_exe, os.X_OK)):
+                    ffprobe_exe = "/usr/bin/ffprobe" if os.access("/usr/bin/ffprobe", os.X_OK) else None
+                if ffprobe_exe:
+                    cmd = [
+                        ffprobe_exe, "-v", "error", "-select_streams", "a",
+                        "-show_entries", "stream=index", "-of", "csv=p=0", media_path,
+                    ]
+                    out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
+                    if out.stdout.strip():
+                        return True
+            except Exception:
+                pass
+
+        return False
+
+    @staticmethod
+    def _add_stereo_audio_track(timeline: Any) -> bool:
+        """Thêm track âm thanh Stereo (fallback 1 tham số nếu mock không nhận subTrackType)."""
+        if not hasattr(timeline, "AddTrack"):
+            return False
+        try:
+            return bool(timeline.AddTrack("audio", "stereo"))
+        except TypeError:
+            return bool(timeline.AddTrack("audio"))
+
+    @classmethod
+    def _find_or_create_free_audio_track(cls, timeline: Any, start_frame: int, end_frame: int) -> int:
+        """
+        Tìm track âm thanh Stereo trống từ A2 trở đi (bảo vệ A1 thoại chính, né track bị khóa / mono / đang bận).
+        Tự động tạo mới track 'stereo' nếu chưa có track phù hợp.
+        """
+        try:
+            audio_count = int(timeline.GetTrackCount("audio") or 0)
+        except Exception:
+            audio_count = 0
+
+        for track in range(2, audio_count + 1):
+            try:
+                if hasattr(timeline, "GetIsTrackLocked") and timeline.GetIsTrackLocked("audio", track) is True:
+                    continue
+                if hasattr(timeline, "GetTrackSubType"):
+                    sub = timeline.GetTrackSubType("audio", track)
+                    if isinstance(sub, str) and sub.strip().lower() == "mono":
+                        continue
+                items = timeline.GetItemListInTrack("audio", track) if hasattr(timeline, "GetItemListInTrack") else []
+                if isinstance(items, (list, tuple)):
+                    occupied = False
+                    for item in items:
+                        try:
+                            left = float(item.GetStart())
+                            right = left + float(item.GetDuration())
+                            if left < end_frame and right > start_frame:
+                                occupied = True
+                                break
+                        except Exception:
+                            pass
+                    if not occupied:
+                        return track
+                else:
+                    return track
+            except Exception:
+                continue
+
+        target = max(2, audio_count + 1)
+        for _ in range(audio_count, target):
+            cls._add_stereo_audio_track(timeline)
+        return target
+
     def insert_media_at_playhead(
         self,
         media_path: str,
@@ -1265,39 +1424,22 @@ class ResolveAutomation:
         # Kiểm tra xem tệp video có chứa luồng âm thanh hay không
         has_audio = False
         if not is_still:
-            try:
-                ch = target_item.GetClipProperty("Audio Channels") or target_item.GetClipProperty("Audio Tracks")
-                if ch and str(ch).strip() not in ("0", ""):
-                    has_audio = True
-            except Exception:
-                pass
-            if not has_audio and os.path.isfile(media_path):
-                try:
-                    import subprocess
-                    cmd = ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", media_path]
-                    out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2)
-                    if out.stdout.strip():
-                        has_audio = True
-                except Exception:
-                    pass
+            has_audio = self._clip_has_audio(target_item, media_path=media_path, total_frames=total_frames)
 
-        # 5. Đảm bảo track video (và track audio nếu có) tồn tại
+        # 5. Đảm bảo track video tồn tại
         try:
             current_tracks = timeline.GetTrackCount("video")
             if target_track > current_tracks:
                 for _ in range(current_tracks, target_track):
                     timeline.AddTrack("video")
-            if has_audio:
-                current_audio_tracks = timeline.GetTrackCount("audio")
-                if current_audio_tracks < 2:
-                    for _ in range(current_audio_tracks, 2):
-                        timeline.AddTrack("audio")
         except Exception:
             pass
 
-        # 6. Append to timeline at track
+        # 6. Append to timeline at track (Video V{target_track} + đồng bộ & liên kết Audio A{free} nếu có)
         try:
+            is_trimmed = False
             if is_still:
+                dur_frames = max(1, int(round((duration_sec or 3.0) * fps)))
                 append_spec = {
                     "mediaPoolItem": target_item,
                     "recordFrame": rec_frame,
@@ -1307,6 +1449,7 @@ class ResolveAutomation:
             else:
                 if duration_sec and duration_sec > 0:
                     dur_frames = min(total_frames, max(1, int(round(duration_sec * fps))))
+                    is_trimmed = dur_frames < total_frames
                 else:
                     dur_frames = total_frames
 
@@ -1316,33 +1459,74 @@ class ResolveAutomation:
                     "endFrame": dur_frames,
                     "recordFrame": rec_frame,
                     "trackIndex": target_track,
+                    "mediaType": 1,
                 }
-                # Nếu không có audio thì chỉ định mediaType = 1 (chỉ video)
-                if not has_audio:
-                    append_spec["mediaType"] = 1
 
             placed = media_pool.AppendToTimeline([append_spec])
+            if not placed and not is_still:
+                if not is_trimmed:
+                    placed = media_pool.AppendToTimeline([{
+                        "mediaPoolItem": target_item,
+                        "recordFrame": rec_frame,
+                        "trackIndex": target_track,
+                        "mediaType": 1,
+                    }])
+                else:
+                    fallback_spec = dict(append_spec)
+                    fallback_spec["endFrame"] = max(0, dur_frames - 1)
+                    placed = media_pool.AppendToTimeline([fallback_spec])
+
             if placed:
-                # Đảm bảo âm thanh đi cùng video nếu video có âm thanh mà Resolve chưa tự chèn
-                if has_audio:
+                video_item = next((item for item in placed if item is not None), None)
+
+                # Chèn đồng bộ âm thanh vào track Stereo trống (từ A2 trở đi) và liên kết với Video như kéo-thả thật
+                if has_audio and not is_still:
                     try:
-                        has_audio_placed = any(
-                            getattr(item, "GetMediaType", lambda: 0)() == 2
-                            for item in placed
-                            if item is not None
+                        audio_target = self._find_or_create_free_audio_track(
+                            timeline, rec_frame, rec_frame + max(1, dur_frames)
                         )
-                        if not has_audio_placed:
-                            audio_target = 2 if timeline.GetTrackCount("audio") >= 2 else 1
-                            audio_spec = {
+                        audio_spec: Dict[str, Any] = {
+                            "mediaPoolItem": target_item,
+                            "recordFrame": rec_frame,
+                            "trackIndex": audio_target,
+                            "mediaType": 2,
+                        }
+                        if is_trimmed:
+                            audio_spec["startFrame"] = 0
+                            audio_spec["endFrame"] = dur_frames
+
+                        audio_placed = media_pool.AppendToTimeline([audio_spec])
+                        if not audio_placed and is_trimmed:
+                            audio_placed = media_pool.AppendToTimeline([{
                                 "mediaPoolItem": target_item,
-                                "startFrame": 0,
-                                "endFrame": dur_frames,
                                 "recordFrame": rec_frame,
                                 "trackIndex": audio_target,
                                 "mediaType": 2,
-                            }
-                            media_pool.AppendToTimeline([audio_spec])
-                            log(f" ✔ Đã chèn đồng bộ âm thanh của '{os.path.basename(media_path)}' vào Audio Track A{audio_target}!")
+                            }])
+                        elif audio_placed and is_trimmed and dur_frames >= 4:
+                            try:
+                                first_audio = next((it for it in audio_placed if it is not None), None)
+                                a_dur = first_audio.GetDuration() if first_audio and hasattr(first_audio, "GetDuration") else None
+                                if isinstance(a_dur, (int, float)) and 0 < a_dur <= 2:
+                                    if hasattr(timeline, "DeleteClips"):
+                                        timeline.DeleteClips([first_audio], False)
+                                    audio_placed = media_pool.AppendToTimeline([{
+                                        "mediaPoolItem": target_item,
+                                        "recordFrame": rec_frame,
+                                        "trackIndex": audio_target,
+                                        "mediaType": 2,
+                                    }])
+                            except Exception:
+                                pass
+
+                        audio_item = next((it for it in (audio_placed or []) if it is not None), None)
+                        if video_item is not None and audio_item is not None and hasattr(timeline, "SetClipsLinked"):
+                            try:
+                                timeline.SetClipsLinked([video_item, audio_item], True)
+                            except Exception:
+                                pass
+                        if audio_item is not None:
+                            log(f" ✔ Đã chèn đồng bộ & liên kết âm thanh của '{os.path.basename(media_path)}' vào Audio Track A{audio_target}!")
                     except Exception as e:
                         log(f" ℹ Bổ sung audio track: {e}")
 

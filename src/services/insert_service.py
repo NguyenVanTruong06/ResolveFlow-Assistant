@@ -68,7 +68,7 @@ def to_asset_dict(asset: Any) -> Dict[str, Any]:
         d["tab"] = "bgm" if raw_tab == "bgm" else "sfx"
         d["sub"] = d.get("sub") or d.get("category") or "SFX"
         d["category"] = d["tab"]
-    elif raw_tab in ("lut", "luts") or ext in (".cube", ".3dl"):
+    elif raw_tab in ("lut", "luts") or ext in (".cube", ".3dl", ".dctl", ".dctle", ".drx", ".dpx"):
         d["tab"] = "lut"
         d["sub"] = d.get("sub") or d.get("category") or "LUT"
         d["category"] = "lut"
@@ -118,7 +118,7 @@ class InsertService(QObject):
         self,
         asset: Any,
         mode: str = "auto",
-        duration: float = 3.0,
+        duration: Optional[float] = None,
         preferred_track: Optional[int] = None,
         timeout: float = 15.0,
         extra_params: Optional[Dict[str, Any]] = None,
@@ -168,7 +168,7 @@ class InsertService(QObject):
         self,
         asset: Any,
         mode: str = "auto",
-        duration: float = 3.0,
+        duration: Optional[float] = None,
         preferred_track: Optional[int] = None,
         callback: Optional[Callable[[InsertResult], None]] = None,
         extra_params: Optional[Dict[str, Any]] = None,
@@ -178,6 +178,7 @@ class InsertService(QObject):
         Asynchronously inserts an asset based on its category and mode.
         """
         asset_dict = to_asset_dict(asset)
+        explicit_duration: Optional[float] = duration
 
         # Action-time Availability & Authority Guard (G04-04C2-I)
         from src.core.action_guard import check_action_availability, ActionGuardResult
@@ -211,9 +212,9 @@ class InsertService(QObject):
         ext = os.path.splitext(file_path)[1].lower() if file_path else ""
 
         if extra_params:
-            if extra_params.get("duration"):
+            if extra_params.get("duration") is not None and extra_params.get("duration") != "":
                 try:
-                    duration = float(extra_params["duration"])
+                    explicit_duration = float(extra_params["duration"])
                 except Exception:
                     pass
             if extra_params.get("text"):
@@ -255,9 +256,11 @@ class InsertService(QObject):
             self.insertion_finished.emit(res)
             return
 
+        eff_duration = explicit_duration if explicit_duration is not None else 3.0
+
         # 2. Video Transitions (Ensure native guidance or Effects Library installation, never implicit Fusion paste or title)
         if cat in ("trans", "transitions", "transition") or "transitions" in file_path.lower():
-            self._insert_transition(name, file_path, mode, duration, callback, extra_params=extra_params)
+            self._insert_transition(name, file_path, mode, eff_duration, callback, extra_params=extra_params)
             return
 
         # 3. Implicit Fusion page paste for titles, text, and fx (Chỉ áp dụng khi không có explicit timeline intent)
@@ -268,17 +271,30 @@ class InsertService(QObject):
 
         # 4. SFX / BGM Audio insertion
         if ext in (".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a") or cat in ("sfx", "bgm", "audio", "sound"):
-            self._insert_audio(name, file_path, mode, duration, preferred_track, callback, extra_params=extra_params)
+            self._insert_audio(name, file_path, mode, eff_duration, preferred_track, callback, extra_params=extra_params)
             return
 
-        # 5. LUT Application
-        if ext in (".cube", ".3dl") or cat in ("luts", "lut", "color"):
+        # 5. LUT / DCTL / PowerGrade Application
+        if ext in (".cube", ".3dl", ".dctl", ".dctle", ".drx", ".dpx") or cat in ("luts", "lut", "color"):
             self._insert_lut(name, file_path, callback, extra_params=extra_params)
             return
 
         # 6. Video / Meme / B-Roll / Overlay insertion (Any video file format or still image or meme category)
         if ext in (".mp4", ".mov", ".webm", ".mkv", ".m4v", ".png", ".jpg", ".jpeg", ".webp", ".svg") or cat in ("meme", "memes", "broll", "video", "overlay", "overlays", "green_screen", "sticker", "stickers"):
-            self._insert_video(name, file_path, mode, duration, preferred_track, callback, extra_params=extra_params)
+            if explicit_duration is not None:
+                vid_duration = explicit_duration
+            else:
+                raw_dsec = asset_dict.get("duration_sec")
+                vid_duration = 0.0
+                if raw_dsec is not None and not isinstance(raw_dsec, bool):
+                    try:
+                        import math
+                        fd = float(raw_dsec)
+                        if math.isfinite(fd) and fd > 0.0:
+                            vid_duration = fd
+                    except Exception:
+                        pass
+            self._insert_video(name, file_path, mode, vid_duration, preferred_track, callback, extra_params=extra_params)
             return
 
         # 7. Procedural Text / Title via ResolveGateway
@@ -290,11 +306,11 @@ class InsertService(QObject):
             or isinstance(asset, TextStylePreset)
         )
         if is_text:
-            self._insert_procedural_text(asset_dict, name, mode, duration, preferred_track, callback, extra_params=extra_params)
+            self._insert_procedural_text(asset_dict, name, mode, eff_duration, preferred_track, callback, extra_params=extra_params)
             return
 
         # 8. Fusion Title / Template -> Title Worker (QProcess fallback)
-        self._insert_title_worker(name, mode, duration, preferred_track, callback, title_id=title_id)
+        self._insert_title_worker(name, mode, eff_duration, preferred_track, callback, title_id=title_id)
 
     def _insert_procedural_text(
         self,
@@ -706,7 +722,7 @@ class InsertService(QObject):
         callback: Optional[Callable[[InsertResult], None]],
         extra_params: Optional[Dict[str, Any]] = None,
     ):
-        """Applies a 3D LUT to DaVinci Resolve via ResolveAutomation.apply_look_lut."""
+        """Applies a 3D LUT or installs a DCTL/PowerGrade into DaVinci Resolve."""
         def _task(resolve):
             tl = None
             proj = None
@@ -726,15 +742,63 @@ class InsertService(QObject):
                 if not auto.is_connected() and not self._gateway._worker.get_resolve_object():
                     auto.connect()
                 tl = auto.get_active_timeline()
-                proj = auto.current_project
+                proj = proj or auto.current_project
+
+            if not file_path or not os.path.exists(file_path):
+                raise FileNotFoundError(f"Không tìm thấy file LUT/DCTL: {file_path}")
+
+            ext = os.path.splitext(file_path)[1].lower()
+            tc = tl.GetCurrentTimecode() if (tl and hasattr(tl, "GetCurrentTimecode")) else "01:00:00:00"
+
+            if ext in (".dctl", ".dctle"):
+                from src.core.asset_manager import AssetManager
+                dest = AssetManager.install_dctl_file(file_path)
+                if proj and hasattr(proj, "RefreshLUTList"):
+                    try:
+                        proj.RefreshLUTList()
+                    except Exception:
+                        pass
+                try:
+                    app = QApplication.instance()
+                    if app:
+                        cb = QApplication.clipboard()
+                        if cb:
+                            cb.setText(name)
+                except Exception:
+                    pass
+                msg = (
+                    f"Đã cài đặt DCTL '{name}' vào DaVinci Resolve ({dest.parent.name})! "
+                    f"Mở trang Color → kéo hiệu ứng OpenFX 'DCTL' vào Node và chọn '{name}' (đã sao chép tên)."
+                )
+                return tc, msg, "Color DCTL", name
+
+            if ext in (".drx", ".dpx"):
+                import shutil
+                from src.core.asset_manager import AssetManager
+                pg_dir = AssetManager.get_lut_install_dir().parent / "PowerGrades" / "ResolveFlow"
+                pg_dir.mkdir(parents=True, exist_ok=True)
+                src_p = Path(file_path)
+                dest = pg_dir / src_p.name
+                shutil.copy2(src_p, dest)
+                for sib in src_p.parent.iterdir():
+                    if sib.is_file() and sib.stem == src_p.stem and sib.suffix.lower() in (".dpx", ".png", ".jpg", ".jpeg"):
+                        shutil.copy2(sib, pg_dir / sib.name)
+                try:
+                    app = QApplication.instance()
+                    if app:
+                        cb = QApplication.clipboard()
+                        if cb:
+                            cb.setText(str(dest))
+                except Exception:
+                    pass
+                msg = (
+                    f"Đã chuẩn bị PowerGrade '{name}'! Mở trang Color → Gallery → chuột phải chọn 'Import' "
+                    f"từ thư mục {pg_dir} (đã sao chép đường dẫn)."
+                )
+                return tc, msg, "Color Gallery", name
 
             if not tl:
                 raise RuntimeError("Không có Timeline nào đang mở trong DaVinci Resolve")
-
-            tc = tl.GetCurrentTimecode() if hasattr(tl, "GetCurrentTimecode") else "01:00:00:00"
-
-            if not file_path or not os.path.exists(file_path):
-                raise FileNotFoundError(f"Không tìm thấy file LUT: {file_path}")
 
             target_track = None
             skip_existing = True

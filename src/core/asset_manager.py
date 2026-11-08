@@ -118,3 +118,51 @@ class AssetManager:
         dest = dest_dir / filename
         shutil.copy2(src, dest)
         return dest
+
+    @classmethod
+    def install_dctl_file(cls, src_path: Union[str, Path], custom_subdir: Optional[str] = None) -> Path:
+        """
+        Cài đặt một tệp DCTL (.dctl / .dctle) cùng các tệp header/companion (.h, .dctlh, .glsl)
+        cùng thư mục vào thư mục LUT của DaVinci Resolve.
+        """
+        src = PosixPathAdapter.resolve_path(src_path)
+        base_lut_dir = cls.get_lut_install_dir()
+        base_lut_dir.mkdir(parents=True, exist_ok=True)
+
+        subdir_name = custom_subdir
+        if not subdir_name and src.parent.name and src.parent.name.lower() not in ("luts", "lut", "resolveflow", "packs"):
+            subdir_name = src.parent.name
+
+        dest_dir = (base_lut_dir / subdir_name) if subdir_name else base_lut_dir
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / src.name
+        shutil.copy2(src, dest)
+
+        # Sao chép các tệp header / companion (.h, .dctlh, .glsl) nằm cạnh tệp DCTL
+        companion_exts = {".h", ".dctlh", ".glsl"}
+        if src.parent.is_dir():
+            try:
+                for sibling in src.parent.iterdir():
+                    if sibling.is_file() and not sibling.is_symlink() and sibling.suffix.lower() in companion_exts:
+                        shutil.copy2(sibling, dest_dir / sibling.name)
+            except OSError:
+                pass
+
+        # Trên Linux, đồng bộ thêm sang ~/.local/share/DaVinciResolve/.LUT/ResolveFlow nếu thư mục .LUT tồn tại
+        if sys.platform.startswith("linux"):
+            dot_lut = Path.home() / ".local" / "share" / "DaVinciResolve" / ".LUT"
+            if dot_lut.is_dir() and os.access(str(dot_lut), os.W_OK):
+                try:
+                    mirror_dir = dot_lut / cls.SUBDIR_NAME
+                    if subdir_name:
+                        mirror_dir = mirror_dir / subdir_name
+                    mirror_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, mirror_dir / src.name)
+                    if src.parent.is_dir():
+                        for sibling in src.parent.iterdir():
+                            if sibling.is_file() and not sibling.is_symlink() and sibling.suffix.lower() in companion_exts:
+                                shutil.copy2(sibling, mirror_dir / sibling.name)
+                except OSError:
+                    pass
+
+        return dest

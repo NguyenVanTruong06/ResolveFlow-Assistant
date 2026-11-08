@@ -90,6 +90,21 @@ def _is_macos_junk(rel: Path) -> bool:
     )
 
 
+def _is_dctl_divider_file(path: Path) -> bool:
+    """Nhận diện tệp DCTL giả chỉ dùng làm đường kẻ phân cách menu (--- PIXELTOOLS ---, == QAZI ==)."""
+    ext = path.suffix.lower()
+    if ext not in {'.dctl', '.dctle'}:
+        return False
+    stem = path.stem.strip()
+    if not stem or not stem.strip('-=_~* '):
+        return True
+    if (stem.startswith(('---', '===', '___')) and stem.endswith(('---', '===', '___'))) or (
+        stem.startswith('==') and stem.endswith('==')
+    ):
+        return True
+    return False
+
+
 def guess(path: Path):
     name = path.as_posix().lower(); ext = path.suffix.lower()
     category = 'broll'; excluded = False
@@ -98,7 +113,10 @@ def guess(path: Path):
         category, excluded = 'templates', True
     elif parts_lower & {'tutorials', 'docs', 'help'}:
         category, excluded = 'docs', True
-    elif ext == '.cube': category = 'luts'
+    elif ext in {'.cube', '.3dl', '.dctl', '.dctle', '.drx', '.dpx'}:
+        category = 'luts'
+        if _is_dctl_divider_file(path):
+            excluded = True
     elif ext in {'.setting', '.drfx', '.comp'}: category = 'templates'
     elif ext in AUDIO: category = 'bgm' if any(s in name for s in ('bgm', 'music', 'nhạc', 'chill', 'lofi')) else 'sfx'
     elif ext in VIDEO | IMAGES:
@@ -188,6 +206,25 @@ class PackIngestService:
             if self.storage.online: shutil.rmtree(job_dir, ignore_errors=True)
             raise
 
+    @staticmethod
+    def _sanitize_zip_rel(entry: zipfile.ZipInfo) -> Path:
+        raw_name = entry.filename
+        if not (entry.flag_bits & 0x800):
+            try:
+                decoded = raw_name.encode('cp437').decode('utf-8')
+                if decoded and '\x00' not in decoded:
+                    raw_name = decoded
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                pass
+        rel = safe_relative(raw_name)
+        clean_parts = []
+        for part in rel.parts:
+            cleaned = re.sub(r'[:<>"|?*]', '-', part).strip() or '_'
+            if cleaned in ('.', '..'):
+                raise ValueError(f'Đường dẫn không an toàn: {entry.filename}')
+            clean_parts.append(cleaned)
+        return Path(*clean_parts) if clean_parts else rel
+
     def _extract(self, source, payload, cancel, progress):
         with zipfile.ZipFile(source) as archive:
             entries = archive.infolist()
@@ -195,7 +232,7 @@ class PackIngestService:
             seen = set(); total = 0
             for entry in entries:
                 if cancel(): raise InterruptedError('Đã hủy giải nén.')
-                rel = safe_relative(entry.filename)
+                rel = self._sanitize_zip_rel(entry)
                 key = rel.as_posix().casefold()
                 if key in seen: raise ValueError('ZIP có tên file trùng hoặc khác hoa/thường.')
                 seen.add(key)
@@ -211,7 +248,7 @@ class PackIngestService:
             for entry in entries:
                 if cancel(): raise InterruptedError('Đã hủy giải nén.')
                 self.storage.ensure_space()
-                rel = safe_relative(entry.filename)
+                rel = self._sanitize_zip_rel(entry)
                 dest = payload / rel
                 if entry.is_dir(): dest.mkdir(parents=True, exist_ok=True); continue
                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -781,6 +818,11 @@ class PackIngestService:
                 for a in chosen
                 if Path(a['relative_path']).suffix.lower() == '.setting'
             }
+            chosen_dctl_dirs = {
+                (payload / safe_relative(a['relative_path'])).parent
+                for a in chosen
+                if Path(a['relative_path']).suffix.lower() in {'.dctl', '.dctle', '.drx', '.dpx'}
+            }
             has_chosen_drfx = any(Path(a['relative_path']).suffix.lower() == '.drfx' for a in chosen)
             for path in payload.rglob('*'):
                 if path.is_file():
@@ -796,13 +838,22 @@ class PackIngestService:
                         and not (rel_parts_lower & {'previews', 'thumbnails'})
                         and any(s_dir in path.parents for s_dir in chosen_setting_dirs)
                     )
+                    # Bảo toàn tệp header/divider/companion đi kèm DCTL hoặc PowerGrade (.h, .dctlh, .glsl, .dctl, .dctle, .dpx, .png, .jpg)
+                    is_dctl_support = (
+                        path.suffix.lower() in ({'.h', '.dctlh', '.glsl', '.dctl', '.dctle', '.drx', '.dpx', '.txt', '.pdf', '.srt'} | IMAGES)
+                        and any(d_dir in path.parents for d_dir in chosen_dctl_dirs)
+                    )
+                    is_pack_doc = (
+                        path.suffix.lower() in {'.pdf', '.txt', '.srt', '.md'}
+                        and bool(rel_parts_lower & {'docs', 'tutorials', 'huong dan', 'huong_dan', 'help'})
+                    )
                     # Bảo toàn kho preview đi kèm gói .drfx (như Preview Transitions/*.mp4, Help/How-To-Use.mp4)
                     is_drfx_preview = (
                         has_chosen_drfx
                         and path.suffix.lower() in (VIDEO | IMAGES)
                         and any(k in p_posix.lower() for k in ('preview', 'thumb', 'tutorial', 'how-to-use', 'help'))
                     )
-                    if p_posix not in keep and not is_macro_support and not is_drfx_preview:
+                    if p_posix not in keep and not is_macro_support and not is_dctl_support and not is_pack_doc and not is_drfx_preview:
                         path.unlink()
             check_identity()
             renamed = False
