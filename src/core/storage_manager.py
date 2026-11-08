@@ -498,9 +498,157 @@ class StorageManager:
             self.snapshot()
             return True
 
-    def assets(self, *, raise_on_error: bool = False):
-        from src.core.contracts.asset_dto import is_safe_relative_path
+    def _build_runtime_assets_list(
+        self,
+        raw_assets: list,
+        packs_map: dict,
+        effective_root: Path,
+        online: bool,
+        origin_lib_id,
+        origin_root,
+        *,
+        strict: bool = False,
+    ) -> list[dict]:
+        from src.core.contracts.asset_dto import is_absolute_lexical_path, is_safe_relative_path
 
+        resolved_effective_root: Path | None = None
+        if online:
+            try:
+                resolved_effective_root = effective_root.resolve()
+            except (ValueError, OSError):
+                resolved_effective_root = None
+
+        # Local per-call caches to eliminate thousands of redundant stat/realpath syscalls
+        pack_info_cache: dict[str, tuple[Path | None, Path | None, Path | None, bool]] = {}
+        companion_cache: dict[tuple[str, str], str | None] = {}
+        file_exists_cache: dict[str, bool] = {}
+
+        def _get_pack_info(pack_folder_rel: str):
+            cached = pack_info_cache.get(pack_folder_rel)
+            if cached is not None:
+                return cached
+            if not isinstance(pack_folder_rel, str) or not is_safe_relative_path(pack_folder_rel):
+                res = (None, None, None, False)
+                pack_info_cache[pack_folder_rel] = res
+                return res
+            folder_rel = safe_relative(pack_folder_rel)
+            pack_root = effective_root / folder_rel
+            resolved_pack_root = None
+            pack_contained = False
+            if online and resolved_effective_root is not None:
+                try:
+                    if pack_root.is_dir():
+                        resolved_pack_root = pack_root.resolve()
+                        pack_contained = (
+                            resolved_pack_root.is_dir()
+                            and resolved_pack_root.is_relative_to(resolved_effective_root)
+                        )
+                except (ValueError, OSError):
+                    pack_contained = False
+            res = (folder_rel, pack_root, resolved_pack_root, pack_contained)
+            pack_info_cache[pack_folder_rel] = res
+            return res
+
+        def _resolve_companion(pack_folder_rel: str, pack_root: Path, resolved_pack_root: Path | None, rel_str: str) -> str | None:
+            cache_key = (pack_folder_rel, rel_str)
+            if cache_key in companion_cache:
+                return companion_cache[cache_key]
+            if not isinstance(rel_str, str) or not is_safe_relative_path(rel_str):
+                companion_cache[cache_key] = None
+                return None
+            rel_path = safe_relative(rel_str)
+            full_path = pack_root / rel_path
+            resolved_val: str | None = None
+            if online:
+                if resolved_pack_root is not None:
+                    try:
+                        if full_path.is_relative_to(pack_root) and full_path.is_file():
+                            resolved_full = full_path.resolve()
+                            if resolved_full.is_file() and resolved_full.is_relative_to(resolved_pack_root):
+                                resolved_val = str(full_path)
+                    except (ValueError, OSError):
+                        resolved_val = None
+            else:
+                try:
+                    if full_path.is_relative_to(pack_root):
+                        resolved_val = str(full_path)
+                except (ValueError, OSError):
+                    resolved_val = None
+            companion_cache[cache_key] = resolved_val
+            return resolved_val
+
+        result = []
+        for asset in raw_assets:
+            if strict and not isinstance(asset, dict):
+                raise ValueError("Mục asset trong registry/snapshot không phải là dict.")
+            item = dict(asset)
+            path = Path(item['external_path']) if item.get('external_path') else effective_root / safe_relative(item['library_path'])
+            file_path_str = str(path)
+            item['file_path'] = file_path_str
+            if online:
+                is_online_file = file_exists_cache.get(file_path_str)
+                if is_online_file is None:
+                    is_online_file = path.is_file()
+                    file_exists_cache[file_path_str] = is_online_file
+                item['availability'] = 'online' if is_online_file else 'offline'
+            else:
+                item['availability'] = 'offline'
+            item['origin_library_id'] = origin_lib_id
+            item['origin_root'] = origin_root
+
+            # Luôn xóa bỏ runtime companion paths cũ để không bị leak khi validation thất bại
+            item.pop('preview_path', None)
+            item.pop('thumbnail_path', None)
+
+            # Dựng runtime companion paths từ pack folder thuộc quyền sở hữu của registry
+            p_id = item.get('pack_id')
+            pack_folder_rel = packs_map.get(p_id)
+            lib_p = item.get('library_path')
+
+            if (
+                pack_folder_rel
+                and lib_p
+                and isinstance(pack_folder_rel, str)
+                and isinstance(lib_p, str)
+                and is_safe_relative_path(lib_p)
+            ):
+                folder_rel, pack_root, resolved_pack_root, pack_contained = _get_pack_info(pack_folder_rel)
+                if folder_rel is not None and pack_root is not None:
+                    is_valid_pack_master = False
+                    try:
+                        lib_p_rel = safe_relative(lib_p)
+                        if lib_p_rel.is_relative_to(folder_rel):
+                            is_valid_pack_master = True
+                    except (ValueError, OSError):
+                        is_valid_pack_master = False
+
+                    if is_valid_pack_master and (pack_contained if online else True):
+                        p_rel_str = item.get('preview_relative_path')
+                        if p_rel_str:
+                            prev_val = _resolve_companion(pack_folder_rel, pack_root, resolved_pack_root, p_rel_str)
+                            if prev_val is not None:
+                                item['preview_path'] = prev_val
+
+                        t_rel_str = item.get('thumbnail_relative_path')
+                        if t_rel_str:
+                            thumb_val = _resolve_companion(pack_folder_rel, pack_root, resolved_pack_root, t_rel_str)
+                            if thumb_val is not None:
+                                item['thumbnail_path'] = thumb_val
+
+            # Suy luận source_kind runtime khi thiếu trường:
+            if not item.get('source_kind'):
+                ext_p = item.get('external_path')
+                if ext_p and isinstance(ext_p, str) and ext_p.strip():
+                    if is_absolute_lexical_path(ext_p):
+                        item['source_kind'] = 'linked'
+                elif lib_p and isinstance(lib_p, str) and lib_p.strip():
+                    if is_safe_relative_path(lib_p):
+                        item['source_kind'] = 'managed'
+
+            result.append(item)
+        return result
+
+    def assets(self, *, raise_on_error: bool = False):
         if type(raise_on_error) is not bool:
             raise ValueError("raise_on_error bắt buộc phải là kiểu bool thuần túy.")
 
@@ -526,122 +674,15 @@ class StorageManager:
                     for p in data.get('packs', [])
                     if isinstance(p, dict) and 'id' in p and p.get('folder')
                 }
-
-                result = []
-                for asset in data.get('assets', []):
-                    item = dict(asset)
-                    path = Path(item['external_path']) if item.get('external_path') else effective_root / safe_relative(item['library_path'])
-                    item['file_path'] = str(path)
-                    item['availability'] = 'online' if online and path.is_file() else 'offline'
-                    item['origin_library_id'] = origin_lib_id
-                    item['origin_root'] = origin_root
-
-                    # Luôn xóa bỏ runtime companion paths cũ để không bị leak khi validation thất bại
-                    item.pop('preview_path', None)
-                    item.pop('thumbnail_path', None)
-
-                    # Dựng runtime companion paths từ pack folder thuộc quyền sở hữu của registry
-                    p_id = item.get('pack_id')
-                    pack_folder_rel = packs_map.get(p_id)
-                    lib_p = item.get('library_path')
-
-                    # Kiểm tra master phải thuộc đúng pack_folder_rel của pack được tham chiếu
-                    is_valid_pack_master = False
-                    if (
-                        pack_folder_rel
-                        and lib_p
-                        and isinstance(pack_folder_rel, str)
-                        and isinstance(lib_p, str)
-                        and is_safe_relative_path(pack_folder_rel)
-                        and is_safe_relative_path(lib_p)
-                    ):
-                        lib_p_rel = safe_relative(lib_p)
-                        folder_rel = safe_relative(pack_folder_rel)
-                        try:
-                            if lib_p_rel.is_relative_to(folder_rel):
-                                is_valid_pack_master = True
-                        except (ValueError, OSError):
-                            is_valid_pack_master = False
-
-                    if is_valid_pack_master and pack_folder_rel:
-                        pack_root = effective_root / safe_relative(pack_folder_rel)
-                        if online:
-                            try:
-                                resolved_effective_root = effective_root.resolve()
-                                resolved_pack_root = pack_root.resolve()
-                                pack_contained = (
-                                    pack_root.is_dir()
-                                    and resolved_pack_root.is_dir()
-                                    and resolved_pack_root.is_relative_to(resolved_effective_root)
-                                )
-                            except (ValueError, OSError):
-                                pack_contained = False
-
-                            if pack_contained:
-                                if item.get('preview_relative_path'):
-                                    p_rel_str = item['preview_relative_path']
-                                    if isinstance(p_rel_str, str) and is_safe_relative_path(p_rel_str):
-                                        prev_rel = safe_relative(p_rel_str)
-                                        prev_full = pack_root / prev_rel
-                                        try:
-                                            if prev_full.is_relative_to(pack_root) and prev_full.is_file():
-                                                resolved_prev = prev_full.resolve()
-                                                if resolved_prev.is_file() and resolved_prev.is_relative_to(resolved_pack_root):
-                                                    item['preview_path'] = str(prev_full)
-                                        except (ValueError, OSError):
-                                            pass
-
-                                if item.get('thumbnail_relative_path'):
-                                    t_rel_str = item['thumbnail_relative_path']
-                                    if isinstance(t_rel_str, str) and is_safe_relative_path(t_rel_str):
-                                        thumb_rel = safe_relative(t_rel_str)
-                                        thumb_full = pack_root / thumb_rel
-                                        try:
-                                            if thumb_full.is_relative_to(pack_root) and thumb_full.is_file():
-                                                resolved_thumb = thumb_full.resolve()
-                                                if resolved_thumb.is_file() and resolved_thumb.is_relative_to(resolved_pack_root):
-                                                    item['thumbnail_path'] = str(thumb_full)
-                                        except (ValueError, OSError):
-                                            pass
-                        else:
-                            # Offline snapshot: giữ metadata đường dẫn lexical
-                            if item.get('preview_relative_path'):
-                                p_rel_str = item['preview_relative_path']
-                                if isinstance(p_rel_str, str) and is_safe_relative_path(p_rel_str):
-                                    prev_rel = safe_relative(p_rel_str)
-                                    prev_full = pack_root / prev_rel
-                                    try:
-                                        if prev_full.is_relative_to(pack_root):
-                                            item['preview_path'] = str(prev_full)
-                                    except (ValueError, OSError):
-                                        pass
-
-                            if item.get('thumbnail_relative_path'):
-                                t_rel_str = item['thumbnail_relative_path']
-                                if isinstance(t_rel_str, str) and is_safe_relative_path(t_rel_str):
-                                    thumb_rel = safe_relative(t_rel_str)
-                                    thumb_full = pack_root / thumb_rel
-                                    try:
-                                        if thumb_full.is_relative_to(pack_root):
-                                            item['thumbnail_path'] = str(thumb_full)
-                                    except (ValueError, OSError):
-                                        pass
-
-                    # Suy luận source_kind runtime khi thiếu trường:
-                    if not item.get('source_kind'):
-                        ext_p = item.get('external_path')
-                        lib_p = item.get('library_path')
-                        if ext_p and isinstance(ext_p, str) and ext_p.strip():
-                            from src.core.contracts.asset_dto import is_absolute_lexical_path
-                            if is_absolute_lexical_path(ext_p):
-                                item['source_kind'] = 'linked'
-                        elif lib_p and isinstance(lib_p, str) and lib_p.strip():
-                            from src.core.contracts.asset_dto import is_safe_relative_path
-                            if is_safe_relative_path(lib_p):
-                                item['source_kind'] = 'managed'
-
-                    result.append(item)
-                return result
+                return self._build_runtime_assets_list(
+                    data.get('assets', []),
+                    packs_map,
+                    effective_root,
+                    online,
+                    origin_lib_id,
+                    origin_root,
+                    strict=False,
+                )
             except (OSError, ValueError, KeyError, TypeError):
                 return []
 
@@ -687,119 +728,15 @@ class StorageManager:
             for p in data.get('packs', [])
             if isinstance(p, dict) and 'id' in p and p.get('folder')
         }
-
-        result = []
-        for asset in data.get('assets', []):
-            if not isinstance(asset, dict):
-                raise ValueError("Mục asset trong registry/snapshot không phải là dict.")
-            item = dict(asset)
-            path = Path(item['external_path']) if item.get('external_path') else effective_root / safe_relative(item['library_path'])
-            item['file_path'] = str(path)
-            item['availability'] = 'online' if online and path.is_file() else 'offline'
-            item['origin_library_id'] = origin_lib_id
-            item['origin_root'] = origin_root
-
-            item.pop('preview_path', None)
-            item.pop('thumbnail_path', None)
-
-            p_id = item.get('pack_id')
-            pack_folder_rel = packs_map.get(p_id)
-            lib_p = item.get('library_path')
-
-            is_valid_pack_master = False
-            if (
-                pack_folder_rel
-                and lib_p
-                and isinstance(pack_folder_rel, str)
-                and isinstance(lib_p, str)
-                and is_safe_relative_path(pack_folder_rel)
-                and is_safe_relative_path(lib_p)
-            ):
-                lib_p_rel = safe_relative(lib_p)
-                folder_rel = safe_relative(pack_folder_rel)
-                try:
-                    if lib_p_rel.is_relative_to(folder_rel):
-                        is_valid_pack_master = True
-                except (ValueError, OSError):
-                    is_valid_pack_master = False
-
-            if is_valid_pack_master and pack_folder_rel:
-                pack_root = effective_root / safe_relative(pack_folder_rel)
-                if online:
-                    try:
-                        resolved_effective_root = effective_root.resolve()
-                        resolved_pack_root = pack_root.resolve()
-                        pack_contained = (
-                            pack_root.is_dir()
-                            and resolved_pack_root.is_dir()
-                            and resolved_pack_root.is_relative_to(resolved_effective_root)
-                        )
-                    except (ValueError, OSError):
-                        pack_contained = False
-
-                    if pack_contained:
-                        if item.get('preview_relative_path'):
-                            p_rel_str = item['preview_relative_path']
-                            if isinstance(p_rel_str, str) and is_safe_relative_path(p_rel_str):
-                                prev_rel = safe_relative(p_rel_str)
-                                prev_full = pack_root / prev_rel
-                                try:
-                                    if prev_full.is_relative_to(pack_root) and prev_full.is_file():
-                                        resolved_prev = prev_full.resolve()
-                                        if resolved_prev.is_file() and resolved_prev.is_relative_to(resolved_pack_root):
-                                            item['preview_path'] = str(prev_full)
-                                except (ValueError, OSError):
-                                    pass
-
-                        if item.get('thumbnail_relative_path'):
-                            t_rel_str = item['thumbnail_relative_path']
-                            if isinstance(t_rel_str, str) and is_safe_relative_path(t_rel_str):
-                                thumb_rel = safe_relative(t_rel_str)
-                                thumb_full = pack_root / thumb_rel
-                                try:
-                                    if thumb_full.is_relative_to(pack_root) and thumb_full.is_file():
-                                        resolved_thumb = thumb_full.resolve()
-                                        if resolved_thumb.is_file() and resolved_thumb.is_relative_to(resolved_pack_root):
-                                            item['thumbnail_path'] = str(thumb_full)
-                                except (ValueError, OSError):
-                                    pass
-                else:
-                    if item.get('preview_relative_path'):
-                        p_rel_str = item['preview_relative_path']
-                        if isinstance(p_rel_str, str) and is_safe_relative_path(p_rel_str):
-                            prev_rel = safe_relative(p_rel_str)
-                            prev_full = pack_root / prev_rel
-                            try:
-                                if prev_full.is_relative_to(pack_root):
-                                    item['preview_path'] = str(prev_full)
-                            except (ValueError, OSError):
-                                pass
-
-                    if item.get('thumbnail_relative_path'):
-                        t_rel_str = item['thumbnail_relative_path']
-                        if isinstance(t_rel_str, str) and is_safe_relative_path(t_rel_str):
-                            thumb_rel = safe_relative(t_rel_str)
-                            thumb_full = pack_root / thumb_rel
-                            try:
-                                if thumb_full.is_relative_to(pack_root):
-                                    item['thumbnail_path'] = str(thumb_full)
-                            except (ValueError, OSError):
-                                pass
-
-            if not item.get('source_kind'):
-                ext_p = item.get('external_path')
-                lib_p = item.get('library_path')
-                if ext_p and isinstance(ext_p, str) and ext_p.strip():
-                    from src.core.contracts.asset_dto import is_absolute_lexical_path
-                    if is_absolute_lexical_path(ext_p):
-                        item['source_kind'] = 'linked'
-                elif lib_p and isinstance(lib_p, str) and lib_p.strip():
-                    from src.core.contracts.asset_dto import is_safe_relative_path
-                    if is_safe_relative_path(lib_p):
-                        item['source_kind'] = 'managed'
-
-            result.append(item)
-        return result
+        return self._build_runtime_assets_list(
+            data.get('assets', []),
+            packs_map,
+            effective_root,
+            online,
+            origin_lib_id,
+            origin_root,
+            strict=True,
+        )
 
     def ui_assets(self):
         from src.core.contracts.asset_dto import to_ui_asset

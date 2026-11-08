@@ -38,55 +38,82 @@ def _parse_wmctrl_output(output: str, with_identity: bool = False) -> Optional[T
     return max(candidates, key=lambda r: r[2] * r[3], default=None)
 
 
+import shutil
+import time
+
+_WMCTRL_BIN: Optional[str] = shutil.which("wmctrl")
+_XDOTOOL_BIN: Optional[str] = shutil.which("xdotool")
+_RECT_CACHE_TS: float = 0.0
+_RECT_CACHE_VAL: Optional[Tuple[int, int, int, int]] = None
+
+
 def get_resolve_window_rect() -> Optional[Tuple[int, int, int, int]]:
     """
     Returns (x, y, width, height) of the active DaVinci Resolve window,
     or None if not found / running headlessly.
     """
+    global _RECT_CACHE_TS, _RECT_CACHE_VAL
+    if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+        return None
+
+    now = time.monotonic()
+    if (now - _RECT_CACHE_TS) < 0.8:
+        return _RECT_CACHE_VAL
+
     system = platform.system()
+    rect: Optional[Tuple[int, int, int, int]] = None
 
     if system == "Linux":
-        # Try wmctrl
-        try:
-            res = subprocess.run(
-                ["wmctrl", "-l", "-G", "-p", "-x"],
-                capture_output=True,
-                text=True,
-                timeout=1.0,
-            )
-            if res.returncode == 0:
-                rect = _parse_wmctrl_output(res.stdout, with_identity=True)
-                if rect:
-                    return rect
-        except Exception:
-            pass
-
-        # Try xdotool
-        try:
-            res = subprocess.run(
-                ["xdotool", "search", "--onlyvisible", "--class", "^([Rr]esolve|[Dd]a[Vv]inci[Rr]esolve)$"],
-                capture_output=True,
-                text=True,
-                timeout=1.0,
-            )
-            if res.returncode == 0 and res.stdout.strip():
-                wid = res.stdout.strip().splitlines()[0]
-                geom = subprocess.run(
-                    ["xdotool", "getwindowgeometry", "--shell", wid],
+        # Try wmctrl first; if wmctrl succeeds (returncode == 0), its window list is authoritative
+        if _WMCTRL_BIN:
+            try:
+                res = subprocess.run(
+                    [_WMCTRL_BIN, "-l", "-G", "-p", "-x"],
                     capture_output=True,
                     text=True,
-                    timeout=1.0,
+                    timeout=0.4,
                 )
-                if geom.returncode == 0:
-                    data = {}
-                    for gline in geom.stdout.splitlines():
-                        if "=" in gline:
-                            k, v = gline.split("=", 1)
-                            data[k.strip()] = int(v.strip())
-                    if "X" in data and "Y" in data and "WIDTH" in data and "HEIGHT" in data:
-                        return (data["X"], data["Y"], data["WIDTH"], data["HEIGHT"])
-        except Exception:
-            pass
+                if res.returncode == 0:
+                    rect = _parse_wmctrl_output(res.stdout, with_identity=True)
+                    _RECT_CACHE_TS = now
+                    _RECT_CACHE_VAL = rect
+                    return rect
+            except Exception:
+                pass
+
+        # Fallback to xdotool only if wmctrl is unavailable or failed
+        if _XDOTOOL_BIN:
+            try:
+                res = subprocess.run(
+                    [_XDOTOOL_BIN, "search", "--onlyvisible", "--class", "^([Rr]esolve|[Dd]a[Vv]inci[Rr]esolve)$"],
+                    capture_output=True,
+                    text=True,
+                    timeout=0.4,
+                )
+                if res.returncode == 0 and res.stdout.strip():
+                    wid = res.stdout.strip().splitlines()[0]
+                    geom = subprocess.run(
+                        [_XDOTOOL_BIN, "getwindowgeometry", "--shell", wid],
+                        capture_output=True,
+                        text=True,
+                        timeout=0.4,
+                    )
+                    if geom.returncode == 0:
+                        data = {}
+                        for gline in geom.stdout.splitlines():
+                            if "=" in gline:
+                                k, v = gline.split("=", 1)
+                                data[k.strip()] = int(v.strip())
+                        if "X" in data and "Y" in data and "WIDTH" in data and "HEIGHT" in data:
+                            rect = (data["X"], data["Y"], data["WIDTH"], data["HEIGHT"])
+                            _RECT_CACHE_TS = now
+                            _RECT_CACHE_VAL = rect
+                            return rect
+            except Exception:
+                pass
+        _RECT_CACHE_TS = now
+        _RECT_CACHE_VAL = None
+        return None
 
     elif system == "Windows":
         try:

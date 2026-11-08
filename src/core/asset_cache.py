@@ -183,9 +183,17 @@ def extract_thumbnail(
         offset_y = (target_h - new_h) // 2
         canvas.alpha_composite(resized, (offset_x, offset_y))
 
-        temp_file = cache_file + ".tmp"
-        canvas.convert("RGB").save(temp_file, "JPEG", quality=quality)
-        os.replace(temp_file, cache_file)
+        import threading
+        temp_file = f"{cache_file}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            canvas.convert("RGB").save(temp_file, "JPEG", quality=quality)
+            os.replace(temp_file, cache_file)
+        finally:
+            if os.path.exists(temp_file):
+                try:
+                    os.unlink(temp_file)
+                except OSError:
+                    pass
 
         _MEMORY_THUMB_CACHE[key] = cache_file
         return cache_file
@@ -221,6 +229,8 @@ def request_thumbnail_async(
         thumb = extract_thumbnail(media_path, target_w, target_h)
         if thumb and os.path.isfile(thumb):
             _dispatch_callback(callback, thumb)
+        else:
+            _dispatch_callback(callback, "")
 
     _get_executor().submit(_worker)
 

@@ -16,20 +16,33 @@ logger = logging.getLogger("ResolveFlow.CollectionsManager")
 
 class CollectionsManager:
     FILE_PATH = Path("data") / "collections.json"
+    _cache: Optional[tuple] = None
 
     @classmethod
     def load(cls) -> Dict[str, List[str]]:
-        """Tải dữ liệu danh sách bộ sưu tập {coll_name: [asset_id, ...]}."""
-        if not cls.FILE_PATH.parent.exists():
-            cls.FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        if not cls.FILE_PATH.exists():
+        """Tải dữ liệu danh sách bộ sưu tập {coll_name: [asset_id, ...]} (có bộ nhớ đệm theo mtime)."""
+        try:
+            st = cls.FILE_PATH.stat()
+            cache_key = (str(cls.FILE_PATH), st.st_mtime_ns, st.st_size)
+        except OSError:
+            if not cls.FILE_PATH.parent.exists():
+                try:
+                    cls.FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    pass
+            cls._cache = None
             return {}
+
+        if cls._cache is not None and cls._cache[0] == cache_key:
+            return {k: list(v) for k, v in cls._cache[1].items()}
+
         try:
             with open(cls.FILE_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
-                    # Ensure all values are lists of strings
-                    return {str(k): [str(x) for x in v] if isinstance(v, list) else [] for k, v in data.items()}
+                    normalized = {str(k): [str(x) for x in v] if isinstance(v, list) else [] for k, v in data.items()}
+                    cls._cache = (cache_key, normalized)
+                    return {k: list(v) for k, v in normalized.items()}
                 return {}
         except Exception as e:
             logger.error(f"Error loading collections: {e}")
@@ -43,7 +56,14 @@ class CollectionsManager:
         try:
             with open(cls.FILE_PATH, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            try:
+                st = cls.FILE_PATH.stat()
+                normalized = {str(k): [str(x) for x in v] if isinstance(v, list) else [] for k, v in data.items()}
+                cls._cache = ((str(cls.FILE_PATH), st.st_mtime_ns, st.st_size), normalized)
+            except OSError:
+                cls._cache = None
         except Exception as e:
+            cls._cache = None
             logger.error(f"Error saving collections: {e}")
 
     @classmethod

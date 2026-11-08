@@ -37,6 +37,7 @@ _THUMB_PIXMAP_CACHE: Dict[str, QPixmap] = {}
 _GENERATED_THUMB_CACHE: Dict[str, QPixmap] = {}
 _PACK_VIDEO_INDEX_CACHE: Dict[str, Tuple[Dict[str, str], str]] = {}
 _CLOUD_PACKS_VIDEO_CACHE: Dict[Tuple[str, int], Tuple[Dict[str, str], Dict[str, str]]] = {}
+_DRFX_IMG_INDEX_CACHE: Dict[Tuple[str, int], list] = {}
 
 
 def _get_attr(obj: Any, *keys: str, default: Any = "") -> Any:
@@ -90,20 +91,53 @@ def _resolve_master_disk_path(asset: Any) -> str:
     return fp if (fp and os.path.isfile(fp)) else ""
 
 
+_PACK_ROOT_DIR_CACHE: Dict[str, Optional[Path]] = {}
+
+
 def _find_pack_root(file_path: str) -> Optional[Path]:
     """Finds the enclosing pack directory under 02_cloud_downloads/packs or containing pack_manifest.json."""
     if not file_path:
         return None
     try:
-        p = Path(file_path).resolve()
+        abs_fp = os.path.abspath(file_path)
+        norm_fp = abs_fp.replace("\\", "/")
+        if "/templates/transitions/installed/" in norm_fp:
+            return None
+
+        parent_dir = os.path.dirname(abs_fp) if os.path.splitext(abs_fp)[1] else abs_fp
+        if parent_dir in _PACK_ROOT_DIR_CACHE:
+            cached_root = _PACK_ROOT_DIR_CACHE[parent_dir]
+            if cached_root is None or cached_root.is_dir():
+                return cached_root
+
+        p = Path(abs_fp)
         curr = p.parent if p.is_file() else p
+        found: Optional[Path] = None
+        visited: list[str] = []
         for ancestor in [curr, *curr.parents]:
-            if (ancestor / "pack_manifest.json").is_file():
-                return ancestor
-            if (ancestor / "Preview Transitions").is_dir() or (ancestor / "Previews").is_dir():
-                return ancestor
+            anc_str = str(ancestor)
+            if anc_str in _PACK_ROOT_DIR_CACHE:
+                cached_anc = _PACK_ROOT_DIR_CACHE[anc_str]
+                if cached_anc is None or cached_anc.is_dir():
+                    found = cached_anc
+                    break
+            visited.append(anc_str)
             if ancestor.parent and ancestor.parent.name == "packs" and ancestor.parent.parent and ancestor.parent.parent.name == "02_cloud_downloads":
-                return ancestor
+                found = ancestor
+                break
+            if (ancestor / "pack_manifest.json").is_file():
+                found = ancestor
+                break
+            if (ancestor / "Preview Transitions").is_dir() or (ancestor / "Previews").is_dir():
+                found = ancestor
+                break
+        if len(_PACK_ROOT_DIR_CACHE) > 1024:
+            _PACK_ROOT_DIR_CACHE.clear()
+        _PACK_ROOT_DIR_CACHE[parent_dir] = found
+        if found is None:
+            for v in visited:
+                _PACK_ROOT_DIR_CACHE[v] = None
+        return found
     except Exception:
         pass
     return None
@@ -141,13 +175,18 @@ def resolve_drfx_thumbnail(asset: Any) -> str:
                     return str(sibling.resolve())
 
         # If .drfx zip archive, look inside for a matching .png or .jpg
-        if master_path.suffix.lower() == ".drfx" and master_path.is_file() and zipfile.is_zipfile(master_path):
+        if master_path.suffix.lower() == ".drfx" and master_path.is_file():
             asset_name = str(_get_attr(asset, "name", default=master_path.stem) or master_path.stem).strip()
             try:
                 mtime = int(os.path.getmtime(master_path))
             except OSError:
                 mtime = 0
-            key_raw = f"{master_path.resolve()}:{mtime}:{asset_name.lower()}"
+            resolved_master_str = str(master_path.resolve())
+            drfx_idx_key = (resolved_master_str, mtime)
+            if drfx_idx_key in _DRFX_IMG_INDEX_CACHE and not _DRFX_IMG_INDEX_CACHE[drfx_idx_key]:
+                return ""
+
+            key_raw = f"{resolved_master_str}:{mtime}:{asset_name.lower()}"
             digest = hashlib.sha1(key_raw.encode("utf-8", errors="ignore")).hexdigest()[:20]
             cache_dir = os.path.join(tempfile.gettempdir(), "chundvc_drfx_thumbs")
             cache_file = os.path.join(cache_dir, f"{digest}.png")
@@ -155,47 +194,63 @@ def resolve_drfx_thumbnail(asset: Any) -> str:
                 return cache_file
 
             try:
-                with zipfile.ZipFile(master_path, "r") as zf:
+                if drfx_idx_key not in _DRFX_IMG_INDEX_CACHE:
+                    if not zipfile.is_zipfile(master_path):
+                        _DRFX_IMG_INDEX_CACHE[drfx_idx_key] = []
+                        return ""
                     img_entries = []
-                    for info in zf.infolist():
-                        if info.is_dir():
-                            continue
-                        norm_name = info.filename.replace("\\", "/")
-                        parts = [pt for pt in norm_name.split("/") if pt]
-                        if not parts:
-                            continue
-                        if "__MACOSX" in parts:
-                            continue
-                        fname = parts[-1]
-                        if fname.startswith("._") or fname.startswith("."):
-                            continue
-                        if fname.lower().endswith(IMAGE_EXTS):
-                            # Skip macro frame sequences like LLmotion_C_000.png or LLmotion_Rect_001.png
-                            stem_l = os.path.splitext(fname)[0].lower()
-                            if len(stem_l) > 4 and stem_l[-4] == "_" and stem_l[-3:].isdigit():
+                    with zipfile.ZipFile(master_path, "r") as zf:
+                        for info in zf.infolist():
+                            if info.is_dir():
                                 continue
-                            if stem_l in ("paper", "texture", "bg", "mask"):
+                            norm_name = info.filename.replace("\\", "/")
+                            parts = [pt for pt in norm_name.split("/") if pt]
+                            if not parts:
                                 continue
-                            img_entries.append((norm_name, stem_l))
+                            if "__MACOSX" in parts:
+                                continue
+                            fname = parts[-1]
+                            if fname.startswith("._") or fname.startswith("."):
+                                continue
+                            if fname.lower().endswith(IMAGE_EXTS):
+                                # Skip macro frame sequences like LLmotion_C_000.png or LLmotion_Rect_001.png
+                                stem_l = os.path.splitext(fname)[0].lower()
+                                if len(stem_l) > 4 and stem_l[-4] == "_" and stem_l[-3:].isdigit():
+                                    continue
+                                if stem_l in ("paper", "texture", "bg", "mask"):
+                                    continue
+                                img_entries.append((norm_name, stem_l))
+                    _DRFX_IMG_INDEX_CACHE[drfx_idx_key] = img_entries
+                else:
+                    img_entries = _DRFX_IMG_INDEX_CACHE[drfx_idx_key]
 
-                    if img_entries:
-                        target_entry = img_entries[0][0]
-                        target_stem = asset_name.lower().strip()
-                        for entry_name, stem_l in img_entries:
-                            if stem_l == target_stem or target_stem in stem_l or stem_l in target_stem:
-                                target_entry = entry_name
-                                break
+                if img_entries:
+                    target_entry = img_entries[0][0]
+                    target_stem = asset_name.lower().strip()
+                    for entry_name, stem_l in img_entries:
+                        if stem_l == target_stem or target_stem in stem_l or stem_l in target_stem:
+                            target_entry = entry_name
+                            break
 
-                        os.makedirs(cache_dir, exist_ok=True)
+                    os.makedirs(cache_dir, exist_ok=True)
+                    with zipfile.ZipFile(master_path, "r") as zf:
                         data = zf.read(target_entry)
-                        if data:
-                            with open(cache_file, "wb") as f:
-                                f.write(data)
-                            return cache_file
+                    if data:
+                        with open(cache_file, "wb") as f:
+                            f.write(data)
+                        return cache_file
             except Exception:
                 pass
 
     return ""
+
+
+_PACK_NORM_VIDEO_INDEX_CACHE: Dict[str, Dict[str, str]] = {}
+_CLOUD_PACKS_FAST_CACHE: Optional[Tuple[float, int, Dict[str, str], Dict[str, str]]] = None
+
+
+def _norm_stem(s: str) -> str:
+    return "".join(ch for ch in s.lower() if ch.isalnum())
 
 
 def _index_pack_videos(pack_root: Path) -> Tuple[Dict[str, str], str]:
@@ -205,39 +260,41 @@ def _index_pack_videos(pack_root: Path) -> Tuple[Dict[str, str], str]:
         return _PACK_VIDEO_INDEX_CACHE[key]
 
     by_stem: Dict[str, str] = {}
+    by_norm: Dict[str, str] = {}
     fallback_video = ""
     fallback_priority = 999
 
     try:
-        for f in sorted(pack_root.rglob("*")):
-            if not f.is_file():
-                continue
-            rel_parts = f.relative_to(pack_root).parts
-            if "__MACOSX" in rel_parts or f.name.startswith("._") or f.name.startswith("."):
-                continue
-            if f.suffix.lower() in VIDEO_EXTS:
-                abs_p = str(f.resolve())
-                stem_l = f.stem.lower().strip()
-                by_stem.setdefault(stem_l, abs_p)
-                rel_lower = f.relative_to(pack_root).as_posix().lower()
-                if any(k in stem_l for k in ("tutorial", "how-to-use", "how_to_use", "preview", "demo")):
-                    prio = 1 if "preview" in rel_lower else 2
-                    if prio < fallback_priority:
-                        fallback_priority = prio
-                        fallback_video = abs_p
-                elif "preview transitions" in rel_lower or "previews" in rel_lower:
-                    if fallback_priority > 3:
-                        fallback_priority = 3
-                        fallback_video = abs_p
+        for root_str, dirs, files in os.walk(pack_root):
+            dirs[:] = [d for d in sorted(dirs) if d != "__MACOSX" and not d.startswith(".")]
+            for fname in sorted(files):
+                if fname.startswith("._") or fname.startswith("."):
+                    continue
+                ext_l = os.path.splitext(fname)[1].lower()
+                if ext_l in VIDEO_EXTS:
+                    full_p = os.path.join(root_str, fname)
+                    abs_p = os.path.abspath(full_p)
+                    stem_l = os.path.splitext(fname)[0].lower().strip()
+                    by_stem.setdefault(stem_l, abs_p)
+                    n_stem = _norm_stem(stem_l)
+                    if n_stem:
+                        by_norm.setdefault(n_stem, abs_p)
+                    rel_lower = full_p.replace("\\", "/").lower()
+                    if any(k in stem_l for k in ("tutorial", "how-to-use", "how_to_use", "preview", "demo")):
+                        prio = 1 if "preview" in rel_lower else 2
+                        if prio < fallback_priority:
+                            fallback_priority = prio
+                            fallback_video = abs_p
+                    elif "preview transitions" in rel_lower or "previews" in rel_lower:
+                        if fallback_priority > 3:
+                            fallback_priority = 3
+                            fallback_video = abs_p
     except Exception:
         pass
 
     _PACK_VIDEO_INDEX_CACHE[key] = (by_stem, fallback_video)
+    _PACK_NORM_VIDEO_INDEX_CACHE[key] = by_norm
     return by_stem, fallback_video
-
-
-def _norm_stem(s: str) -> str:
-    return "".join(ch for ch in s.lower() if ch.isalnum())
 
 
 def _index_all_cloud_pack_videos() -> Tuple[Dict[str, str], Dict[str, str]]:
@@ -246,8 +303,17 @@ def _index_all_cloud_pack_videos() -> Tuple[Dict[str, str], Dict[str, str]]:
     02_cloud_downloads/packs/ so extracted .setting files in assets/templates/transitions/installed/
     cleanly link back to their real Preview Transitions/*.mp4 videos.
     """
+    global _CLOUD_PACKS_FAST_CACHE
     try:
+        import time
         from src.core.storage_manager import StorageManager
+        now = time.monotonic()
+        sm_cls_id = id(StorageManager)
+        if _CLOUD_PACKS_FAST_CACHE is not None:
+            cached_ts, cached_cls_id, cached_exact, cached_norm = _CLOUD_PACKS_FAST_CACHE
+            if cached_cls_id == sm_cls_id and (now - cached_ts) < 2.0:
+                return cached_exact, cached_norm
+
         sm = StorageManager()
         if not sm.online or not sm.root:
             return {}, {}
@@ -259,12 +325,14 @@ def _index_all_cloud_pack_videos() -> Tuple[Dict[str, str], Dict[str, str]]:
             mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
         except OSError:
             mtime_ns = 0
-        cache_key = (str(packs_dir.resolve()), mtime_ns)
+        cache_key = (str(packs_dir), mtime_ns)
         if cache_key in _CLOUD_PACKS_VIDEO_CACHE:
-            return _CLOUD_PACKS_VIDEO_CACHE[cache_key]
+            exact_map, norm_map = _CLOUD_PACKS_VIDEO_CACHE[cache_key]
+            _CLOUD_PACKS_FAST_CACHE = (now, sm_cls_id, exact_map, norm_map)
+            return exact_map, norm_map
 
-        exact_map: Dict[str, str] = {}
-        norm_map: Dict[str, str] = {}
+        exact_map = {}
+        norm_map = {}
         for pack_sub in sorted(packs_dir.iterdir()):
             if not pack_sub.is_dir() or pack_sub.name.startswith("."):
                 continue
@@ -280,6 +348,7 @@ def _index_all_cloud_pack_videos() -> Tuple[Dict[str, str], Dict[str, str]]:
         if len(_CLOUD_PACKS_VIDEO_CACHE) > 8:
             _CLOUD_PACKS_VIDEO_CACHE.clear()
         _CLOUD_PACKS_VIDEO_CACHE[cache_key] = (exact_map, norm_map)
+        _CLOUD_PACKS_FAST_CACHE = (now, sm_cls_id, exact_map, norm_map)
         return exact_map, norm_map
     except Exception:
         return {}, {}
@@ -315,36 +384,49 @@ def resolve_transition_preview_video(asset: Any) -> str:
 
             by_stem, fallback_video = _index_pack_videos(pack_root)
             for candidate_key in (master_stem, asset_name):
-                if candidate_key and candidate_key in by_stem and os.path.isfile(by_stem[candidate_key]):
+                if candidate_key and candidate_key in by_stem:
                     return by_stem[candidate_key]
 
-            norm_targets = {_norm_stem(master_stem), _norm_stem(asset_name)} - {""}
-            for stem_k, vid_path in by_stem.items():
-                if _norm_stem(stem_k) in norm_targets and os.path.isfile(vid_path):
-                    return vid_path
+            by_norm = _PACK_NORM_VIDEO_INDEX_CACHE.get(str(pack_root), {})
+            for candidate_key in (master_stem, asset_name):
+                nk = _norm_stem(candidate_key)
+                if nk and nk in by_norm:
+                    return by_norm[nk]
 
             # Use pack-level tutorial/demo video when asset is a .drfx bundle or small pack without per-item stems
-            if fallback_video and os.path.isfile(fallback_video):
+            if fallback_video:
                 if master_p.lower().endswith(".drfx") or len(by_stem) <= 3:
                     return fallback_video
 
         else:
-            # Check sibling .mp4 next to master_p
+            # Cross-reference extracted .setting transitions against active cloud packs first (O(1) memory lookup)
+            exact_cloud, norm_cloud = _index_all_cloud_pack_videos()
+            if exact_cloud:
+                for candidate_key in (master_stem, asset_name):
+                    if candidate_key and candidate_key in exact_cloud:
+                        return exact_cloud[candidate_key]
+                for candidate_key in (master_stem, asset_name):
+                    nk = _norm_stem(candidate_key)
+                    if nk and nk in norm_cloud:
+                        return norm_cloud[nk]
+
+            # Check sibling .mp4/.mov next to master_p
             master_path = Path(master_p)
-            for ext in VIDEO_EXTS:
+            for ext in (".mp4", ".mov", ".webm"):
                 sib = master_path.with_suffix(ext)
                 if sib.is_file():
                     return str(sib.resolve())
+            return ""
 
     # Cross-reference extracted .setting transitions against active cloud packs (e.g. GR-44 1,005 .mp4s)
     exact_cloud, norm_cloud = _index_all_cloud_pack_videos()
     if exact_cloud:
         for candidate_key in (master_stem, asset_name):
-            if candidate_key and candidate_key in exact_cloud and os.path.isfile(exact_cloud[candidate_key]):
+            if candidate_key and candidate_key in exact_cloud:
                 return exact_cloud[candidate_key]
         for candidate_key in (master_stem, asset_name):
             nk = _norm_stem(candidate_key)
-            if nk and nk in norm_cloud and os.path.isfile(norm_cloud[nk]):
+            if nk and nk in norm_cloud:
                 return norm_cloud[nk]
 
     return ""

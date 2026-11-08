@@ -81,23 +81,42 @@ class PackManager:
         "sony_canon_monitor_luts": ["monitor_luts", "a4_monitor", "slog3", "clog3", "vlog"],
     }
 
+    _raw_installed_cache: Optional[ tuple ] = None
+    _sm_packs_cache: Optional[ tuple ] = None
+
+    @classmethod
+    def _invalidate_caches(cls) -> None:
+        cls._raw_installed_cache = None
+        cls._sm_packs_cache = None
+
     @classmethod
     def get_installed_packs(cls, verify_files: bool = True) -> Dict[str, Any]:
         """Lấy danh sách các gói đã cài đặt trên máy từ data/installed_packs.json.
         Khi verify_files=True (mặc định), các gói có danh sách installed_paths nhưng toàn bộ
         tệp trên ổ cứng đã bị xóa (ví dụ thư mục tạm pytest hoặc dọn kho) sẽ được lọc bỏ.
         """
-        if not cls.INSTALLED_PACKS_FILE.exists():
-            return {}
+        installed_file = Path(cls.INSTALLED_PACKS_FILE)
         try:
-            with open(cls.INSTALLED_PACKS_FILE, "r", encoding="utf-8") as f:
-                raw_data = json.load(f)
-        except Exception:
+            st = installed_file.stat()
+            cache_key = (str(installed_file), st.st_mtime_ns, st.st_size)
+        except OSError:
+            cls._raw_installed_cache = None
             return {}
-        if not isinstance(raw_data, dict):
-            return {}
+
+        if cls._raw_installed_cache is not None and cls._raw_installed_cache[0] == cache_key:
+            raw_data = cls._raw_installed_cache[1]
+        else:
+            try:
+                with open(installed_file, "r", encoding="utf-8") as f:
+                    raw_data = json.load(f)
+            except Exception:
+                return {}
+            if not isinstance(raw_data, dict):
+                return {}
+            cls._raw_installed_cache = (cache_key, raw_data)
+
         if not verify_files:
-            return raw_data
+            return dict(raw_data)
         verified: Dict[str, Any] = {}
         for pack_id, entry in raw_data.items():
             if not isinstance(entry, dict):
@@ -108,6 +127,42 @@ class PackManager:
                     continue
             verified[pack_id] = entry
         return verified
+
+    @classmethod
+    def _get_storage_registry_packs(cls) -> tuple[Optional[Path], list]:
+        """Đọc danh sách packs từ StorageManager.registry() có bộ nhớ đệm theo mtime."""
+        try:
+            import time
+            from src.core.storage_manager import StorageManager
+            now = time.monotonic()
+            if cls._sm_packs_cache is not None:
+                cached_ts, cached_root, cached_reg_mtime, cached_packs = cls._sm_packs_cache
+                if (now - cached_ts) < 0.5 and cached_root is not None:
+                    reg_file = cached_root / ".chundvc_meta" / "registry.json"
+                    try:
+                        if reg_file.stat().st_mtime_ns == cached_reg_mtime:
+                            return cached_root, cached_packs
+                    except OSError:
+                        pass
+                elif (now - cached_ts) < 0.5 and cached_root is None:
+                    return None, []
+
+            sm = StorageManager()
+            if not sm.online:
+                cls._sm_packs_cache = (now, None, 0, [])
+                return None, []
+            sm_root = sm.root
+            reg_file = sm.meta / "registry.json"
+            try:
+                reg_mtime = reg_file.stat().st_mtime_ns
+            except OSError:
+                reg_mtime = 0
+            reg = sm.registry()
+            packs = reg.get("packs", []) if isinstance(reg, dict) else []
+            cls._sm_packs_cache = (now, sm_root, reg_mtime, packs)
+            return sm_root, packs
+        except Exception:
+            return None, []
 
     @classmethod
     def is_pack_installed(cls, pack_id: str) -> bool:
@@ -133,11 +188,10 @@ class PackManager:
 
         # Dự phòng: Kiểm tra thêm trong StorageManager (registry packs)
         try:
-            from src.core.storage_manager import StorageManager
-            sm = StorageManager()
-            if sm.online:
-                reg = sm.registry()
-                for p in reg.get('packs', []):
+            import itertools
+            sm_root, reg_packs = cls._get_storage_registry_packs()
+            if sm_root is not None and reg_packs:
+                for p in reg_packs:
                     pid = str(p.get('id', '')).strip().lower()
                     pname = str(p.get('name', '')).strip().lower()
                     folder_rel = str(p.get('folder', '')).strip()
@@ -151,9 +205,14 @@ class PackManager:
                     elif aliases and any(a in pname or a in pfolder for a in aliases):
                         matched = True
 
-                    if matched and folder_rel and (sm.root / folder_rel).exists():
-                        # Tự động đồng bộ vào installed_packs.json để cache lâu dài
-                        pack_files = [str(f) for f in (sm.root / folder_rel).glob("**/*") if f.is_file()][:10]
+                    if matched and folder_rel and (sm_root / folder_rel).exists():
+                        # Tự động đồng bộ vào installed_packs.json để cache lâu dài (dừng sớm ở 10 file đầu tiên)
+                        pack_files = list(
+                            itertools.islice(
+                                (str(f) for f in (sm_root / folder_rel).rglob("*") if f.is_file()),
+                                10,
+                            )
+                        )
                         cls.record_installed_pack(pack_id, folder_name=p.get('name', pack_id), installed_paths=pack_files)
                         return True
         except Exception:
@@ -197,6 +256,7 @@ class PackManager:
                 json.dump(installed, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+        cls._invalidate_caches()
 
     @classmethod
     def uninstall_pack(cls, pack_id: str) -> bool:
@@ -234,6 +294,7 @@ class PackManager:
         except Exception:
             pass
 
+        cls._invalidate_caches()
         return removed_any
 
     @staticmethod

@@ -43,10 +43,12 @@ class AudioExtractor:
         except ffmpeg.Error as e:
             # Fallback trực tiếp bằng subprocess nếu ffmpeg-python gặp sự cố
             try:
+                _no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
                 cmd = ["ffmpeg", "-y", "-i", norm_video, "-ac", "1", "-ar", "16000", "-vn", norm_output]
                 res = subprocess.run(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    text=True, timeout=120, encoding="utf-8", errors="replace"
+                    text=True, timeout=120, encoding="utf-8", errors="replace",
+                    creationflags=_no_win,
                 )
                 if res.returncode != 0:
                     stderr_msg = res.stderr or (e.stderr.decode("utf-8", errors="replace") if e.stderr else str(e))
@@ -57,10 +59,12 @@ class AudioExtractor:
 
         if not os.path.exists(norm_output) or os.path.getsize(norm_output) == 0:
             # Thử lần cuối bằng lệnh subprocess trực tiếp
+            _no_win = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
             cmd = ["ffmpeg", "-y", "-i", norm_video, "-ac", "1", "-ar", "16000", "-vn", norm_output]
             subprocess.run(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, timeout=120, encoding="utf-8", errors="replace"
+                text=True, timeout=120, encoding="utf-8", errors="replace",
+                creationflags=_no_win,
             )
             if not os.path.exists(norm_output) or os.path.getsize(norm_output) == 0:
                 raise RuntimeError(f"Không thể tạo tệp âm thanh WAV tại: {norm_output}")

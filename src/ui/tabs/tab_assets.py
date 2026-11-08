@@ -59,16 +59,34 @@ MAX_FUSION_SETTING_BYTES = 5 * 1024 * 1024  # 5 MiB giới hạn tối đa cho f
 # =========================================================================
 class FavoritesManager:
     FILE_PATH = "data/favorites.json"
+    _cache: Optional[set] = None
+    _cache_mtime: float = -1.0
+    _cache_path: str = ""
 
     @classmethod
     def load(cls) -> set:
+        try:
+            abs_p = os.path.abspath(cls.FILE_PATH)
+        except Exception:
+            abs_p = cls.FILE_PATH
+
         if not os.path.exists("data"):
             os.makedirs("data", exist_ok=True)
         if not os.path.exists(cls.FILE_PATH):
+            cls._cache = set()
+            cls._cache_mtime = -1.0
+            cls._cache_path = abs_p
             return set()
         try:
+            st_mtime = os.stat(cls.FILE_PATH).st_mtime
+            if cls._cache is not None and cls._cache_path == abs_p and cls._cache_mtime == st_mtime:
+                return set(cls._cache)
             with open(cls.FILE_PATH, 'r', encoding='utf-8') as f:
-                return set(json.load(f))
+                data = set(json.load(f))
+            cls._cache = data
+            cls._cache_mtime = st_mtime
+            cls._cache_path = abs_p
+            return set(data)
         except Exception:
             return set()
 
@@ -79,6 +97,9 @@ class FavoritesManager:
         try:
             with open(cls.FILE_PATH, 'w', encoding='utf-8') as f:
                 json.dump(list(favs), f)
+            cls._cache = set(favs)
+            cls._cache_path = os.path.abspath(cls.FILE_PATH)
+            cls._cache_mtime = os.stat(cls.FILE_PATH).st_mtime
         except Exception:
             pass
 
@@ -87,16 +108,34 @@ class RecentManager:
     """Quản lý danh sách các đạo cụ đã dùng hoặc bấm xem gần đây."""
     FILE_PATH = "data/recent.json"
     MAX_ITEMS = 60
+    _cache: Optional[list] = None
+    _cache_mtime: float = -1.0
+    _cache_path: str = ""
 
     @classmethod
     def load(cls) -> list:
+        try:
+            abs_p = os.path.abspath(cls.FILE_PATH)
+        except Exception:
+            abs_p = cls.FILE_PATH
+
         if not os.path.exists("data"):
             os.makedirs("data", exist_ok=True)
         if not os.path.exists(cls.FILE_PATH):
+            cls._cache = []
+            cls._cache_mtime = -1.0
+            cls._cache_path = abs_p
             return []
         try:
+            st_mtime = os.stat(cls.FILE_PATH).st_mtime
+            if cls._cache is not None and cls._cache_path == abs_p and cls._cache_mtime == st_mtime:
+                return list(cls._cache)
             with open(cls.FILE_PATH, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = list(json.load(f))
+            cls._cache = data
+            cls._cache_mtime = st_mtime
+            cls._cache_path = abs_p
+            return list(data)
         except Exception:
             return []
 
@@ -114,6 +153,9 @@ class RecentManager:
         try:
             with open(cls.FILE_PATH, 'w', encoding='utf-8') as f:
                 json.dump(items, f)
+            cls._cache = list(items)
+            cls._cache_path = os.path.abspath(cls.FILE_PATH)
+            cls._cache_mtime = os.stat(cls.FILE_PATH).st_mtime
         except Exception:
             pass
 
@@ -662,6 +704,16 @@ class TextLivePreviewWidget(QWidget):
         self.anim_timer.setInterval(33)  # ~30 FPS
         self.anim_timer.timeout.connect(self._on_tick)
         self.anim_timer.start()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if hasattr(self, "anim_timer") and not self.anim_timer.isActive():
+            self.anim_timer.start()
+
+    def hideEvent(self, event):
+        if hasattr(self, "anim_timer") and self.anim_timer.isActive():
+            self.anim_timer.stop()
+        super().hideEvent(event)
 
     def set_params(
         self,
@@ -1274,6 +1326,16 @@ class TransitionLoopWidget(QWidget):
         self.anim_timer.timeout.connect(self._on_tick)
         self.anim_timer.start()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if hasattr(self, "anim_timer") and not self.anim_timer.isActive():
+            self.anim_timer.start()
+
+    def hideEvent(self, event):
+        if hasattr(self, "anim_timer") and self.anim_timer.isActive():
+            self.anim_timer.stop()
+        super().hideEvent(event)
+
     def set_transition(self, name: str, kind: str, frames: int, asset: Any = None, thumb_path: str = ""):
         self.trans_name = name
         self.trans_kind = kind
@@ -1831,14 +1893,21 @@ class IconMemePreviewWidget(QWidget):
 
     def stop_playback(self):
         """Dừng phát video an toàn: tăng epoch trước, dọn connections và clear player source."""
+        was_active = self._is_active_playback
         self._playback_epoch += 1
         self._is_active_playback = False
         self._disconnect_session()
 
         if self._player is not None:
             try:
-                self._player.stop()
-                self._player.setSource(QUrl())
+                src_fn = getattr(self._player, "source", None)
+                cur_src = src_fn() if callable(src_fn) else None
+                state_fn = getattr(self._player, "playbackState", None)
+                cur_state = state_fn() if callable(state_fn) else None
+                has_src = cur_src is None or not hasattr(cur_src, "isEmpty") or not cur_src.isEmpty()
+                if was_active or cur_state != QMediaPlayer.PlaybackState.StoppedState or has_src:
+                    self._player.stop()
+                    self._player.setSource(QUrl())
             except Exception:
                 pass
 
@@ -2538,6 +2607,7 @@ class AudioInspectorWidget(QWidget):
 
     def stop_playback(self):
         """Dừng phát âm thanh an toàn: tăng epoch trước, dọn connections và clear player source."""
+        was_active = self._is_active_playback
         self._playback_epoch += 1
         self._is_active_playback = False
         self._session_has_error = False
@@ -2546,8 +2616,14 @@ class AudioInspectorWidget(QWidget):
 
         if self._player is not None:
             try:
-                self._player.stop()
-                self._player.setSource(QUrl())
+                src_fn = getattr(self._player, "source", None)
+                cur_src = src_fn() if callable(src_fn) else None
+                state_fn = getattr(self._player, "playbackState", None)
+                cur_state = state_fn() if callable(state_fn) else None
+                has_src = cur_src is None or not hasattr(cur_src, "isEmpty") or not cur_src.isEmpty()
+                if was_active or cur_state != QMediaPlayer.PlaybackState.StoppedState or has_src:
+                    self._player.stop()
+                    self._player.setSource(QUrl())
             except Exception:
                 pass
 
@@ -5467,9 +5543,8 @@ class TabAssets(QWidget):
         if hasattr(self, "content_stack"):
             self.content_stack.setCurrentIndex(0)
 
-        # Cập nhật danh mục con ở Cột 2
+        # Cập nhật danh mục con ở Cột 2 (đã bao gồm kích hoạt danh mục con và _refresh_grid)
         self._rebuild_categories_column()
-        self._refresh_grid()
 
         from src.ui.lux.library.asset_model import AssetObjRole
         index = self.asset_filter.index(0, 0)
@@ -5690,25 +5765,43 @@ class TabAssets(QWidget):
             ])
 
         known_subs = {cid for cid, _ in sub_cats}
+        sub_counts: Dict[str, int] = {}
+        tab_total_count = 0
+        discovered_packs: List[str] = []
+        seen_packs = set()
+        pack_counts: Dict[str, int] = {}
+
+        # Quét 1 vòng O(N) duy nhất qua self.all_assets để tính số lượng sub-category và pack
         for asset in self.all_assets:
+            p_name = getattr(asset, "pack_name", None) or (asset.get("pack_name") if isinstance(asset, dict) else "")
+            if p_name:
+                pack_counts[p_name] = pack_counts.get(p_name, 0) + 1
+
             a_tab = self._get_asset_tab(asset)
             if a_tab == tab:
+                tab_total_count += 1
                 sub_label = self._get_asset_sub(asset)
-                if sub_label and sub_label not in known_subs and sub_label not in ("all", "Tất cả", "default"):
-                    sub_cats.append((sub_label, sub_label))
-                    known_subs.add(sub_label)
+                if sub_label:
+                    sub_counts[sub_label] = sub_counts.get(sub_label, 0) + 1
+                    if sub_label not in known_subs and sub_label not in ("all", "Tất cả", "default"):
+                        sub_cats.append((sub_label, sub_label))
+                        known_subs.add(sub_label)
+                if p_name and p_name not in ("Mặc định", "all", "") and p_name not in seen_packs:
+                    seen_packs.add(p_name)
+                    discovered_packs.append(p_name)
 
         def _get_sub_count(cid_target):
             if cid_target == "all":
-                return sum(1 for a in self.all_assets if self._get_asset_tab(a) == tab)
-            return sum(1 for a in self.all_assets if self._get_asset_tab(a) == tab and self._get_asset_sub(a) == cid_target)
+                return tab_total_count
+            return sub_counts.get(cid_target, 0)
 
         # Lọc danh mục: giữ "all", các nhóm có item, hoặc nhóm mặc định hệ thống
         visible_sub_cats = []
+        base_sub_ids = {c[0] for c in sub_cats[:4]}
         for cid, cname in sub_cats:
             cnt = _get_sub_count(cid)
             # Chỉ ẩn những mục rác 0 item nếu không phải là nhóm cơ bản
-            if cid != "all" and cnt == 0 and cid not in {c[0] for c in sub_cats[:4]}:
+            if cid != "all" and cnt == 0 and cid not in base_sub_ids:
                 continue
             visible_sub_cats.append((cid, cname, cnt))
 
@@ -5750,19 +5843,8 @@ class TabAssets(QWidget):
 
             self.cats_vbox.addWidget(btn)
 
-        # Quét các gói cài đặt (Packs) cho danh mục này
-        discovered_packs = []
-        seen = set()
-        for a in self.all_assets:
-            a_tab = "text" if isinstance(a, TextStylePreset) else "trans" if isinstance(a, TransitionStylePreset) else getattr(a, "tab", "")
-            if a_tab == tab:
-                p_name = getattr(a, "pack_name", None) or (a.get("pack_name") if isinstance(a, dict) else "")
-                if p_name and p_name not in ("Mặc định", "all", "") and p_name not in seen:
-                    seen.add(p_name)
-                    discovered_packs.append(p_name)
-
-        # Ghi nhận thêm từ PackManager
-        for pack_id, p_info in PackManager.get_installed_packs().items():
+        # Ghi nhận thêm từ PackManager (không quét lại đĩa cứng verify_files)
+        for pack_id, p_info in PackManager.get_installed_packs(verify_files=False).items():
             if not isinstance(p_info, dict):
                 continue
             p_cat = (p_info.get("category") or "").lower()
@@ -5776,8 +5858,8 @@ class TabAssets(QWidget):
                 (tab == "overlay" and p_cat in ("overlay", "overlays")) or
                 (tab == "bgm" and p_cat in ("bgm", "music", "nhac_nen"))
             )
-            if cat_match and p_name not in seen:
-                seen.add(p_name)
+            if cat_match and p_name not in seen_packs:
+                seen_packs.add(p_name)
                 discovered_packs.append(p_name)
 
         if discovered_packs:
@@ -5794,7 +5876,7 @@ class TabAssets(QWidget):
             self.cats_vbox.addWidget(lbl_packs_hdr)
 
             for p_name in discovered_packs:
-                count = sum(1 for a in self.all_assets if (getattr(a, "pack_name", "") == p_name or (isinstance(a, dict) and a.get("pack_name") == p_name)))
+                count = pack_counts.get(p_name, 0)
                 cnt_str = f" ({count})" if count > 0 else ""
                 btn_pack = QPushButton(f"  📦 {p_name}{cnt_str}")
                 btn_pack.setProperty("sub_cat_id", f"pack:{p_name}")
@@ -6018,12 +6100,22 @@ class TabAssets(QWidget):
 
         # 1. Cập nhật AssetFilterProxyModel (< 1ms, không tạo QWidget)
         if hasattr(self, "asset_filter"):
-            self.asset_filter.set_category(tab)
-            self.asset_filter.set_sub_category(cat)
-            self.asset_filter.set_filter_mode(filter_mode)
-            if filter_mode == "recent":
-                self.asset_filter.set_recent_ids(RecentManager.load())
-            self.asset_filter.set_search_query(query)
+            recent_ids = RecentManager.load() if filter_mode == "recent" else None
+            if hasattr(self.asset_filter, "set_filters_batch"):
+                self.asset_filter.set_filters_batch(
+                    category=tab,
+                    sub_category=cat,
+                    filter_mode=filter_mode,
+                    recent_ids=recent_ids,
+                    search_query=query,
+                )
+            else:
+                self.asset_filter.set_category(tab)
+                self.asset_filter.set_sub_category(cat)
+                self.asset_filter.set_filter_mode(filter_mode)
+                if recent_ids is not None:
+                    self.asset_filter.set_recent_ids(recent_ids)
+                self.asset_filter.set_search_query(query)
 
             count = self.asset_filter.rowCount()
             self.lbl_count_badge.setText(f"{count} mẫu")

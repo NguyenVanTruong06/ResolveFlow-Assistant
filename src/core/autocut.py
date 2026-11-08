@@ -395,7 +395,8 @@ def get_media_metadata(video_path: str) -> Dict[str, Any]:
         try:
             res = subprocess.run(
                 cmd, capture_output=True, text=True, check=True, timeout=5,
-                encoding="utf-8", errors="replace"
+                encoding="utf-8", errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0,
             )
             probe = json.loads(res.stdout)
         except Exception:

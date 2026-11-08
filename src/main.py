@@ -277,11 +277,21 @@ def start_app():
     resolve_state = ResolveStateService(gateway=gateway, poll_interval_ms=1000)
 
     # 2. Quét & nạp toàn bộ kho đạo cụ (600+ assets) và bộ chỉ mục tìm kiếm
-    try:
-        from src.core.transition_preset import TransitionMacroGenerator
-        TransitionMacroGenerator.install_transitions_to_davinci_resolve()
-    except Exception as e:
-        logger.warning("Auto-install transitions to DaVinci Resolve error: %s", e)
+    def _bg_startup_warmup():
+        try:
+            from src.utils.path_utils import get_installed_linux_fonts
+            if sys.platform.startswith("linux"):
+                get_installed_linux_fonts()
+        except Exception:
+            pass
+        try:
+            from src.core.transition_preset import TransitionMacroGenerator
+            TransitionMacroGenerator.install_transitions_to_davinci_resolve()
+        except Exception as e:
+            logger.debug("Auto-install transitions to DaVinci Resolve error: %s", e)
+
+    import threading
+    threading.Thread(target=_bg_startup_warmup, daemon=True, name="ChunDVC_Warmup").start()
 
     all_assets = load_all_library_assets()
     search_index = SearchIndex(assets=all_assets)
@@ -301,7 +311,11 @@ def start_app():
 
     # 5. Timer polling trạng thái kho (stat polling nhẹ nhàng, không parse media hay scan bundled)
     from PySide6.QtCore import QTimer
-    storage_signature = [None]
+    try:
+        from src.core.storage_manager import StorageManager
+        storage_signature = [_compute_storage_poll_signature(StorageManager())]
+    except Exception:
+        storage_signature = [None]
 
     storage_timer = QTimer(dock)
     storage_timer.timeout.connect(lambda: poll_storage_status(None, dock, storage_signature))

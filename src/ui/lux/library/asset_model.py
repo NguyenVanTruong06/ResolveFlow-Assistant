@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import logging
+import unicodedata
 from typing import Optional, List, Dict, Any, Set
 
 from PySide6.QtCore import Qt, QAbstractListModel, QModelIndex, Signal, Slot
@@ -93,19 +94,26 @@ def extract_asset_info(item: Any) -> Dict[str, Any]:
     }
     kind = kind_map.get(cat, cat.upper())
 
+    def _norm(txt: Any) -> str:
+        return unicodedata.normalize("NFC", str(txt)).strip().lower() if txt else ""
+
     return {
         "id": asset_id,
         "name": name,
+        "_name_lower": name.lower(),
         "category": cat,
         "sub": sub,
+        "_sub_norm": _norm(sub),
         "duration": dur,
         "file_path": file_path,
         "thumbnail_path": thumbnail_path,
         "preview_path": preview_path,
         "motion": motion,
         "tags": tags,
+        "_tags_norm": {_norm(t) for t in tags if t},
         "kind": kind,
         "pack_name": pack_name,
+        "_pack_norm": _norm(pack_name),
         "obj": item
     }
 
@@ -129,6 +137,8 @@ class AssetListModel(QAbstractListModel):
         self._favs: Set[str] = set(favs) if favs is not None else set()
         self._thumb_cache: Dict[str, QPixmap] = {}
         self._pending_thumb_requests: Set[str] = set()
+        self._pending_thumb_assets: Dict[str, Set[str]] = {}
+        self._failed_thumb_files: Set[str] = set()
 
         if assets:
             self.set_assets(assets)
@@ -241,7 +251,8 @@ class AssetListModel(QAbstractListModel):
 
         # 1. Nếu có thumbnail_path trực tiếp là ảnh thật trên đĩa (vd: PNG từ gói DRFX), nạp và cache ngay
         thumb_p = info.get("thumbnail_path")
-        if not thumb_p and cat in ("trans", "transition", "transitions"):
+        if not thumb_p and cat in ("trans", "transition", "transitions") and not info.get("_drfx_thumb_checked"):
+            info["_drfx_thumb_checked"] = True
             try:
                 from src.ui.lux.library.transition_preview_generator import resolve_drfx_thumbnail
                 resolved_thumb = resolve_drfx_thumbnail(asset_obj)
@@ -262,14 +273,16 @@ class AssetListModel(QAbstractListModel):
         if cat in ("trans", "transition", "transitions"):
             _vid_exts = (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v")
             if not (cand_p and str(cand_p).lower().endswith(_vid_exts) and os.path.isfile(str(cand_p))):
-                try:
-                    from src.ui.lux.library.transition_preview_generator import resolve_transition_preview_video
-                    resolved_vid = resolve_transition_preview_video(asset_obj)
-                    if resolved_vid and os.path.isfile(resolved_vid):
-                        cand_p = resolved_vid
-                        info["preview_path"] = resolved_vid
-                except Exception:
-                    pass
+                if not info.get("_trans_vid_checked"):
+                    info["_trans_vid_checked"] = True
+                    try:
+                        from src.ui.lux.library.transition_preview_generator import resolve_transition_preview_video
+                        resolved_vid = resolve_transition_preview_video(asset_obj)
+                        if resolved_vid and os.path.isfile(resolved_vid):
+                            cand_p = resolved_vid
+                            info["preview_path"] = resolved_vid
+                    except Exception:
+                        pass
 
             if cand_p and str(cand_p).lower().endswith(_vid_exts) and os.path.isfile(str(cand_p)):
                 # Nếu khung hình video đã có sẵn trong đĩa cache AssetCache thì nạp tức thì
@@ -283,9 +296,9 @@ class AssetListModel(QAbstractListModel):
                             return pix
                 except Exception:
                     pass
-                if cand_p not in self._pending_thumb_requests:
+                if cand_p not in self._failed_thumb_files:
                     self._request_async_thumbnail(asset_id, cand_p)
-                return None
+                    return None
 
             # 3. CHỈ fallback sang vẽ mô phỏng khi chuyển cảnh hoàn toàn KHÔNG có ảnh hay video thật trên đĩa
             try:
@@ -299,7 +312,7 @@ class AssetListModel(QAbstractListModel):
             return None
 
         # Thử nạp bất đồng bộ từ preview_path hoặc file_path cho các loại media khác (Meme, Overlay...)
-        if cand_p and os.path.isfile(str(cand_p)) and cand_p not in self._pending_thumb_requests:
+        if cand_p and os.path.isfile(str(cand_p)) and cand_p not in self._failed_thumb_files:
             self._request_async_thumbnail(asset_id, cand_p)
         return None
 
@@ -327,8 +340,12 @@ class AssetListModel(QAbstractListModel):
             self.dataChanged.emit(idx, idx, [ThumbnailRole])
 
     def _request_async_thumbnail(self, asset_id: str, file_path: str):
-        """Dispatches thumbnail extraction via AssetCache."""
+        """Dispatches thumbnail extraction via AssetCache (coalescing multiple asset_ids sharing the same file)."""
         if not os.path.isfile(file_path):
+            return
+        waiters = self._pending_thumb_assets.setdefault(file_path, set())
+        waiters.add(asset_id)
+        if file_path in self._pending_thumb_requests:
             return
         self._pending_thumb_requests.add(file_path)
 
@@ -337,14 +354,20 @@ class AssetListModel(QAbstractListModel):
 
             def _on_loaded(thumb_path: str):
                 self._pending_thumb_requests.discard(file_path)
+                target_ids = self._pending_thumb_assets.pop(file_path, {asset_id})
                 if thumb_path and os.path.isfile(thumb_path):
                     pix = QPixmap(thumb_path)
-                    self.update_thumbnail(asset_id, pix)
+                    if not pix.isNull():
+                        for aid in target_ids:
+                            self.update_thumbnail(aid, pix)
+                        return
+                self._failed_thumb_files.add(file_path)
 
             request_thumbnail_async(file_path, _on_loaded)
         except Exception as e:
             logger.debug("Failed to dispatch async thumbnail for %s: %s", asset_id, e)
             self._pending_thumb_requests.discard(file_path)
+            self._pending_thumb_assets.pop(file_path, None)
 
     def toggle_favorite(self, asset_id: str) -> bool:
         """Toggles favorite state for an asset, notifies views."""
