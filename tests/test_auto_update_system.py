@@ -190,3 +190,42 @@ def test_download_file_retry_on_504_and_succeed(qapp, tmp_path, monkeypatch):
         assert f.read() == b"FAKE_DEB_DATA_1234567890"
 
 
+def test_download_file_fallback_url_success(qapp, tmp_path, monkeypatch):
+    """Kiểm tra _download_file tự động chuyển sang fallback_url khi URL chính bị 504."""
+    import urllib.error
+    import io
+
+    worker = UpdateDownloadAndInstallWorker({"latest_version": "1.0.17", "assets": {}})
+    dest = str(tmp_path / "test_download_fb.deb")
+
+    urls_called = []
+    def mock_urlopen(req, timeout=45):
+        urls_called.append(req.full_url)
+        if "primary.com" in req.full_url:
+            fp = io.BytesIO(b"Gateway Time-out")
+            raise urllib.error.HTTPError(req.full_url, 504, "Gateway Time-out", {}, fp)
+        mock_resp = MagicMock()
+        payload = b"FALLBACK_DATA"
+        mock_resp.headers = {"content-length": str(len(payload))}
+        mock_resp.read.side_effect = [payload, b""]
+        mock_resp.__enter__.return_value = mock_resp
+        return mock_resp
+
+    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    ok = worker._download_file(
+        "https://primary.com/asset.deb",
+        dest,
+        expected_size=13,
+        max_retries=2,
+        fallback_url="https://fallback.com/asset.deb"
+    )
+    assert ok is True
+    assert "https://primary.com/asset.deb" in urls_called
+    assert "https://fallback.com/asset.deb" in urls_called
+    with open(dest, "rb") as f:
+        assert f.read() == b"FALLBACK_DATA"
+
+
+
