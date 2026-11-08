@@ -7,6 +7,7 @@ import time
 import uuid
 from typing import Optional, Dict, Any, List, Tuple, Literal, Union
 from pydantic import BaseModel, Field
+from src.utils.subprocess_utils import no_window_kwargs
 
 class SubtitleConfig(BaseModel):
     """
@@ -82,7 +83,7 @@ class ResolveAutomation:
                 out = subprocess.run(
                     ["powershell.exe", "-NoProfile", "-Command",
                      "(Get-Process Resolve -ErrorAction SilentlyContinue | Select-Object -First 1).Path"],
-                    capture_output=True, text=True, timeout=10
+                    capture_output=True, text=True, timeout=10, **no_window_kwargs()
                 ).stdout.strip()
                 if out:
                     candidates.append(os.path.join(os.path.dirname(out), "fusionscript.dll"))
@@ -141,7 +142,7 @@ class ResolveAutomation:
             elif sys.platform.startswith("win"):
                 try:
                     import subprocess
-                    p_check = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Resolve.exe"], capture_output=True, text=True, timeout=0.5)
+                    p_check = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Resolve.exe"], capture_output=True, text=True, timeout=0.5, **no_window_kwargs())
                     if "Resolve.exe" not in p_check.stdout:
                         self.last_connect_error = "Tiến trình DaVinci Resolve chưa được bật trên hệ thống."
                         return False
@@ -1254,7 +1255,7 @@ class ResolveAutomation:
                         ffprobe_exe, "-v", "error", "-select_streams", "a",
                         "-show_entries", "stream=index", "-of", "csv=p=0", media_path,
                     ]
-                    out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
+                    out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3, **no_window_kwargs())
                     if out.stdout.strip():
                         return True
             except Exception:
@@ -2793,6 +2794,7 @@ def run_title_insert_worker_isolated(
             capture_output=True,
             text=True,
             timeout=timeout,
+            **no_window_kwargs(),
         )
         for line in proc.stdout.splitlines():
             if line.startswith("CHUNDVC_RESULT:"):

@@ -18,7 +18,7 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 APP_NAME = "ResolveFlow-Assistant"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.18"
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 ENTRY_POINT = os.path.join("src", "main.py")
 
@@ -304,6 +304,8 @@ def get_hidden_imports() -> List[str]:
         "src.ui.widgets.update_toast",
         "src.utils",
         "src.utils.path_utils",
+        "src.utils.subprocess_utils",
+        "src.utils.windows_shortcuts",
     ]
 
 def get_excludes() -> List[str]:
@@ -329,6 +331,9 @@ def get_pyinstaller_args() -> List[str]:
         "--clean",
         "--windowed",
     ]
+    ico = os.path.join("assets", "branding", "chundvc.ico")
+    if os.path.exists(ico):
+        args.extend(["--icon", ico])
     for src, dst in get_resource_specs():
         if os.path.exists(src):
             args.extend(["--add-data", f"{src}{sep}{dst}"])
@@ -404,6 +409,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=os.path.join('assets', 'branding', 'chundvc.ico') if os.path.exists(os.path.join('assets', 'branding', 'chundvc.ico')) else None,
 )
 
 coll = COLLECT(
@@ -546,6 +552,53 @@ start "" "%~dp0{APP_NAME}.exe" %*
             f.write(bat_content)
         with open(os.path.join(dist_app_dir, "Launch_ResolveFlow.bat"), "w", encoding="utf-8") as f:
             f.write(bat_content)
+
+        # Icon cho shortcut Start Menu / Desktop
+        ico_src = os.path.join(PROJECT_ROOT, "assets", "branding", "chundvc.ico")
+        if os.path.exists(ico_src):
+            shutil.copy2(ico_src, os.path.join(dist_app_dir, "chundvc.ico"))
+
+        # Trình cài đặt 1-click: copy vào %LOCALAPPDATA%\\Programs\\ChunDVC + tạo shortcut Start Menu/Desktop
+        installer_bat = os.path.join(dist_app_dir, "Install_ChunDVC_Windows.bat")
+        with open(installer_bat, "w", encoding="utf-8") as f:
+            f.write(WINDOWS_INSTALLER_BAT)
+
+
+WINDOWS_INSTALLER_BAT = r"""@echo off
+chcp 65001 >nul
+setlocal
+set "SRC=%~dp0"
+set "DEST=%LOCALAPPDATA%\Programs\ChunDVC"
+echo [ChunDVC] Dang cai dat vao "%DEST%" ...
+taskkill /F /IM ResolveFlow-Assistant.exe >nul 2>&1
+robocopy "%SRC%." "%DEST%" /E /NFL /NDL /NJH /NJS /NP /XF Install_ChunDVC_Windows.bat >nul
+if %ERRORLEVEL% GEQ 8 (
+  echo [ChunDVC] Loi sao chep tep. & pause & exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ws=New-Object -ComObject WScript.Shell;" ^
+  "foreach($d in @([Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('Desktop'))){" ^
+  "$s=$ws.CreateShortcut((Join-Path $d 'ChunDVC.lnk'));" ^
+  "$s.TargetPath=Join-Path $env:LOCALAPPDATA 'Programs\ChunDVC\ResolveFlow-Assistant.exe';" ^
+  "$s.WorkingDirectory=Join-Path $env:LOCALAPPDATA 'Programs\ChunDVC';" ^
+  "$s.IconLocation=(Join-Path $env:LOCALAPPDATA 'Programs\ChunDVC\chundvc.ico')+',0';" ^
+  "$s.Description='ChunDVC';$s.Save()}"
+echo [ChunDVC] Hoan tat! Mo ChunDVC tu Start Menu hoac Desktop.
+start "" "%DEST%\ResolveFlow-Assistant.exe"
+endlocal
+"""
+
+
+def install_windows_shortcuts(app_dir: str = None, programs_dir: str = None,
+                              desktop_dir: str = None, desktop: bool = True,
+                              dry_run: bool = False) -> dict:
+    """Đăng ký ChunDVC vào Windows Start Menu (Apps) và Desktop."""
+    from src.utils.windows_shortcuts import install_shortcuts
+    if app_dir is None:
+        dist_dir = os.path.join(PROJECT_ROOT, "dist", APP_NAME)
+        app_dir = dist_dir if os.path.isdir(dist_dir) else PROJECT_ROOT
+    return install_shortcuts(app_dir, programs_dir=programs_dir, desktop_dir=desktop_dir,
+                             desktop=desktop, dry_run=dry_run)
 
 def run_dry_run() -> bool:
     """Perform dry-run checks and validation without building."""

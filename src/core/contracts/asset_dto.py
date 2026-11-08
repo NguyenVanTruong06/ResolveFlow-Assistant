@@ -14,7 +14,11 @@ import copy
 import json
 import math
 import re
-from typing import Any, Dict, List, Literal, NotRequired, Optional, Required, Set, Tuple, TypedDict
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, TypedDict
+try:
+    from typing import NotRequired, Required
+except ImportError:
+    from typing_extensions import NotRequired, Required
 
 
 # ==============================================================================

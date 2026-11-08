@@ -7,6 +7,14 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+# Windows: chặn mọi tiến trình con (tasklist/powershell/ffmpeg...) bật nháy cửa sổ console
+if sys.platform.startswith("win"):
+    try:
+        from src.utils.subprocess_utils import install_global_no_window_patch
+        install_global_no_window_patch()
+    except Exception:
+        pass
+
 # Cấu hình chuẩn cho Qt6 trên Linux (XCB display server & FFmpeg media engine)
 if sys.platform.startswith("linux"):
     os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
@@ -289,6 +297,12 @@ def start_app():
             TransitionMacroGenerator.install_transitions_to_davinci_resolve()
         except Exception as e:
             logger.debug("Auto-install transitions to DaVinci Resolve error: %s", e)
+        if sys.platform.startswith("win") and getattr(sys, "frozen", False):
+            try:
+                from src.utils.windows_shortcuts import ensure_windows_shortcuts
+                ensure_windows_shortcuts(os.path.dirname(sys.executable))
+            except Exception as e:
+                logger.debug("Windows Start Menu shortcut registration error: %s", e)
 
     import threading
     threading.Thread(target=_bg_startup_warmup, daemon=True, name="ChunDVC_Warmup").start()
