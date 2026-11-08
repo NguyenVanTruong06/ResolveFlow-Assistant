@@ -71,8 +71,12 @@ class _GatewayWorker(QObject):
                 from src.core.resolve_api import ResolveAutomation
                 self._automation = ResolveAutomation()
 
-            # Verify connection
-            if self._automation.is_connected():
+            # Verify connection with a real API round-trip so a stale handle
+            # (Resolve restarted / project switched) is detected and refreshed.
+            ensure_live = getattr(self._automation, "ensure_live_connection", None)
+            if callable(ensure_live):
+                now_connected = bool(ensure_live())
+            elif self._automation.is_connected():
                 now_connected = True
             else:
                 now_connected = self._automation.connect()
@@ -85,6 +89,21 @@ class _GatewayWorker(QObject):
             if prev_connected:
                 self._is_connected = False
                 self.connection_changed.emit(False)
+
+    def _refresh_live_connection(self) -> None:
+        """Re-validate the Resolve handle (and reconnect if dead) on the gateway thread."""
+        try:
+            if not self._automation:
+                from src.core.resolve_api import ResolveAutomation
+                self._automation = ResolveAutomation()
+            ensure_live = getattr(self._automation, "ensure_live_connection", None)
+            now_connected = bool(ensure_live()) if callable(ensure_live) else self._automation.is_connected()
+        except Exception as e:
+            logger.debug("Live connection refresh failed: %s", e)
+            now_connected = False
+        if now_connected != self._is_connected:
+            self._is_connected = now_connected
+            self.connection_changed.emit(now_connected)
 
     def get_resolve_object(self) -> Optional[Any]:
         if self._resolve_override is not None:
@@ -119,6 +138,9 @@ class _GatewayWorker(QObject):
                 break
 
             try:
+                # Refresh a possibly stale connection right before executing the task
+                if not self._mock_mode:
+                    self._refresh_live_connection()
                 # If fn accepts resolve, inject it if needed
                 resolve_obj = self.get_resolve_object()
                 # Run the callable

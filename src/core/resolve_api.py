@@ -52,6 +52,7 @@ class ResolveAutomation:
         self.current_project = None
 
     last_connect_error: str = ""
+    last_timeline_error: str = ""
 
     @staticmethod
     def _locate_fusionscript() -> Optional[str]:
@@ -142,10 +143,15 @@ class ResolveAutomation:
             elif sys.platform.startswith("win"):
                 try:
                     import subprocess
-                    p_check = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Resolve.exe"], capture_output=True, text=True, timeout=0.5, **no_window_kwargs())
-                    if "Resolve.exe" not in p_check.stdout:
-                        self.last_connect_error = "Tiến trình DaVinci Resolve chưa được bật trên hệ thống."
-                        return False
+                    p_check = subprocess.run(
+                        ["tasklist", "/FI", "IMAGENAME eq Resolve.exe"],
+                        capture_output=True, text=True, timeout=1.5, **no_window_kwargs()
+                    )
+                    if p_check.returncode == 0 and p_check.stdout:
+                        out_lower = p_check.stdout.lower()
+                        if "info:" in out_lower or ("resolve.exe" not in out_lower and "image name" in out_lower):
+                            self.last_connect_error = "Tiến trình DaVinci Resolve chưa được bật trên hệ thống."
+                            return False
                 except Exception:
                     pass
             elif sys.platform.startswith("darwin"):
@@ -450,30 +456,94 @@ class ResolveAutomation:
         paths = self.auto_detect_video_paths()
         return paths[0] if paths else None
 
-    def get_active_timeline(self) -> Optional[Any]:
+    def get_active_timeline(self, auto_create: bool = True) -> Optional[Any]:
         """
         Lấy đối tượng Timeline đang mở và hoạt động trong DaVinci Resolve.
+        Tự động kích hoạt timeline đầu tiên nếu project đã có timeline nhưng chưa mở,
+        hoặc tự động tạo 'Timeline 1' nếu project hoàn toàn chưa có timeline nào.
 
         Returns:
             object: Đối tượng Timeline của Resolve hoặc None nếu thất bại.
         """
-        if not self.resolve:
-            if not self.connect():
-                return None
+        self.last_timeline_error = ""
+        # Luôn xác thực kết nối sống: handle cũ (DaVinci đã khởi động lại / đổi project)
+        # sẽ trả None ở mọi lệnh và gây báo lỗi "No active timeline" sai.
+        if not self.ensure_live_connection():
+            self.last_timeline_error = (
+                "Chưa kết nối được DaVinci Resolve. Hãy mở DaVinci Resolve và bật "
+                "Preferences > System > General > External scripting using = Local."
+                + (f" ({self.last_connect_error})" if self.last_connect_error else "")
+            )
+            return None
+
+        tl = None
         try:
-            if self.resolve:
-                pm = self.resolve.GetProjectManager()
-                if pm:
-                    proj = pm.GetCurrentProject()
-                    if proj:
-                        self.current_project = proj
-                        self.project_manager = pm
+            tl = self.current_project.GetCurrentTimeline() if self.current_project else None
         except Exception:
-            pass
-        if not self.current_project:
-            if not self.connect():
-                return None
-        return self.current_project.GetCurrentTimeline() if self.current_project else None
+            tl = None
+
+        # Tự động kích hoạt hoặc tạo timeline nếu chưa active
+        if not tl and self.current_project:
+            try:
+                tl_count = int(self.current_project.GetTimelineCount() or 0)
+                if tl_count > 0:
+                    first_tl = self.current_project.GetTimelineByIndex(1)
+                    if first_tl and hasattr(self.current_project, "SetCurrentTimeline"):
+                        self.current_project.SetCurrentTimeline(first_tl)
+                        tl = self.current_project.GetCurrentTimeline()
+                elif auto_create:
+                    mp = self.current_project.GetMediaPool()
+                    if mp and hasattr(mp, "CreateEmptyTimeline"):
+                        tl = mp.CreateEmptyTimeline("Timeline 1")
+                        if tl and hasattr(self.current_project, "SetCurrentTimeline"):
+                            self.current_project.SetCurrentTimeline(tl)
+            except Exception:
+                pass
+
+        # Đảm bảo trang Edit đang mở khi làm việc với timeline
+        if tl and self.resolve and hasattr(self.resolve, "GetCurrentPage") and hasattr(self.resolve, "OpenPage"):
+            try:
+                if self.resolve.GetCurrentPage() not in ("edit", "cut"):
+                    self.resolve.OpenPage("edit")
+            except Exception:
+                pass
+
+        if not tl:
+            try:
+                proj_name = self.current_project.GetName() if self.current_project else ""
+            except Exception:
+                proj_name = ""
+            self.last_timeline_error = (
+                f"Project '{proj_name}' trong DaVinci chưa có Timeline nào. "
+                "Hãy tạo hoặc mở một Timeline (trang Edit) rồi bấm chèn lại."
+            )
+        return tl
+
+    def ensure_live_connection(self) -> bool:
+        """
+        Xác thực kết nối tới DaVinci Resolve còn sống (gọi API thật), tự kết nối lại nếu
+        handle cũ đã chết (ví dụ người dùng tắt/mở lại DaVinci hoặc đổi project).
+        Cập nhật project_manager/current_project theo project đang mở hiện tại.
+        Chỉ nên gọi từ luồng nền (gateway) vì có IPC tới Resolve.
+        """
+        for _attempt in range(2):
+            if not self.resolve:
+                if not self.connect():
+                    return False
+            try:
+                pm = self.resolve.GetProjectManager()
+                proj = pm.GetCurrentProject() if pm else None
+            except Exception:
+                pm, proj = None, None
+            if pm and proj:
+                self.project_manager = pm
+                self.current_project = proj
+                return True
+            # Handle chết hoặc chưa có project: bỏ cache và thử kết nối mới một lần
+            self.resolve = None
+            self.project_manager = None
+            self.current_project = None
+        return False
 
     @staticmethod
     def generate_srt(subtitles: List[Dict[str, Any]], output_path: str) -> str:

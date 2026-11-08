@@ -25,6 +25,15 @@ from src.services.resolve_state import ResolveStateService
 logger = logging.getLogger("ResolveFlow.InsertService")
 
 
+def _no_timeline_message(auto: Any = None) -> str:
+    """Thông báo lỗi rõ ràng khi không lấy được Timeline (phân biệt chưa kết nối / chưa có timeline)."""
+    msg = str(getattr(auto, "last_timeline_error", "") or "").strip() if auto is not None else ""
+    return msg or (
+        "Không tìm thấy Timeline đang mở trong DaVinci Resolve. "
+        "Hãy mở một Timeline trên trang Edit rồi bấm chèn lại."
+    )
+
+
 def to_asset_dict(asset: Any) -> Dict[str, Any]:
     """Chuyển đổi an toàn mọi đối tượng Asset (Pydantic model, StudioAsset, dict) sang dict chuẩn."""
     if not asset:
@@ -399,7 +408,25 @@ class InsertService(QObject):
                 tl = proj.GetCurrentTimeline() if proj else None
 
             if not tl:
-                raise RuntimeError("No active timeline in DaVinci Resolve")
+                if proj is not None:
+                    # Kết nối sống nhưng project chưa mở Timeline -> báo rõ ràng.
+                    try:
+                        proj_name = proj.GetName() if hasattr(proj, "GetName") else ""
+                        tl_count = int(proj.GetTimelineCount() or 0) if hasattr(proj, "GetTimelineCount") else 1
+                    except Exception:
+                        proj_name, tl_count = "", 1
+                    if tl_count <= 0:
+                        raise RuntimeError(
+                            f"Project '{proj_name}' trong DaVinci chưa có Timeline nào. "
+                            "Hãy tạo hoặc mở một Timeline (trang Edit) rồi bấm chèn lại."
+                        )
+                    raise RuntimeError(_no_timeline_message(None))
+                # Không có handle Resolve hợp lệ (gateway chưa kết nối) -> báo lỗi kết nối.
+                raise RuntimeError(
+                    "Chưa kết nối được DaVinci Resolve (không lấy được Project/Timeline). "
+                    "Hãy mở DaVinci Resolve, mở một Timeline và bật Preferences > System > General > "
+                    "External scripting using = Local, rồi thử lại."
+                )
 
             from src.core.resolve_api import current_record_frame, _nominal_fps
             start_frame, current_tc = current_record_frame(tl, proj)
@@ -645,7 +672,7 @@ class InsertService(QObject):
                 proj = auto.current_project
 
             if not tl:
-                raise RuntimeError("No active timeline in DaVinci Resolve")
+                raise RuntimeError(_no_timeline_message(locals().get("auto")))
 
             import math
             from src.core.resolve_api import current_record_frame, _nominal_fps
@@ -798,7 +825,7 @@ class InsertService(QObject):
                 return tc, msg, "Color Gallery", name
 
             if not tl:
-                raise RuntimeError("Không có Timeline nào đang mở trong DaVinci Resolve")
+                raise RuntimeError(_no_timeline_message(auto))
 
             target_track = None
             skip_existing = True
@@ -909,7 +936,7 @@ class InsertService(QObject):
                 auto.connect()
             tl = auto.get_active_timeline()
             if not tl:
-                raise RuntimeError("No active timeline in DaVinci Resolve")
+                raise RuntimeError(_no_timeline_message(auto))
 
             current_tc = tl.GetCurrentTimecode() if hasattr(tl, "GetCurrentTimecode") else "01:00:00:00"
 
