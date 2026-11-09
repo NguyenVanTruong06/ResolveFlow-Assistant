@@ -191,14 +191,16 @@ class AssetListModel(QAbstractListModel):
             _vid_exts = (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v")
             if not (p_p and str(p_p).lower().endswith(_vid_exts) and os.path.isfile(str(p_p))):
                 if info.get("category") in ("trans", "transition", "transitions"):
-                    try:
-                        from src.ui.lux.library.transition_preview_generator import resolve_transition_preview_video
-                        resolved_vid = resolve_transition_preview_video(info.get("obj"))
-                        if resolved_vid and os.path.isfile(resolved_vid):
-                            info["preview_path"] = resolved_vid
-                            return resolved_vid
-                    except Exception:
-                        pass
+                    if not info.get("_trans_preview_checked"):
+                        info["_trans_preview_checked"] = True
+                        try:
+                            from src.ui.lux.library.transition_preview_generator import resolve_transition_preview_video
+                            resolved_vid = resolve_transition_preview_video(info.get("obj"), fast_only=True)
+                            if resolved_vid and os.path.isfile(resolved_vid):
+                                info["preview_path"] = resolved_vid
+                                return resolved_vid
+                        except Exception:
+                            pass
             return p_p
 
         if role == TagsRole:
@@ -284,7 +286,7 @@ class AssetListModel(QAbstractListModel):
                         info["_trans_vid_checked"] = True
                         try:
                             from src.ui.lux.library.transition_preview_generator import resolve_transition_preview_video
-                            resolved_vid = resolve_transition_preview_video(asset_obj)
+                            resolved_vid = resolve_transition_preview_video(asset_obj, fast_only=True)
                             if resolved_vid and os.path.isfile(resolved_vid):
                                 info["preview_path"] = resolved_vid
                         except Exception:
@@ -303,7 +305,7 @@ class AssetListModel(QAbstractListModel):
                     info["_trans_vid_checked"] = True
                     try:
                         from src.ui.lux.library.transition_preview_generator import resolve_transition_preview_video
-                        resolved_vid = resolve_transition_preview_video(asset_obj)
+                        resolved_vid = resolve_transition_preview_video(asset_obj, fast_only=True)
                         if resolved_vid and os.path.isfile(resolved_vid):
                             cand_p = resolved_vid
                             info["preview_path"] = resolved_vid

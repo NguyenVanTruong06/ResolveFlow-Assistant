@@ -100,11 +100,11 @@ def test_update_toast_widget_ui(qapp):
     toast.close()
 
 
-def test_current_version_v1_0_20():
-    """Xác nhận phiên bản hệ thống đã nâng đồng bộ lên v1.0.20."""
+def test_current_version_v1_0_21():
+    """Xác nhận phiên bản hệ thống đã nâng đồng bộ lên v1.0.21."""
     from src.core.branding import APP_VERSION
-    assert CURRENT_VERSION == "1.0.20"
-    assert APP_VERSION == "v1.0.20"
+    assert CURRENT_VERSION == "1.0.21"
+    assert APP_VERSION == "v1.0.21"
 
 
 def test_restart_app_clean_env_and_guard(qapp, monkeypatch):
@@ -273,7 +273,7 @@ def test_is_valid_zip_validation(tmp_path):
 
 def test_download_file_rejects_json_response(qapp, tmp_path, monkeypatch):
     """Kiểm tra _download_file chủ động từ chối nếu máy chủ trả về JSON thay vì binary."""
-    worker = UpdateDownloadAndInstallWorker({"latest_version": "1.0.20", "assets": {}})
+    worker = UpdateDownloadAndInstallWorker({"latest_version": "1.0.21", "assets": {}})
     dest = str(tmp_path / "test_json_reject.deb")
 
     mock_resp = MagicMock()

@@ -7913,6 +7913,14 @@ class TabAssets(QWidget):
                 self._refresh_grid()
 
     def _update_inspector_details(self):
+        # Invalidate any in-flight async transition preview worker on EVERY selection change / update
+        self._inspector_trans_token = getattr(self, "_inspector_trans_token", 0) + 1
+        cur_token = self._inspector_trans_token
+
+        # Always stop prior media playback on switch
+        if hasattr(self, "icon_meme_widget"):
+            self.icon_meme_widget.stop_playback()
+
         if not self.selected_asset:
             return
         if hasattr(self, "_empty_inspector_label"):
@@ -7941,12 +7949,23 @@ class TabAssets(QWidget):
                 self.lbl_insp_collections.setText("")
                 self.lbl_insp_collections.hide()
 
-        asset_tab = str(self.selected_asset.get("tab", "") if isinstance(self.selected_asset, dict) else getattr(self.selected_asset, "tab", "")).lower()
-        is_text = isinstance(self.selected_asset, TextStylePreset) or asset_tab == "text"
-        is_lut = asset_tab in ("lut", "luts")
-        is_sfx = asset_tab == "sfx"
+        if isinstance(self.selected_asset, dict):
+            asset_tab = str(self.selected_asset.get("tab") or self.selected_asset.get("category") or "").lower()
+            raw_obj = self.selected_asset.get("_raw_obj")
+        else:
+            asset_tab = str(getattr(self.selected_asset, "tab", None) or getattr(self.selected_asset, "category", "") or "").lower()
+            raw_obj = getattr(self.selected_asset, "_raw_obj", None)
+
+        is_text = isinstance(self.selected_asset, TextStylePreset) or asset_tab in ("text", "title", "titles")
+        is_lut = asset_tab in ("lut", "luts", "color")
+        is_sfx = asset_tab in ("sfx", "sound", "audio")
         is_bgm = asset_tab in ("bgm", "audio", "music")
-        is_trans = isinstance(self.selected_asset, TransitionStylePreset) or asset_tab in ("trans", "transition", "transitions")
+        is_trans = (
+            isinstance(self.selected_asset, TransitionStylePreset)
+            or asset_tab in ("trans", "transition", "transitions")
+            or hasattr(self.selected_asset, "transition_type")
+            or (raw_obj is not None and hasattr(raw_obj, "transition_type"))
+        )
 
         if is_text:
             self.icon_meme_widget.stop_playback()
@@ -8171,6 +8190,9 @@ class TabAssets(QWidget):
             self.inspector_lut_viewport.hide()
             self.inspector_sfx_viewport.hide()
 
+            # Always release prior playback on switch
+            self.icon_meme_widget.stop_playback()
+
             thumb_path = (
                 self.selected_asset.get("thumbnail_path", "")
                 if isinstance(self.selected_asset, dict)
@@ -8187,27 +8209,6 @@ class TabAssets(QWidget):
                 else getattr(self.selected_asset, "file_path", "")
             ) or ""
 
-            video_file = ""
-            try:
-                from src.ui.lux.library.transition_preview_generator import (
-                    resolve_transition_preview_video,
-                    resolve_drfx_thumbnail,
-                )
-                video_file = resolve_transition_preview_video(self.selected_asset) or ""
-                if not thumb_path:
-                    thumb_path = resolve_drfx_thumbnail(self.selected_asset) or ""
-            except Exception:
-                pass
-
-            if not video_file:
-                _vid_exts = (".mp4", ".mov", ".webm", ".mkv", ".avi")
-                if prev_path and prev_path.lower().endswith(_vid_exts) and os.path.isfile(prev_path):
-                    video_file = prev_path
-                elif fpath and fpath.lower().endswith(_vid_exts) and os.path.isfile(fpath):
-                    video_file = fpath
-
-            has_playable_video = bool(video_file and os.path.isfile(video_file))
-
             kind = (
                 self.selected_asset.get("category", "transform")
                 if isinstance(self.selected_asset, dict)
@@ -8221,31 +8222,113 @@ class TabAssets(QWidget):
             if hasattr(self, "slide_trans_frames"):
                 self.slide_trans_frames.setValue(frames)
 
-            if has_playable_video:
-                try:
-                    from src.ui.lux.library.transition_preview_generator import build_verified_video_preview_payload
-                    preview_asset_payload = build_verified_video_preview_payload(self.selected_asset, video_file)
-                except Exception:
-                    preview_asset_payload = self.selected_asset
-                self.inspector_trans_viewport.hide()
-                self.inspector_icon_viewport.show()
-                self.icon_meme_widget.set_asset(preview_asset_payload, sub=sub)
-                if getattr(self.icon_meme_widget, "resolved_file_path", "") and self.isVisible():
-                    self.icon_meme_widget.start_auto_preview(muted=True)
-                if not getattr(self.icon_meme_widget, "resolved_file_path", ""):
-                    self.icon_meme_widget.stop_playback()
-                    self.inspector_trans_viewport.show()
-                    self.inspector_icon_viewport.hide()
-                    self.trans_loop_widget.set_transition(
-                        name, kind, frames, asset=self.selected_asset, thumb_path=thumb_path
-                    )
-            else:
-                self.icon_meme_widget.stop_playback()
-                self.inspector_trans_viewport.show()
+            # Check provenance and file backing
+            from src.core.action_guard import check_action_availability
+            guard_base = check_action_availability(self.selected_asset, intent="preview", bundled_root=getattr(self, "_bundled_root", None))
+
+            denial_codes = (
+                "ERR_STAGING_UNPUBLISHED",
+                "ERR_STAGING_MEDIA_UNSUPPORTED",
+                "ERR_STORAGE_OFFLINE",
+                "ERR_STORAGE_IDENTITY_MISMATCH",
+                "ERR_FOREIGN_ROOT",
+                "ERR_ORIGIN_STORAGE_MISMATCH",
+                "ERR_STORAGE_PROVIDER_FAILURE",
+                "ERR_CONFLICTING_SOURCE_METADATA",
+                "ERR_PATH_MISMATCH",
+                "ERR_SYMLINK_ESCAPE",
+                "ERR_INVALID_PATH_TRAVERSAL",
+                "ERR_PROVENANCE_OFFLINE",
+                "ERR_PROVENANCE_STAGING",
+                "ERR_PROVENANCE_CONFLICT",
+                "ERR_PROVENANCE_FOREIGN_MANAGED",
+                "ERR_PROVENANCE_UNRESOLVED",
+            )
+            has_denial_provenance = (
+                (isinstance(self.selected_asset, dict) and self.selected_asset.get("availability") in ("offline", "staging"))
+                or guard_base.status in ("offline", "staging")
+                or guard_base.result_code in denial_codes
+            )
+
+            is_file_backed = bool(
+                (isinstance(self.selected_asset, dict) and (self.selected_asset.get("file_path") or self.selected_asset.get("path") or self.selected_asset.get("library_path") or self.selected_asset.get("preview_path")))
+                or (not isinstance(self.selected_asset, dict) and (getattr(self.selected_asset, "file_path", None) or getattr(self.selected_asset, "path", None) or getattr(self.selected_asset, "library_path", None) or getattr(self.selected_asset, "preview_path", None)))
+            )
+
+            # Genuine built-in procedural preset: in-memory only, no file backing, no denial
+            if not is_file_backed and not has_denial_provenance:
                 self.inspector_icon_viewport.hide()
+                self.inspector_trans_viewport.show()
+                self.trans_loop_widget.show()
                 self.trans_loop_widget.set_transition(
                     name, kind, frames, asset=self.selected_asset, thumb_path=thumb_path
                 )
+            else:
+                # File-backed or provenance denial: strictly forbid procedural synthetic preview
+                self.trans_loop_widget.hide()
+                self.inspector_trans_viewport.hide()
+                self.inspector_icon_viewport.show()
+
+                sel_asset = self.selected_asset
+                expected_aid = str(getattr(self.selected_asset, "id", None) or (self.selected_asset.get("id") if isinstance(self.selected_asset, dict) else ""))
+
+                video_file = ""
+                try:
+                    from src.ui.lux.library.transition_preview_generator import (
+                        resolve_transition_preview_video,
+                        resolve_drfx_thumbnail,
+                    )
+                    video_file = resolve_transition_preview_video(self.selected_asset, fast_only=True) or ""
+                    if not thumb_path:
+                        thumb_path = resolve_drfx_thumbnail(self.selected_asset, fast_only=True) or ""
+                except Exception:
+                    pass
+
+                if not video_file:
+                    _vid_exts = (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v")
+                    if prev_path and str(prev_path).lower().endswith(_vid_exts) and os.path.isfile(prev_path):
+                        video_file = prev_path
+                    elif fpath and str(fpath).lower().endswith(_vid_exts) and os.path.isfile(fpath):
+                        video_file = fpath
+
+                if video_file and os.path.isfile(video_file):
+                    try:
+                        from src.ui.lux.library.transition_preview_generator import build_verified_video_preview_payload
+                        preview_asset_payload = build_verified_video_preview_payload(self.selected_asset, video_file)
+                    except Exception:
+                        preview_asset_payload = self.selected_asset
+                    self.icon_meme_widget.set_asset(preview_asset_payload, sub=sub)
+                    if getattr(self.icon_meme_widget, "resolved_file_path", "") and self.isVisible():
+                        self.icon_meme_widget.start_auto_preview(muted=True)
+                else:
+                    self.icon_meme_widget.set_asset(self.selected_asset, sub=sub)
+                    if not has_denial_provenance:
+                        def _on_inspector_video_resolved(async_vid: str):
+                            if getattr(self, "_inspector_trans_token", 0) != cur_token:
+                                # Stale selection result rejected! Latest selection wins
+                                return
+                            if not self.selected_asset or self.selected_asset is not sel_asset:
+                                return
+                            current_aid = str(getattr(self.selected_asset, "id", None) or (self.selected_asset.get("id") if isinstance(self.selected_asset, dict) else ""))
+                            if current_aid != expected_aid:
+                                return
+                            if async_vid and os.path.isfile(async_vid):
+                                try:
+                                    from src.ui.lux.library.transition_preview_generator import build_verified_video_preview_payload
+                                    prev_payload = build_verified_video_preview_payload(sel_asset, async_vid)
+                                except Exception:
+                                    prev_payload = sel_asset
+                                self.icon_meme_widget.set_asset(prev_payload, sub=sub)
+                                if getattr(self.icon_meme_widget, "resolved_file_path", "") and self.isVisible():
+                                    self.icon_meme_widget.start_auto_preview(muted=True)
+                            else:
+                                self.icon_meme_widget.set_asset(sel_asset, sub=sub)
+
+                        try:
+                            from src.ui.lux.library.transition_preview_generator import request_transition_preview_video_async
+                            request_transition_preview_video_async(self.selected_asset, _on_inspector_video_resolved)
+                        except Exception:
+                            pass
 
             self.grp_params.show()
             if hasattr(self, "grp_sample_text"):
@@ -8263,9 +8346,6 @@ class TabAssets(QWidget):
             if hasattr(self, "grp_trans_pos"):
                 self.grp_trans_pos.show()
 
-            self.trans_loop_widget.set_transition(
-                name, kind, frames, asset=self.selected_asset, thumb_path=thumb_path
-            )
             self._update_trans_alignment_styles()
             self.btn_insert_title_playhead.setText("➡️ Áp dụng vào Timeline")
 
@@ -9474,10 +9554,20 @@ class TabAssets(QWidget):
             super().hideEvent(event)
 
     def closeEvent(self, event):
+        self._inspector_trans_token = getattr(self, "_inspector_trans_token", 0) + 1
         if hasattr(self, "audio_inspector_widget"):
             self.audio_inspector_widget.stop_playback()
         if hasattr(self, "icon_meme_widget"):
             self.icon_meme_widget.stop_playback()
         if event is not None:
             super().closeEvent(event)
+
+    def hideEvent(self, event):
+        self._inspector_trans_token = getattr(self, "_inspector_trans_token", 0) + 1
+        if hasattr(self, "audio_inspector_widget"):
+            self.audio_inspector_widget.stop_playback()
+        if hasattr(self, "icon_meme_widget"):
+            self.icon_meme_widget.stop_playback()
+        if event is not None:
+            super().hideEvent(event)
 

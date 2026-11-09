@@ -9,12 +9,14 @@ import hashlib
 import math
 import os
 import tempfile
+import threading
 import zipfile
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt, QPointF, QRect, QRectF
+from PySide6.QtCore import Qt, QPointF, QRect, QRectF, QObject, Signal, Slot
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -136,12 +138,12 @@ def _find_pack_root(file_path: str) -> Optional[Path]:
     return None
 
 
-def resolve_drfx_thumbnail(asset: Any) -> str:
+def resolve_drfx_thumbnail(asset: Any, fast_only: bool = False) -> str:
     """
     Resolves a representative PNG/JPG thumbnail for a transition or template asset:
     1. Checks existing thumbnail_path on disk.
     2. Checks sibling .png/.jpg next to a .setting file or thumbnail_relative_path in pack.
-    3. Extracts representative .png/.jpg from inside a .drfx zip archive into a temp cache.
+    3. Extracts representative .png/.jpg from inside a .drfx zip archive into a temp cache (background only).
     """
     if asset is None or isinstance(asset, str):
         return ""
@@ -153,13 +155,6 @@ def resolve_drfx_thumbnail(asset: Any) -> str:
     master_p = _resolve_master_disk_path(asset)
     if master_p:
         master_path = Path(master_p)
-        pack_root = _find_pack_root(master_p)
-        thumb_rel = str(_get_attr(asset, "thumbnail_relative_path", default="") or "").strip()
-        if thumb_rel and pack_root is not None:
-            cand_rel = pack_root / thumb_rel
-            if cand_rel.is_file() and cand_rel.suffix.lower() in IMAGE_EXTS:
-                return str(cand_rel.resolve())
-
         # Check sibling image next to .setting or .drfx file
         if master_path.suffix.lower() in (".setting", ".drfx", ".comp"):
             for ext in IMAGE_EXTS:
@@ -167,7 +162,7 @@ def resolve_drfx_thumbnail(asset: Any) -> str:
                 if sibling.is_file():
                     return str(sibling.resolve())
 
-        # If .drfx zip archive, look inside for a matching .png or .jpg
+        # If .drfx zip archive, check extracted cache first
         if master_path.suffix.lower() == ".drfx" and master_path.is_file():
             asset_name = str(_get_attr(asset, "name", default=master_path.stem) or master_path.stem).strip()
             try:
@@ -185,6 +180,21 @@ def resolve_drfx_thumbnail(asset: Any) -> str:
             cache_file = os.path.join(cache_dir, f"{digest}.png")
             if os.path.isfile(cache_file) and os.path.getsize(cache_file) > 0:
                 return cache_file
+
+            if fast_only:
+                # Do NOT perform ZIP parsing/extraction on the GUI thread
+                return ""
+
+        if not fast_only:
+            pack_root = _find_pack_root(master_p)
+            thumb_rel = str(_get_attr(asset, "thumbnail_relative_path", default="") or "").strip()
+            if thumb_rel and pack_root is not None:
+                cand_rel = pack_root / thumb_rel
+                if cand_rel.is_file() and cand_rel.suffix.lower() in IMAGE_EXTS:
+                    return str(cand_rel.resolve())
+
+        # If .drfx zip archive, look inside for a matching .png or .jpg (off-GUI only)
+        if not fast_only and master_path.suffix.lower() == ".drfx" and master_path.is_file():
 
             try:
                 if drfx_idx_key not in _DRFX_IMG_INDEX_CACHE:
@@ -246,11 +256,13 @@ def _norm_stem(s: str) -> str:
     return "".join(ch for ch in s.lower() if ch.isalnum())
 
 
-def _index_pack_videos(pack_root: Path) -> Tuple[Dict[str, str], str]:
+def _index_pack_videos(pack_root: Path, fast_only: bool = False) -> Tuple[Dict[str, str], str]:
     """Builds and caches a lookup table of {lowercase_stem: abs_video_path} and fallback tutorial/preview video."""
     key = str(pack_root)
     if key in _PACK_VIDEO_INDEX_CACHE:
         return _PACK_VIDEO_INDEX_CACHE[key]
+    if fast_only:
+        return {}, ""
 
     by_stem: Dict[str, str] = {}
     by_norm: Dict[str, str] = {}
@@ -290,7 +302,7 @@ def _index_pack_videos(pack_root: Path) -> Tuple[Dict[str, str], str]:
     return by_stem, fallback_video
 
 
-def _index_all_cloud_pack_videos() -> Tuple[Dict[str, str], Dict[str, str]]:
+def _index_all_cloud_pack_videos(fast_only: bool = False) -> Tuple[Dict[str, str], Dict[str, str]]:
     """
     Indexes companion .mp4/.mov/.webm preview videos across active StorageManager
     02_cloud_downloads/packs/ so extracted .setting files in assets/templates/transitions/installed/
@@ -324,6 +336,9 @@ def _index_all_cloud_pack_videos() -> Tuple[Dict[str, str], Dict[str, str]]:
             _CLOUD_PACKS_FAST_CACHE = (now, sm_cls_id, exact_map, norm_map)
             return exact_map, norm_map
 
+        if fast_only:
+            return {}, {}
+
         exact_map = {}
         norm_map = {}
         for pack_sub in sorted(packs_dir.iterdir()):
@@ -347,13 +362,16 @@ def _index_all_cloud_pack_videos() -> Tuple[Dict[str, str], Dict[str, str]]:
         return {}, {}
 
 
-def resolve_transition_preview_video(asset: Any) -> str:
+def resolve_transition_preview_video(asset: Any, fast_only: bool = False) -> str:
     """
     Resolves a playable companion .mp4/.mov/.webm video for a transition asset:
     1. Direct preview_path or file_path if it is a playable video file on disk.
     2. Sibling .mp4/.mov/.webm next to master file on disk.
     3. Matching <stem>.mp4 inside the pack's Preview Transitions/ or Previews/ folder.
     4. Cross-reference against active StorageManager cloud packs for extracted .drfx/.setting items.
+
+    When fast_only=True, only performs fast O(1) checks and in-memory cache lookups,
+    guaranteeing zero recursive or full-pack filesystem scanning on the GUI thread.
     """
     if asset is None or isinstance(asset, str):
         return ""
@@ -367,13 +385,60 @@ def resolve_transition_preview_video(asset: Any) -> str:
     master_stem = Path(master_p).stem.lower().strip() if master_p else ""
     asset_name = str(_get_attr(asset, "name", default=master_stem) or master_stem).lower().strip()
 
-    # 2. Check sibling .mp4/.mov/.webm next to master_p (direct 1:1 companion file)
+    # 2. Check sibling .mp4/.mov/.webm next to master_p (direct 1:1 companion file - bounded O(1))
     if master_p:
         master_path = Path(master_p)
         for ext in VIDEO_EXTS:
             sib = master_path.with_suffix(ext)
             if sib.is_file():
                 return str(sib.resolve())
+
+        # Check direct 1:1 companion in standard sibling preview directories (bounded O(1) file existence checks)
+        parent_dir = master_path.parent
+        grandparent_dir = parent_dir.parent
+        for folder_name in ("Preview Transitions", "Previews", "previews", "preview"):
+            cand_dir = grandparent_dir / folder_name
+            for cand_stem in (master_path.stem, str(_get_attr(asset, "name", default="") or "").strip()):
+                if not cand_stem:
+                    continue
+                for ext in VIDEO_EXTS:
+                    cand_file = cand_dir / f"{cand_stem}{ext}"
+                    if cand_file.is_file():
+                        return str(cand_file.resolve())
+
+        # Check in-memory index cache if pack root was already indexed
+        parent_dir_str = str(parent_dir)
+        cached_pack_root = _PACK_ROOT_DIR_CACHE.get(parent_dir_str)
+        if cached_pack_root is not None:
+            c_key = str(cached_pack_root)
+            if c_key in _PACK_VIDEO_INDEX_CACHE:
+                by_stem, fallback_video = _PACK_VIDEO_INDEX_CACHE[c_key]
+                for candidate_key in (master_stem, asset_name):
+                    if candidate_key and candidate_key in by_stem:
+                        return by_stem[candidate_key]
+                by_norm = _PACK_NORM_VIDEO_INDEX_CACHE.get(c_key, {})
+                for candidate_key in (master_stem, asset_name):
+                    nk = _norm_stem(candidate_key)
+                    if nk and nk in by_norm:
+                        return by_norm[nk]
+                if fallback_video and master_p.lower().endswith(".drfx"):
+                    return fallback_video
+
+        # Check in-memory cloud pack index cache
+        if _CLOUD_PACKS_FAST_CACHE is not None:
+            cached_exact, cached_norm = _CLOUD_PACKS_FAST_CACHE[2], _CLOUD_PACKS_FAST_CACHE[3]
+            for candidate_key in (master_stem, asset_name):
+                if candidate_key and candidate_key in cached_exact:
+                    return cached_exact[candidate_key]
+            for candidate_key in (master_stem, asset_name):
+                nk = _norm_stem(candidate_key)
+                if nk and nk in cached_norm:
+                    return cached_norm[nk]
+
+        if fast_only:
+            # GUI fast path strictly avoids filesystem directory listing, pack root traversal,
+            # and recursive walking. Heavy scanning is deferred to background worker.
+            return ""
 
         pack_root = _find_pack_root(master_p)
         if pack_root is not None:
@@ -383,7 +448,22 @@ def resolve_transition_preview_video(asset: Any) -> str:
                 if cand.is_file() and cand.suffix.lower() in VIDEO_EXTS:
                     return str(cand.resolve())
 
-            by_stem, fallback_video = _index_pack_videos(pack_root)
+            # Off-GUI candidate search in common pack preview folders
+            for folder_name in ("Preview Transitions", "Previews", "previews", "preview", ""):
+                target_dir = (pack_root / folder_name) if folder_name else pack_root
+                if not target_dir.is_dir():
+                    continue
+                try:
+                    for entry in os.scandir(target_dir):
+                        if entry.is_file():
+                            e_stem = os.path.splitext(entry.name)[0].lower().strip()
+                            e_ext = os.path.splitext(entry.name)[1].lower()
+                            if e_ext in VIDEO_EXTS and (e_stem == master_stem or e_stem == asset_name or _norm_stem(e_stem) in (_norm_stem(master_stem), _norm_stem(asset_name))):
+                                return str(Path(entry.path).resolve())
+                except Exception:
+                    pass
+
+            by_stem, fallback_video = _index_pack_videos(pack_root, fast_only=False)
             for candidate_key in (master_stem, asset_name):
                 if candidate_key and candidate_key in by_stem:
                     return by_stem[candidate_key]
@@ -398,18 +478,151 @@ def resolve_transition_preview_video(asset: Any) -> str:
             if fallback_video and master_p.lower().endswith(".drfx"):
                 return fallback_video
 
-    # 3. Cross-reference extracted .setting transitions against active cloud packs (e.g. GR-44 1,005 .mp4s)
-    exact_cloud, norm_cloud = _index_all_cloud_pack_videos()
-    if exact_cloud:
-        for candidate_key in (master_stem, asset_name):
-            if candidate_key and candidate_key in exact_cloud:
-                return exact_cloud[candidate_key]
-        for candidate_key in (master_stem, asset_name):
-            nk = _norm_stem(candidate_key)
-            if nk and nk in norm_cloud:
-                return norm_cloud[nk]
+    # 3. Cross-reference extracted .setting transitions against active cloud packs (background only)
+    if not fast_only:
+        exact_cloud, norm_cloud = _index_all_cloud_pack_videos(fast_only=False)
+        if exact_cloud:
+            for candidate_key in (master_stem, asset_name):
+                if candidate_key and candidate_key in exact_cloud:
+                    return exact_cloud[candidate_key]
+            for candidate_key in (master_stem, asset_name):
+                nk = _norm_stem(candidate_key)
+                if nk and nk in norm_cloud:
+                    return norm_cloud[nk]
 
     return ""
+
+
+def resolve_transition_preview_video_fast(asset: Any) -> str:
+    """Fast non-blocking resolution of transition preview video (O(1), zero disk walk)."""
+    return resolve_transition_preview_video(asset, fast_only=True)
+
+
+_TRANS_RESOLVE_LOCK = threading.Lock()
+_TRANS_RESOLVE_WAITERS: Dict[str, List[Callable[[str], None]]] = {}
+_TRANS_RESOLVE_POOL: Optional[ThreadPoolExecutor] = None
+
+
+def _get_transition_resolve_pool() -> ThreadPoolExecutor:
+    global _TRANS_RESOLVE_POOL
+    if _TRANS_RESOLVE_POOL is None:
+        _TRANS_RESOLVE_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="TransVidResolver")
+    return _TRANS_RESOLVE_POOL
+
+
+def _get_asset_identity_key(asset: Any) -> str:
+    if asset is None:
+        return ""
+    if isinstance(asset, Mapping):
+        return str(asset.get("id") or asset.get("file_path") or asset.get("name") or "")
+    return str(getattr(asset, "id", "") or getattr(asset, "file_path", "") or getattr(asset, "name", "") or "")
+
+
+class _MainThreadDispatcher(QObject):
+    dispatch_signal = Signal(object, str)
+
+    def __init__(self, parent: Optional[QObject] = None):
+        super().__init__(parent)
+        self.dispatch_signal.connect(self._on_dispatch, Qt.ConnectionType.QueuedConnection)
+
+    @Slot(object, str)
+    def _on_dispatch(self, callback: Any, result: str):
+        try:
+            callback(result)
+        except Exception:
+            pass
+
+
+_DISPATCHER: Optional[_MainThreadDispatcher] = None
+
+
+def _get_main_dispatcher() -> Optional[_MainThreadDispatcher]:
+    global _DISPATCHER
+    if _DISPATCHER is not None:
+        return _DISPATCHER
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is not None:
+        _DISPATCHER = _MainThreadDispatcher()
+        if hasattr(_DISPATCHER, "moveToThread") and hasattr(app, "thread"):
+            _DISPATCHER.moveToThread(app.thread())
+        return _DISPATCHER
+    return None
+
+
+def _dispatch_callback(callback: Callable[[str], None], result: str):
+    """Safely delivers callback to Qt main thread using a persistent GUI-thread-owned QObject Signal."""
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is not None and getattr(app, "thread", None):
+        if threading.current_thread() == threading.main_thread():
+            try:
+                callback(result)
+            except Exception:
+                pass
+            return
+        disp = _get_main_dispatcher()
+        if disp is not None:
+            disp.dispatch_signal.emit(callback, result)
+            return
+
+    # Fallback only when running in non-Qt / headless command-line test environment without QApplication
+    if app is None:
+        try:
+            callback(result)
+        except Exception:
+            pass
+
+
+def request_transition_preview_video_async(
+    asset: Any,
+    callback: Callable[[str], None],
+    on_error: Optional[Callable[[Exception], None]] = None,
+) -> None:
+    """
+    Asynchronously resolves a transition preview video without blocking GUI thread.
+    - If fast check succeeds, executes callback immediately.
+    - Otherwise bounds in-flight requests and dedupes multiple callers for the same asset.
+    - Safely dispatches callback onto Qt main thread.
+    """
+    if asset is None:
+        _dispatch_callback(callback, "")
+        return
+
+    # Fast path: already known / sibling / cached in memory
+    fast_vid = resolve_transition_preview_video(asset, fast_only=True)
+    if fast_vid and os.path.isfile(fast_vid):
+        _dispatch_callback(callback, fast_vid)
+        return
+
+    key = _get_asset_identity_key(asset)
+    if not key:
+        _dispatch_callback(callback, "")
+        return
+
+    with _TRANS_RESOLVE_LOCK:
+        if key in _TRANS_RESOLVE_WAITERS:
+            _TRANS_RESOLVE_WAITERS[key].append(callback)
+            return
+        _TRANS_RESOLVE_WAITERS[key] = [callback]
+
+    def _worker():
+        resolved_vid = ""
+        try:
+            resolved_vid = resolve_transition_preview_video(asset, fast_only=False)
+        except Exception as ex:
+            if on_error:
+                try:
+                    on_error(ex)
+                except Exception:
+                    pass
+        finally:
+            with _TRANS_RESOLVE_LOCK:
+                waiters = _TRANS_RESOLVE_WAITERS.pop(key, [])
+            for cb in waiters:
+                _dispatch_callback(cb, resolved_vid)
+
+    _get_transition_resolve_pool().submit(_worker)
 
 
 def build_verified_video_preview_payload(base_asset: Any, video_path: str) -> Dict[str, Any]:

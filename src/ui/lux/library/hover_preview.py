@@ -514,7 +514,7 @@ class SharedHoverPreview(QObject):
                     resolve_transition_preview_video,
                     build_verified_video_preview_payload,
                 )
-                cand_vid = resolve_transition_preview_video(raw if raw is not None else payload)
+                cand_vid = resolve_transition_preview_video(raw if raw is not None else payload, fast_only=True)
                 if cand_vid:
                     cand_payload = build_verified_video_preview_payload(payload, cand_vid)
                     cand_guard = check_action_availability(cand_payload, intent="preview")
@@ -572,24 +572,28 @@ class SharedHoverPreview(QObject):
                     return
 
             # Procedural rendering is STRICTLY forbidden for assets with offline, staging, foreign, or conflicting provenance
+            denial_codes = (
+                "ERR_STAGING_UNPUBLISHED",
+                "ERR_STAGING_MEDIA_UNSUPPORTED",
+                "ERR_STORAGE_OFFLINE",
+                "ERR_STORAGE_IDENTITY_MISMATCH",
+                "ERR_FOREIGN_ROOT",
+                "ERR_ORIGIN_STORAGE_MISMATCH",
+                "ERR_STORAGE_PROVIDER_FAILURE",
+                "ERR_CONFLICTING_SOURCE_METADATA",
+                "ERR_PATH_MISMATCH",
+                "ERR_SYMLINK_ESCAPE",
+                "ERR_INVALID_PATH_TRAVERSAL",
+                "ERR_PROVENANCE_OFFLINE",
+                "ERR_PROVENANCE_STAGING",
+                "ERR_PROVENANCE_CONFLICT",
+                "ERR_PROVENANCE_FOREIGN_MANAGED",
+                "ERR_PROVENANCE_UNRESOLVED",
+            )
             has_denial_provenance = (
                 payload.get("availability") in ("offline", "staging")
-                or bool(payload.get("origin_library_id"))
-                or bool(payload.get("origin_root"))
                 or guard_res.status in ("offline", "staging")
-                or guard_res.result_code in (
-                    "ERR_STAGING_UNPUBLISHED",
-                    "ERR_STAGING_MEDIA_UNSUPPORTED",
-                    "ERR_STORAGE_OFFLINE",
-                    "ERR_STORAGE_IDENTITY_MISMATCH",
-                    "ERR_FOREIGN_ROOT",
-                    "ERR_ORIGIN_STORAGE_MISMATCH",
-                    "ERR_STORAGE_PROVIDER_FAILURE",
-                    "ERR_CONFLICTING_SOURCE_METADATA",
-                    "ERR_PATH_MISMATCH",
-                    "ERR_SYMLINK_ESCAPE",
-                    "ERR_INVALID_PATH_TRAVERSAL",
-                )
+                or guard_res.result_code in denial_codes
             )
             if has_denial_provenance:
                 self.stop()
@@ -628,6 +632,63 @@ class SharedHoverPreview(QObject):
 
             # File-backed transitions without verified video or unverified assets:
             # Procedural rendering must NEVER silently masquerade as actual sample when resolution/guard/decode fails.
+            is_file_backed = bool(
+                payload.get("file_path")
+                or payload.get("path")
+                or payload.get("preview_path")
+                or payload.get("library_path")
+                or (raw is not None and (
+                    getattr(raw, "file_path", None)
+                    or getattr(raw, "path", None)
+                    or getattr(raw, "library_path", None)
+                    or getattr(raw, "preview_path", None)
+                ))
+            )
+            if is_file_backed and not has_denial_provenance:
+                self._hover_async_token = getattr(self, "_hover_async_token", 0) + 1
+                hover_token = self._hover_async_token
+                row_expected = self._hovered_row
+                expected_aid = str(payload.get("id") or payload.get("file_path") or asset_name)
+
+                def _on_hover_resolved(async_vid: str):
+                    if getattr(self, "_hover_async_token", 0) != hover_token:
+                        return
+                    if self._hovered_row != row_expected or not self._view:
+                        return
+                    if not async_vid or not os.path.isfile(async_vid):
+                        return
+                    cur_model = self._view.model()
+                    if not cur_model:
+                        return
+                    cur_idx = cur_model.index(row_expected, 0)
+                    if not cur_idx.isValid():
+                        return
+                    cur_raw = cur_idx.data(AssetObjRole)
+                    cur_id = str(cur_idx.data(IdRole) or (cur_raw.get("id") if isinstance(cur_raw, dict) else getattr(cur_raw, "id", "")))
+                    if cur_id and expected_aid and cur_id != expected_aid:
+                        return
+                    try:
+                        from src.ui.lux.library.transition_preview_generator import build_verified_video_preview_payload
+                        from src.core.action_guard import check_action_availability
+                        p_load = build_verified_video_preview_payload(payload, async_vid)
+                        g_res = check_action_availability(p_load, intent="preview")
+                        if (
+                            g_res.allowed
+                            and g_res.resolved_path
+                            and os.path.splitext(g_res.resolved_path)[1].lower() in VIDEO_EXTS
+                            and os.path.isfile(g_res.resolved_path)
+                        ):
+                            self._play_video(cur_idx, g_res.resolved_path)
+                    except Exception:
+                        pass
+
+                try:
+                    from src.ui.lux.library.transition_preview_generator import request_transition_preview_video_async
+                    request_transition_preview_video_async(raw if raw is not None else payload, _on_hover_resolved)
+                except Exception:
+                    pass
+                return
+
             logger.debug(
                 "Transition '%s' has no verified video preview (code=%s, path=%s); refusing procedural masquerade.",
                 asset_name,
@@ -851,6 +912,7 @@ class SharedHoverPreview(QObject):
 
     def stop(self, *args: Any, **kwargs: Any):
         """Immediately stops playback, silences audio, and hides overlay. Idempotent."""
+        self._hover_async_token = getattr(self, "_hover_async_token", 0) + 1
         self._is_active_playback = False
         self._timer.stop()
         self._hovered_row = -1
