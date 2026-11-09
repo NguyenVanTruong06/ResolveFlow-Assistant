@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import json
+import time
 import logging
 from pathlib import Path
 from typing import Dict, List, Set, Optional
@@ -49,22 +50,33 @@ class CollectionsManager:
             return {}
 
     @classmethod
-    def save(cls, data: Dict[str, List[str]]):
-        """Lưu toàn bộ danh mục bộ sưu tập."""
-        if not cls.FILE_PATH.parent.exists():
-            cls.FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    def save(cls, data: Dict[str, List[str]]) -> bool:
+        """Lưu toàn bộ danh mục bộ sưu tập nguyên tử."""
+        path = Path(cls.FILE_PATH)
         try:
-            with open(cls.FILE_PATH, "w", encoding="utf-8") as f:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_name(f"{path.name}.{os.getpid()}_{time.time_ns()}.tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
             try:
-                st = cls.FILE_PATH.stat()
+                st = path.stat()
                 normalized = {str(k): [str(x) for x in v] if isinstance(v, list) else [] for k, v in data.items()}
-                cls._cache = ((str(cls.FILE_PATH), st.st_mtime_ns, st.st_size), normalized)
+                cls._cache = ((str(path), st.st_mtime_ns, st.st_size), normalized)
             except OSError:
                 cls._cache = None
+            return True
         except Exception as e:
             cls._cache = None
             logger.error(f"Error saving collections: {e}")
+            try:
+                if 'tmp_path' in locals() and tmp_path.exists():
+                    tmp_path.unlink()
+            except Exception:
+                pass
+            return False
 
     @classmethod
     def get_collection_names(cls) -> List[str]:
@@ -82,8 +94,7 @@ class CollectionsManager:
         if clean_name in data:
             return False  # Đã tồn tại
         data[clean_name] = []
-        cls.save(data)
-        return True
+        return cls.save(data)
 
     @classmethod
     def delete_collection(cls, name: str) -> bool:
@@ -92,8 +103,7 @@ class CollectionsManager:
         data = cls.load()
         if clean_name in data:
             del data[clean_name]
-            cls.save(data)
-            return True
+            return cls.save(data)
         return False
 
     @classmethod
@@ -108,8 +118,7 @@ class CollectionsManager:
             return False
         items = data.pop(old)
         data[new] = items
-        cls.save(data)
-        return True
+        return cls.save(data)
 
     @classmethod
     def get_collection_assets(cls, name: str) -> List[str]:
@@ -135,9 +144,10 @@ class CollectionsManager:
             data[name] = []
         if asset_id not in data[name]:
             data[name].append(asset_id)
-            cls.save(data)
-            return True
-        return False
+            return cls.save(data)
+        return True
+
+    add_to_collection = add_asset_to_collection
 
     @classmethod
     def remove_asset_from_collection(cls, name: str, asset_id: str) -> bool:
@@ -147,9 +157,8 @@ class CollectionsManager:
         data = cls.load()
         if name in data and asset_id in data[name]:
             data[name].remove(asset_id)
-            cls.save(data)
-            return True
-        return False
+            return cls.save(data)
+        return True
 
     @classmethod
     def toggle_asset_collection(cls, name: str, asset_id: str) -> bool:
@@ -159,13 +168,36 @@ class CollectionsManager:
         data = cls.load()
         if name not in data:
             data[name] = [asset_id]
-            cls.save(data)
-            return True
+            return cls.save(data)
         if asset_id in data[name]:
             data[name].remove(asset_id)
-            cls.save(data)
-            return False
+            if cls.save(data):
+                return False
+            return True
         else:
             data[name].append(asset_id)
-            cls.save(data)
+            return cls.save(data)
+
+    @classmethod
+    def remove_asset_from_all(cls, asset_id: str) -> bool:
+        """Xóa hoàn toàn asset_id khỏi tất cả bộ sưu tập."""
+        if not asset_id:
             return True
+        data = cls.load()
+        changed = False
+        for cname, items in data.items():
+            if asset_id in items:
+                items.remove(asset_id)
+                changed = True
+        if changed:
+            return cls.save(data)
+        return True
+
+    @classmethod
+    def get_ungrouped_favorites(cls, all_favorites: Set[str]) -> List[str]:
+        """Lấy danh sách các asset yêu thích chưa thuộc bất kỳ bộ sưu tập nào."""
+        data = cls.load()
+        grouped = set()
+        for items in data.values():
+            grouped.update(items)
+        return [fid for fid in all_favorites if fid not in grouped]

@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from typing import Any, Optional
 
-from PySide6.QtCore import Qt, QRect, QRectF, QSize, QPointF
+from PySide6.QtCore import Qt, QRect, QRectF, QSize, QPointF, QEvent
 from PySide6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QStyle
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QPainterPath,
@@ -171,10 +171,13 @@ class AssetCardDelegate(QStyledItemDelegate):
             painter.drawText(d_rect, Qt.AlignmentFlag.AlignCenter, dur_str)
 
         # Favorite Heart (Top-Right)
+        fav_rect = QRectF(preview_rect.right() - 22, preview_rect.y() + 6, 16, 16)
         if is_fav:
-            fav_rect = QRectF(preview_rect.right() - 20, preview_rect.y() + 6, 16, 16)
             painter.setPen(QColor("#ef4444"))
             painter.drawText(fav_rect, Qt.AlignmentFlag.AlignCenter, "♥")
+        elif is_hover:
+            painter.setPen(QColor("#71717a"))
+            painter.drawText(fav_rect, Qt.AlignmentFlag.AlignCenter, "♡")
 
         # -------------------------------------------------------------
         # 4. Single-line Elided Asset Name
@@ -193,6 +196,33 @@ class AssetCardDelegate(QStyledItemDelegate):
         painter.drawText(label_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_name)
 
         painter.restore()
+
+    def editorEvent(self, event, model, option, index) -> bool:
+        """Bắt sự kiện nhấp chuột trực tiếp vào biểu tượng trái tim để bật/tắt yêu thích."""
+        if event.type() in (QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonPress):
+            if event.button() == Qt.MouseButton.LeftButton:
+                pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+                card_margin = 2
+                card_rect = QRectF(
+                    option.rect.x() + card_margin,
+                    option.rect.y() + card_margin,
+                    option.rect.width() - (card_margin * 2),
+                    option.rect.height() - (card_margin * 2)
+                )
+                pad = 4.0
+                pw = card_rect.width() - (pad * 2)
+                ph = round(pw * 9 / 16)
+                preview_rect = QRectF(card_rect.x() + pad, card_rect.y() + pad, pw, ph)
+                fav_hit_rect = QRectF(preview_rect.right() - 28, preview_rect.y() + 2, 26, 26)
+                if fav_hit_rect.contains(pos):
+                    if event.type() == QEvent.Type.MouseButtonRelease:
+                        asset_id = str(index.data(IdRole) or "")
+                        is_fav = bool(index.data(IsFavRole))
+                        view = self.parent()
+                        if hasattr(view, "favorite_toggled"):
+                            view.favorite_toggled.emit(asset_id, not is_fav)
+                    return True
+        return super().editorEvent(event, model, option, index)
 
     def _draw_procedural_waveform(self, painter: QPainter, rect: QRectF, asset_id: str, category: str):
         """Draws a crisp audio waveform using pseudo-random seed from asset id."""

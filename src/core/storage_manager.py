@@ -431,6 +431,67 @@ class StorageManager:
             self.snapshot()
             return True
 
+    def merge_category(self, source_category_id: str, dest_category_id: str) -> bool:
+        """Gộp danh mục source vào dest_category_id: chuyển toàn bộ assets và links, xóa source khỏi taxonomy."""
+        src = str(source_category_id).strip().lower()
+        dst = str(dest_category_id).strip().lower()
+
+        if not src or not dst:
+            raise ValueError("ID danh mục không được để trống.")
+        if src == dst:
+            raise ValueError("Không thể gộp danh mục vào chính nó.")
+        if src in {'all', 'fav', 'recent', 'mine', 'hub', 'text', 'trans', 'lut', 'meme', 'overlay', 'icon'}:
+            raise ValueError("Không thể gộp danh mục hệ thống mặc định.")
+        if dst in {'all', 'fav', 'recent', 'mine', 'hub'}:
+            raise ValueError("Không thể gộp vào danh mục hệ thống mặc định.")
+
+        if not self.online:
+            return False
+
+        with self.lock():
+            tax = self.taxonomy()
+            if dst not in tax:
+                raise ValueError(f"Danh mục đích '{dst}' chưa được đăng ký trong taxonomy.")
+
+            reg = self.registry()
+            assets = reg.get('assets', [])
+            for a in assets:
+                if str(a.get('category', '')).lower() == src or str(a.get('category_id', '')).lower() == src:
+                    if 'category' in a:
+                        a['category'] = dst
+                    if 'category_id' in a:
+                        a['category_id'] = dst
+                    if 'category' not in a and 'category_id' not in a:
+                        a['category'] = dst
+
+            links = self.links()
+            if isinstance(links, list):
+                for link in links:
+                    if isinstance(link, dict):
+                        if str(link.get('category', '')).lower() == src or str(link.get('category_id', '')).lower() == src:
+                            if 'category' in link:
+                                link['category'] = dst
+                            if 'category_id' in link:
+                                link['category_id'] = dst
+            elif isinstance(links, dict):
+                for link_id, link in links.items():
+                    if isinstance(link, dict):
+                        if str(link.get('category', '')).lower() == src or str(link.get('category_id', '')).lower() == src:
+                            if 'category' in link:
+                                link['category'] = dst
+                            if 'category_id' in link:
+                                link['category_id'] = dst
+
+            atomic_json(self.root / '03_local_linked/links.json', links)
+            atomic_json(self.meta / 'registry.json', reg)
+
+            if src in tax:
+                del tax[src]
+                atomic_json(self.meta / 'taxonomy.json', tax)
+
+            self.snapshot()
+            return True
+
     def remove_pack(self, pack_id: str) -> bool:
         """Xóa hoàn toàn một pack khỏi kho lưu trữ, dọn dẹp các tệp media và cập nhật registry."""
         if not self.online:

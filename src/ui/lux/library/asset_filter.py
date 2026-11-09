@@ -260,13 +260,16 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
 
             # 3. Filter Mode (all / fav / recent) & Favorites/Custom Collections
             if self._category == "fav" or self._filter_mode == "fav":
-                if self._sub_category and self._sub_category.startswith("coll:"):
+                favs = getattr(src_model, "_favs", None)
+                is_fav = (asset_id in favs) if favs is not None else bool(item.get("is_fav", False))
+                if self._sub_category in ("coll:__ungrouped__", "__ungrouped__"):
+                    if not is_fav or bool(CollectionsManager.get_asset_collections(asset_id)):
+                        return False
+                elif self._sub_category and self._sub_category.startswith("coll:"):
                     coll_name = self._sub_category[5:]
                     if asset_id not in CollectionsManager.get_collection_assets(coll_name):
                         return False
                 else:
-                    favs = getattr(src_model, "_favs", None)
-                    is_fav = (asset_id in favs) if favs is not None else bool(item.get("is_fav", False))
                     if not is_fav:
                         return False
             elif self._filter_mode == "recent":
@@ -295,7 +298,7 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
                     target_pack = normalize_taxonomy(self._sub_category[5:])
                     if pack_norm != target_pack:
                         return False
-                elif self._category != "fav":
+                elif self._category != "fav" and not self._sub_category.startswith("coll:"):
                     target_sub = normalize_taxonomy(self._sub_category)
                     if sub_norm != target_sub and target_sub not in tags_norm:
                         return False
@@ -329,7 +332,10 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
 
         # 2. Filter Mode (all / fav / recent) & Favorites/Custom Collections
         if self._category == "fav" or self._filter_mode == "fav":
-            if self._sub_category and self._sub_category.startswith("coll:"):
+            if self._sub_category in ("coll:__ungrouped__", "__ungrouped__"):
+                if not is_fav or bool(CollectionsManager.get_asset_collections(asset_id)):
+                    return False
+            elif self._sub_category and self._sub_category.startswith("coll:"):
                 coll_name = self._sub_category[5:]
                 coll_assets = set(CollectionsManager.get_collection_assets(coll_name))
                 if asset_id not in coll_assets:
@@ -359,7 +365,7 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
                 target_pack = normalize_taxonomy(self._sub_category[5:])
                 if normalize_taxonomy(pack) != target_pack:
                     return False
-            elif self._category != "fav":
+            elif self._category != "fav" and not self._sub_category.startswith("coll:"):
                 sub_norm = normalize_taxonomy(sub)
                 target_sub = normalize_taxonomy(self._sub_category)
                 if sub_norm != target_sub and target_sub not in tags_norm:

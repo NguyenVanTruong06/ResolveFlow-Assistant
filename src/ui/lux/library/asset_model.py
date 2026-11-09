@@ -134,7 +134,7 @@ class AssetListModel(QAbstractListModel):
         super().__init__(parent)
         self._assets: List[Dict[str, Any]] = []
         self._id_to_row: Dict[str, int] = {}
-        self._favs: Set[str] = set(favs) if favs is not None else set()
+        self._favs: Set[str] = favs if favs is not None else set()
         self._thumb_cache: Dict[str, QPixmap] = {}
         self._pending_thumb_requests: Set[str] = set()
         self._pending_thumb_assets: Dict[str, Set[str]] = {}
@@ -369,22 +369,31 @@ class AssetListModel(QAbstractListModel):
             self._pending_thumb_requests.discard(file_path)
             self._pending_thumb_assets.pop(file_path, None)
 
-    def toggle_favorite(self, asset_id: str) -> bool:
-        """Toggles favorite state for an asset, notifies views."""
-        if asset_id in self._favs:
-            self._favs.remove(asset_id)
-            is_fav = False
-        else:
-            self._favs.add(asset_id)
-            is_fav = True
+    def is_favorite(self, asset_id: str) -> bool:
+        return asset_id in self._favs
 
-        if asset_id in self._id_to_row:
+    def set_favorite(self, asset_id: str, is_fav: bool) -> None:
+        """Sets explicit favorite state and notifies views."""
+        changed = False
+        if is_fav and asset_id not in self._favs:
+            self._favs.add(asset_id)
+            changed = True
+        elif not is_fav and asset_id in self._favs:
+            self._favs.discard(asset_id)
+            changed = True
+
+        if changed and asset_id in self._id_to_row:
             row = self._id_to_row[asset_id]
             idx = self.index(row, 0)
             self.dataChanged.emit(idx, idx, [IsFavRole])
+        if changed:
+            self.favorite_changed.emit(asset_id, is_fav)
 
-        self.favorite_changed.emit(asset_id, is_fav)
-        return is_fav
+    def toggle_favorite(self, asset_id: str) -> bool:
+        """Toggles favorite state for an asset, notifies views."""
+        new_state = asset_id not in self._favs
+        self.set_favorite(asset_id, new_state)
+        return new_state
 
     def get_asset(self, row: int) -> Optional[Dict[str, Any]]:
         if 0 <= row < len(self._assets):

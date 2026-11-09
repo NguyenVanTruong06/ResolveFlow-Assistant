@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QCheckBox, QGroupBox, QFormLayout,
     QSlider, QFrame, QScrollArea, QGridLayout, QApplication, QMessageBox,
     QSizePolicy, QFileDialog, QColorDialog, QSplitter, QStackedWidget,
-    QInputDialog, QMenu
+    QInputDialog, QMenu, QDialog, QRadioButton
 )
 from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF, QPoint, QEvent, QMetaObject, QObject
 from PySide6.QtGui import (
@@ -57,51 +57,388 @@ MAX_FUSION_SETTING_BYTES = 5 * 1024 * 1024  # 5 MiB giới hạn tối đa cho f
 # =========================================================================
 # 1. BỘ QUẢN LÝ YÊU THÍCH (Favorites Manager)
 # =========================================================================
+def _atomic_save_json(path: Path, data: Any) -> bool:
+    try:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_name(f"{path.name}.{os.getpid()}_{time.time_ns()}.tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+        return True
+    except Exception as e:
+        logger.error(f"[AtomicSave] Error saving {path}: {e}")
+        try:
+            if 'tmp_path' in locals() and tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+        return False
+
+
 class FavoritesManager:
-    FILE_PATH = "data/favorites.json"
+    FILE_PATH = Path("data") / "favorites.json"
     _cache: Optional[set] = None
     _cache_mtime: float = -1.0
     _cache_path: str = ""
 
     @classmethod
     def load(cls) -> set:
-        try:
-            abs_p = os.path.abspath(cls.FILE_PATH)
-        except Exception:
-            abs_p = cls.FILE_PATH
-
-        if not os.path.exists("data"):
-            os.makedirs("data", exist_ok=True)
-        if not os.path.exists(cls.FILE_PATH):
+        path = Path(cls.FILE_PATH)
+        abs_p = str(path.resolve()) if path.exists() else str(path)
+        if not path.parent.exists():
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+        if not path.exists():
             cls._cache = set()
             cls._cache_mtime = -1.0
             cls._cache_path = abs_p
             return set()
         try:
-            st_mtime = os.stat(cls.FILE_PATH).st_mtime
+            st_mtime = path.stat().st_mtime
             if cls._cache is not None and cls._cache_path == abs_p and cls._cache_mtime == st_mtime:
                 return set(cls._cache)
-            with open(cls.FILE_PATH, 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 data = set(json.load(f))
             cls._cache = data
             cls._cache_mtime = st_mtime
             cls._cache_path = abs_p
             return set(data)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[FavoritesManager] Error loading {path}: {e}")
             return set()
 
     @classmethod
-    def save(cls, favs: set):
-        if not os.path.exists("data"):
-            os.makedirs("data", exist_ok=True)
-        try:
-            with open(cls.FILE_PATH, 'w', encoding='utf-8') as f:
-                json.dump(list(favs), f)
+    def save(cls, favs: set) -> bool:
+        path = Path(cls.FILE_PATH)
+        data = sorted(list(favs))
+        if _atomic_save_json(path, data):
             cls._cache = set(favs)
-            cls._cache_path = os.path.abspath(cls.FILE_PATH)
-            cls._cache_mtime = os.stat(cls.FILE_PATH).st_mtime
-        except Exception:
-            pass
+            cls._cache_path = str(path.resolve()) if path.exists() else str(path)
+            cls._cache_mtime = path.stat().st_mtime if path.exists() else 0.0
+            return True
+        return False
+
+
+class CategoryOverridesManager:
+    """Quản lý ghi đè danh mục logic (category overrides) của từng đạo cụ."""
+    FILE_PATH = Path("data") / "category_overrides.json"
+    _cache: Optional[dict] = None
+    _cache_mtime: float = -1.0
+    _cache_path: str = ""
+
+    @classmethod
+    def load(cls) -> dict:
+        path = Path(cls.FILE_PATH)
+        abs_p = str(path.resolve()) if path.exists() else str(path)
+        if not path.parent.exists():
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+        if not path.exists():
+            cls._cache = {}
+            cls._cache_mtime = -1.0
+            cls._cache_path = abs_p
+            return {}
+        try:
+            st_mtime = path.stat().st_mtime
+            if cls._cache is not None and cls._cache_path == abs_p and cls._cache_mtime == st_mtime:
+                return dict(cls._cache)
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                data = {}
+            cls._cache = data
+            cls._cache_mtime = st_mtime
+            cls._cache_path = abs_p
+            return dict(data)
+        except Exception as e:
+            logger.warning(f"[CategoryOverridesManager] Error loading {path}: {e}")
+            return {}
+
+    @classmethod
+    def save(cls, overrides: dict) -> bool:
+        path = Path(cls.FILE_PATH)
+        if _atomic_save_json(path, overrides):
+            cls._cache = dict(overrides)
+            cls._cache_path = str(path.resolve()) if path.exists() else str(path)
+            cls._cache_mtime = path.stat().st_mtime if path.exists() else 0.0
+            return True
+        return False
+
+    @classmethod
+    def set_override(cls, asset_id: str, dest_cat: str) -> bool:
+        data = cls.load()
+        data[str(asset_id)] = str(dest_cat)
+        return cls.save(data)
+
+    @classmethod
+    def set_overrides_batch(cls, mapping: dict) -> bool:
+        data = cls.load()
+        for k, v in mapping.items():
+            data[str(k)] = str(v)
+        return cls.save(data)
+
+    @classmethod
+    def update_category_rename(cls, old_cat: str, new_cat: str) -> bool:
+        data = cls.load()
+        changed = False
+        for k, v in list(data.items()):
+            if v == old_cat:
+                data[k] = new_cat
+                changed = True
+        if changed:
+            return cls.save(data)
+        return True
+
+
+class FavoriteGroupSelectDialog(QDialog):
+    """Hộp thoại chọn nhóm lưu trữ khi thêm đạo cụ vào Yêu thích."""
+    def __init__(self, parent=None, collections: Optional[List[str]] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Thêm vào mục Yêu thích")
+        self.setFixedWidth(380)
+        self.setModal(True)
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: #18181b;
+                color: #e4e4e7;
+            }}
+            QLabel {{
+                color: #e4e4e7;
+                font-size: 12px;
+            }}
+            QRadioButton {{
+                color: #e4e4e7;
+                font-size: 12px;
+                spacing: 8px;
+            }}
+            QRadioButton::indicator {{
+                width: 14px;
+                height: 14px;
+            }}
+            QComboBox, QLineEdit {{
+                background-color: #27272a;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 4px 8px;
+                font-size: 12px;
+            }}
+            QPushButton {{
+                background-color: #3f3f46;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: #52525b;
+            }}
+            QPushButton#btnPrimary {{
+                background-color: #6366f1;
+            }}
+            QPushButton#btnPrimary:hover {{
+                background-color: #4f46e5;
+            }}
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(18, 18, 18, 18)
+
+        lbl_desc = QLabel("Chọn nhóm lưu trữ cho đạo cụ:")
+        lbl_desc.setStyleSheet("font-weight: bold; color: #f4f4f5; margin-bottom: 4px;")
+        layout.addWidget(lbl_desc)
+
+        # 1. Mặc định / Chưa phân nhóm
+        self.rb_ungrouped = QRadioButton("⭐ Tất cả yêu thích (Chưa phân nhóm)")
+        self.rb_ungrouped.setChecked(True)
+        layout.addWidget(self.rb_ungrouped)
+
+        # 2. Bộ sưu tập hiện có
+        available_colls = collections if collections is not None else CollectionsManager.get_collection_names()
+        self.rb_existing = QRadioButton("📁 Chọn bộ sưu tập hiện có:")
+        layout.addWidget(self.rb_existing)
+
+        self.cb_existing = QComboBox()
+        for cname in available_colls:
+            self.cb_existing.addItem(cname)
+        if not available_colls:
+            self.rb_existing.setEnabled(False)
+            self.cb_existing.setEnabled(False)
+        layout.addWidget(self.cb_existing)
+
+        # 3. Tạo bộ sưu tập mới
+        self.rb_new = QRadioButton("➕ Tạo bộ sưu tập mới:")
+        layout.addWidget(self.rb_new)
+
+        self.txt_new = QLineEdit()
+        self.txt_new.setPlaceholderText("VD: Vlog Du Lịch, Highlight, Shorts...")
+        layout.addWidget(self.txt_new)
+
+        def _update_enabled():
+            self.cb_existing.setEnabled(self.rb_existing.isChecked() and bool(available_colls))
+            self.txt_new.setEnabled(self.rb_new.isChecked())
+            if self.rb_new.isChecked():
+                self.txt_new.setFocus()
+        self.rb_ungrouped.toggled.connect(_update_enabled)
+        self.rb_existing.toggled.connect(_update_enabled)
+        self.rb_new.toggled.connect(_update_enabled)
+        _update_enabled()
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.btn_cancel = QPushButton("Hủy")
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_ok = QPushButton("Lưu")
+        self.btn_ok.setObjectName("btnPrimary")
+        self.btn_ok.clicked.connect(self._on_accept)
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_ok)
+        layout.addLayout(btn_layout)
+
+    def _on_accept(self):
+        if self.rb_new.isChecked():
+            val = self.txt_new.text().strip()
+            if not val:
+                return
+        self.accept()
+
+    def get_selected_group(self) -> str:
+        """Trả về tên collection hoặc chuỗi rỗng '' nếu chọn ungrouped."""
+        if self.rb_existing.isChecked() and self.cb_existing.count() > 0:
+            return self.cb_existing.currentText().strip()
+        elif self.rb_new.isChecked():
+            return self.txt_new.text().strip()
+        return ""
+
+
+class MoveCategoryDialog(QDialog):
+    """Hộp thoại di chuyển đạo cụ sang danh mục mới hoặc danh mục hiện có."""
+    def __init__(self, parent=None, current_tab: str = "", existing_categories: Optional[List[str]] = None, asset_count: int = 1):
+        super().__init__(parent)
+        self.setWindowTitle("Chuyển danh mục")
+        self.setFixedWidth(380)
+        self.setModal(True)
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: #18181b;
+                color: #e4e4e7;
+            }}
+            QLabel {{
+                color: #e4e4e7;
+                font-size: 12px;
+            }}
+            QRadioButton {{
+                color: #e4e4e7;
+                font-size: 12px;
+                spacing: 8px;
+            }}
+            QRadioButton::indicator {{
+                width: 14px;
+                height: 14px;
+            }}
+            QComboBox, QLineEdit {{
+                background-color: #27272a;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 4px 8px;
+                font-size: 12px;
+            }}
+            QPushButton {{
+                background-color: #3f3f46;
+                color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: #52525b;
+            }}
+            QPushButton#btnPrimary {{
+                background-color: #6366f1;
+            }}
+            QPushButton#btnPrimary:hover {{
+                background-color: #4f46e5;
+            }}
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(18, 18, 18, 18)
+
+        lbl_desc = QLabel(f"Chuyển {asset_count} đạo cụ đã chọn sang danh mục đích:")
+        lbl_desc.setStyleSheet("font-weight: bold; color: #f4f4f5; margin-bottom: 4px;")
+        layout.addWidget(lbl_desc)
+
+        cats = [c for c in (existing_categories or []) if c not in ("all", "Tất cả", "default")]
+
+        self.rb_existing = QRadioButton("📁 Chọn danh mục hiện có:")
+        layout.addWidget(self.rb_existing)
+
+        self.cb_existing = QComboBox()
+        for c in cats:
+            self.cb_existing.addItem(c)
+        if not cats:
+            self.rb_existing.setEnabled(False)
+            self.cb_existing.setEnabled(False)
+        else:
+            self.rb_existing.setChecked(True)
+        layout.addWidget(self.cb_existing)
+
+        self.rb_new = QRadioButton("➕ Tạo danh mục mới:")
+        if not cats:
+            self.rb_new.setChecked(True)
+        layout.addWidget(self.rb_new)
+
+        self.txt_new = QLineEdit()
+        self.txt_new.setPlaceholderText("Nhập tên danh mục mới...")
+        layout.addWidget(self.txt_new)
+
+        def _update_enabled():
+            self.cb_existing.setEnabled(self.rb_existing.isChecked() and bool(cats))
+            self.txt_new.setEnabled(self.rb_new.isChecked())
+            if self.rb_new.isChecked():
+                self.txt_new.setFocus()
+        self.rb_existing.toggled.connect(_update_enabled)
+        self.rb_new.toggled.connect(_update_enabled)
+        _update_enabled()
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.btn_cancel = QPushButton("Hủy")
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_ok = QPushButton("Chuyển")
+        self.btn_ok.setObjectName("btnPrimary")
+        self.btn_ok.clicked.connect(self._on_accept)
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_ok)
+        layout.addLayout(btn_layout)
+
+    def _on_accept(self):
+        if self.rb_new.isChecked():
+            val = self.txt_new.text().strip()
+            if not val:
+                return
+        self.accept()
+
+    def get_selected_category(self) -> str:
+        if self.rb_existing.isChecked() and self.cb_existing.count() > 0:
+            return self.cb_existing.currentText().strip()
+        elif self.rb_new.isChecked():
+            return self.txt_new.text().strip()
+        return ""
 
 
 class RecentManager:
@@ -4126,6 +4463,7 @@ class TabAssets(QWidget):
         self.all_assets.extend(self.all_sfx)
         self.all_assets.extend(self.all_bgm)
         self._merge_storage_assets()
+        self._apply_category_overrides()
 
         self.current_rail_tab = "text"
         self.current_sub_cat = "all"
@@ -4583,6 +4921,7 @@ class TabAssets(QWidget):
         self.asset_grid.asset_activated.connect(self._on_lux_card_activated)
         self.asset_grid.favorite_toggled.connect(self._on_favorite_toggled)
         self.asset_grid.fusion_paste_requested.connect(self._on_lux_fusion_paste)
+        self.asset_grid.move_category_requested.connect(self._on_move_category_requested)
 
         # Legacy backward-compatibility wrappers
         self.scroll_grid = self.asset_grid
@@ -5614,6 +5953,37 @@ class TabAssets(QWidget):
             btn_fav_all.clicked.connect(lambda: self._on_sub_category_clicked("all"))
             self.cats_vbox.addWidget(btn_fav_all)
 
+            # A2. Nút Chưa phân nhóm (Favorites không thuộc bộ sưu tập nào)
+            ungrouped_favs = CollectionsManager.get_ungrouped_favorites(set(self.favorites))
+            ungrouped_count = len(ungrouped_favs)
+            btn_fav_ungrouped = QPushButton(f"  ⭐ Chưa phân nhóm ({ungrouped_count})")
+            btn_fav_ungrouped.setProperty("sub_cat_id", "coll:__ungrouped__")
+            btn_fav_ungrouped.setCheckable(True)
+            btn_fav_ungrouped.setFixedHeight(32)
+            btn_fav_ungrouped.setCursor(Qt.PointingHandCursor)
+            btn_fav_ungrouped.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: none;
+                    border-radius: 6px;
+                    color: {ThemeColors.TEXT_MUTED};
+                    font-size: 12px;
+                    text-align: left;
+                    padding-left: 6px;
+                }}
+                QPushButton:hover {{
+                    background: {ThemeColors.BG_CARD};
+                    color: {ThemeColors.TEXT_PRIMARY};
+                }}
+                QPushButton:checked {{
+                    background: {ThemeColors.BG_CARD_ACTIVE};
+                    color: #fbbf24;
+                    font-weight: bold;
+                }}
+            """)
+            btn_fav_ungrouped.clicked.connect(lambda: self._on_sub_category_clicked("coll:__ungrouped__"))
+            self.cats_vbox.addWidget(btn_fav_ungrouped)
+
             # B. Tiêu đề mục: BỘ SƯU TẬP CỦA TÔI
             lbl_coll_hdr = QLabel("📁 BỘ SƯU TẬP CỦA TÔI")
             lbl_coll_hdr.setStyleSheet(f"""
@@ -5953,10 +6323,13 @@ class TabAssets(QWidget):
                 color: #ffffff;
             }
         """)
+        act_merge = menu.addAction("🔀 Gộp vào danh mục khác...")
         act_rename = menu.addAction("✏️ Đổi Tên Danh Mục...")
         act_delete = menu.addAction(f"🗑️ Xóa Danh Mục ({count} mẫu)..." if count > 0 else "🗑️ Xóa Danh Mục Trống...")
         action = menu.exec(btn.mapToGlobal(pos))
-        if action == act_rename:
+        if action == act_merge:
+            self._prompt_merge_category(cid, cname)
+        elif action == act_rename:
             new_name, ok = QInputDialog.getText(self, "Đổi tên danh mục", f"Nhập tên mới cho danh mục '{cname}':", text=cname)
             if ok and new_name.strip() and new_name.strip() != cname:
                 self._rename_sub_category(cid, new_name.strip())
@@ -5973,27 +6346,196 @@ class TabAssets(QWidget):
                 if reply == QMessageBox.StandardButton.Yes:
                     self._delete_sub_category(cid, cname)
 
-    def _rename_sub_category(self, old_cid: str, new_name: str):
+    def _prompt_merge_category(self, source_cid: str, source_cname: str):
+        sub_cats = []
         for a in self.all_assets:
-            if self._get_asset_sub(a) == old_cid:
-                if isinstance(a, dict):
-                    a["sub"] = new_name
-                    a["sub_category"] = new_name
+            if self._get_asset_tab(a) == self.current_rail_tab:
+                sub = self._get_asset_sub(a)
+                if sub and sub != source_cid and sub != source_cname and sub not in ("all", "Tất cả") and sub not in sub_cats:
+                    sub_cats.append(sub)
+
+        if not sub_cats:
+            dest_name, ok = QInputDialog.getText(
+                self, "Gộp danh mục",
+                f"Không có danh mục nào khác trong tab này.\nNhập tên danh mục đích để gộp '{source_cname}' sang:"
+            )
+            if ok and dest_name.strip():
+                dest_clean = dest_name.strip()
+                if dest_clean == source_cid or dest_clean == source_cname:
+                    QMessageBox.warning(self, "Không hợp lệ", "Không thể gộp danh mục vào chính nó!")
+                    return
+                self.merge_category(source_cid, dest_clean)
+            return
+
+        dest_name, ok = QInputDialog.getItem(
+            self, "Gộp danh mục",
+            f"Chọn danh mục đích để gộp toàn bộ đạo cụ từ '{source_cname}' sang:",
+            sub_cats, 0, True
+        )
+        if ok and dest_name.strip():
+            dest_clean = dest_name.strip()
+            if dest_clean == source_cid or dest_clean == source_cname:
+                QMessageBox.warning(self, "Không hợp lệ", "Không thể gộp danh mục vào chính nó!")
+                return
+            self.merge_category(source_cid, dest_clean)
+
+    def merge_category(self, source_cat: str, dest_cat: str, tab: Optional[str] = None) -> bool:
+        """Gộp toàn bộ đạo cụ từ source_cat vào dest_cat trong tab hiện tại không làm mất dữ liệu."""
+        src = str(source_cat or "").strip()
+        dst = str(dest_cat or "").strip()
+        if not src or not dst or src == dst:
+            return False
+
+        target_tab = str(tab or getattr(self, "current_rail_tab", "") or "").strip()
+
+        # Lọc danh sách đạo cụ thuộc đúng target_tab và có nhóm con là src
+        affected_assets = [
+            a for a in self.all_assets
+            if (not target_tab or self._get_asset_tab(a) == target_tab) and self._get_asset_sub(a) == src
+        ]
+
+        if not affected_assets:
+            return False
+
+        # Thu thập ID của tất cả item bị ảnh hưởng (kể cả item mới import chưa từng có override)
+        affected_ids = {self._get_asset_id(a) for a in affected_assets}
+        affected_ids.discard("")
+        if not affected_ids:
+            return False
+
+        # Lưu ghi đè danh mục cho từng ID bị ảnh hưởng TRƯỚC KHI thay đổi bộ nhớ / UI
+        overrides_to_set = {aid: dst for aid in affected_ids}
+        if not CategoryOverridesManager.set_overrides_batch(overrides_to_set):
+            self._show_toast("⚠️ Lỗi lưu cấu hình gộp danh mục.")
+            return False
+
+        # Cập nhật in-memory cho các item bị ảnh hưởng
+        for a in affected_assets:
+            if isinstance(a, dict):
+                a["sub"] = dst
+                a["sub_category"] = dst
+            else:
+                setattr(a, "sub", dst)
+                if hasattr(a, "sub_category"):
+                    setattr(a, "sub_category", dst)
+
+        # Đồng bộ lại model & UI
+        if hasattr(self, "asset_model") and self.asset_model:
+            self.asset_model.set_assets(self.all_assets)
+        self._rebuild_categories_column()
+        self._on_sub_category_clicked(dst)
+        self._refresh_grid()
+        self._show_toast(f"🔀 Đã gộp {len(affected_assets)} đạo cụ từ '{src}' sang '{dst}'!")
+        return True
+
+    def move_assets_category(self, assets: List[Any], dest_cat: str) -> int:
+        """Di chuyển danh mục logic cho danh sách đạo cụ đã chọn."""
+        dst = str(dest_cat or "").strip()
+        if not assets or not dst:
+            return 0
+
+        target_ids = set()
+        overrides_to_set = {}
+        for item in assets:
+            aid = self._get_asset_id(item)
+            if not aid:
+                continue
+            target_ids.add(aid)
+            overrides_to_set[aid] = dst
+
+        if not target_ids:
+            return 0
+
+        # Lưu ghi đè danh mục cho từng ID TRƯỚC KHI thay đổi bộ nhớ / UI
+        if not CategoryOverridesManager.set_overrides_batch(overrides_to_set):
+            self._show_toast("⚠️ Không thể lưu danh mục mới cho đạo cụ.")
+            return 0
+
+        moved = 0
+        for item in assets:
+            aid = self._get_asset_id(item)
+            if aid in target_ids:
+                if isinstance(item, dict):
+                    item["sub"] = dst
+                    item["sub_category"] = dst
                 else:
-                    setattr(a, "sub", new_name)
+                    setattr(item, "sub", dst)
+                    if hasattr(item, "sub_category"):
+                        setattr(item, "sub_category", dst)
+                moved += 1
+
+        # Cập nhật các instance tương ứng trong self.all_assets nếu item truyền vào là bản copy
+        for a in self.all_assets:
+            aid = self._get_asset_id(a)
+            if aid in target_ids:
+                if isinstance(a, dict):
+                    a["sub"] = dst
+                    a["sub_category"] = dst
+                else:
+                    setattr(a, "sub", dst)
                     if hasattr(a, "sub_category"):
-                        setattr(a, "sub_category", new_name)
+                        setattr(a, "sub_category", dst)
 
-        try:
-            from src.core.storage_manager import StorageManager
-            sm = StorageManager()
-            if sm.online:
-                sm.rename_category(old_cid, new_name)
-        except Exception:
-            pass
+        # Đồng bộ model & view
+        if hasattr(self, "asset_model") and self.asset_model:
+            self.asset_model.set_assets(self.all_assets)
+        self._rebuild_categories_column()
+        self._refresh_grid()
+        self._show_toast(f"✅ Đã chuyển {moved} đạo cụ sang '{dst}'!")
+        return moved
 
+    def _on_move_category_requested(self, assets: List[Any]):
+        if not assets:
+            return
+        if getattr(self, "headless", False):
+            return
+        existing_cats = []
+        for a in self.all_assets:
+            if self._get_asset_tab(a) == self.current_rail_tab:
+                sub = self._get_asset_sub(a)
+                if sub and sub not in ("all", "Tất cả") and sub not in existing_cats:
+                    existing_cats.append(sub)
+
+        dlg = MoveCategoryDialog(self, current_tab=self.current_rail_tab, existing_categories=existing_cats, asset_count=len(assets))
+        if dlg.exec() == QDialog.Accepted:
+            dest_cat = dlg.get_selected_category()
+            if dest_cat:
+                self.move_assets_category(assets, dest_cat)
+
+    def _rename_sub_category(self, old_cid: str, new_name: str, tab: Optional[str] = None):
+        target_tab = str(tab or getattr(self, "current_rail_tab", "") or "").strip()
+        affected_assets = [
+            a for a in self.all_assets
+            if (not target_tab or self._get_asset_tab(a) == target_tab) and self._get_asset_sub(a) == old_cid
+        ]
+
+        if not affected_assets:
+            return
+
+        affected_ids = {self._get_asset_id(a) for a in affected_assets}
+        affected_ids.discard("")
+        if not affected_ids:
+            return
+
+        overrides_to_set = {aid: new_name for aid in affected_ids}
+        if not CategoryOverridesManager.set_overrides_batch(overrides_to_set):
+            self._show_toast("⚠️ Lỗi lưu đổi tên danh mục.")
+            return
+
+        for a in affected_assets:
+            if isinstance(a, dict):
+                a["sub"] = new_name
+                a["sub_category"] = new_name
+            else:
+                setattr(a, "sub", new_name)
+                if hasattr(a, "sub_category"):
+                    setattr(a, "sub_category", new_name)
+
+        if hasattr(self, "asset_model") and self.asset_model:
+            self.asset_model.set_assets(self.all_assets)
         self._rebuild_categories_column()
         self._on_sub_category_clicked(new_name)
+        self._refresh_grid()
         self._show_toast(f"✅ Đã đổi tên danh mục thành '{new_name}'!")
 
     def _delete_sub_category(self, cid: str, cname: str):
@@ -6099,6 +6641,8 @@ class TabAssets(QWidget):
         filter_mode = getattr(self, "filter_mode", "all")
 
         # 1. Cập nhật AssetFilterProxyModel (< 1ms, không tạo QWidget)
+        if hasattr(self, "asset_model") and self.asset_model:
+            self.asset_model._favs = self.favorites
         if hasattr(self, "asset_filter"):
             recent_ids = RecentManager.load() if filter_mode == "recent" else None
             if hasattr(self.asset_filter, "set_filters_batch"):
@@ -6117,6 +6661,7 @@ class TabAssets(QWidget):
                     self.asset_filter.set_recent_ids(recent_ids)
                 self.asset_filter.set_search_query(query)
 
+            self.asset_filter.invalidate()
             count = self.asset_filter.rowCount()
             self.lbl_count_badge.setText(f"{count} mẫu")
 
@@ -6162,7 +6707,11 @@ class TabAssets(QWidget):
                 continue
 
             if tab == "fav":
-                if cat.startswith("coll:"):
+                if cat in ("coll:__ungrouped__", "__ungrouped__"):
+                    if not i_fav or bool(CollectionsManager.get_asset_collections(i_id)):
+                        card.setVisible(False)
+                        continue
+                elif cat.startswith("coll:"):
                     cname = cat[5:]
                     coll_assets = set(CollectionsManager.get_collection_assets(cname))
                     if i_id not in coll_assets:
@@ -7003,6 +7552,23 @@ class TabAssets(QWidget):
                 rail_layout = self.rail.layout()
                 rail_layout.insertWidget(max(0, rail_layout.count() - 1), button)
 
+    def _apply_category_overrides(self):
+        """Áp dụng các danh mục đã ghi đè cho toàn bộ đạo cụ trong self.all_assets."""
+        overrides = CategoryOverridesManager.load()
+        if not overrides:
+            return
+        for a in self.all_assets:
+            aid = self._get_asset_id(a)
+            if aid and aid in overrides:
+                dest_cat = overrides[aid]
+                if isinstance(a, dict):
+                    a["sub"] = dest_cat
+                    a["sub_category"] = dest_cat
+                else:
+                    setattr(a, "sub", dest_cat)
+                    if hasattr(a, "sub_category"):
+                        setattr(a, "sub_category", dest_cat)
+
     def _merge_storage_assets(self):
         """Nạp snapshot kho ngoài; metadata không phụ thuộc media đang online."""
         from src.core.storage_manager import StorageManager
@@ -7060,6 +7626,7 @@ class TabAssets(QWidget):
         ]
         new_managed = [self._dict_to_studio_asset(r) for r in managed_assets]
         self.all_assets = base_assets + new_managed
+        self._apply_category_overrides()
 
         # 3. Ghi nhận ID đang chọn trước khi cập nhật Model
         selected_id = self._get_asset_id(self.selected_asset) if self.selected_asset else None
@@ -7175,6 +7742,7 @@ class TabAssets(QWidget):
         self.all_assets.extend(self.all_sfx)
         self.all_assets.extend(self.all_bgm)
         self._merge_storage_assets()
+        self._apply_category_overrides()
         self._sync_storage_rail()
         
         if hasattr(self, "suggester"):
@@ -8783,14 +9351,98 @@ class TabAssets(QWidget):
         else:
             self._show_toast(f"⚠️ {res.get('message', 'Không thể dán tự động')}")
 
-    def _on_favorite_toggled(self, preset_id: str, is_fav: bool):
+    def _prompt_favorite_group(self, preset_id: str) -> Optional[str]:
+        """Hiển thị hộp thoại chọn nhóm lưu trữ khi thêm vào yêu thích.
+        Trả về:
+        - '' cho mặc định / chưa phân nhóm
+        - '<tên nhóm>' cho nhóm tùy chỉnh
+        - None nếu người dùng Hủy (cancel)
+        """
+        if getattr(self, "headless", False):
+            return ""
+        dlg = FavoriteGroupSelectDialog(self)
+        if dlg.exec() == QDialog.Accepted:
+            return dlg.get_selected_group()
+        return None
+
+    def _on_favorite_toggled(self, preset_id: str, is_fav: Optional[bool] = None, group: Optional[str] = None) -> bool:
+        if is_fav is None:
+            is_fav = preset_id not in self.favorites
+
         if is_fav:
+            if group is None:
+                group = self._prompt_favorite_group(preset_id)
+            if group is None:
+                # Người dùng hủy bỏ dialog: phục hồi trạng thái un-favorite trong model
+                if hasattr(self, "asset_model") and self.asset_model:
+                    self.asset_model.set_favorite(preset_id, False)
+                return False
+
+            clean_grp = group.strip()
+            old_favorites = set(self.favorites)
             self.favorites.add(preset_id)
-        else:
-            self.favorites.discard(preset_id)
-        FavoritesManager.save(self.favorites)
-        if self.current_rail_tab == "fav":
+
+            # Lưu file favorites.json
+            if not FavoritesManager.save(self.favorites):
+                self.favorites = old_favorites
+                if hasattr(self, "asset_model") and self.asset_model:
+                    self.asset_model.set_favorite(preset_id, False)
+                self._show_toast("⚠️ Lỗi lưu danh sách Yêu thích.")
+                return False
+
+            # Lưu nhóm bộ sưu tập nếu có
+            if clean_grp:
+                if clean_grp not in CollectionsManager.get_collection_names():
+                    if not CollectionsManager.create_collection(clean_grp):
+                        # Rollback favorites.json
+                        self.favorites = old_favorites
+                        FavoritesManager.save(self.favorites)
+                        if hasattr(self, "asset_model") and self.asset_model:
+                            self.asset_model.set_favorite(preset_id, False)
+                        self._show_toast("⚠️ Lỗi tạo nhóm bộ sưu tập.")
+                        return False
+                if not CollectionsManager.add_asset_to_collection(clean_grp, preset_id):
+                    # Rollback favorites.json
+                    self.favorites = old_favorites
+                    FavoritesManager.save(self.favorites)
+                    if hasattr(self, "asset_model") and self.asset_model:
+                        self.asset_model.set_favorite(preset_id, False)
+                    self._show_toast("⚠️ Lỗi lưu nhóm bộ sưu tập.")
+                    return False
+            else:
+                if not CollectionsManager.remove_asset_from_all(preset_id):
+                    # Rollback favorites.json
+                    self.favorites = old_favorites
+                    FavoritesManager.save(self.favorites)
+                    if hasattr(self, "asset_model") and self.asset_model:
+                        self.asset_model.set_favorite(preset_id, False)
+                    self._show_toast("⚠️ Lỗi cập nhật nhóm bộ sưu tập.")
+                    return False
+
+            if hasattr(self, "asset_model") and self.asset_model:
+                self.asset_model.set_favorite(preset_id, True)
+            self._rebuild_categories_column()
             self._refresh_grid()
+            return True
+        else:
+            old_favorites = set(self.favorites)
+            self.favorites.discard(preset_id)
+            if not FavoritesManager.save(self.favorites):
+                self.favorites = old_favorites
+                self._show_toast("⚠️ Lỗi cập nhật danh sách Yêu thích.")
+                return False
+
+            if not CollectionsManager.remove_asset_from_all(preset_id):
+                self.favorites = old_favorites
+                FavoritesManager.save(self.favorites)
+                self._show_toast("⚠️ Lỗi cập nhật nhóm bộ sưu tập.")
+                return False
+
+            if hasattr(self, "asset_model") and self.asset_model:
+                self.asset_model.set_favorite(preset_id, False)
+            self._rebuild_categories_column()
+            self._refresh_grid()
+            return True
 
     def _scan_local_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục chứa SFX / LUTs / Footage")

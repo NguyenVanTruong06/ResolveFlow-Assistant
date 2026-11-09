@@ -169,7 +169,8 @@ class AssetGridView(QListView):
     asset_activated = Signal(object)      # Emits on double-click or Enter
     drag_started = Signal()
     drag_ended = Signal()
-    favorite_toggled = Signal(str)        # Emits asset_id
+    favorite_toggled = Signal((str, bool), (str,))  # Emits (asset_id, is_fav) or asset_id
+    move_category_requested = Signal(list)          # Emits list of selected assets to move
     fusion_paste_requested = Signal(object) # Emits asset for Fusion paste
     open_folder_requested = Signal(str)   # Emits directory path
 
@@ -185,7 +186,7 @@ class AssetGridView(QListView):
         self.setLayoutMode(QListView.LayoutMode.Batched)
         self.setBatchSize(40)
         self.setSpacing(8)
-        self.setSelectionMode(QListView.SelectionMode.SingleSelection)
+        self.setSelectionMode(QListView.SelectionMode.ExtendedSelection)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setMouseTracking(True)
@@ -289,6 +290,18 @@ class AssetGridView(QListView):
         if not index.isValid():
             return
 
+        # Handle multi-selection: if clicked index not in selected, make it the sole selection
+        sel_model = self.selectionModel()
+        selected_indexes = sel_model.selectedIndexes() if sel_model else []
+        if index not in selected_indexes:
+            if sel_model:
+                from PySide6.QtCore import QItemSelectionModel
+                sel_model.select(index, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+            selected_indexes = [index]
+
+        selected_assets = [self._get_asset_at_index(idx) for idx in selected_indexes if self._get_asset_at_index(idx) is not None]
+        num_sel = len(selected_assets)
+
         asset = self._get_asset_at_index(index)
         asset_id = str(index.data(IdRole) or "")
         is_fav = bool(index.data(IsFavRole))
@@ -317,6 +330,10 @@ class AssetGridView(QListView):
         fav_label = "☆ Bỏ yêu thích" if is_fav else "★ Thêm vào Yêu thích"
         act_fav = menu.addAction(fav_label)
 
+        # Move Category action (supports moving one or multiple selected assets)
+        move_label = f"📁 Chuyển danh mục ({num_sel} đạo cụ)..." if num_sel > 1 else "📁 Chuyển danh mục..."
+        act_move_cat = menu.addAction(move_label)
+
         # Fusion paste action
         act_fusion = menu.addAction("📋 Dán vào Fusion (Ctrl+V)")
 
@@ -327,7 +344,9 @@ class AssetGridView(QListView):
 
         action = menu.exec(self.mapToGlobal(pos))
         if action == act_fav:
-            self.favorite_toggled.emit(asset_id)
+            self.favorite_toggled.emit(asset_id, not is_fav)
+        elif action == act_move_cat:
+            self.move_category_requested.emit(selected_assets)
         elif action == act_fusion:
             self.fusion_paste_requested.emit(asset)
         elif act_open_dir and action == act_open_dir:
