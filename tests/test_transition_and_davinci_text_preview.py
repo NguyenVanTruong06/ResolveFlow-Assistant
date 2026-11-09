@@ -543,3 +543,341 @@ def test_scan_transitions_managed_mp4_provenance_for_action_guard(tmp_path, monk
     assert guard_res.allowed is True
     assert guard_res.resolved_path == str(mp4_file.resolve())
 
+
+def test_pack_root_cache_does_not_poison_ancestors(tmp_path):
+    """Kiểm tra _find_pack_root không đầu độc cache tổ tiên khi gặp file ngoài pack."""
+    from src.ui.lux.library.transition_preview_generator import _find_pack_root, _PACK_ROOT_DIR_CACHE
+    _PACK_ROOT_DIR_CACHE.clear()
+
+    # 1. File ngoài pack
+    non_pack_file = tmp_path / "loose_folder" / "loose.setting"
+    non_pack_file.parent.mkdir(parents=True)
+    non_pack_file.write_text("{ Tools = ordered() {} }")
+
+    assert _find_pack_root(str(non_pack_file)) is None
+    # Đảm bảo thư mục gốc tmp_path không bị ghi đè thành None trong cache
+    assert _PACK_ROOT_DIR_CACHE.get(str(tmp_path)) is None or str(tmp_path) not in _PACK_ROOT_DIR_CACHE
+
+    # 2. File trong pack hợp lệ nằm cùng cây thư mục
+    pack_dir = tmp_path / "valid_pack"
+    (pack_dir / "Preview Transitions").mkdir(parents=True)
+    pack_setting = pack_dir / "Transitions" / "Slide.setting"
+    pack_setting.parent.mkdir(parents=True)
+    pack_setting.write_text("{ Tools = ordered() {} }")
+
+    found = _find_pack_root(str(pack_setting))
+    assert found is not None
+    assert found.resolve() == pack_dir.resolve()
+
+
+def test_transition_sibling_video_resolution(tmp_path):
+    """Kiểm tra video đồng cấp (.mp4/.mov cùng tên cạnh .setting) luôn được ưu tiên giải quyết."""
+    from src.ui.lux.library.transition_preview_generator import (
+        resolve_transition_preview_video,
+        build_verified_video_preview_payload,
+    )
+    from src.core.action_guard import check_action_availability
+
+    sibling_dir = tmp_path / "transitions_folder"
+    sibling_dir.mkdir(parents=True)
+    setting_p = sibling_dir / "Wipe_Left.setting"
+    setting_p.write_text("{ Tools = ordered() {} }")
+    mp4_p = sibling_dir / "Wipe_Left.mp4"
+    mp4_p.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    asset = {
+        "id": "wipe_left",
+        "name": "Wipe_Left",
+        "category": "trans",
+        "file_path": str(setting_p),
+    }
+
+    resolved = resolve_transition_preview_video(asset)
+    assert resolved == str(mp4_p.resolve())
+
+    cand_payload = build_verified_video_preview_payload(asset, resolved)
+    guard = check_action_availability(cand_payload, intent="preview")
+    assert guard.allowed is True
+    assert guard.resolved_path == str(mp4_p.resolve())
+
+
+def test_transition_companion_video_wins_over_procedural(tmp_path, qapp, monkeypatch):
+    """Mẫu video thật của chuyển cảnh luôn thắng và không bị procedural thay thế kể cả khi có thumbnail ảnh."""
+    from src.core.storage_manager import StorageManager
+    from src.ui.lux.library.asset_model import AssetListModel, PreviewPathRole
+    from src.ui.lux.library.asset_grid import AssetGridView
+    from src.ui.lux.library.hover_preview import _SoftwareVideoCanvas, _ProceduralCanvas
+    from src.ui.lux.library import transition_preview_generator as tpg
+
+    tpg._PACK_VIDEO_INDEX_CACHE.clear()
+    tpg._PACK_NORM_VIDEO_INDEX_CACHE.clear()
+    tpg._PACK_ROOT_DIR_CACHE.clear()
+
+    sm = StorageManager(config_dir=tmp_path / "sm_cfg", reserve_bytes=0)
+    sm_root = tmp_path / "storage_root"
+    sm.configure(sm_root)
+    lib_id = sm._config["library_id"]
+
+    monkeypatch.setattr("src.core.storage_manager.StorageManager", lambda *a, **kw: sm)
+
+    pack_dir = sm_root / "02_cloud_downloads" / "packs" / "ZoomPack"
+    (pack_dir / "Transitions").mkdir(parents=True)
+    (pack_dir / "Preview Transitions").mkdir(parents=True)
+
+    setting_p = pack_dir / "Transitions" / "Zoom Impact.setting"
+    setting_p.write_text("{ Tools = ordered() {} }")
+    mp4_p = pack_dir / "Preview Transitions" / "Zoom Impact.mp4"
+    mp4_p.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    # Tạo thumbnail PNG hợp lệ cạnh file .setting
+    png_p = pack_dir / "Transitions" / "Zoom Impact.png"
+    img = QImage(64, 36, QImage.Format_ARGB32)
+    img.fill(0xFF00BCD4)
+    img.save(str(png_p), "PNG")
+
+    asset_dict = {
+        "id": "zoom_impact",
+        "name": "Zoom Impact",
+        "category": "trans",
+        "source_kind": "managed",
+        "origin_library_id": lib_id,
+        "origin_root": str(sm_root.resolve()),
+        "library_path": "02_cloud_downloads/packs/ZoomPack/Transitions/Zoom Impact.setting",
+        "file_path": str(setting_p.resolve()),
+        "thumbnail_path": str(png_p.resolve()),
+    }
+
+    grid = AssetGridView()
+    model = AssetListModel([asset_dict])
+    grid.setModel(model)
+    grid.resize(800, 600)
+    grid.show()
+    qapp.processEvents()
+
+    # 1. PreviewPathRole phải trả về video .mp4 thật
+    idx = model.index(0, 0)
+    prev_role_val = model.data(idx, PreviewPathRole)
+    assert prev_role_val == str(mp4_p.resolve())
+
+    # 2. Khi hover, player video phải được nạp file .mp4, không kích hoạt procedural canvas
+    hover = grid.hover_controller
+    hover._hovered_row = 0
+    hover._on_hover_timeout()
+    qapp.processEvents()
+
+    try:
+        assert hover._is_active_playback is True
+        assert hover._current_source_file == str(mp4_p.resolve())
+        assert hover._overlay is not None
+        assert hover._overlay.isVisible()
+        # Canvas phát phải là SoftwareVideoCanvas, không phải ProceduralCanvas
+        assert isinstance(hover._overlay.stack.currentWidget(), _SoftwareVideoCanvas)
+        assert hover._overlay._proc_timer.isActive() is False
+    finally:
+        hover.stop()
+        grid.close()
+
+
+def test_transition_without_video_never_masquerades_as_procedural(tmp_path, qapp, monkeypatch):
+    """Chuyển cảnh file-backed không có video mẫu KHÔNG ĐƯỢC âm thầm vẽ procedural giả lập."""
+    from src.core.storage_manager import StorageManager
+    from src.ui.lux.library.asset_model import AssetListModel
+    from src.ui.lux.library.asset_grid import AssetGridView
+    from src.ui.lux.library import transition_preview_generator as tpg
+
+    tpg._PACK_VIDEO_INDEX_CACHE.clear()
+    tpg._PACK_NORM_VIDEO_INDEX_CACHE.clear()
+    tpg._PACK_ROOT_DIR_CACHE.clear()
+
+    sm = StorageManager(config_dir=tmp_path / "sm_cfg", reserve_bytes=0)
+    sm_root = tmp_path / "storage_root"
+    sm.configure(sm_root)
+    lib_id = sm._config["library_id"]
+
+    monkeypatch.setattr("src.core.storage_manager.StorageManager", lambda *a, **kw: sm)
+
+    pack_dir = sm_root / "02_cloud_downloads" / "packs" / "NoVideoPack"
+    (pack_dir / "Transitions").mkdir(parents=True)
+    setting_p = pack_dir / "Transitions" / "UniqueCustomTransition.setting"
+    setting_p.write_text("{ Tools = ordered() {} }")
+
+    asset_dict = {
+        "id": "unique_custom",
+        "name": "UniqueCustomTransition",
+        "category": "trans",
+        "source_kind": "managed",
+        "origin_library_id": lib_id,
+        "origin_root": str(sm_root.resolve()),
+        "library_path": "02_cloud_downloads/packs/NoVideoPack/Transitions/UniqueCustomTransition.setting",
+        "file_path": str(setting_p.resolve()),
+    }
+
+    grid = AssetGridView()
+    model = AssetListModel([asset_dict])
+    grid.setModel(model)
+    grid.resize(800, 600)
+    grid.show()
+    qapp.processEvents()
+
+    hover = grid.hover_controller
+    hover._hovered_row = 0
+    hover._on_hover_timeout()
+    qapp.processEvents()
+
+    try:
+        # Không được masquerade: playback video không chạy, procedural timer không chạy
+        assert hover._is_active_playback is False
+        assert hover._overlay is None or hover._overlay._proc_timer.isActive() is False
+    finally:
+        hover.stop()
+        grid.close()
+
+
+def test_procedural_labelled_transition_denied_for_staging_offline_foreign(tmp_path, qapp, monkeypatch):
+    """Tài nguyên gắn nhãn procedural bị từ chối do staging/offline/foreign provenance -> không được bật overlay/player."""
+    from src.core.storage_manager import StorageManager
+    from src.core.transition_preset import TransitionStylePreset
+    from src.ui.lux.library.asset_model import AssetListModel
+    from src.ui.lux.library.asset_grid import AssetGridView
+
+    sm = StorageManager(config_dir=tmp_path / "sm_cfg", reserve_bytes=0)
+    sm_root = tmp_path / "storage_root"
+    sm.configure(sm_root)
+    monkeypatch.setattr("src.core.storage_manager.StorageManager", lambda *a, **kw: sm)
+
+    preset_raw = TransitionStylePreset(id="tr_staging", name="Staging Transition", transition_type="Wipe")
+
+    # 1. Staging asset gắn TransitionStylePreset
+    staging_asset = {
+        "id": "trans_staging_1",
+        "name": "Staging Transition",
+        "category": "trans",
+        "availability": "staging",
+        "_raw_obj": preset_raw,
+        "is_procedural": True,
+    }
+
+    # 2. Offline asset gắn TransitionStylePreset
+    offline_asset = {
+        "id": "trans_offline_1",
+        "name": "Offline Transition",
+        "category": "trans",
+        "availability": "offline",
+        "_raw_obj": preset_raw,
+        "is_procedural": True,
+    }
+
+    # 3. Foreign managed provenance asset gắn TransitionStylePreset
+    foreign_asset = {
+        "id": "trans_foreign_1",
+        "name": "Foreign Transition",
+        "category": "trans",
+        "source_kind": "managed",
+        "origin_library_id": "foreign_lib_999",
+        "origin_root": "/foreign/unmounted/root",
+        "_raw_obj": preset_raw,
+        "is_procedural": True,
+    }
+
+    grid = AssetGridView()
+    model = AssetListModel([staging_asset, offline_asset, foreign_asset])
+    grid.setModel(model)
+    grid.resize(800, 600)
+    grid.show()
+    qapp.processEvents()
+
+    hover = grid.hover_controller
+
+    for row_idx in (0, 1, 2):
+        hover._hovered_row = row_idx
+        hover._on_hover_timeout()
+        qapp.processEvents()
+
+        assert hover._is_active_playback is False
+        assert hover._overlay is None or hover._overlay.isVisible() is False
+        assert hover._overlay is None or hover._overlay._proc_timer.isActive() is False
+        hover.stop()
+
+    grid.close()
+
+
+def test_genuine_builtin_transition_preset_renders_procedural(qapp):
+    """TransitionStylePreset thuần túy trong bộ nhớ (không có file đĩa, không denial) được chạy live 30fps procedural."""
+    from src.core.transition_preset import TransitionStylePreset
+    from src.ui.lux.library.asset_model import AssetListModel
+    from src.ui.lux.library.asset_grid import AssetGridView
+    from src.ui.lux.library.hover_preview import _ProceduralCanvas
+
+    builtin_preset = TransitionStylePreset(id="tr_pure_builtin", name="Smooth Wipe", transition_type="Wipe")
+    asset = {
+        "id": "tr_pure_builtin",
+        "name": "Smooth Wipe",
+        "category": "trans",
+        "_raw_obj": builtin_preset,
+    }
+
+    grid = AssetGridView()
+    model = AssetListModel([asset])
+    grid.setModel(model)
+    grid.resize(800, 600)
+    grid.show()
+    qapp.processEvents()
+
+    hover = grid.hover_controller
+    hover._hovered_row = 0
+    hover._on_hover_timeout()
+    qapp.processEvents()
+
+    try:
+        assert hover._is_active_playback is False
+        assert hover._overlay is not None
+        assert hover._overlay.isVisible() is True
+        assert isinstance(hover._overlay.stack.currentWidget(), _ProceduralCanvas)
+        assert hover._overlay._proc_timer.isActive() is True
+    finally:
+        hover.stop()
+        grid.close()
+
+
+def test_build_verified_video_preview_payload_preserves_provenance(tmp_path):
+    """build_verified_video_preview_payload không relabeling hay làm suy yếu ActionGuard khi có provenance tồn tại."""
+    from src.ui.lux.library.transition_preview_generator import build_verified_video_preview_payload
+
+    dummy_vid = tmp_path / "sample.mp4"
+    dummy_vid.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    # 1. Managed với foreign root: phải giữ nguyên provenance
+    foreign_asset = {
+        "id": "foreign_1",
+        "name": "Foreign",
+        "source_kind": "managed",
+        "origin_library_id": "lib_remote",
+        "origin_root": "/remote/mount",
+        "library_path": "packs/P/t.setting",
+    }
+    payload = build_verified_video_preview_payload(foreign_asset, str(dummy_vid))
+    assert payload["source_kind"] == "managed"
+    assert payload["origin_library_id"] == "lib_remote"
+    assert payload["origin_root"] == "/remote/mount"
+    assert payload["library_path"] == "packs/P/t.setting"
+
+    # 2. Staging asset: không bị đổi source_kind thành managed
+    staging_asset = {
+        "id": "staging_1",
+        "name": "Staging",
+        "availability": "staging",
+    }
+    payload_st = build_verified_video_preview_payload(staging_asset, str(dummy_vid))
+    assert payload_st.get("availability") == "staging"
+    assert payload_st.get("source_kind") != "managed"
+
+    # 3. Offline asset: không bị đổi source_kind thành managed
+    offline_asset = {
+        "id": "offline_1",
+        "name": "Offline",
+        "availability": "offline",
+    }
+    payload_off = build_verified_video_preview_payload(offline_asset, str(dummy_vid))
+    assert payload_off.get("availability") == "offline"
+    assert payload_off.get("source_kind") != "managed"
+

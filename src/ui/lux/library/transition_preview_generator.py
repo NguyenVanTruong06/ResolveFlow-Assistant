@@ -95,15 +95,11 @@ _PACK_ROOT_DIR_CACHE: Dict[str, Optional[Path]] = {}
 
 
 def _find_pack_root(file_path: str) -> Optional[Path]:
-    """Finds the enclosing pack directory under 02_cloud_downloads/packs or containing pack_manifest.json."""
+    """Finds the enclosing pack directory under 02_cloud_downloads/packs or containing pack_manifest.json or Previews."""
     if not file_path:
         return None
     try:
         abs_fp = os.path.abspath(file_path)
-        norm_fp = abs_fp.replace("\\", "/")
-        if "/templates/transitions/installed/" in norm_fp:
-            return None
-
         parent_dir = os.path.dirname(abs_fp) if os.path.splitext(abs_fp)[1] else abs_fp
         if parent_dir in _PACK_ROOT_DIR_CACHE:
             cached_root = _PACK_ROOT_DIR_CACHE[parent_dir]
@@ -113,15 +109,15 @@ def _find_pack_root(file_path: str) -> Optional[Path]:
         p = Path(abs_fp)
         curr = p.parent if p.is_file() else p
         found: Optional[Path] = None
-        visited: list[str] = []
         for ancestor in [curr, *curr.parents]:
+            if ancestor == ancestor.parent:
+                break
             anc_str = str(ancestor)
-            if anc_str in _PACK_ROOT_DIR_CACHE:
+            if anc_str in _PACK_ROOT_DIR_CACHE and _PACK_ROOT_DIR_CACHE[anc_str] is not None:
                 cached_anc = _PACK_ROOT_DIR_CACHE[anc_str]
-                if cached_anc is None or cached_anc.is_dir():
+                if cached_anc.is_dir():
                     found = cached_anc
                     break
-            visited.append(anc_str)
             if ancestor.parent and ancestor.parent.name == "packs" and ancestor.parent.parent and ancestor.parent.parent.name == "02_cloud_downloads":
                 found = ancestor
                 break
@@ -134,9 +130,6 @@ def _find_pack_root(file_path: str) -> Optional[Path]:
         if len(_PACK_ROOT_DIR_CACHE) > 1024:
             _PACK_ROOT_DIR_CACHE.clear()
         _PACK_ROOT_DIR_CACHE[parent_dir] = found
-        if found is None:
-            for v in visited:
-                _PACK_ROOT_DIR_CACHE[v] = None
         return found
     except Exception:
         pass
@@ -358,8 +351,9 @@ def resolve_transition_preview_video(asset: Any) -> str:
     """
     Resolves a playable companion .mp4/.mov/.webm video for a transition asset:
     1. Direct preview_path or file_path if it is a playable video file on disk.
-    2. Matching <stem>.mp4 inside the pack's Preview Transitions/ folder or companion tutorial .mp4.
-    3. Cross-reference against active StorageManager cloud packs for extracted .drfx/.setting items.
+    2. Sibling .mp4/.mov/.webm next to master file on disk.
+    3. Matching <stem>.mp4 inside the pack's Preview Transitions/ or Previews/ folder.
+    4. Cross-reference against active StorageManager cloud packs for extracted .drfx/.setting items.
     """
     if asset is None or isinstance(asset, str):
         return ""
@@ -373,7 +367,14 @@ def resolve_transition_preview_video(asset: Any) -> str:
     master_stem = Path(master_p).stem.lower().strip() if master_p else ""
     asset_name = str(_get_attr(asset, "name", default=master_stem) or master_stem).lower().strip()
 
+    # 2. Check sibling .mp4/.mov/.webm next to master_p (direct 1:1 companion file)
     if master_p:
+        master_path = Path(master_p)
+        for ext in VIDEO_EXTS:
+            sib = master_path.with_suffix(ext)
+            if sib.is_file():
+                return str(sib.resolve())
+
         pack_root = _find_pack_root(master_p)
         if pack_root is not None:
             prev_rel = str(_get_attr(asset, "preview_relative_path", default="") or "").strip()
@@ -393,32 +394,11 @@ def resolve_transition_preview_video(asset: Any) -> str:
                 if nk and nk in by_norm:
                     return by_norm[nk]
 
-            # Use pack-level tutorial/demo video when asset is a .drfx bundle or small pack without per-item stems
-            if fallback_video:
-                if master_p.lower().endswith(".drfx") or len(by_stem) <= 3:
-                    return fallback_video
+            # Use pack-level tutorial/demo video ONLY when asset is a .drfx bundle
+            if fallback_video and master_p.lower().endswith(".drfx"):
+                return fallback_video
 
-        else:
-            # Cross-reference extracted .setting transitions against active cloud packs first (O(1) memory lookup)
-            exact_cloud, norm_cloud = _index_all_cloud_pack_videos()
-            if exact_cloud:
-                for candidate_key in (master_stem, asset_name):
-                    if candidate_key and candidate_key in exact_cloud:
-                        return exact_cloud[candidate_key]
-                for candidate_key in (master_stem, asset_name):
-                    nk = _norm_stem(candidate_key)
-                    if nk and nk in norm_cloud:
-                        return norm_cloud[nk]
-
-            # Check sibling .mp4/.mov next to master_p
-            master_path = Path(master_p)
-            for ext in (".mp4", ".mov", ".webm"):
-                sib = master_path.with_suffix(ext)
-                if sib.is_file():
-                    return str(sib.resolve())
-            return ""
-
-    # Cross-reference extracted .setting transitions against active cloud packs (e.g. GR-44 1,005 .mp4s)
+    # 3. Cross-reference extracted .setting transitions against active cloud packs (e.g. GR-44 1,005 .mp4s)
     exact_cloud, norm_cloud = _index_all_cloud_pack_videos()
     if exact_cloud:
         for candidate_key in (master_stem, asset_name):
@@ -439,6 +419,7 @@ def build_verified_video_preview_payload(base_asset: Any, video_path: str) -> Di
     - Preserves original provenance/offline/staging fields if base_asset is already storage-attributed.
     - Attributes local extracted templates to the active online StorageManager ONLY when
       `video_path` genuinely resides inside the active StorageManager root.
+    - For standalone/linked files with sibling companion videos, bridges provenance to 'linked'.
     """
     if isinstance(base_asset, Mapping):
         payload: Dict[str, Any] = dict(base_asset)
@@ -482,6 +463,10 @@ def build_verified_video_preview_payload(base_asset: Any, video_path: str) -> Di
     if has_existing_provenance:
         return payload
 
+    real_vid_str = os.path.realpath(video_path)
+    real_vid = Path(real_vid_str)
+
+    # 1. Attribute to active StorageManager if video genuinely resides in active storage root
     try:
         from src.core.storage_manager import StorageManager
         sm = StorageManager()
@@ -489,19 +474,47 @@ def build_verified_video_preview_payload(base_asset: Any, video_path: str) -> Di
         lib_id = cfg.get("library_id") if isinstance(cfg, Mapping) else getattr(sm, "library_id", None)
         if sm.online and sm.root and lib_id:
             real_root = Path(os.path.realpath(str(sm.root)))
-            real_vid = Path(os.path.realpath(video_path))
-            rel_vid = real_vid.relative_to(real_root).as_posix()
-            payload["source_kind"] = "managed"
-            payload["storage_managed"] = True
-            payload["origin_library_id"] = str(lib_id)
-            payload["origin_root"] = str(sm.root)
-            payload["library_path"] = rel_vid
-            payload["relative_path"] = rel_vid
-            payload["file_path"] = str(real_vid)
-            payload["path"] = str(real_vid)
-            payload["preview_path"] = str(real_vid)
+            try:
+                rel_vid = real_vid.relative_to(real_root).as_posix()
+                payload["source_kind"] = "managed"
+                payload["storage_managed"] = True
+                payload["origin_library_id"] = str(lib_id)
+                payload["origin_root"] = str(sm.root)
+                payload["library_path"] = rel_vid
+                payload["relative_path"] = rel_vid
+                payload["file_path"] = real_vid_str
+                payload["path"] = real_vid_str
+                payload["preview_path"] = real_vid_str
+                return payload
+            except ValueError:
+                pass
     except Exception:
         pass
+
+    # 2. Check if video resides in bundled assets/
+    try:
+        b_root = Path(__file__).resolve().parent.parent.parent.parent / "assets"
+        real_b_root = Path(os.path.realpath(str(b_root)))
+        try:
+            real_vid.relative_to(real_b_root)
+            payload["source_kind"] = "builtin"
+            payload["file_path"] = real_vid_str
+            payload["preview_path"] = real_vid_str
+            return payload
+        except ValueError:
+            pass
+    except Exception:
+        pass
+
+    # 3. Check if video is companion to a linked/external file on disk
+    master_p = _resolve_master_disk_path(base_asset)
+    if master_p and os.path.isfile(master_p):
+        master_path = Path(os.path.realpath(master_p))
+        payload["source_kind"] = "linked"
+        payload["external_path"] = str(master_path)
+        payload["file_path"] = str(master_path)
+        payload["preview_path"] = real_vid_str
+        return payload
 
     return payload
 

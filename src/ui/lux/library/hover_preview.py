@@ -518,7 +518,12 @@ class SharedHoverPreview(QObject):
                 if cand_vid:
                     cand_payload = build_verified_video_preview_payload(payload, cand_vid)
                     cand_guard = check_action_availability(cand_payload, intent="preview")
-                    if cand_guard.allowed:
+                    if (
+                        cand_guard.allowed
+                        and cand_guard.resolved_path
+                        and os.path.splitext(cand_guard.resolved_path)[1].lower() in VIDEO_EXTS
+                        and os.path.isfile(cand_guard.resolved_path)
+                    ):
                         payload = cand_payload
                         guard_res = cand_guard
             except Exception:
@@ -557,7 +562,7 @@ class SharedHoverPreview(QObject):
             self.stop()
             return
 
-        # Handle Transitions (video if available & verified, otherwise live 30fps procedural preview)
+        # Handle Transitions (video if available & verified, otherwise live 30fps procedural preview for genuine presets)
         if is_trans:
             if guard_res.allowed:
                 target_file = guard_res.resolved_path
@@ -565,29 +570,70 @@ class SharedHoverPreview(QObject):
                 if target_file and ext in VIDEO_EXTS and os.path.isfile(target_file):
                     self._play_video(idx, target_file)
                     return
+
+            # Procedural rendering is STRICTLY forbidden for assets with offline, staging, foreign, or conflicting provenance
+            has_denial_provenance = (
+                payload.get("availability") in ("offline", "staging")
+                or bool(payload.get("origin_library_id"))
+                or bool(payload.get("origin_root"))
+                or guard_res.status in ("offline", "staging")
+                or guard_res.result_code in (
+                    "ERR_STAGING_UNPUBLISHED",
+                    "ERR_STAGING_MEDIA_UNSUPPORTED",
+                    "ERR_STORAGE_OFFLINE",
+                    "ERR_STORAGE_IDENTITY_MISMATCH",
+                    "ERR_FOREIGN_ROOT",
+                    "ERR_ORIGIN_STORAGE_MISMATCH",
+                    "ERR_STORAGE_PROVIDER_FAILURE",
+                    "ERR_CONFLICTING_SOURCE_METADATA",
+                    "ERR_PATH_MISMATCH",
+                    "ERR_SYMLINK_ESCAPE",
+                    "ERR_INVALID_PATH_TRAVERSAL",
+                )
+            )
+            if has_denial_provenance:
+                self.stop()
+                return
+
+            # Keep procedural only when explicitly allowed by guard or narrowly allowed genuine built-in procedural no-file case
+            from src.core.transition_preset import TransitionStylePreset
+            preset_instance = (
+                raw if isinstance(raw, TransitionStylePreset)
+                else (raw_obj if isinstance(raw_obj, TransitionStylePreset) else None)
+            )
+            has_file_on_disk = bool(
+                (payload.get("file_path") and os.path.isfile(str(payload["file_path"])))
+                or (payload.get("path") and os.path.isfile(str(payload["path"])))
+            )
+            is_genuine_builtin_preset = (
+                preset_instance is not None
+                and not has_file_on_disk
+                and guard_res.status == "missing"
+                and guard_res.result_code in ("OK_PROCEDURAL_PREVIEW_CANVAS", "ERR_FILE_NOT_FOUND", "ERR_MEDIA_PATH_EMPTY")
+            )
+            is_explicit_canvas_allowed = (
+                guard_res.allowed
+                and guard_res.result_code == "OK_PROCEDURAL_PREVIEW_CANVAS"
+            )
+
+            if is_explicit_canvas_allowed or is_genuine_builtin_preset:
                 self._play_procedural(
                     idx,
-                    raw if raw is not None else payload,
+                    preset_instance if preset_instance is not None else (raw if raw is not None else payload),
                     "trans",
                     asset_name or "Transition",
                     "Chuyển cảnh • Live 30fps",
                 )
                 return
-            # For non-managed / procedural TransitionStylePreset or external .setting without video
-            if (
-                guard_res.result_code in ("ERR_FILE_NOT_FOUND", "ERR_MEDIA_PATH_EMPTY", "ERR_SYMLINK_ESCAPE")
-                and payload.get("availability") not in ("offline", "staging")
-                and not payload.get("origin_library_id")
-                and not payload.get("origin_root")
-            ):
-                self._play_procedural(
-                    idx,
-                    raw if raw is not None else payload,
-                    "trans",
-                    asset_name or "Transition",
-                    "Chuyển cảnh • Live 30fps",
-                )
-                return
+
+            # File-backed transitions without verified video or unverified assets:
+            # Procedural rendering must NEVER silently masquerade as actual sample when resolution/guard/decode fails.
+            logger.debug(
+                "Transition '%s' has no verified video preview (code=%s, path=%s); refusing procedural masquerade.",
+                asset_name,
+                guard_res.result_code,
+                guard_res.resolved_path,
+            )
             self.stop()
             return
 
