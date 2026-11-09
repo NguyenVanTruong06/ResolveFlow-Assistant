@@ -173,6 +173,39 @@ class UpdateDownloadAndInstallWorker(QThread):
             logger.exception("Lỗi trong quá trình cập nhật tự động: %s", exc)
             self.install_finished.emit(False, f"Lỗi cập nhật: {exc}")
 
+    @staticmethod
+    def _is_valid_deb(path: str, expected_size: int = 0) -> bool:
+        """Kiểm tra file .deb có header magic !<arch>\n và dung lượng hợp lệ hay không."""
+        if not os.path.exists(path):
+            return False
+        size = os.path.getsize(path)
+        if size < 1_000_000:  # Gói cài đặt Debian thực tế luôn >= 1MB
+            return False
+        if expected_size > 0 and size < int(expected_size * 0.95):
+            return False
+        try:
+            with open(path, "rb") as f:
+                return f.read(8) == b"!<arch>\n"
+        except Exception:
+            return False
+
+    @staticmethod
+    def _is_valid_zip(path: str, expected_size: int = 0) -> bool:
+        """Kiểm tra file .zip có header magic PK\x03\x04 và dung lượng hợp lệ hay không."""
+        if not os.path.exists(path):
+            return False
+        size = os.path.getsize(path)
+        if size < 1_000_000:
+            return False
+        if expected_size > 0 and size < int(expected_size * 0.95):
+            return False
+        try:
+            with open(path, "rb") as f:
+                sig = f.read(4)
+                return sig in (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+        except Exception:
+            return False
+
     def _download_file(self, url: str, dest_path: str, expected_size: int = 0, max_retries: int = 4, fallback_url: Optional[str] = None) -> bool:
         """Tải file theo luồng chunk với báo cáo % tiến độ và cơ chế tự động thử lại / dự phòng khi gặp sự cố mạng."""
         urls_to_try = [url]
@@ -190,15 +223,25 @@ class UpdateDownloadAndInstallWorker(QThread):
                     else:
                         self.status_changed.emit(f"Máy chủ đang chuẩn bị gói, thử lại lần {attempt}/{max_retries}...")
 
+                    # Chú ý: Tuyệt đối không thêm wildcard '*/*' vào Accept khi gọi GitHub API asset endpoint,
+                    # vì GitHub sẽ ưu tiên trả về metadata JSON thay vì chuyển hướng 302 sang file binary!
                     req = urllib.request.Request(
                         current_url,
                         headers={
                             "User-Agent": f"ChunDVC-ResolveFlow/{CURRENT_VERSION}",
-                            "Accept": "application/octet-stream, */*"
+                            "Accept": "application/octet-stream"
                         }
                     )
                     with urllib.request.urlopen(req, timeout=45) as resp:
-                        total_bytes = int(resp.headers.get("content-length") or expected_size or 0)
+                        content_type = (resp.headers.get("content-type") or "").lower()
+                        if "json" in content_type and not current_url.endswith(".json"):
+                            raise IOError(f"Máy chủ phản hồi JSON thay vì gói binary ({content_type})")
+
+                        resp_length = int(resp.headers.get("content-length") or 0)
+                        total_bytes = resp_length or expected_size or 0
+                        if expected_size > 0 and resp_length > 0 and resp_length < int(expected_size * 0.9):
+                            raise IOError(f"Dung lượng máy chủ báo quá nhỏ ({resp_length} bytes so với kỳ vọng {expected_size} bytes)")
+
                         downloaded = 0
                         chunk_size = 65536  # 64KB
 
@@ -228,8 +271,9 @@ class UpdateDownloadAndInstallWorker(QThread):
                                     self.progress_changed.emit(50.0, f"{down_mb:.1f} MB đã tải")
 
                         # Kiểm tra tính toàn vẹn cơ bản dung lượng
-                        if total_bytes > 0 and downloaded < int(total_bytes * 0.95):
-                            raise IOError(f"Tải không trọn vẹn: nhận được {downloaded}/{total_bytes} bytes")
+                        effective_target = expected_size or total_bytes
+                        if effective_target > 0 and downloaded < int(effective_target * 0.95):
+                            raise IOError(f"Tải không trọn vẹn: nhận được {downloaded}/{effective_target} bytes")
 
                         return True
 
@@ -264,15 +308,20 @@ class UpdateDownloadAndInstallWorker(QThread):
 
         # 1. Ưu tiên tải gói .deb
         if deb_url:
-            self.status_changed.emit("Đang tải gói cài đặt .deb...")
+            self.status_changed.emit("Đang chuẩn bị gói cài đặt .deb...")
             tmp_deb = os.path.join(tempfile.gettempdir(), f"chundvc_{ver}_amd64.deb")
             expected_size = assets.get("deb_size", 0)
 
-            already_ready = (
-                os.path.exists(tmp_deb) and
-                (expected_size == 0 or os.path.getsize(tmp_deb) >= int(expected_size * 0.95))
-            )
+            # Xóa file rác/hỏng nếu có từ lần tải trước
+            if os.path.exists(tmp_deb) and not self._is_valid_deb(tmp_deb, expected_size):
+                try:
+                    os.remove(tmp_deb)
+                except Exception:
+                    pass
+
+            already_ready = self._is_valid_deb(tmp_deb, expected_size)
             if not already_ready:
+                self.status_changed.emit("Đang tải gói cài đặt .deb...")
                 if not self._download_file(deb_url, tmp_deb, expected_size, fallback_url=deb_fallback):
                     self.install_finished.emit(False, "Đã hủy tải bản cập nhật.")
                     return
@@ -395,11 +444,23 @@ class UpdateDownloadAndInstallWorker(QThread):
             self.install_finished.emit(False, "Chưa tìm thấy gói Windows .zip trong bản phát hành này.")
             return
 
-        self.status_changed.emit("Đang tải bản cập nhật Windows...")
+        self.status_changed.emit("Đang chuẩn bị bản cập nhật Windows...")
         tmp_zip = os.path.join(tempfile.gettempdir(), f"chundvc_{ver}_win.zip")
-        if not self._download_file(zip_url, tmp_zip, assets.get("zip_size", 0)):
-            self.install_finished.emit(False, "Đã hủy tải bản cập nhật.")
-            return
+        expected_size = assets.get("zip_size", 0)
+
+        # Xóa file zip rác/hỏng nếu có từ lần trước
+        if os.path.exists(tmp_zip) and not self._is_valid_zip(tmp_zip, expected_size):
+            try:
+                os.remove(tmp_zip)
+            except Exception:
+                pass
+
+        already_ready = self._is_valid_zip(tmp_zip, expected_size)
+        if not already_ready:
+            self.status_changed.emit("Đang tải bản cập nhật Windows...")
+            if not self._download_file(zip_url, tmp_zip, expected_size, fallback_url=assets.get("zip_browser")):
+                self.install_finished.emit(False, "Đã hủy tải bản cập nhật.")
+                return
 
         self.status_changed.emit("Đang giải nén gói cập nhật...")
         extract_dir = os.path.join(tempfile.gettempdir(), f"chundvc_{ver}_extracted")

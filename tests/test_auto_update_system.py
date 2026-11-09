@@ -228,4 +228,65 @@ def test_download_file_fallback_url_success(qapp, tmp_path, monkeypatch):
         assert f.read() == b"FALLBACK_DATA"
 
 
+def test_is_valid_deb_validation(tmp_path):
+    """Kiểm tra xác thực gói .deb bằng magic header !<arch>\n và kích thước."""
+    deb_path = tmp_path / "test.deb"
+
+    # Không tồn tại
+    assert not UpdateDownloadAndInstallWorker._is_valid_deb(str(deb_path))
+
+    # Kích thước nhỏ (< 1MB)
+    deb_path.write_bytes(b"!<arch>\n" + b"x" * 100)
+    assert not UpdateDownloadAndInstallWorker._is_valid_deb(str(deb_path))
+
+    # Đủ lớn nhưng sai header (ví dụ file JSON 1.5MB)
+    fake_json = b"{\"message\": \"error\"}" * 100000
+    deb_path.write_bytes(fake_json)
+    assert not UpdateDownloadAndInstallWorker._is_valid_deb(str(deb_path))
+
+    # Hợp lệ: đủ lớn và đúng header !<arch>\n
+    valid_data = b"!<arch>\n" + b"0" * 1_050_000
+    deb_path.write_bytes(valid_data)
+    assert UpdateDownloadAndInstallWorker._is_valid_deb(str(deb_path), expected_size=1_050_000)
+
+
+def test_is_valid_zip_validation(tmp_path):
+    """Kiểm tra xác thực gói .zip bằng magic header PK\x03\x04 và kích thước."""
+    zip_path = tmp_path / "test.zip"
+
+    # Không tồn tại
+    assert not UpdateDownloadAndInstallWorker._is_valid_zip(str(zip_path))
+
+    # Quá nhỏ
+    zip_path.write_bytes(b"PK\x03\x04" + b"x" * 100)
+    assert not UpdateDownloadAndInstallWorker._is_valid_zip(str(zip_path))
+
+    # Đủ lớn nhưng sai header
+    zip_path.write_bytes(b"NOT_A_ZIP" * 120_000)
+    assert not UpdateDownloadAndInstallWorker._is_valid_zip(str(zip_path))
+
+    # Hợp lệ
+    valid_data = b"PK\x03\x04" + b"0" * 1_050_000
+    zip_path.write_bytes(valid_data)
+    assert UpdateDownloadAndInstallWorker._is_valid_zip(str(zip_path), expected_size=1_050_000)
+
+
+def test_download_file_rejects_json_response(qapp, tmp_path, monkeypatch):
+    """Kiểm tra _download_file chủ động từ chối nếu máy chủ trả về JSON thay vì binary."""
+    worker = UpdateDownloadAndInstallWorker({"latest_version": "1.0.19", "assets": {}})
+    dest = str(tmp_path / "test_json_reject.deb")
+
+    mock_resp = MagicMock()
+    mock_resp.headers = {
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "100"
+    }
+    mock_resp.__enter__.return_value = mock_resp
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=45: mock_resp)
+
+    with pytest.raises(IOError, match="JSON"):
+        worker._download_file("https://api.github.com/repos/assets/123", dest, expected_size=100_000_000, max_retries=1)
+
+
 
