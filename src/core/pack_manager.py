@@ -7,8 +7,9 @@ import os
 import json
 import zipfile
 import datetime
+import unicodedata
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 from pydantic import BaseModel, Field
 
 
@@ -55,6 +56,126 @@ CATEGORY_DIR_MAP = {
 }
 
 
+def normalize_pack_taxonomy(text: Any) -> str:
+    if not text:
+        return ""
+    return unicodedata.normalize("NFC", str(text)).strip().lower()
+
+
+class PackIdentitySnapshot:
+    """
+    Immutable in-memory snapshot of pack aliases, canonical IDs, display names,
+    and declared categories.
+    Used by row-level filters and UI rebuilds for O(1) matching with ZERO filesystem I/O.
+    """
+    def __init__(
+        self,
+        alias_to_id: Dict[str, str],
+        id_to_name: Dict[str, str],
+        id_to_categories: Dict[str, Set[str]],
+        id_to_folders: Dict[str, Set[str]],
+        installed_pack_ids: Optional[Set[str]] = None,
+    ):
+        self.alias_to_id = alias_to_id
+        self.id_to_name = id_to_name
+        self.id_to_categories = id_to_categories
+        self.id_to_folders = id_to_folders
+        self.installed_pack_ids = installed_pack_ids if installed_pack_ids is not None else set()
+
+    def get_canonical_pack_id(self, name_or_id: str) -> Optional[str]:
+        if not name_or_id:
+            return None
+        norm = normalize_pack_taxonomy(name_or_id)
+        return self.alias_to_id.get(norm)
+
+    def get_canonical_pack_name(self, name_or_id: str) -> str:
+        if not name_or_id:
+            return ""
+        canon_id = self.get_canonical_pack_id(name_or_id)
+        if canon_id:
+            norm = normalize_pack_taxonomy(name_or_id)
+            folders = self.id_to_folders.get(canon_id, set())
+            if name_or_id == canon_id or norm in folders or "_" in str(name_or_id):
+                return self.id_to_name.get(canon_id) or str(name_or_id).strip()
+            return self.id_to_name.get(canon_id) or str(name_or_id).strip()
+        return str(name_or_id).strip()
+
+    def match_pack_names(self, pack_a: str, pack_b: str) -> bool:
+        if not pack_a or not pack_b:
+            return False
+        norm_a = normalize_pack_taxonomy(pack_a)
+        norm_b = normalize_pack_taxonomy(pack_b)
+        if norm_a == norm_b:
+            return True
+        id_a = self.alias_to_id.get(norm_a)
+        id_b = self.alias_to_id.get(norm_b)
+        if id_a and id_b and id_a == id_b:
+            return True
+        return False
+
+    def is_green_screen_pack(self, name_or_id: str) -> bool:
+        canon_id = self.get_canonical_pack_id(name_or_id)
+        return canon_id == "green_screen_memes_109"
+
+    def pack_supports_category(self, name_or_id: str, rail_category: str) -> bool:
+        """Kiểm tra xem một gói có hỗ trợ hiển thị trên thanh rail danh mục này không."""
+        canon_id = self.get_canonical_pack_id(name_or_id)
+        norm_cat = normalize_pack_taxonomy(rail_category)
+        if canon_id == "green_screen_memes_109":
+            # Gói meme phông xanh được hỗ trợ trên rail Overlay và Meme
+            return norm_cat in ("overlay", "overlays", "meme", "memes", "broll", "green_screen")
+        if not canon_id:
+            return False
+        cats = self.id_to_categories.get(canon_id, set())
+        canonical_map = {
+            "text": {"text", "title", "titles", "chu"},
+            "trans": {"trans", "transition", "transitions", "chuyen_canh"},
+            "lut": {"lut", "luts", "mau", "color"},
+            "overlay": {"overlay", "overlays", "lop_phu"},
+            "meme": {"meme", "memes"},
+            "sfx": {"sfx", "sound", "am_thanh", "audio"},
+            "bgm": {"bgm", "music", "nhac_nen"},
+            "icon": {"icon", "icons", "sticker", "stickers"},
+            "broll": {"broll", "canh"},
+        }
+        target_set = canonical_map.get(norm_cat, {norm_cat})
+        return bool(cats & target_set)
+
+    def asset_matches_rail_category(self, pack_name: str, asset_category: str, rail_category: str) -> bool:
+        """
+        Kiểm tra tính tương thích giữa asset và rail category cho một gói:
+        - Với green_screen_memes_109: các video (broll, meme, overlay, green_screen)
+          đều được hiển thị trên rail overlay và rail meme.
+        - Với các gói thông thường khác: asset_category phải tương thích với rail_category
+          (chặn hoàn toàn việc audio lọt vào overlay, broll thường lọt vào overlay, v.v.).
+        """
+        norm_asset_cat = normalize_pack_taxonomy(asset_category)
+        norm_rail_cat = normalize_pack_taxonomy(rail_category)
+
+        canonical_map = {
+            "text": "text", "title": "text", "titles": "text", "chu": "text",
+            "trans": "trans", "transition": "trans", "transitions": "trans",
+            "lut": "lut", "luts": "lut", "mau": "lut", "color": "lut",
+            "overlay": "overlay", "overlays": "overlay", "green_screen": "overlay", "greenscreen": "overlay",
+            "meme": "meme", "memes": "meme",
+            "sfx": "sfx", "sound": "sfx", "am_thanh": "sfx", "audio": "sfx",
+            "bgm": "bgm", "music": "bgm", "nhac_nen": "bgm",
+            "icon": "icon", "sticker": "icon",
+            "broll": "broll", "footage": "broll",
+        }
+        canon_asset = canonical_map.get(norm_asset_cat, norm_asset_cat)
+        canon_rail = canonical_map.get(norm_rail_cat, norm_rail_cat)
+
+        if canon_asset == canon_rail:
+            return True
+
+        if self.is_green_screen_pack(pack_name):
+            if canon_rail in ("overlay", "meme"):
+                return canon_asset in ("overlay", "meme", "broll")
+
+        return False
+
+
 class PackManager:
     """Bộ máy quản lý đóng gói & cài đặt gói tài nguyên ResolveFlow."""
 
@@ -69,7 +190,7 @@ class PackManager:
         "davinci_unfold_paper_animator": ["unfold_paper", "paper_animator", "unfold", "paper"],
         "secret_sauce_cinema_luts": ["secret_sauce", "secret sauce", "secret"],
         "iphone_cinematic_luts": ["iphone", "apple_log", "apple log", "applelog"],
-        "green_screen_memes_109": ["109", "green_screen", "greenscreen", "tong_hop_meme", "meme_109"],
+        "green_screen_memes_109": ["109", "green_screen", "greenscreen", "tong_hop_meme", "meme_109", "tong_hop_meme_green_screen_109clips"],
         "dehancer_pro_ofx_plugin": ["dehancer"],
         "dctl_pfa_color_suite": ["pfa_color", "pfa", "skinmatch", "filmfade"],
         "dctl_pixeltools_bundle": ["pixeltools", "pixel_tools", "hueshift", "splittone"],
@@ -83,11 +204,13 @@ class PackManager:
 
     _raw_installed_cache: Optional[ tuple ] = None
     _sm_packs_cache: Optional[ tuple ] = None
+    _identity_snapshot: Optional[PackIdentitySnapshot] = None
 
     @classmethod
     def _invalidate_caches(cls) -> None:
         cls._raw_installed_cache = None
         cls._sm_packs_cache = None
+        cls._identity_snapshot = None
 
     @classmethod
     def get_installed_packs(cls, verify_files: bool = True) -> Dict[str, Any]:
@@ -220,6 +343,89 @@ class PackManager:
         return False
 
     @classmethod
+    def get_identity_snapshot(cls) -> PackIdentitySnapshot:
+        """Tạo bộ nhớ đệm snapshot danh tính gói (RAM-only) dùng cho việc lọc hàng loạt O(1) không I/O."""
+        if cls._identity_snapshot is not None:
+            return cls._identity_snapshot
+
+        alias_to_id: Dict[str, str] = {}
+        id_to_name: Dict[str, str] = {}
+        id_to_categories: Dict[str, Set[str]] = {}
+        id_to_folders: Dict[str, Set[str]] = {}
+
+        # 1. Khởi tạo từ COMMUNITY_PACKS_CATALOG
+        for m in COMMUNITY_PACKS_CATALOG:
+            pid = m.id
+            pid_norm = normalize_pack_taxonomy(pid)
+            name_norm = normalize_pack_taxonomy(m.name)
+            alias_to_id[pid_norm] = pid
+            alias_to_id[name_norm] = pid
+            id_to_name[pid] = m.name
+            id_to_categories[pid] = {normalize_pack_taxonomy(c) for c in (m.categories or []) if c}
+            id_to_folders[pid] = set()
+
+        # 2. Ánh xạ aliases
+        for pid, aliases in cls.COMMUNITY_PACK_ALIASES.items():
+            for a in aliases:
+                a_norm = normalize_pack_taxonomy(a)
+                if a_norm:
+                    alias_to_id[a_norm] = pid
+
+        # 3. Nạp installed_packs (chỉ đọc file 1 lần duy nhất)
+        installed = cls.get_installed_packs(verify_files=False)
+        installed_ids: Set[str] = set()
+        for pid, entry in installed.items():
+            if not isinstance(entry, dict):
+                continue
+            installed_ids.add(pid)
+            pid_norm = normalize_pack_taxonomy(pid)
+            alias_to_id[pid_norm] = pid
+            name = entry.get("name")
+            if name:
+                name_norm = normalize_pack_taxonomy(name)
+                alias_to_id[name_norm] = pid
+                if pid not in id_to_name or not id_to_name[pid]:
+                    id_to_name[pid] = name
+            folder = entry.get("folder_name")
+            if folder:
+                f_norm = normalize_pack_taxonomy(folder)
+                alias_to_id[f_norm] = pid
+                id_to_folders.setdefault(pid, set()).add(f_norm)
+            cats = entry.get("categories") or ([entry.get("category")] if entry.get("category") else [])
+            for c in cats:
+                if c:
+                    id_to_categories.setdefault(pid, set()).add(normalize_pack_taxonomy(c))
+
+        # Đảm bảo green_screen_memes_109 luôn hỗ trợ cả overlay và meme
+        gs_cats = id_to_categories.setdefault("green_screen_memes_109", set())
+        gs_cats.update({"memes", "meme", "overlay", "overlays", "green_screen", "broll"})
+
+        snapshot = PackIdentitySnapshot(
+            alias_to_id,
+            id_to_name,
+            id_to_categories,
+            id_to_folders,
+            installed_pack_ids=installed_ids
+        )
+        cls._identity_snapshot = snapshot
+        return snapshot
+
+    @classmethod
+    def get_canonical_pack_id(cls, name_or_id: str) -> Optional[str]:
+        """Chuẩn hóa tên thư mục, ID, hoặc alias về ID gói chính thức (RAM-only snapshot)."""
+        return cls.get_identity_snapshot().get_canonical_pack_id(name_or_id)
+
+    @classmethod
+    def get_canonical_pack_name(cls, name_or_id: str) -> str:
+        """Lấy tên hiển thị chuẩn cho gói (RAM-only snapshot)."""
+        return cls.get_identity_snapshot().get_canonical_pack_name(name_or_id)
+
+    @classmethod
+    def match_pack_names(cls, pack_a: str, pack_b: str) -> bool:
+        """So khớp hai định danh gói (RAM-only snapshot)."""
+        return cls.get_identity_snapshot().match_pack_names(pack_a, pack_b)
+
+    @classmethod
     def record_installed_pack(
         cls,
         manifest_or_id: Any,
@@ -239,16 +445,23 @@ class PackManager:
                 "installed_paths": installed_paths or [],
                 "installed_at": datetime.datetime.now().isoformat()
             }
+            if manifest_or_id.categories:
+                entry["categories"] = manifest_or_id.categories
+                entry["category"] = manifest_or_id.categories[0]
         else:
             pack_id = str(manifest_or_id)
+            manifest = next((m for m in COMMUNITY_PACKS_CATALOG if m.id == pack_id), None)
             entry = {
                 "id": pack_id,
-                "name": folder_name or pack_id,
-                "version": "1.0.0",
-                "folder_name": folder_name or pack_id,
+                "name": manifest.name if manifest else (folder_name or pack_id),
+                "version": manifest.version if manifest else "1.0.0",
+                "folder_name": folder_name or (manifest.name if manifest else pack_id),
                 "installed_paths": installed_paths or [],
                 "installed_at": datetime.datetime.now().isoformat()
             }
+            if manifest and manifest.categories:
+                entry["categories"] = manifest.categories
+                entry["category"] = manifest.categories[0]
         installed[pack_id] = entry
         cls.INSTALLED_PACKS_FILE.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -632,7 +845,7 @@ COMMUNITY_PACKS_CATALOG: List[PackManifest] = [
         version="1.0.0",
         author="ChunnDVC Vault",
         description="109 video phông xanh hài hước, countdown, meme trend... Dễ dàng tách nền 1-click với 3D Keyer.",
-        categories=["memes"],
+        categories=["memes", "overlay"],
         item_count=109,
         size_mb=307.7,
         download_url="https://github.com/NguyenVanTruong06/resolveflow-packs/releases/download/v1.0.0/green_screen_memes_109.rfpack",

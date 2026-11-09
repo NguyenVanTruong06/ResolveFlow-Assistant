@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QFileDialog, QColorDialog, QSplitter, QStackedWidget,
     QInputDialog, QMenu, QDialog, QRadioButton
 )
-from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF, QPoint, QEvent, QMetaObject, QObject
+from PySide6.QtCore import Qt, Signal as pyqtSignal, QMimeData, QUrl, QTimer, QRectF, QPointF, QPoint, QEvent, QMetaObject, QObject, QModelIndex
 from PySide6.QtGui import (
     QDrag, QPixmap, QCursor, QMovie, QPainter, QColor, QPen, QBrush,
     QFont, QPainterPath, QLinearGradient, QFontMetrics, QDesktopServices
@@ -6139,26 +6139,46 @@ class TabAssets(QWidget):
         tab_total_count = 0
         discovered_packs: List[str] = []
         seen_packs = set()
+        seen_pack_ids = set()
         pack_counts: Dict[str, int] = {}
+        snapshot = PackManager.get_identity_snapshot()
 
         # Quét 1 vòng O(N) duy nhất qua self.all_assets để tính số lượng sub-category và pack
         for asset in self.all_assets:
             p_name = getattr(asset, "pack_name", None) or (asset.get("pack_name") if isinstance(asset, dict) else "")
-            if p_name:
-                pack_counts[p_name] = pack_counts.get(p_name, 0) + 1
-
+            canon_p_name = snapshot.get_canonical_pack_name(p_name) if p_name else ""
+            canon_id = snapshot.get_canonical_pack_id(p_name) or p_name
             a_tab = self._get_asset_tab(asset)
-            if a_tab == tab:
+
+            if p_name:
+                is_tab_match = snapshot.asset_matches_rail_category(p_name, a_tab, tab)
+            else:
+                is_tab_match = (
+                    a_tab == tab
+                    or (tab in ("overlay", "meme") and a_tab in ("overlay", "meme", "green_screen"))
+                )
+
+            if is_tab_match:
                 tab_total_count += 1
+                if p_name and p_name not in ("Mặc định", "all", ""):
+                    pack_counts[p_name] = pack_counts.get(p_name, 0) + 1
+                    if canon_p_name and canon_p_name != p_name:
+                        pack_counts[canon_p_name] = pack_counts.get(canon_p_name, 0) + 1
+
+                    target_display = canon_p_name or p_name
+                    if canon_id not in seen_pack_ids and target_display not in seen_packs:
+                        seen_packs.add(target_display)
+                        seen_pack_ids.add(canon_id)
+                        discovered_packs.append(target_display)
+
                 sub_label = self._get_asset_sub(asset)
-                if sub_label:
+                # Chỉ đưa vào sub_cats nếu sub_label KHÔNG phải là tên pack
+                is_sub_a_pack = bool(snapshot.get_canonical_pack_id(sub_label)) or (sub_label == p_name)
+                if sub_label and not is_sub_a_pack:
                     sub_counts[sub_label] = sub_counts.get(sub_label, 0) + 1
                     if sub_label not in known_subs and sub_label not in ("all", "Tất cả", "default"):
                         sub_cats.append((sub_label, sub_label))
                         known_subs.add(sub_label)
-                if p_name and p_name not in ("Mặc định", "all", "") and p_name not in seen_packs:
-                    seen_packs.add(p_name)
-                    discovered_packs.append(p_name)
 
         def _get_sub_count(cid_target):
             if cid_target == "all":
@@ -6213,24 +6233,15 @@ class TabAssets(QWidget):
 
             self.cats_vbox.addWidget(btn)
 
-        # Ghi nhận thêm từ PackManager (không quét lại đĩa cứng verify_files)
-        for pack_id, p_info in PackManager.get_installed_packs(verify_files=False).items():
-            if not isinstance(p_info, dict):
-                continue
-            p_cat = (p_info.get("category") or "").lower()
-            p_name = p_info.get("name") or p_info.get("folder_name") or pack_id
-            cat_match = (
-                (tab == "lut" and p_cat in ("luts", "lut", "mau", "color")) or
-                (tab == "sfx" and p_cat in ("sfx", "sound", "am_thanh")) or
-                (tab == "trans" and p_cat in ("trans", "transition", "chuyen_canh")) or
-                (tab == "text" and p_cat in ("text", "title", "chu")) or
-                (tab == "meme" and p_cat in ("meme", "memes")) or
-                (tab == "overlay" and p_cat in ("overlay", "overlays")) or
-                (tab == "bgm" and p_cat in ("bgm", "music", "nhac_nen"))
-            )
-            if cat_match and p_name not in seen_packs:
-                seen_packs.add(p_name)
-                discovered_packs.append(p_name)
+        # Ghi nhận thêm từ danh mục PackManager (RAM snapshot, 0 per-row filesystem stats)
+        for pack_id in snapshot.installed_pack_ids:
+            if snapshot.pack_supports_category(pack_id, tab):
+                canon_id = snapshot.get_canonical_pack_id(pack_id) or pack_id
+                p_name = snapshot.get_canonical_pack_name(pack_id) or pack_id
+                if p_name not in seen_packs and canon_id not in seen_pack_ids:
+                    seen_packs.add(p_name)
+                    seen_pack_ids.add(canon_id)
+                    discovered_packs.append(p_name)
 
         if discovered_packs:
             lbl_packs_hdr = QLabel("📦 CÁC GÓI ĐÃ CÀI")
@@ -6247,6 +6258,10 @@ class TabAssets(QWidget):
 
             for p_name in discovered_packs:
                 count = pack_counts.get(p_name, 0)
+                if count == 0:
+                    for raw_pn, cnt in pack_counts.items():
+                        if PackManager.match_pack_names(raw_pn, p_name):
+                            count = max(count, cnt)
                 cnt_str = f" ({count})" if count > 0 else ""
                 btn_pack = QPushButton(f"  📦 {p_name}{cnt_str}")
                 btn_pack.setProperty("sub_cat_id", f"pack:{p_name}")
@@ -6665,9 +6680,38 @@ class TabAssets(QWidget):
             count = self.asset_filter.rowCount()
             self.lbl_count_badge.setText(f"{count} mẫu")
 
+            # Cập nhật nhãn Header danh mục chính xác (thay vì bị đóng băng ở 'Chữ chuyển động')
+            tab_titles = {
+                "text": "Chữ chuyển động",
+                "lut": "Bộ lọc màu LUT",
+                "trans": "Chuyển cảnh",
+                "icon": "Sticker biểu tượng",
+                "overlay": "Hiệu ứng lớp phủ",
+                "meme": "Meme thịnh hành",
+                "sfx": "Hiệu ứng âm thanh",
+                "bgm": "Nhạc nền",
+                "broll": "Thước phim B-Roll",
+                "fav": "Bộ sưu tập & Yêu thích",
+            }
+            tab_header = tab_titles.get(tab, tab.capitalize() if tab else "Đạo cụ")
+            if hasattr(self, "lbl_main_cat"):
+                if cat and cat.startswith("pack:"):
+                    pack_title = cat[5:]
+                    self.lbl_main_cat.setText(f"{tab_header} • {pack_title}")
+                elif cat and cat.startswith("coll:"):
+                    coll_title = cat[5:]
+                    self.lbl_main_cat.setText(f"⭐ {coll_title}")
+                elif cat and cat not in ("all", "Tất cả", "default"):
+                    self.lbl_main_cat.setText(f"{tab_header} • {cat}")
+                else:
+                    self.lbl_main_cat.setText(tab_header)
+
             # Đồng bộ bỏ chọn nếu tài nguyên đang chọn bị lọc mất hoặc không còn kết quả
             if count == 0:
                 self.selected_asset = None
+                if hasattr(self, "asset_grid"):
+                    self.asset_grid.clearSelection()
+                    self.asset_grid.setCurrentIndex(QModelIndex())
                 self._update_inspector_details()
             elif self.selected_asset is not None:
                 sel_id = getattr(self.selected_asset, "id", "") if not isinstance(self.selected_asset, dict) else self.selected_asset.get("id", "")
@@ -6675,6 +6719,9 @@ class TabAssets(QWidget):
                 still_visible = any(self.asset_filter.index(r, 0).data(IdRole) == sel_id for r in range(count))
                 if not still_visible:
                     self.selected_asset = None
+                    if hasattr(self, "asset_grid"):
+                        self.asset_grid.clearSelection()
+                        self.asset_grid.setCurrentIndex(QModelIndex())
                     self._update_inspector_details()
 
         # 2. Đồng bộ hóa card_widgets cũ nếu test đang truy cập
@@ -6721,15 +6768,24 @@ class TabAssets(QWidget):
                     card.setVisible(False)
                     continue
             elif i_tab != tab:
-                card.setVisible(False)
-                continue
+                i_pack = getattr(item, "pack_name", "") or (item.get("pack_name") if isinstance(item, dict) else "")
+                snapshot = PackManager.get_identity_snapshot()
+                target_pack = cat[5:] if (cat and cat.startswith("pack:")) else None
+                is_cross = (
+                    bool(target_pack)
+                    and snapshot.match_pack_names(i_pack, target_pack)
+                    and snapshot.asset_matches_rail_category(i_pack, i_tab, tab)
+                )
+                if not is_cross:
+                    card.setVisible(False)
+                    continue
 
             if cat not in ("all", "fav:all", "Tất cả") and not cat.startswith("coll:"):
                 if cat.startswith("pack:"):
                     target_pack = cat[5:]
                     i_pack = getattr(item, "pack_name", "") or (item.get("pack_name") if isinstance(item, dict) else "")
-                    i_sub = getattr(item, "sub", "") or (item.get("sub") if isinstance(item, dict) else "")
-                    if i_pack != target_pack and i_sub != target_pack:
+                    snapshot = PackManager.get_identity_snapshot()
+                    if not snapshot.match_pack_names(i_pack, target_pack):
                         card.setVisible(False)
                         continue
                 else:
@@ -7922,12 +7978,50 @@ class TabAssets(QWidget):
             self.icon_meme_widget.stop_playback()
 
         if not self.selected_asset:
+            if hasattr(self, "lbl_insp_title"):
+                self.lbl_insp_title.setText("<b>Chưa chọn mẫu</b>")
+            if hasattr(self, "lbl_insp_sub"):
+                self.lbl_insp_sub.setText("Chọn một mẫu từ lưới để xem chi tiết")
+            if hasattr(self, "lbl_insp_collections"):
+                self.lbl_insp_collections.hide()
+            if hasattr(self, "icon_meme_widget"):
+                self.icon_meme_widget.stop_playback()
+            if hasattr(self, "inspector_aspect_btn"):
+                self.inspector_aspect_btn.hide()
+            if hasattr(self, "inspector_text_preview"):
+                self.inspector_text_preview.hide()
+            if hasattr(self, "inspector_lut_viewport"):
+                self.inspector_lut_viewport.hide()
+            if hasattr(self, "inspector_sfx_viewport"):
+                self.inspector_sfx_viewport.hide()
+            if hasattr(self, "inspector_trans_viewport"):
+                self.inspector_trans_viewport.hide()
+            if hasattr(self, "inspector_icon_viewport"):
+                self.inspector_icon_viewport.hide()
+            if hasattr(self, "grp_params"):
+                self.grp_params.hide()
+            if hasattr(self, "btn_insert_title_playhead"):
+                self.btn_insert_title_playhead.setEnabled(False)
+            if hasattr(self, "btn_drag_davinci"):
+                self.btn_drag_davinci.setEnabled(False)
+            if hasattr(self, "btn_copy_fusion"):
+                self.btn_copy_fusion.setEnabled(False)
+            if hasattr(self, "btn_install_presets"):
+                self.btn_install_presets.setEnabled(False)
             return
         if hasattr(self, "_empty_inspector_label"):
             self._empty_inspector_label.hide()
         for widget, was_hidden in getattr(self, "_inspector_hidden_widgets", []):
             widget.setVisible(not was_hidden)
         self._inspector_hidden_widgets = []
+        if hasattr(self, "btn_insert_title_playhead"):
+            self.btn_insert_title_playhead.setEnabled(True)
+        if hasattr(self, "btn_drag_davinci"):
+            self.btn_drag_davinci.setEnabled(True)
+        if hasattr(self, "btn_copy_fusion"):
+            self.btn_copy_fusion.setEnabled(True)
+        if hasattr(self, "btn_install_presets"):
+            self.btn_install_presets.setEnabled(True)
 
         name = self.selected_asset.get("name", "") if isinstance(self.selected_asset, dict) else getattr(self.selected_asset, "name", "")
         self.lbl_insp_title.setText(f"<b>{name}</b>")

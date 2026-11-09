@@ -16,6 +16,7 @@ from src.ui.lux.library.asset_model import (
 )
 from src.core.collections_manager import CollectionsManager
 from src.services.search_index import SearchIndex
+from src.core.pack_manager import PackManager
 
 logger = logging.getLogger("ChunDVC.AssetFilter")
 
@@ -31,7 +32,7 @@ CANONICAL_CATEGORIES: Dict[str, List[str]] = {
     "text": ["text", "title", "chu", "chữ", "subtitle", "kinetic", "kinetics"],
     "trans": ["trans", "chuyen_canh", "chuyển cảnh", "transition", "transitions"],
     "meme": ["meme", "hai_huoc", "hài hước", "reaction"],
-    "overlay": ["overlay", "lop_phu", "lớp phủ"],
+    "overlay": ["overlay", "lop_phu", "lớp phủ", "green_screen", "greenscreen", "phong_xanh"],
     "sfx": ["sfx", "sound", "audio", "am_thanh", "âm thanh"],
     "bgm": ["bgm", "nhac_nen", "nhạc nền", "music", "nhac", "nhạc"],
     "lut": ["lut", "color", "mau", "màu"],
@@ -245,8 +246,19 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
 
             # 1. Category Filter (fast early exit for ~85% of rows)
             if self._category and self._category not in ("all", "fav", "recent"):
-                if get_canonical_category(self._category) != get_canonical_category(cat):
-                    return False
+                target_canon = get_canonical_category(self._category)
+                asset_canon = get_canonical_category(cat)
+                if target_canon != asset_canon:
+                    p_name = str(item.get("pack_name") or "")
+                    snapshot = PackManager.get_identity_snapshot()
+                    target_pack = self._sub_category[5:] if (self._sub_category and self._sub_category.startswith("pack:")) else self._pack_filter
+                    is_valid_cross_category = (
+                        bool(target_pack)
+                        and snapshot.match_pack_names(p_name, target_pack)
+                        and snapshot.asset_matches_rail_category(p_name, cat, self._category)
+                    )
+                    if not is_valid_cross_category:
+                        return False
 
             # 2. Search Query Filter
             if self._search_query:
@@ -276,13 +288,14 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
                 if asset_id not in self._recent_ids_set:
                     return False
 
+            pack_name = str(item.get("pack_name") or "")
             pack_norm = item.get("_pack_norm")
             if pack_norm is None:
-                pack_norm = normalize_taxonomy(item.get("pack_name") or "")
+                pack_norm = normalize_taxonomy(pack_name)
 
             # 4. Explicit Pack Filter
             if self._pack_filter:
-                if pack_norm != self._pack_filter:
+                if not PackManager.match_pack_names(pack_name, self._pack_filter):
                     return False
 
             sub_norm = item.get("_sub_norm")
@@ -295,8 +308,8 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
             # 5. Sub-category Filter (supports pack: prefix or subcategory/tag)
             if self._sub_category and self._sub_category not in ("all", "Tất cả", "fav:all"):
                 if self._sub_category.startswith("pack:"):
-                    target_pack = normalize_taxonomy(self._sub_category[5:])
-                    if pack_norm != target_pack:
+                    target_pack = self._sub_category[5:]
+                    if not PackManager.match_pack_names(pack_name, target_pack):
                         return False
                 elif self._category != "fav" and not self._sub_category.startswith("coll:"):
                     target_sub = normalize_taxonomy(self._sub_category)
@@ -352,18 +365,26 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
             target_canon = get_canonical_category(self._category)
             asset_canon = get_canonical_category(cat)
             if target_canon != asset_canon:
-                return False
+                snapshot = PackManager.get_identity_snapshot()
+                target_pack = self._sub_category[5:] if (self._sub_category and self._sub_category.startswith("pack:")) else getattr(self, "_pack_filter", None)
+                is_valid_cross_category = (
+                    bool(target_pack)
+                    and snapshot.match_pack_names(pack, target_pack)
+                    and snapshot.asset_matches_rail_category(pack, cat, self._category)
+                )
+                if not is_valid_cross_category:
+                    return False
 
         # 4. Explicit Pack Filter
         if getattr(self, "_pack_filter", None):
-            if normalize_taxonomy(pack) != self._pack_filter:
+            if not PackManager.match_pack_names(pack, self._pack_filter):
                 return False
 
         # 5. Sub-category Filter (supports pack: prefix or subcategory/tag)
         if self._sub_category and self._sub_category not in ("all", "Tất cả", "fav:all"):
             if self._sub_category.startswith("pack:"):
-                target_pack = normalize_taxonomy(self._sub_category[5:])
-                if normalize_taxonomy(pack) != target_pack:
+                target_pack = self._sub_category[5:]
+                if not PackManager.match_pack_names(pack, target_pack):
                     return False
             elif self._category != "fav" and not self._sub_category.startswith("coll:"):
                 sub_norm = normalize_taxonomy(sub)
