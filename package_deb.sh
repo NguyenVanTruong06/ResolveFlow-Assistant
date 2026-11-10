@@ -95,7 +95,7 @@ Version: ${VERSION}
 Section: video
 Priority: optional
 Architecture: amd64
-Depends: ffmpeg, libxcb-cursor0
+Depends: ffmpeg, libxcb-cursor0, zstd
 Maintainer: Nguyen Van Truong <truong@chundvc.dev>
 Description: AI-Powered Rough Cut & Asset Studio for DaVinci Resolve
  ResolveFlow Assistant (ChunDVC) is an AI-powered editing assistant that

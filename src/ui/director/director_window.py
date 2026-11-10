@@ -40,6 +40,7 @@ class DirectorWindow(QMainWindow):
     """Cửa sổ đạo diễn ChunDVC Director."""
     closed = Signal()
     analysis_and_preflight_idle = Signal()
+    settings_requested = Signal()
 
     def __init__(self, controller: Optional[DirectorController] = None, parent=None):
         super().__init__(parent)
@@ -232,6 +233,13 @@ class DirectorWindow(QMainWindow):
             }
         """)
         h_layout.addWidget(self.btn_whisper)
+
+        # Cụm tiêu đề góc trên bên phải: Phiên bản chuẩn và Nút Cài đặt (⚙)
+        from src.ui.widgets.app_header_actions import AppHeaderActions
+        self.header_actions = AppHeaderActions(parent=self.header_frame, show_version=True)
+        self.header_actions.settings_requested.connect(self._on_settings_requested)
+        self.header_actions.ai_setup_requested.connect(self._on_open_ai_setup)
+        h_layout.addWidget(self.header_actions)
 
         # Nút đóng ✕
         btn_close = QPushButton("✕")
@@ -1357,6 +1365,15 @@ class DirectorWindow(QMainWindow):
         """Mở menu cấu hình Whisper từ topbar chip."""
         if hasattr(self, "page_source"):
             self.page_source._show_whisper_menu(parent_btn=self.btn_whisper)
+
+    def _on_settings_requested(self):
+        """Xử lý yêu cầu mở Cài đặt từ thanh tiêu đề."""
+        self.settings_requested.emit()
+
+    def _on_open_ai_setup(self):
+        """Mở hộp thoại Thiết lập AI từ thanh tiêu đề."""
+        if hasattr(self, "page_source"):
+            self.page_source.open_ai_setup_dialog()
 
     def _on_whisper_changed(self, model, lang):
         self.config.whisper_model = model

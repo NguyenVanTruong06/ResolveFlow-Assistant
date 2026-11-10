@@ -447,6 +447,41 @@ class DockSettingsDialog(QDialog):
         self.btn_check_update.clicked.connect(self._check_for_updates)
         sec5_up_layout.addWidget(self.btn_check_update)
 
+        # Section AI: Cấu hình AI Cục Bộ (Local AI)
+        sec_ai_frame = QFrame()
+        sec_ai_frame.setObjectName("card_frame")
+        sec_ai_layout = QVBoxLayout(sec_ai_frame)
+        sec_ai_layout.setContentsMargins(14, 12, 14, 14)
+        sec_ai_layout.setSpacing(8)
+
+        lbl_sec_ai = QLabel("🧠 THIẾT LẬP AI CỤC BỘ (LOCAL AI)")
+        lbl_sec_ai.setStyleSheet(f"font-size: 11px; font-weight: 700; color: {ThemeColors.TEXT_ACCENT}; letter-spacing: 0.5px;")
+        sec_ai_layout.addWidget(lbl_sec_ai)
+
+        lbl_ai_desc = QLabel("Quản lý mô hình giọng nói Whisper, máy chủ thị giác Ollama và Vision Model.")
+        lbl_ai_desc.setStyleSheet(f"color: {ThemeColors.TEXT_SECONDARY}; font-size: 11.5px;")
+        sec_ai_layout.addWidget(lbl_ai_desc)
+
+        btn_open_ai_setup = QPushButton("⚙️ Mở Thiết Lập AI (Whisper / Ollama)...")
+        btn_open_ai_setup.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_open_ai_setup.setStyleSheet(f"""
+            QPushButton {{
+                background: {ThemeColors.BG_INPUT};
+                color: #ffffff;
+                border: 1px solid {ThemeColors.BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 11.5px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background: {ThemeColors.BG_CARD_ACTIVE};
+                border-color: {ThemeColors.PRIMARY_HOVER};
+            }}
+        """)
+        btn_open_ai_setup.clicked.connect(self._open_ai_setup_dialog)
+        sec_ai_layout.addWidget(btn_open_ai_setup)
+
         # 7. Section 6: Phím tắt nhanh
         sec6_frame = QFrame()
         sec6_frame.setObjectName("card_frame")
@@ -525,6 +560,7 @@ class DockSettingsDialog(QDialog):
         content_layout.addWidget(sec2_frame)
         content_layout.addWidget(sec3_monitor_frame)
         content_layout.addWidget(sec4_storage_frame)
+        content_layout.addWidget(sec_ai_frame)
         content_layout.addWidget(sec5_update_frame)
         content_layout.addWidget(sec6_frame)
         content_layout.addStretch(1)
@@ -643,6 +679,12 @@ class DockSettingsDialog(QDialog):
         dlg.library_changed.connect(self._on_storage_changed)
         dlg.exec()
         self._update_storage_ui()
+
+    def _open_ai_setup_dialog(self):
+        """Mở hộp thoại Thiết lập AI (Whisper, Ollama, Vision model)."""
+        from src.ui.director.widgets.ai_setup_dialog import AISetupDialog
+        dlg = AISetupDialog(parent=self)
+        dlg.exec()
 
     def _on_storage_changed(self):
         self._update_storage_ui()

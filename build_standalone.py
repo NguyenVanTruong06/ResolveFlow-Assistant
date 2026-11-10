@@ -18,7 +18,7 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 APP_NAME = "ResolveFlow-Assistant"
-APP_VERSION = "1.0.23"
+APP_VERSION = "1.0.24"
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 ENTRY_POINT = os.path.join("src", "main.py")
 
@@ -204,6 +204,7 @@ def get_hidden_imports() -> List[str]:
         "src.services.isolated_resolve_trial_adapter",
         "src.services.live_canary_dispatch_service",
         "src.services.live_resolve_canary_adapter",
+        "src.services.local_ai_setup_service",
         "src.services.multi_screen_service",
         "src.services.recovery_classifier_service",
         "src.services.recovery_coordinator",
@@ -235,6 +236,7 @@ def get_hidden_imports() -> List[str]:
         "src.ui.director.pages.style_page",
         "src.ui.director.widgets",
         "src.ui.director.widgets.advanced_panel",
+        "src.ui.director.widgets.ai_setup_dialog",
         "src.ui.director.widgets.asset_advisory_drawer",
         "src.ui.director.widgets.common_proposal_review_widget",
         "src.ui.director.widgets.mini_timeline_view",
@@ -295,6 +297,7 @@ def get_hidden_imports() -> List[str]:
         "src.ui.tabs.tab_asset_hub",
         "src.ui.tabs.tab_assets",
         "src.ui.theme",
+        "src.ui.widgets.app_header_actions",
         "src.ui.widgets.copilot_dialog",
         "src.ui.widgets.drive_dialog",
         "src.ui.widgets.mini_timeline",

@@ -1,4 +1,6 @@
 import gc
+import math
+import numbers
 import re
 import os
 import wave
@@ -7,6 +9,68 @@ import numpy as np
 from src.core import transcript_quality
 from src.core.whisper_cleaner import is_whisper_hallucination
 from pydantic import BaseModel, Field
+
+
+def _to_native_finite_float(val: Any) -> float:
+    """
+    Chuyển đổi một numeric scalar (int, float, numpy scalar) thành native Python float hữu hạn.
+    - Chấp nhận numeric scalars thực sự (int, float, np.floating, np.integer, numbers.Real).
+    - Từ chối bool, np.bool_, string, bytes, đối tượng tùy ý.
+    - Từ chối NaN, +/-Infinity, giá trị tràn số (overflow).
+    - Không dùng silent default hay clamping.
+    """
+    if val is None or isinstance(val, (bool, str, bytes)):
+        raise TypeError(f"Giá trị không phải numeric scalar hợp lệ: {type(val)}")
+
+    type_name = type(val).__name__.lower()
+    if "bool" in type_name:
+        raise TypeError(f"Không chấp nhận kiểu boolean: {type(val)}")
+
+    if not isinstance(val, (int, float, numbers.Real)):
+        raise TypeError(f"Kiểu dữ liệu không được hỗ trợ: {type(val)}")
+
+    try:
+        f = float(val)
+    except (OverflowError, ValueError, TypeError) as e:
+        raise ValueError(f"Không thể chuyển đổi sang float hữu hạn: {val}") from e
+
+    if not math.isfinite(f):
+        raise ValueError(f"Giá trị không hữu hạn (NaN hoặc Infinity): {val}")
+
+    return f
+
+
+def normalize_whisper_segment_numbers(segment: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Chuẩn hóa các trường số học của một phân đoạn Whisper thành native Python float/int.
+    Đảm bảo tương thích hoàn hảo với schema validation của ScanCacheManager và JSON serialization.
+    """
+    if not isinstance(segment, dict):
+        raise TypeError(f"Phân đoạn phải là dictionary: {type(segment)}")
+
+    norm = dict(segment)
+    norm["start"] = _to_native_finite_float(segment["start"])
+    norm["end"] = _to_native_finite_float(segment["end"])
+    if not isinstance(segment.get("text"), str):
+        raise TypeError(f"Segment text phải là str: {type(segment.get('text'))}")
+    norm["text"] = segment["text"]
+
+    if "words" in segment and segment["words"]:
+        norm_words = []
+        for w in segment["words"]:
+            w_dict = dict(w)
+            w_dict["start"] = _to_native_finite_float(w["start"])
+            w_dict["end"] = _to_native_finite_float(w["end"])
+            if "probability" in w and w["probability"] is not None:
+                w_dict["probability"] = _to_native_finite_float(w["probability"])
+            norm_words.append(w_dict)
+        norm["words"] = norm_words
+
+    for num_field in ("avg_logprob", "no_speech_prob", "compression_ratio", "temperature"):
+        if num_field in segment and segment[num_field] is not None:
+            norm[num_field] = _to_native_finite_float(segment[num_field])
+
+    return norm
 
 # Kích thước ước lượng của các mô hình Faster-Whisper trên đĩa
 MODEL_DISK_SIZES: Dict[str, str] = {
@@ -237,32 +301,33 @@ class ResolveTranscriber:
             else:
                 log_callback(f"🤖 Đang nạp mô hình Whisper '{self.config.model_size}' ({device.upper()} - {compute_type})...")
 
-        # Khởi tạo mô hình cTranslate2 của faster-whisper
-        self.model = WhisperModel(
-            self.config.model_size,
-            device=device,
-            compute_type=compute_type,
-            local_files_only=local_files_only,
-        )
-
-        # Thiếu thư viện CUDA (cuBLAS/cuDNN) chỉ lộ ra ở lần suy luận đầu tiên, nên chạy thử 1 lần ngay tại đây
-        if device == "cuda":
-            try:
-                import numpy as np
+        try:
+            self.model = WhisperModel(
+                self.config.model_size,
+                device=device,
+                compute_type=compute_type,
+                local_files_only=local_files_only,
+            )
+            # A missing CUDA library can first surface during inference.
+            if device == "cuda":
                 list(self.model.transcribe(np.zeros(16000, dtype=np.float32), language="en")[0])
-            except Exception as e:
-                msg = f"⚠️ GPU CUDA không chạy được ({str(e).splitlines()[0][:120]}). Chuyển sang CPU (int8)."
-                if log_callback:
-                    log_callback(msg)
-                else:
-                    print(f" Warn: {msg}")
-                device, compute_type = "cpu", "int8"
-                self.model = WhisperModel(
-                    self.config.model_size,
-                    device=device,
-                    compute_type=compute_type,
-                    local_files_only=local_files_only,
-                )
+        except RuntimeError as exc:
+            if device != "cuda":
+                raise
+            reason = str(exc).partition("\n")[0][:120]
+            msg = f"⚠️ GPU CUDA không chạy được ({reason}). Chuyển sang CPU (int8)."
+            if log_callback:
+                log_callback(msg)
+            else:
+                print(f" Warn: {msg}")
+            self.model = None
+            device, compute_type = "cpu", "int8"
+            self.model = WhisperModel(
+                self.config.model_size,
+                device=device,
+                compute_type=compute_type,
+                local_files_only=local_files_only,
+            )
         self.active_device = device
         self.active_compute_type = compute_type
 
@@ -349,7 +414,7 @@ class ResolveTranscriber:
             results = self.fill_uncovered_gaps(
                 audio_path, results, language, is_cancelled_callback, progress_callback, audio_waveform=audio_waveform
             )
-        return results
+        return [normalize_whisper_segment_numbers(s) for s in results]
 
     def transcribe_slice(
         self,
@@ -384,7 +449,8 @@ class ResolveTranscriber:
                 "compression_ratio": getattr(seg, "compression_ratio", 1.0),
                 "temperature": getattr(seg, "temperature", 0.0),
             })
-        return transcript_quality.split_stretched_segments(out)
+        split_out = transcript_quality.split_stretched_segments(out)
+        return [normalize_whisper_segment_numbers(s) for s in split_out]
 
     def fill_uncovered_gaps(
         self,
@@ -408,7 +474,8 @@ class ResolveTranscriber:
             extra.extend(self.transcribe_slice(audio[int(a * sr): int(b * sr)], a, language))
             if progress_callback:
                 progress_callback(n / len(gaps), f"Quét bổ sung vùng bị bỏ sót {n}/{len(gaps)}")
-        return transcript_quality.merge_segments(results, extra)
+        merged = transcript_quality.merge_segments(results, extra)
+        return [normalize_whisper_segment_numbers(s) for s in merged]
 
     def unload_model(self) -> None:
         """

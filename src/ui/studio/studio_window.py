@@ -174,6 +174,8 @@ class StudioWindow(QMainWindow):
     open_auto_requested = pyqtSignal()
     return_to_dock_requested = pyqtSignal()
     assets_updated = pyqtSignal(list)
+    settings_requested = pyqtSignal()
+    ai_setup_requested = pyqtSignal()
 
     def __init__(self, parent=None, insert_service=None):
         super().__init__(parent)
@@ -390,6 +392,13 @@ class StudioWindow(QMainWindow):
             }}
         """)
         h_layout.addWidget(self.btn_pin)
+
+        # 6. Cụm phiên bản & nút cài đặt góc trên bên phải
+        from src.ui.widgets.app_header_actions import AppHeaderActions
+        self.header_actions = AppHeaderActions(parent=header, show_version=True)
+        self.header_actions.settings_requested.connect(self.settings_requested.emit)
+        self.header_actions.ai_setup_requested.connect(self.open_auto_requested.emit)
+        h_layout.addWidget(self.header_actions)
 
         main_layout.addWidget(header)
 

@@ -25,6 +25,8 @@ def _local_endpoint(endpoint: str) -> str:
 
 
 PROMPT_VERSION = "observed-windows-5-scene-hints"
+DEFAULT_INFERENCE_TIMEOUT: float = 120.0
+DEFAULT_METADATA_TIMEOUT: float = 10.0
 
 
 def _window_schema(frame_map, window):
@@ -44,7 +46,7 @@ def _window_schema(frame_map, window):
                                      "properties": fields, "required": list(fields)}}}}
 
 
-def _json_request(endpoint, route, payload=None, timeout=30):
+def _json_request(endpoint, route, payload=None, timeout=DEFAULT_INFERENCE_TIMEOUT):
     request = urllib.request.Request(
         _local_endpoint(endpoint) + route,
         data=json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8") if payload is not None else None,
@@ -62,7 +64,7 @@ def _json_request(endpoint, route, payload=None, timeout=30):
         raise ConnectionError(f"Không kết nối được Ollama tại {endpoint}: {exc}") from exc
 
 
-def local_model_info(model, endpoint, timeout=10):
+def local_model_info(model, endpoint, timeout=DEFAULT_METADATA_TIMEOUT):
     """Kiểm tra model đã tải, khả năng vision và digest; không tự tải model."""
     if not model.strip() or "cloud" in model.lower():
         raise ValueError("Hãy chọn model thị giác đã cài local")
@@ -85,7 +87,7 @@ def describe_with_ollama(
     model: str,
     endpoint: str = "http://127.0.0.1:11434",
     index: Optional[VisualIndex] = None,
-    timeout: float = 30.0,
+    timeout: float = DEFAULT_INFERENCE_TIMEOUT,
     *, window_sec=8.0, frames_per_window=4, max_windows=24,
     cancelled=None, progress=None, force=False, max_refinements=2,
     run_evidence: Optional[Dict[str, Any]] = None,
@@ -102,7 +104,7 @@ def describe_with_ollama(
         raise ValueError("Ngân sách tăng mẫu phải từ 0 tới 4 cửa sổ")
     index = index or VisualIndex()
     video_path = Path(video_path)
-    info = local_model_info(model, endpoint, min(timeout, 10))
+    info = local_model_info(model, endpoint, min(timeout, DEFAULT_METADATA_TIMEOUT))
     visual = index.prepare_windows(video_path, window_sec, frames_per_window, max_windows, cancelled)
     source_fingerprint = visual["fingerprint"]
     signature_data = {

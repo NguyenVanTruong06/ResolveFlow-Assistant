@@ -2,10 +2,10 @@ import shutil
 import subprocess
 from typing import Optional, List, Union
 from pathlib import Path
-
-
 import sys
 import os
+
+from src.utils.subprocess_utils import clean_media_subprocess_env, no_window_kwargs
 
 def get_ffmpeg_path() -> Optional[str]:
     """Tìm đường dẫn binary ffmpeg trong PATH hệ thống hoặc venv/static-ffmpeg."""
@@ -65,10 +65,14 @@ def is_ffprobe_available() -> bool:
     return get_ffprobe_path() is not None
 
 
-def run_ffmpeg(args: List[str], timeout: Optional[int] = None) -> subprocess.CompletedProcess:
+def run_ffmpeg(
+    args: List[str],
+    timeout: Optional[int] = None,
+    env: Optional[dict] = None,
+) -> subprocess.CompletedProcess:
     """
-    Thực thi lệnh FFmpeg an toàn thông qua subprocess.
-    Tự động xác định binary ffmpeg hợp lệ.
+    Thực thi lệnh FFmpeg an toàn thông qua subprocess với môi trường sạch.
+    Tự động xác định binary ffmpeg hợp lệ và loại bỏ ô nhiễm LD_LIBRARY_PATH.
     """
     ffmpeg_bin = get_ffmpeg_path()
     if not ffmpeg_bin:
@@ -80,9 +84,8 @@ def run_ffmpeg(args: List[str], timeout: Optional[int] = None) -> subprocess.Com
         )
 
     cmd = [ffmpeg_bin] + args
-    kwargs = {}
-    if sys.platform == "win32":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    sub_env = clean_media_subprocess_env(env)
+    nw_kwargs = no_window_kwargs()
 
     return subprocess.run(
         cmd,
@@ -92,7 +95,42 @@ def run_ffmpeg(args: List[str], timeout: Optional[int] = None) -> subprocess.Com
         timeout=timeout,
         encoding="utf-8",
         errors="replace",
-        **kwargs
+        env=sub_env,
+        **nw_kwargs,
+    )
+
+
+def run_ffprobe(
+    args: List[str],
+    timeout: Optional[int] = None,
+    env: Optional[dict] = None,
+) -> subprocess.CompletedProcess:
+    """
+    Thực thi lệnh ffprobe an toàn thông qua subprocess với môi trường sạch.
+    Tự động xác định binary ffprobe hợp lệ và loại bỏ ô nhiễm LD_LIBRARY_PATH.
+    """
+    ffprobe_bin = get_ffprobe_path()
+    if not ffprobe_bin:
+        raise FileNotFoundError(
+            "Không tìm thấy công cụ ffprobe trong hệ thống PATH.\n"
+            "Trên Linux: vui lòng chạy 'sudo apt install -y ffmpeg'.\n"
+            "Trên macOS: 'brew install ffmpeg'."
+        )
+
+    cmd = [ffprobe_bin] + args
+    sub_env = clean_media_subprocess_env(env)
+    nw_kwargs = no_window_kwargs()
+
+    return subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=timeout,
+        encoding="utf-8",
+        errors="replace",
+        env=sub_env,
+        **nw_kwargs,
     )
 
 
@@ -139,9 +177,8 @@ def detect_vfr_status(video_path: Union[str, Path]) -> dict:
         "-select_streams", "v:0",
         norm_path
     ]
-    kwargs = {}
-    if sys.platform == "win32":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    sub_env = clean_media_subprocess_env()
+    nw_kwargs = no_window_kwargs()
 
     try:
         res = subprocess.run(
@@ -151,7 +188,8 @@ def detect_vfr_status(video_path: Union[str, Path]) -> dict:
             text=True,
             encoding="utf-8",
             errors="replace",
-            **kwargs
+            env=sub_env,
+            **nw_kwargs
         )
         if res.stdout:
             data = json.loads(res.stdout)

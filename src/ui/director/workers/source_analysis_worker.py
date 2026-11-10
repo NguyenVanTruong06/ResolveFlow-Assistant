@@ -24,7 +24,12 @@ from src.core.cache_manager import (
     normalize_language_code,
     validate_file_identity,
 )
-from src.core.transcriber import ModelConfig, ResolveTranscriber
+from src.core.transcriber import (
+    ModelConfig,
+    ResolveTranscriber,
+    _to_native_finite_float,
+    normalize_whisper_segment_numbers,
+)
 from src.core.visual_index import VisualIndex
 from src.core.whisper_cleaner import clean_whisper_segments_with_stats
 from src.core.audio import AudioExtractor
@@ -654,11 +659,13 @@ class SourceAnalysisWorker(QThread):
                                             # Xuất bản cache v3
                                             save_res = False
                                             try:
+                                                safe_subs = [normalize_whisper_segment_numbers(s) for s in clean_subs]
+                                                safe_dur = _to_native_finite_float(clip_dur)
                                                 save_res = self._cache_mgr.save_scan_result(
                                                     vp,
                                                     {
-                                                        "clip_dur": clip_dur,
-                                                        "raw_subtitles": clean_subs,
+                                                        "clip_dur": safe_dur,
+                                                        "raw_subtitles": safe_subs,
                                                     },
                                                     model_size=self.config.whisper_model,
                                                     language=self.config.whisper_language,
@@ -672,9 +679,9 @@ class SourceAnalysisWorker(QThread):
                                                 )
 
                                             clip_res["audio_status"] = "new"
-                                            clip_res["raw_subtitles"] = clean_subs
-                                            clip_res["audio_segments"] = clean_subs
-                                            clip_res["clip_dur"] = clip_dur
+                                            clip_res["raw_subtitles"] = safe_subs
+                                            clip_res["audio_segments"] = safe_subs
+                                            clip_res["clip_dur"] = safe_dur
                                             self._clip_states[idx]["audio_state"] = "new"
 
                                             if not clean_subs:

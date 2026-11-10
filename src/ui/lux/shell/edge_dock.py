@@ -331,6 +331,7 @@ class EdgeDockWindow(QWidget):
         self.header.instant_autocut_clicked.connect(self.run_instant_autocut)
         self.header.director_clicked.connect(self.director_requested.emit)
         self.header.settings_clicked.connect(self.open_settings)
+        self.header.ai_setup_clicked.connect(self.open_ai_setup)
         self.header.audio_preview_toggled.connect(self._on_hover_audio_changed)
         self.header.pending_chip_clicked.connect(self.router.apply_pending)
         self.header.profile_lock_selected.connect(self.router.lock_profile)
@@ -1099,9 +1100,16 @@ class EdgeDockWindow(QWidget):
         if not hasattr(self, "_director_window") or self._director_window is None:
             from src.ui.director import DirectorWindow
             self._director_window = DirectorWindow()
+            self._director_window.settings_requested.connect(self.open_settings)
         self._director_window.show()
         self._director_window.raise_()
         self._director_window.activateWindow()
+
+    def open_ai_setup(self):
+        """Mở hộp thoại Thiết lập AI cục bộ."""
+        from src.ui.director.widgets.ai_setup_dialog import AISetupDialog
+        dlg = AISetupDialog(parent=self)
+        dlg.exec()
 
     def _on_palette_command_executed(self, cmd_id: str):
         if cmd_id in ("cmd_director", "cmd_autocut"):

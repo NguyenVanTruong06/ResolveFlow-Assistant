@@ -833,16 +833,16 @@ class SourceClipRow(QFrame):
             v_err_type = clip_res.get("visual_describe_error_type", "")
             err_lower = str(error or "").lower()
             if v_err_type == "ollama_disconnected" or "không kết nối" in err_lower or "connection" in err_lower or "refused" in err_lower:
-                tt_parts.append("Hướng dẫn: Dịch vụ Ollama chưa khởi động hoặc không thể kết nối. Vui lòng bật Ollama service trên máy.")
+                tt_parts.append("Hướng dẫn: Dịch vụ Ollama chưa khởi động hoặc không thể kết nối. Bấm 'Thiết lập AI' để khởi động máy chủ Ollama.")
             elif v_err_type == "vision_model_absent" or "chưa cài" in err_lower or "not found" in err_lower:
                 v_model_name = clip_res.get("vision_model", "")
                 m_str = f" '{v_model_name}'" if v_model_name else ""
-                tt_parts.append(f"Hướng dẫn: Mô hình thị giác{m_str} chưa được tải về Ollama. Chạy 'ollama pull <tên_model>' trên Terminal để cài đặt.")
+                tt_parts.append(f"Hướng dẫn: Mô hình thị giác{m_str} chưa được tải. Bấm 'Thiết lập AI' để tải mô hình trực tiếp trong ứng dụng.")
             else:
-                tt_parts.append("Hướng dẫn: Kiểm tra lại cấu hình và trạng thái của Ollama.")
+                tt_parts.append("Hướng dẫn: Kiểm tra lại cấu hình AI trong 'Thiết lập AI'.")
 
         if audio_st == "unavailable":
-            tt_parts.append("Hướng dẫn: Mô hình Whisper được chọn chưa có trên máy. Bấm vào chip Whisper để chuẩn bị mô hình trước khi quét thoại.")
+            tt_parts.append("Hướng dẫn: Mô hình Whisper được chọn chưa có trên máy. Bấm vào chip Whisper hoặc 'Thiết lập AI' để chuẩn bị mô hình trước khi quét thoại.")
 
         tt_parts.append("Lấy mẫu khung hình chỉ để xem trước, chưa thực hiện mô tả nội dung hay phân loại hành động AI.")
         self.lbl_cache.setToolTip("\n".join(tt_parts))
@@ -928,6 +928,25 @@ class SourcePage(QWidget):
         self._whisper_model = _read_whisper_setting("whisper_model", DirectorConfig().whisper_model)
         self._whisper_lang = _read_whisper_setting("whisper_lang", "vi")
         self._init_ui()
+
+    def _show_toast(self, message: str, level: str = "info"):
+        """Hiển thị thông báo toast nổi hoặc visual status label an toàn."""
+        logger.info("[SourcePage Toast] %s", message)
+        if hasattr(self, "lbl_visual_status") and self.lbl_visual_status is not None:
+            self.lbl_visual_status.setText(message)
+            self.lbl_visual_status.show()
+        try:
+            from src.ui.lux.feedback.toast import ChunDVCToast
+            if not hasattr(self, "_toast_widget") or self._toast_widget is None:
+                self._toast_widget = ChunDVCToast(parent=self)
+            if "✔" in message or "thành công" in message.lower() or level == "success":
+                self._toast_widget.show_success(message)
+            elif "❌" in message or "thất bại" in message.lower() or "lỗi" in message.lower() or level == "error":
+                self._toast_widget.show_error(message)
+            else:
+                self._toast_widget.show_message(message)
+        except Exception as exc:
+            logger.debug("Không thể hiển thị ChunDVCToast: %s", exc)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if self.is_source_analysis_active():
@@ -1094,12 +1113,12 @@ class SourcePage(QWidget):
         h_vision_opt.addWidget(self.chk_enable_visual_describe)
 
         settings = QSettings("ChunDVC", "ResolveFlow")
-        saved_vmodel = str(settings.value("ai/vision_model", "qwen2.5-vl:7b"))
+        saved_vmodel = str(settings.value("ai/vision_model", "qwen3-vl:2b-instruct"))
 
         self.cbo_vision_model = QComboBox()
         self.cbo_vision_model.setEditable(True)
-        self.cbo_vision_model.addItems(["qwen2.5-vl:7b", "llama3.2-vision:11b", "minicpm-v"])
-        self.cbo_vision_model.setCurrentText(saved_vmodel or "qwen2.5-vl:7b")
+        self.cbo_vision_model.addItems(["qwen3-vl:2b-instruct", "qwen2.5-vl:7b", "llama3.2-vision:11b", "minicpm-v"])
+        self.cbo_vision_model.setCurrentText(saved_vmodel or "qwen3-vl:2b-instruct")
         self.cbo_vision_model.setFixedWidth(160)
         self.cbo_vision_model.setToolTip("Chọn hoặc nhập tên mô hình Ollama cục bộ (không tự động tải qua mạng)")
         self.cbo_vision_model.setStyleSheet("""
@@ -1114,6 +1133,29 @@ class SourcePage(QWidget):
         """)
         self.cbo_vision_model.currentTextChanged.connect(self._on_vision_settings_changed)
         h_vision_opt.addWidget(self.cbo_vision_model)
+
+        # Nút Thiết lập AI mở dialog cài đặt và cấu hình độc lập
+        self.btn_ai_setup = QPushButton("⚙️ Thiết lập AI")
+        self.btn_ai_setup.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_ai_setup.setToolTip("Cấu hình & Tải mô hình Whisper, Ollama và Vision Model ngay trong ứng dụng")
+        self.btn_ai_setup.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(217, 79, 61, 0.18);
+                color: #f8b4a8;
+                border: 1px solid rgba(217, 79, 61, 0.45);
+                border-radius: 4px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: rgba(217, 79, 61, 0.35);
+                color: #ffffff;
+            }
+        """)
+        self.btn_ai_setup.clicked.connect(self.open_ai_setup_dialog)
+        h_vision_opt.addWidget(self.btn_ai_setup)
+
         h_vision_opt.addStretch(1)
         layout.addLayout(h_vision_opt)
 
@@ -1233,17 +1275,69 @@ class SourcePage(QWidget):
             action = menu.addAction(f"Ngôn ngữ: {lang}")
             action.triggered.connect(lambda checked=False, c=code: self._set_lang(c))
 
+        menu.addSeparator()
+        act_setup = menu.addAction("⚙️ Thiết lập AI...")
+        act_setup.triggered.connect(self.open_ai_setup_dialog)
+
         btn = parent_btn or self.btn_whisper_chip
         menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def open_ai_setup_dialog(self):
+        """Mở hộp thoại cấu hình & cài đặt Local AI (Whisper, Ollama daemon, Vision model)."""
+        from src.ui.director.widgets.ai_setup_dialog import AISetupDialog
+        v_model = self.cbo_vision_model.currentText().strip() or "qwen3-vl:2b-instruct"
+        dlg = AISetupDialog(
+            selected_whisper_model=self._whisper_model,
+            selected_vision_model=v_model,
+            parent=self,
+            whisper_prep_delegate=self.start_whisper_model_preparation,
+            whisper_cancel_delegate=self.cancel_whisper_model_preparation,
+        )
+
+        def _on_w_changed(m: str):
+            if m and m != self._whisper_model:
+                self._whisper_model = m
+                _write_whisper_setting("whisper_model", self._whisper_model)
+                self._update_whisper_label()
+                self._invalidate_runtime_status()
+                self.recheck_cache()
+                self.whisper_changed.emit(self._whisper_model, self._whisper_lang)
+
+        def _on_v_changed(m: str):
+            if m:
+                idx = self.cbo_vision_model.findText(m)
+                if idx < 0:
+                    self.cbo_vision_model.addItem(m)
+                self.cbo_vision_model.setCurrentText(m)
+
+        dlg.whisper_model_changed.connect(_on_w_changed)
+        dlg.vision_model_changed.connect(_on_v_changed)
+        dlg.exec()
 
     def is_model_preparation_active(self) -> bool:
         """Kiểm tra xem worker chuẩn bị mô hình Whisper có đang chạy hay không."""
         return any(str(k).startswith("whisper_prep_") for k in self._workers_registry)
 
-    def start_whisper_model_preparation(self, model: str, download_fn: Optional[Callable] = None) -> bool:
+    def cancel_whisper_model_preparation(self):
+        """Hủy tác vụ tải trước mô hình Whisper nếu đang chạy."""
+        if getattr(self, "_whisper_prep_worker", None) is not None:
+            try:
+                self._whisper_prep_worker.cancel()
+            except Exception as exc:
+                logger.warning("Lỗi hủy whisper prep worker: %s", exc)
+
+    def start_whisper_model_preparation(
+        self,
+        model: str,
+        download_fn: Optional[Callable] = None,
+        on_progress: Optional[Callable[[str, float, str], None]] = None,
+        on_finished: Optional[Callable[[str, bool, str], None]] = None,
+    ) -> bool:
         """Khởi chạy chuẩn bị tải trước mô hình Whisper trong nền (chỉ sau khi người dùng phê duyệt)."""
         if self.is_model_preparation_active() or self.is_source_analysis_active():
-            logger.warning("Đang có tiến trình phân tích hoặc tải mô hình Whisper.")
+            msg = "Đang có tiến trình phân tích hoặc tải mô hình Whisper."
+            logger.warning(msg)
+            self._show_toast(f"⚠️ {msg}", level="warning")
             return False
 
         worker = WhisperModelDownloadWorker(model, parent=self, download_fn=download_fn)
@@ -1273,7 +1367,9 @@ class SourcePage(QWidget):
             if ok:
                 self.recheck_cache()
                 self._show_toast(f"✔ Đã tải xong mô hình Whisper '{m}'. Sẵn sàng quét ngoại tuyến.")
-            elif msg != "cancelled":
+            elif msg == "cancelled":
+                self._show_toast(f"ℹ️ Đã hủy tải mô hình Whisper '{m}'.")
+            else:
                 self._show_toast(f"❌ Tải mô hình '{m}' thất bại: {msg}")
 
         def _on_thread_finished():
@@ -1290,7 +1386,11 @@ class SourcePage(QWidget):
                     QTimer.singleShot(0, self.close)
 
         worker.progress_signal.connect(_on_prog)
+        if on_progress:
+            worker.progress_signal.connect(on_progress)
         worker.finished_signal.connect(_on_fin)
+        if on_finished:
+            worker.finished_signal.connect(on_finished)
         worker.finished.connect(_on_thread_finished)
         worker.start()
         return True
@@ -1830,6 +1930,7 @@ class SourcePage(QWidget):
         worker.status_signal.connect(self._on_source_status)
         worker.counters_signal.connect(self._on_source_counters)
         worker.finished_signal.connect(self._on_source_finished)
+        worker.log_signal.connect(lambda jid, msg: logger.info("[%s] %s", jid, msg))
 
         # Kết nối callback thread finished gắn chặt identity worker và token
         def _on_thread_finished(w=worker, jid=job_id, token=registry_token):

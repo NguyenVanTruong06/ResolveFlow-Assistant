@@ -44,7 +44,8 @@ def test_source_page_scan_folder_with_assets_and_memes_in_path(tmp_path, qapp):
         )
         page.add_paths([str(nested_dir)])
         page.wait_for_scan()
-        qapp.processEvents()
+        for _ in range(5):
+            qapp.processEvents()
 
     assert len(page._clip_infos) == 3
     loaded_filenames = [c.filename for c in page._clip_infos]

@@ -200,6 +200,7 @@ class _StudioSyncCoordinator:
             self.studio_window.return_to_dock_requested.connect(self._on_return_to_dock)
             self.studio_window.assets_updated.connect(self._on_studio_assets_updated)
             self.studio_window.open_auto_requested.connect(self.dock.open_director)
+            self.studio_window.settings_requested.connect(self.dock.open_settings)
 
             # Lần đầu mở Studio: chủ động nạp snapshot mới nhất từ StorageManager
             try:

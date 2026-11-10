@@ -42,7 +42,8 @@ def test_source_analysis_worker_rejects_zero_clips(qapp):
     worker = SourceAnalysisWorker(cfg)
 
     finished_events = []
-    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)))
+    from PySide6.QtCore import Qt
+    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)), Qt.ConnectionType.DirectConnection)
 
     worker.run()
 
@@ -140,7 +141,8 @@ def test_source_analysis_worker_mixed_speech_empty_no_audio_error(tmp_path, qapp
         transcriber_factory=lambda c: mock_transcriber,
         audio_probe_fn=fake_audio_probe
     )
-    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)))
+    from PySide6.QtCore import Qt
+    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)), Qt.ConnectionType.DirectConnection)
     worker.status_signal.connect(lambda j, p, r: status_events.append((p, r)))
 
     with patch("src.core.audio.AudioExtractor.extract_audio"), \
@@ -203,7 +205,8 @@ def test_source_analysis_worker_verified_audio_hit_visual_miss(tmp_path, qapp):
         visual_index=mock_visual,
         transcriber_factory=mock_transcriber_factory
     )
-    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)))
+    from PySide6.QtCore import Qt
+    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)), Qt.ConnectionType.DirectConnection)
 
     worker.run()
 
@@ -245,7 +248,8 @@ def test_source_analysis_worker_visual_cache_hit_respected(tmp_path, qapp):
 
     finished_events = []
     worker = SourceAnalysisWorker(cfg, cache_mgr=cache_mgr, visual_index=mock_visual)
-    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)))
+    from PySide6.QtCore import Qt
+    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)), Qt.ConnectionType.DirectConnection)
 
     worker.run()
 
@@ -329,7 +333,8 @@ def test_source_analysis_worker_unavailable_local_model_still_runs_visual(tmp_pa
         transcriber_factory=lambda c: mock_transcriber,
         audio_probe_fn=lambda vp: True
     )
-    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)))
+    from PySide6.QtCore import Qt
+    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)), Qt.ConnectionType.DirectConnection)
 
     worker.run()
 
@@ -373,7 +378,8 @@ def test_source_analysis_worker_source_mutation_aborts_cleanly(tmp_path, qapp):
         audio_probe_fn=lambda vp: True,
         validate_identity_fn=fake_validate
     )
-    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)))
+    from PySide6.QtCore import Qt
+    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)), Qt.ConnectionType.DirectConnection)
 
     with patch("src.core.audio.AudioExtractor.extract_audio"), \
          patch("src.core.audio.AudioExtractor.get_audio_duration", return_value=5.0):
@@ -417,7 +423,8 @@ def test_source_analysis_worker_cancellation_boundaries(tmp_path, qapp):
         transcriber_factory=lambda c: mock_transcriber,
         audio_probe_fn=lambda vp: True
     )
-    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)))
+    from PySide6.QtCore import Qt
+    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)), Qt.ConnectionType.DirectConnection)
 
     with patch("src.core.audio.AudioExtractor.extract_audio"), \
          patch("src.core.audio.AudioExtractor.get_audio_duration", return_value=5.0):
@@ -917,7 +924,8 @@ def test_source_analysis_worker_real_qthread_start_and_join(tmp_path, qapp):
 
     worker = SourceAnalysisWorker(cfg, cache_mgr=mock_cache, visual_index=mock_vis)
     finished_events = []
-    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)))
+    from PySide6.QtCore import Qt
+    worker.finished_signal.connect(lambda j, s, m, c: finished_events.append((j, s, m, c)), Qt.ConnectionType.DirectConnection)
 
     worker.start()
     joined = worker.wait(5000)
