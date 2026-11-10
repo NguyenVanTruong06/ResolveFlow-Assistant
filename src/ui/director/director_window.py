@@ -131,6 +131,13 @@ class DirectorWindow(QMainWindow):
         self.setAcceptDrops(True)
         self._init_ui()
         self._wire_signals()
+        # Đồng bộ cấu hình Whisper ban đầu từ page_source (nguồn chân lý QSettings) sang self.config và Topbar Chip
+        if hasattr(self, "page_source"):
+            init_model = self.page_source.get_whisper_model()
+            init_lang = self.page_source.get_whisper_language()
+            self.config.whisper_model = init_model
+            self.config.whisper_language = init_lang
+            self.btn_whisper.setText(f"Whisper {init_model} · {init_lang}")
         self.page_source.workers_idle.connect(self._on_sources_idle)
         if hasattr(self.page_review, "analysis_workers_idle"):
             self.page_review.analysis_workers_idle.connect(self._on_sources_idle)
@@ -207,6 +214,7 @@ class DirectorWindow(QMainWindow):
         # Chip Whisper
         self.btn_whisper = QPushButton(f"Whisper {self.config.whisper_model} · {self.config.whisper_language}")
         self.btn_whisper.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_whisper.clicked.connect(self._show_whisper_menu)
         self.btn_whisper.setStyleSheet("""
             QPushButton {
                 background-color: #23252a;
@@ -1244,10 +1252,17 @@ class DirectorWindow(QMainWindow):
                 if vdesc_skipped == total or not vdesc:
                     vdesc_str = "Chưa chạy mô tả AI (tùy chọn tắt)."
                 else:
+                    unavail_details = []
+                    if vdesc.get("disconnected", 0) > 0:
+                        unavail_details.append(f"{vdesc.get('disconnected')} chưa kết nối Ollama")
+                    if vdesc.get("model_absent", 0) > 0:
+                        unavail_details.append(f"{vdesc.get('model_absent')} chưa cài model Ollama")
+                    unavail_str = f" ({', '.join(unavail_details)})" if unavail_details else ""
+
                     vdesc_str = (
                         f"{vdesc_ok}/{total} thành công"
                         f"{f', {vdesc_partial} một phần/giới hạn ngân sách' if vdesc_partial else ''}"
-                        f"{f', {vdesc_unavailable} thiếu mô hình' if vdesc_unavailable else ''}"
+                        f"{f', {vdesc_unavailable} thiếu mô hình{unavail_str}' if vdesc_unavailable else ''}"
                         f"{f', {vdesc_failed} lỗi' if vdesc_failed else ''}."
                     )
                 body = (
@@ -1337,6 +1352,11 @@ class DirectorWindow(QMainWindow):
                 "DaVinci Resolve",
                 "Đã kết nối DaVinci Resolve thành công nhưng không tìm thấy tệp video nào trong Media Pool hoặc Timeline hiện tại."
             )
+
+    def _show_whisper_menu(self):
+        """Mở menu cấu hình Whisper từ topbar chip."""
+        if hasattr(self, "page_source"):
+            self.page_source._show_whisper_menu(parent_btn=self.btn_whisper)
 
     def _on_whisper_changed(self, model, lang):
         self.config.whisper_model = model

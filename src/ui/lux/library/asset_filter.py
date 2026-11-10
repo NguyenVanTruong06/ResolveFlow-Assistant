@@ -54,6 +54,83 @@ def get_canonical_category(cat: str) -> str:
     return _CANONICAL_LOOKUP.get(norm, norm)
 
 
+DEFAULT_TAB_CATEGORIES: Dict[str, List[Tuple[str, str]]] = {
+    "text": [
+        ("kinetic", "Kinetic / Nhảy chữ"),
+        ("highlighter_paper", "Bút dạ & Giấy"),
+        ("glitch_cyber", "Neon & Glitch"),
+        ("retro_film", "Retro thập niên 90"),
+        ("clean_minimal", "Tối giản"),
+    ],
+    "lut": [
+        ("natural", "Đời thường & Vlog"),
+        ("cinema", "Điện ảnh Hollywood"),
+        ("style", "Phong cách & Anime"),
+    ],
+    "trans": [
+        ("motion", "Lia máy nhanh"),
+        ("zoom", "Phóng to nhòe"),
+        ("glitch", "Nhiễu sóng số"),
+    ],
+    "icon": [
+        ("arrow", "Mũi tên & Khoanh"),
+        ("place", "Địa điểm & Cờ"),
+        ("emo", "Cảm xúc & Ngôi sao"),
+        ("alert", "Cảnh báo & Đánh dấu"),
+        ("talk", "Hội thoại & Kênh"),
+    ],
+    "sfx": [
+        ("chuyen_canh", "💨 Chuyển cảnh (Whoosh)"),
+        ("giat_minh", "💥 Giật mình / Cú sốc"),
+        ("hai_huoc", "😂 Hài hước / Troll"),
+        ("diem_nhan", "✨ Điểm nhấn (Pop/Ding)"),
+        ("cong_nghe", "⚡ Kỹ thuật / UI"),
+        ("accent", "🔊 Nhấn mạnh khác"),
+    ],
+    "bgm": [
+        ("chill_vlog", "🍃 Chill Vlog / Lofi"),
+        ("upbeat_trend", "🔥 Upbeat / TikTok Trend"),
+        ("cinematic", "🎬 Cinematic Điện ảnh"),
+        ("funny", "🎭 Hài hước Meme"),
+    ],
+    "overlay": [
+        ("cinematic", "Điện ảnh"),
+        ("green_screen", "Phông xanh"),
+    ],
+    "meme": [
+        ("vietnam_viral", "🇻🇳 Viral Việt Nam"),
+        ("reaction", "🤦 Cảm xúc / Bất lực"),
+        ("cham_hoi", "❓ Ngơ ngác / Chấm hỏi"),
+        ("cay_cu", "🤬 Cay cú / Đập bàn"),
+        ("trending", "🔥 Thịnh hành"),
+    ],
+}
+
+
+def get_canonical_sub_category(tab: str, sub: Any) -> str:
+    """
+    Resolves a sub-category to its canonical slug for default tab categories,
+    or normalized NFC lower string for custom categories.
+    Preserves 'all', 'Tất cả', 'fav:all', 'pack:*', 'coll:*'.
+    """
+    if not sub:
+        return ""
+    s_raw = str(sub).strip()
+    if s_raw in ("all", "Tất cả", "fav:all") or s_raw.startswith(("pack:", "coll:")):
+        return s_raw
+    s_nfc = unicodedata.normalize("NFC", s_raw).strip()
+    s_lower = s_nfc.lower()
+
+    # Search default categories for the given tab
+    tab_defs = DEFAULT_TAB_CATEGORIES.get(str(tab or "").lower(), [])
+    for slug, label in tab_defs:
+        s_slug = unicodedata.normalize("NFC", slug).strip().lower()
+        s_lbl = unicodedata.normalize("NFC", label).strip().lower()
+        if s_lower in (s_slug, s_lbl):
+            return slug
+    return s_lower
+
+
 class AssetFilterProxyModel(QSortFilterProxyModel):
     """
     Filtering and sorting proxy model for AssetListModel.
@@ -312,8 +389,11 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
                     if not PackManager.match_pack_names(pack_name, target_pack):
                         return False
                 elif self._category != "fav" and not self._sub_category.startswith("coll:"):
+                    target_canon = get_canonical_sub_category(self._category, self._sub_category)
+                    sub_val = item.get("sub_category") or item.get("sub") or ""
+                    asset_canon = get_canonical_sub_category(self._category, sub_val)
                     target_sub = normalize_taxonomy(self._sub_category)
-                    if sub_norm != target_sub and target_sub not in tags_norm:
+                    if asset_canon != target_canon and sub_norm != target_sub and target_sub not in tags_norm and target_canon not in tags_norm:
                         return False
 
             # 6. Tag Filter (explicit tag matching only - pack is never treated as tag)
@@ -387,9 +467,11 @@ class AssetFilterProxyModel(QSortFilterProxyModel):
                 if not PackManager.match_pack_names(pack, target_pack):
                     return False
             elif self._category != "fav" and not self._sub_category.startswith("coll:"):
+                target_canon = get_canonical_sub_category(self._category, self._sub_category)
+                asset_canon = get_canonical_sub_category(self._category, sub)
                 sub_norm = normalize_taxonomy(sub)
                 target_sub = normalize_taxonomy(self._sub_category)
-                if sub_norm != target_sub and target_sub not in tags_norm:
+                if asset_canon != target_canon and sub_norm != target_sub and target_sub not in tags_norm and target_canon not in tags_norm:
                     return False
 
         # 6. Tag Filter (explicit tag matching only - pack is never treated as tag)

@@ -768,7 +768,15 @@ class SourceClipRow(QFrame):
             else:
                 vdesc_text = "🤖 Mô tả AI một phần"
         elif vdesc_st == "unavailable":
-            vdesc_text = "⚠️ Mô tả AI không khả dụng"
+            v_err_type = clip_res.get("visual_describe_error_type", "")
+            err_lower = str(error or "").lower()
+            if v_err_type == "ollama_disconnected" or "không kết nối" in err_lower or "connection" in err_lower or "refused" in err_lower:
+                vdesc_text = "⚠️ Ollama chưa kết nối"
+            elif v_err_type == "vision_model_absent" or "chưa cài" in err_lower or "not found" in err_lower:
+                v_model_name = clip_res.get("vision_model", "")
+                vdesc_text = f"⚠️ Chưa cài model '{v_model_name}'" if v_model_name else "⚠️ Chưa cài model Ollama"
+            else:
+                vdesc_text = "⚠️ Mô tả AI không khả dụng"
         elif vdesc_st == "failed":
             vdesc_text = "❌ Lỗi mô tả AI"
         elif vdesc_st == "skipped":
@@ -820,8 +828,66 @@ class SourceClipRow(QFrame):
             tt_parts.append(f"Cảnh báo: {warning}")
         elif cache_saved is False:
             tt_parts.append("Cảnh báo: Dữ liệu phân tích chưa được lưu vào cache.")
+
+        if vdesc_st == "unavailable":
+            v_err_type = clip_res.get("visual_describe_error_type", "")
+            err_lower = str(error or "").lower()
+            if v_err_type == "ollama_disconnected" or "không kết nối" in err_lower or "connection" in err_lower or "refused" in err_lower:
+                tt_parts.append("Hướng dẫn: Dịch vụ Ollama chưa khởi động hoặc không thể kết nối. Vui lòng bật Ollama service trên máy.")
+            elif v_err_type == "vision_model_absent" or "chưa cài" in err_lower or "not found" in err_lower:
+                v_model_name = clip_res.get("vision_model", "")
+                m_str = f" '{v_model_name}'" if v_model_name else ""
+                tt_parts.append(f"Hướng dẫn: Mô hình thị giác{m_str} chưa được tải về Ollama. Chạy 'ollama pull <tên_model>' trên Terminal để cài đặt.")
+            else:
+                tt_parts.append("Hướng dẫn: Kiểm tra lại cấu hình và trạng thái của Ollama.")
+
+        if audio_st == "unavailable":
+            tt_parts.append("Hướng dẫn: Mô hình Whisper được chọn chưa có trên máy. Bấm vào chip Whisper để chuẩn bị mô hình trước khi quét thoại.")
+
         tt_parts.append("Lấy mẫu khung hình chỉ để xem trước, chưa thực hiện mô tả nội dung hay phân loại hành động AI.")
         self.lbl_cache.setToolTip("\n".join(tt_parts))
+
+
+class WhisperModelDownloadWorker(QThread):
+    """Worker tải trước mô hình Whisper chạy ngầm theo sự phê duyệt của người dùng."""
+    progress_signal = Signal(str, float, str)  # model_size, percent, message
+    finished_signal = Signal(str, bool, str)   # model_size, success, error_or_path
+
+    def __init__(self, model_size: str, parent=None, download_fn: Optional[Callable] = None):
+        super().__init__(parent)
+        self.model_size = model_size
+        self._is_cancelled = False
+        self._download_fn = download_fn
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        try:
+            self.progress_signal.emit(self.model_size, -1.0, f"Đang chuẩn bị mô hình {self.model_size} trong nền...")
+            if self._download_fn is not None:
+                res = self._download_fn(
+                    self.model_size,
+                    cancelled=lambda: self._is_cancelled,
+                    progress=lambda pct, msg: self.progress_signal.emit(self.model_size, pct, msg)
+                )
+            else:
+                from faster_whisper import download_model
+                if self._is_cancelled:
+                    self.finished_signal.emit(self.model_size, False, "cancelled")
+                    return
+                # faster_whisper.download_model is blocking / non-cancellable
+                res = download_model(self.model_size, local_files_only=False)
+
+            if self._is_cancelled:
+                self.finished_signal.emit(self.model_size, False, "cancelled")
+            else:
+                self.progress_signal.emit(self.model_size, 100.0, "Hoàn tất")
+                self.finished_signal.emit(self.model_size, True, str(res or ""))
+        except Exception as exc:
+            err_msg = str(exc)
+            logger.error("Lỗi khi tải mô hình Whisper %s: %s", self.model_size, exc)
+            self.finished_signal.emit(self.model_size, False, err_msg)
 
 
 class SourcePage(QWidget):
@@ -847,6 +913,7 @@ class SourcePage(QWidget):
         self._active_source_worker: Optional[SourceAnalysisWorker] = None
         self._active_source_job_id: Optional[str] = None
         self._active_source_thread_pending: bool = False
+        self._whisper_prep_worker: Optional[WhisperModelDownloadWorker] = None
         self._visual_job_id = 0
         self._workers_registry: Dict[Any, Any] = {}
         self._runtime_clip_status: Dict[str, dict] = {}
@@ -1134,7 +1201,11 @@ class SourcePage(QWidget):
             return
         self.add_paths([path])
 
-    def _on_whisper_chip_clicked(self):
+    def _show_whisper_menu(self, parent_btn: Optional[QPushButton] = None):
+        """Mở menu cấu hình mô hình và ngôn ngữ Whisper."""
+        return self._on_whisper_chip_clicked(parent_btn=parent_btn)
+
+    def _on_whisper_chip_clicked(self, parent_btn: Optional[QPushButton] = None):
         if self.is_source_analysis_active():
             return
         menu = QMenu(self)
@@ -1152,7 +1223,9 @@ class SourcePage(QWidget):
             }
         """)
         for m in ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"]:
-            action = menu.addAction(f"Model: {m}")
+            on_disk = is_model_on_disk(m)
+            status_tag = " [✓ sẵn sàng]" if on_disk else " [chưa tải]"
+            action = menu.addAction(f"Model: {m}{status_tag}")
             action.triggered.connect(lambda checked=False, model=m: self._set_model(model))
 
         menu.addSeparator()
@@ -1160,24 +1233,97 @@ class SourcePage(QWidget):
             action = menu.addAction(f"Ngôn ngữ: {lang}")
             action.triggered.connect(lambda checked=False, c=code: self._set_lang(c))
 
-        menu.exec(self.btn_whisper_chip.mapToGlobal(self.btn_whisper_chip.rect().bottomLeft()))
+        btn = parent_btn or self.btn_whisper_chip
+        menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def is_model_preparation_active(self) -> bool:
+        """Kiểm tra xem worker chuẩn bị mô hình Whisper có đang chạy hay không."""
+        return any(str(k).startswith("whisper_prep_") for k in self._workers_registry)
+
+    def start_whisper_model_preparation(self, model: str, download_fn: Optional[Callable] = None) -> bool:
+        """Khởi chạy chuẩn bị tải trước mô hình Whisper trong nền (chỉ sau khi người dùng phê duyệt)."""
+        if self.is_model_preparation_active() or self.is_source_analysis_active():
+            logger.warning("Đang có tiến trình phân tích hoặc tải mô hình Whisper.")
+            return False
+
+        worker = WhisperModelDownloadWorker(model, parent=self, download_fn=download_fn)
+        prep_key = f"whisper_prep_{model}"
+        self._whisper_prep_worker = worker
+        self._workers_registry[prep_key] = worker
+
+        self.btn_whisper_chip.setEnabled(False)
+        self.btn_whisper_chip.setText(f"Whisper {model} · ⏳ Đang tải...")
+
+        def _on_prog(m, pct, msg):
+            from shiboken6 import isValid
+            if not isValid(self) or self._shutdown_pending or self._close_pending:
+                return
+            if pct >= 0:
+                self.btn_whisper_chip.setToolTip(f"Đang tải {m}: {pct:.0f}% ({msg})")
+            else:
+                self.btn_whisper_chip.setToolTip(f"Đang tải {m}: {msg}")
+
+        def _on_fin(m, ok, msg):
+            # Completion on GUI thread without touching closing widgets
+            from shiboken6 import isValid
+            if not isValid(self) or self._shutdown_pending or self._close_pending:
+                return
+            self.btn_whisper_chip.setEnabled(True)
+            self._update_whisper_label()
+            if ok:
+                self.recheck_cache()
+                self._show_toast(f"✔ Đã tải xong mô hình Whisper '{m}'. Sẵn sàng quét ngoại tuyến.")
+            elif msg != "cancelled":
+                self._show_toast(f"❌ Tải mô hình '{m}' thất bại: {msg}")
+
+        def _on_thread_finished():
+            # Keep strong ref until QThread.finished
+            self._workers_registry.pop(prep_key, None)
+            if getattr(self, "_whisper_prep_worker", None) is worker:
+                self._whisper_prep_worker = None
+            worker.deleteLater()
+            if not self._workers_registry:
+                self._shutdown_pending = False
+                self.workers_idle.emit()
+                if self._close_pending:
+                    self._close_pending = False
+                    QTimer.singleShot(0, self.close)
+
+        worker.progress_signal.connect(_on_prog)
+        worker.finished_signal.connect(_on_fin)
+        worker.finished.connect(_on_thread_finished)
+        worker.start()
+        return True
 
     def _set_model(self, model: str):
-        if self.is_source_analysis_active():
+        if self.is_source_analysis_active() or self.is_model_preparation_active():
             return
         if not is_model_on_disk(model):
             size_str = MODEL_DISK_SIZES.get(model, "~1.5 GB")
             reply = QMessageBox.question(
                 self,
-                "Tải mô hình Whisper",
-                f"Mô hình '{model}' chưa có trên máy.\n"
-                f"Ứng dụng sẽ cần tải khoảng {size_str} từ internet khi quét.\n\n"
-                f"Bạn có muốn chọn mô hình này không?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes
+                "Mô hình Whisper chưa có trên máy",
+                f"Mô hình Whisper '{model}' chưa có trên máy (dung lượng {size_str}).\n"
+                f"Quá trình phân tích nguồn luôn chạy ngoại tuyến (offline), "
+                f"không tự động tải mô hình qua mạng trong tiến trình phân tích.\n\n"
+                f"Bạn có muốn tải mô hình này trong nền ngay bây giờ không?\n"
+                f"(Bấm 'Yes' để tải ngầm có tiến trình, 'No' để chọn trước và tải sau, 'Cancel' để hủy).",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.No
             )
-            if reply != QMessageBox.StandardButton.Yes:
+            if reply == QMessageBox.StandardButton.Cancel:
                 return
+
+            self._whisper_model = model
+            _write_whisper_setting("whisper_model", self._whisper_model)
+            self._update_whisper_label()
+            self._invalidate_runtime_status()
+            self.recheck_cache()
+            self.whisper_changed.emit(self._whisper_model, self._whisper_lang)
+
+            if reply == QMessageBox.StandardButton.Yes:
+                self.start_whisper_model_preparation(model)
+            return
 
         self._whisper_model = model
         _write_whisper_setting("whisper_model", self._whisper_model)
@@ -1187,7 +1333,7 @@ class SourcePage(QWidget):
         self.whisper_changed.emit(self._whisper_model, self._whisper_lang)
 
     def _set_lang(self, lang: str):
-        if self.is_source_analysis_active():
+        if self.is_source_analysis_active() or self.is_model_preparation_active():
             return
         self._whisper_lang = lang
         _write_whisper_setting("whisper_lang", self._whisper_lang)
@@ -1197,7 +1343,16 @@ class SourcePage(QWidget):
         self.whisper_changed.emit(self._whisper_model, self._whisper_lang)
 
     def _update_whisper_label(self):
-        self.btn_whisper_chip.setText(f"Whisper {self._whisper_model} · {self._whisper_lang}")
+        suffix = ""
+        if not is_model_on_disk(self._whisper_model):
+            suffix = " ⚠️"
+        self.btn_whisper_chip.setText(f"Whisper {self._whisper_model} · {self._whisper_lang}{suffix}")
+        if not is_model_on_disk(self._whisper_model):
+            self.btn_whisper_chip.setToolTip(
+                f"Mô hình '{self._whisper_model}' chưa có trên máy. Bấm vào đây để tải trước trong nền."
+            )
+        else:
+            self.btn_whisper_chip.setToolTip(f"Mô hình Whisper {self._whisper_model} ({self._whisper_lang}) đã sẵn sàng ngoại tuyến.")
 
     def recheck_cache(self):
         """Cập nhật lại trạng thái cache thực tế của các clip khi đổi model hoặc ngôn ngữ."""
@@ -1360,6 +1515,11 @@ class SourcePage(QWidget):
         self._active_worker = None
         if self._active_source_worker is not None:
             self._active_source_worker.cancel()
+        if getattr(self, "_whisper_prep_worker", None) is not None:
+            try:
+                self._whisper_prep_worker.cancel()
+            except Exception:
+                pass
         self._shutdown_pending = bool(self._workers_registry)
         for worker in list(self._workers_registry.values()):
             if hasattr(worker, "cancel"):

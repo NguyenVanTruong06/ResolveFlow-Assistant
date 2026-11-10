@@ -14,8 +14,9 @@ import uuid
 import time
 import tempfile
 import math
+import unicodedata
 from pathlib import Path
-from typing import Optional, Callable, List, Dict, Any, Tuple
+from typing import Optional, Callable, List, Dict, Any, Tuple, Set
 from collections.abc import Mapping
 import logging
 
@@ -51,6 +52,8 @@ from src.core.action_guard import check_action_availability
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
 AUDIO_EXTS = {".wav", ".mp3", ".aac", ".flac", ".ogg", ".m4a", ".aif", ".aiff"}
 MAX_FUSION_SETTING_BYTES = 5 * 1024 * 1024  # 5 MiB giới hạn tối đa cho file .setting xuất vào clipboard
+
+from src.ui.lux.library.asset_filter import DEFAULT_TAB_CATEGORIES, get_canonical_sub_category
 
 
 
@@ -6076,65 +6079,11 @@ class TabAssets(QWidget):
 
         # Xác định nhóm con mặc định
         sub_cats = [("all", "Tất cả")]
-        if tab == "text":
-            sub_cats.extend([
-                ("kinetic", "Kinetic / Nhảy chữ"),
-                ("highlighter_paper", "Bút dạ & Giấy"),
-                ("glitch_cyber", "Neon & Glitch"),
-                ("retro_film", "Retro thập niên 90"),
-                ("clean_minimal", "Tối giản")
-            ])
-        elif tab == "lut":
-            sub_cats.extend([
-                ("natural", "Đời thường & Vlog"),
-                ("cinema", "Điện ảnh Hollywood"),
-                ("style", "Phong cách & Anime")
-            ])
-        elif tab == "trans":
-            sub_cats.extend([
-                ("motion", "Lia máy nhanh"),
-                ("zoom", "Phóng to nhòe"),
-                ("glitch", "Nhiễu sóng số")
-            ])
-        elif tab == "icon":
-            sub_cats.extend([
-                ("arrow", "Mũi tên & Khoanh"),
-                ("place", "Địa điểm & Cờ"),
-                ("emo", "Cảm xúc & Ngôi sao"),
-                ("alert", "Cảnh báo & Đánh dấu"),
-                ("talk", "Hội thoại & Kênh")
-            ])
-        elif tab == "sfx":
-            sub_cats.extend([
-                ("chuyen_canh", "💨 Chuyển cảnh (Whoosh)"),
-                ("giat_minh", "💥 Giật mình / Cú sốc"),
-                ("hai_huoc", "😂 Hài hước / Troll"),
-                ("diem_nhan", "✨ Điểm nhấn (Pop/Ding)"),
-                ("cong_nghe", "⚡ Kỹ thuật / UI"),
-                ("accent", "🔊 Nhấn mạnh khác")
-            ])
-        elif tab == "bgm":
-            sub_cats.extend([
-                ("chill_vlog", "🍃 Chill Vlog / Lofi"),
-                ("upbeat_trend", "🔥 Upbeat / TikTok Trend"),
-                ("cinematic", "🎬 Cinematic Điện ảnh"),
-                ("funny", "🎭 Hài hước Meme")
-            ])
-        elif tab == "overlay":
-            sub_cats.extend([
-                ("cinematic", "Điện ảnh"),
-                ("green_screen", "Phông xanh")
-            ])
-        elif tab == "meme":
-            sub_cats.extend([
-                ("vietnam_viral", "🇻🇳 Viral Việt Nam"),
-                ("reaction", "🤦 Cảm xúc / Bất lực"),
-                ("cham_hoi", "❓ Ngơ ngác / Chấm hỏi"),
-                ("cay_cu", "🤬 Cay cú / Đập bàn"),
-                ("trending", "🔥 Thịnh hành")
-            ])
+        if tab in DEFAULT_TAB_CATEGORIES:
+            sub_cats.extend(DEFAULT_TAB_CATEGORIES[tab])
 
         known_subs = {cid for cid, _ in sub_cats}
+        known_labels_norm = {unicodedata.normalize("NFC", cname).strip().lower() for _, cname in sub_cats}
         sub_counts: Dict[str, int] = {}
         tab_total_count = 0
         discovered_packs: List[str] = []
@@ -6171,14 +6120,24 @@ class TabAssets(QWidget):
                         seen_pack_ids.add(canon_id)
                         discovered_packs.append(target_display)
 
-                sub_label = self._get_asset_sub(asset)
+                raw_sub = self._get_asset_sub(asset)
+                if not raw_sub:
+                    continue
+                sub_label = unicodedata.normalize("NFC", str(raw_sub)).strip()
                 # Chỉ đưa vào sub_cats nếu sub_label KHÔNG phải là tên pack
                 is_sub_a_pack = bool(snapshot.get_canonical_pack_id(sub_label)) or (sub_label == p_name)
                 if sub_label and not is_sub_a_pack:
-                    sub_counts[sub_label] = sub_counts.get(sub_label, 0) + 1
-                    if sub_label not in known_subs and sub_label not in ("all", "Tất cả", "default"):
-                        sub_cats.append((sub_label, sub_label))
-                        known_subs.add(sub_label)
+                    # Chuẩn tắc hóa sub_label về canonical identity của tab
+                    canon_id = sub_label
+                    sub_lower = sub_label.lower()
+                    for slug, label in DEFAULT_TAB_CATEGORIES.get(tab, []):
+                        if sub_lower in (slug.lower(), label.lower(), unicodedata.normalize("NFC", label).strip().lower()):
+                            canon_id = slug
+                            break
+                    sub_counts[canon_id] = sub_counts.get(canon_id, 0) + 1
+                    if canon_id not in known_subs and canon_id.lower() not in known_labels_norm and canon_id not in ("all", "Tất cả", "default"):
+                        sub_cats.append((canon_id, canon_id))
+                        known_subs.add(canon_id)
 
         def _get_sub_count(cid_target):
             if cid_target == "all":
@@ -6187,10 +6146,10 @@ class TabAssets(QWidget):
 
         # Lọc danh mục: giữ "all", các nhóm có item, hoặc nhóm mặc định hệ thống
         visible_sub_cats = []
-        base_sub_ids = {c[0] for c in sub_cats[:4]}
+        base_sub_ids = {c[0] for c in DEFAULT_TAB_CATEGORIES.get(tab, [])}
         for cid, cname in sub_cats:
             cnt = _get_sub_count(cid)
-            # Chỉ ẩn những mục rác 0 item nếu không phải là nhóm cơ bản
+            # Chỉ ẩn những mục rác 0 item nếu không phải là nhóm cơ bản mặc định
             if cid != "all" and cnt == 0 and cid not in base_sub_ids:
                 continue
             visible_sub_cats.append((cid, cname, cnt))
@@ -6361,86 +6320,232 @@ class TabAssets(QWidget):
                 if reply == QMessageBox.StandardButton.Yes:
                     self._delete_sub_category(cid, cname)
 
-    def _prompt_merge_category(self, source_cid: str, source_cname: str):
-        sub_cats = []
-        for a in self.all_assets:
-            if self._get_asset_tab(a) == self.current_rail_tab:
-                sub = self._get_asset_sub(a)
-                if sub and sub != source_cid and sub != source_cname and sub not in ("all", "Tất cả") and sub not in sub_cats:
-                    sub_cats.append(sub)
+    def _get_existing_categories_for_tab(self, tab: Optional[str] = None) -> List[Tuple[str, str]]:
+        """Lấy danh sách các danh mục khả dụng trong tab (bao gồm mặc định hệ thống và danh mục tùy chỉnh có đạo cụ)."""
+        target_tab = str(tab or getattr(self, "current_rail_tab", "") or "").strip()
+        defaults = DEFAULT_TAB_CATEGORIES.get(target_tab, [])
+        known_cids = {cid for cid, _ in defaults}
+        known_names_norm = {unicodedata.normalize("NFC", cname).strip().lower() for _, cname in defaults}
 
-        if not sub_cats:
-            dest_name, ok = QInputDialog.getText(
-                self, "Gộp danh mục",
-                f"Không có danh mục nào khác trong tab này.\nNhập tên danh mục đích để gộp '{source_cname}' sang:"
+        categories: List[Tuple[str, str]] = list(defaults)
+        seen_custom = set()
+        snapshot = PackManager.get_identity_snapshot()
+
+        for a in self.all_assets:
+            if self._get_asset_tab(a) == target_tab:
+                sub = self._get_asset_sub(a)
+                if not sub:
+                    continue
+                sub_norm = unicodedata.normalize("NFC", str(sub)).strip()
+                if (
+                    sub_norm
+                    and sub_norm not in ("all", "Tất cả", "default")
+                    and not sub_norm.startswith("pack:")
+                    and not snapshot.get_canonical_pack_id(sub_norm)
+                ):
+                    sub_lower = sub_norm.lower()
+                    if sub_norm not in known_cids and sub_lower not in known_names_norm and sub_norm not in seen_custom:
+                        seen_custom.add(sub_norm)
+                        categories.append((sub_norm, sub_norm))
+
+        return categories
+
+    def _prompt_merge_category(self, source_cid: str, source_cname: str):
+        src_cid_str = str(source_cid or "").strip()
+        src_cname_str = str(source_cname or "").strip()
+
+        # Kiểm tra nếu là Pack thì từ chối rõ ràng và giải thích phạm vi
+        snapshot = PackManager.get_identity_snapshot()
+        if (
+            src_cid_str.startswith("pack:")
+            or bool(snapshot.get_canonical_pack_id(src_cid_str))
+            or bool(snapshot.get_canonical_pack_id(src_cname_str))
+        ):
+            QMessageBox.warning(
+                self,
+                "Không hỗ trợ",
+                "Không thể gộp gói cài đặt (Pack). Các gói được quản lý riêng biệt theo cấu trúc của gói."
             )
-            if ok and dest_name.strip():
-                dest_clean = dest_name.strip()
-                if dest_clean == source_cid or dest_clean == source_cname:
-                    QMessageBox.warning(self, "Không hợp lệ", "Không thể gộp danh mục vào chính nó!")
-                    return
-                self.merge_category(source_cid, dest_clean)
             return
 
-        dest_name, ok = QInputDialog.getItem(
+        cur_tab = getattr(self, "current_rail_tab", "text")
+        all_cats = self._get_existing_categories_for_tab(cur_tab)
+
+        src_cid_norm = unicodedata.normalize("NFC", src_cid_str).lower()
+        src_cname_norm = unicodedata.normalize("NFC", src_cname_str).lower()
+
+        # Lọc danh sách đích hợp lệ: loại trừ chính nó và 'all'
+        candidates: List[Tuple[str, str]] = []
+        for cid, cname in all_cats:
+            cid_norm = unicodedata.normalize("NFC", str(cid)).lower()
+            cname_norm = unicodedata.normalize("NFC", str(cname)).lower()
+            if cid_norm in (src_cid_norm, src_cname_norm) or cname_norm in (src_cid_norm, src_cname_norm):
+                continue
+            if cid_norm in ("all", "tất cả"):
+                continue
+            if cid_norm.startswith("pack:") or bool(snapshot.get_canonical_pack_id(cid)):
+                continue
+            candidates.append((cid, cname))
+
+        if not candidates:
+            QMessageBox.information(
+                self, "Gộp danh mục",
+                f"Không có danh mục nào khác trong tab này để gộp '{src_cname_str}' sang."
+            )
+            return
+
+        # Hiển thị nhãn dịch/thân thiện trong dropdown nhưng map chính xác về target_cid
+        display_labels = [cname for _, cname in candidates]
+        display_to_cid: Dict[str, str] = {}
+        for cid, cname in candidates:
+            display_to_cid[cname] = cid
+            display_to_cid[unicodedata.normalize("NFC", cname).strip()] = cid
+            display_to_cid[cid] = cid
+            display_to_cid[unicodedata.normalize("NFC", cid).strip()] = cid
+
+        selected_label, ok = QInputDialog.getItem(
             self, "Gộp danh mục",
-            f"Chọn danh mục đích để gộp toàn bộ đạo cụ từ '{source_cname}' sang:",
-            sub_cats, 0, True
+            f"Chọn danh mục đích để gộp toàn bộ đạo cụ từ '{src_cname_str}' sang:",
+            display_labels, 0, False  # editable=False để chặn tạo danh mục bừa bãi khi gộp
         )
-        if ok and dest_name.strip():
-            dest_clean = dest_name.strip()
-            if dest_clean == source_cid or dest_clean == source_cname:
-                QMessageBox.warning(self, "Không hợp lệ", "Không thể gộp danh mục vào chính nó!")
-                return
-            self.merge_category(source_cid, dest_clean)
+
+        if not ok or not selected_label or not str(selected_label).strip():
+            return
+
+        chosen_str = unicodedata.normalize("NFC", str(selected_label).strip())
+        target_cid = display_to_cid.get(chosen_str) or display_to_cid.get(str(selected_label).strip())
+        if not target_cid:
+            chosen_lower = chosen_str.lower()
+            for cid, cname in candidates:
+                if (
+                    unicodedata.normalize("NFC", cname).strip().lower() == chosen_lower
+                    or unicodedata.normalize("NFC", cid).strip().lower() == chosen_lower
+                ):
+                    target_cid = cid
+                    break
+
+        if not target_cid or target_cid == src_cid_str:
+            QMessageBox.warning(self, "Không hợp lệ", "Không thể gộp danh mục vào chính nó hoặc danh mục không hợp lệ!")
+            return
+
+        self.merge_category(src_cid_str, target_cid, tab=cur_tab)
 
     def merge_category(self, source_cat: str, dest_cat: str, tab: Optional[str] = None) -> bool:
         """Gộp toàn bộ đạo cụ từ source_cat vào dest_cat trong tab hiện tại không làm mất dữ liệu."""
-        src = str(source_cat or "").strip()
-        dst = str(dest_cat or "").strip()
-        if not src or not dst or src == dst:
+        src_raw = str(source_cat or "").strip()
+        dst_raw = str(dest_cat or "").strip()
+        if not src_raw or not dst_raw:
+            return False
+
+        # Kiểm tra gói Pack
+        snapshot = PackManager.get_identity_snapshot()
+        if (
+            src_raw.startswith("pack:")
+            or dst_raw.startswith("pack:")
+            or bool(snapshot.get_canonical_pack_id(src_raw))
+            or bool(snapshot.get_canonical_pack_id(dst_raw))
+        ):
+            self._show_toast("⚠️ Không hỗ trợ gộp gói cài đặt (Pack).")
             return False
 
         target_tab = str(tab or getattr(self, "current_rail_tab", "") or "").strip()
+        tab_defs = DEFAULT_TAB_CATEGORIES.get(target_tab, [])
 
-        # Lọc danh sách đạo cụ thuộc đúng target_tab và có nhóm con là src
-        affected_assets = [
-            a for a in self.all_assets
-            if (not target_tab or self._get_asset_tab(a) == target_tab) and self._get_asset_sub(a) == src
-        ]
+        # Ánh xạ slug vs label dịch chuẩn tắc
+        def _resolve_identity_and_names(val: str) -> Tuple[str, Set[str]]:
+            v_nfc = unicodedata.normalize("NFC", str(val or "")).strip()
+            v_nfd = unicodedata.normalize("NFD", str(val or "")).strip()
+            v_lower = v_nfc.lower()
+            matched_slug = None
+            matched_names = {v_nfc, v_nfd, v_lower, v_nfd.lower()}
+            for slug, label in tab_defs:
+                l_nfc = unicodedata.normalize("NFC", label).strip()
+                s_nfc = unicodedata.normalize("NFC", slug).strip()
+                l_nfd = unicodedata.normalize("NFD", label).strip()
+                s_nfd = unicodedata.normalize("NFD", slug).strip()
+                if v_lower in (s_nfc.lower(), l_nfc.lower(), s_nfd.lower(), l_nfd.lower()):
+                    matched_slug = slug
+                    for alias in (slug, label, s_nfc, l_nfc, s_nfd, l_nfd):
+                        matched_names.add(alias)
+                        matched_names.add(alias.lower())
+                    break
+            identity = matched_slug if matched_slug else v_nfc
+            return identity, matched_names
+
+        src_id, src_names = _resolve_identity_and_names(src_raw)
+        dst_id, dst_names = _resolve_identity_and_names(dst_raw)
+
+        if src_id.lower() == dst_id.lower():
+            return False
+
+        # Lọc danh sách đạo cụ thuộc đúng target_tab (cả nguồn và đích)
+        affected_assets = []
+        destination_assets = []
+        for a in self.all_assets:
+            if not target_tab or self._get_asset_tab(a) == target_tab:
+                a_sub = self._get_asset_sub(a)
+                if not a_sub:
+                    continue
+                a_sub_nfc = unicodedata.normalize("NFC", str(a_sub)).strip()
+                a_sub_nfd = unicodedata.normalize("NFD", str(a_sub)).strip()
+                if (
+                    a_sub in src_names
+                    or a_sub_nfc in src_names
+                    or a_sub_nfd in src_names
+                    or a_sub_nfc.lower() in src_names
+                    or a_sub_nfd.lower() in src_names
+                    or a_sub_nfc.lower() == src_id.lower()
+                ):
+                    affected_assets.append(a)
+                elif (
+                    a_sub in dst_names
+                    or a_sub_nfc in dst_names
+                    or a_sub_nfd in dst_names
+                    or a_sub_nfc.lower() in dst_names
+                    or a_sub_nfd.lower() in dst_names
+                    or a_sub_nfc.lower() == dst_id.lower()
+                ):
+                    destination_assets.append(a)
 
         if not affected_assets:
             return False
 
-        # Thu thập ID của tất cả item bị ảnh hưởng (kể cả item mới import chưa từng có override)
-        affected_ids = {self._get_asset_id(a) for a in affected_assets}
-        affected_ids.discard("")
-        if not affected_ids:
-            return False
+        # Thu thập ID của tất cả item bị ảnh hưởng (cả source và destination cần chuẩn hóa)
+        overrides_to_set = {}
+        for a in affected_assets:
+            aid = self._get_asset_id(a)
+            if aid:
+                overrides_to_set[aid] = dst_id
+        for a in destination_assets:
+            aid = self._get_asset_id(a)
+            if aid:
+                overrides_to_set[aid] = dst_id
 
-        # Lưu ghi đè danh mục cho từng ID bị ảnh hưởng TRƯỚC KHI thay đổi bộ nhớ / UI
-        overrides_to_set = {aid: dst for aid in affected_ids}
         if not CategoryOverridesManager.set_overrides_batch(overrides_to_set):
             self._show_toast("⚠️ Lỗi lưu cấu hình gộp danh mục.")
             return False
 
-        # Cập nhật in-memory cho các item bị ảnh hưởng
-        for a in affected_assets:
+        # Cập nhật in-memory cho các item nguồn và đích về canonical dst_id
+        for a in affected_assets + destination_assets:
             if isinstance(a, dict):
-                a["sub"] = dst
-                a["sub_category"] = dst
+                a["sub"] = dst_id
+                a["sub_category"] = dst_id
+                if "category" in a:
+                    a["category"] = dst_id
             else:
-                setattr(a, "sub", dst)
+                setattr(a, "sub", dst_id)
                 if hasattr(a, "sub_category"):
-                    setattr(a, "sub_category", dst)
+                    setattr(a, "sub_category", dst_id)
+                if hasattr(a, "category"):
+                    setattr(a, "category", dst_id)
 
         # Đồng bộ lại model & UI
         if hasattr(self, "asset_model") and self.asset_model:
             self.asset_model.set_assets(self.all_assets)
         self._rebuild_categories_column()
-        self._on_sub_category_clicked(dst)
+        self._on_sub_category_clicked(dst_id)
         self._refresh_grid()
-        self._show_toast(f"🔀 Đã gộp {len(affected_assets)} đạo cụ từ '{src}' sang '{dst}'!")
+        self._show_toast(f"🔀 Đã gộp {len(affected_assets)} đạo cụ từ '{src_raw}' sang '{dst_id}'!")
         return True
 
     def move_assets_category(self, assets: List[Any], dest_cat: str) -> int:
@@ -6800,7 +6905,9 @@ class TabAssets(QWidget):
                         "cay_cu": ["cay_cu"],
                     }
                     allowed = cat_aliases.get(cat, [cat])
-                    if i_cat not in allowed and cat not in i_cat:
+                    target_c = get_canonical_sub_category(tab, cat)
+                    item_c = get_canonical_sub_category(tab, getattr(item, "sub", "") or i_cat)
+                    if i_cat not in allowed and cat not in i_cat and target_c != item_c:
                         card.setVisible(False)
                         continue
 

@@ -11,6 +11,7 @@ import math
 import os
 import shutil
 import tempfile
+import urllib.error
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -191,6 +192,8 @@ class SourceAnalysisWorker(QThread):
             "skipped": 0,
             "cancelled": 0,
             "pending": 0,
+            "disconnected": 0,
+            "model_absent": 0,
         }
 
         for clip in self._clip_states:
@@ -207,6 +210,10 @@ class SourceAnalysisWorker(QThread):
             vd_st = clip.get("visual_describe_state", "skipped")
             if vd_st in visual_describe_counts:
                 visual_describe_counts[vd_st] += 1
+            if clip.get("visual_describe_error_type") == "ollama_disconnected":
+                visual_describe_counts["disconnected"] += 1
+            elif clip.get("visual_describe_error_type") == "vision_model_absent":
+                visual_describe_counts["model_absent"] += 1
 
         return {
             "total_clips": len(self._clip_states),
@@ -809,29 +816,39 @@ class SourceAnalysisWorker(QThread):
                             except Exception as minfo_exc:
                                 err_s = str(minfo_exc)
                                 err_s_lower = err_s.lower()
-                                is_unavail = (
-                                    "connection" in err_s_lower
-                                    or "not found" in err_s_lower
+                                is_conn = (
+                                    isinstance(minfo_exc, (ConnectionError, urllib.error.URLError))
+                                    or "connection" in err_s_lower
                                     or "refused" in err_s_lower
-                                    or "unavailable" in err_s_lower
-                                    or "chưa cài" in err_s_lower
+                                    or "không kết nối" in err_s_lower
+                                    or "timed out" in err_s_lower
+                                )
+                                is_model_absent = (
+                                    "chưa cài" in err_s_lower
+                                    or "not found" in err_s_lower
                                     or "chưa có" in err_s_lower
+                                    or "hãy chọn model" in err_s_lower
+                                )
+                                is_unavail = is_conn or is_model_absent or (
+                                    "unavailable" in err_s_lower
                                     or "missing" in err_s_lower
                                     or "remote" in err_s_lower
                                     or "cloud" in err_s_lower
                                     or "offline" in err_s_lower
-                                    or "không kết nối" in err_s_lower
-                                    or "hãy chọn model" in err_s_lower
-                                    or isinstance(minfo_exc, (ConnectionError, FileNotFoundError, OSError))
+                                    or isinstance(minfo_exc, (FileNotFoundError, OSError))
                                 )
                                 classification = "unavailable" if is_unavail else "failed"
+                                error_type = "ollama_disconnected" if is_conn else ("vision_model_absent" if is_model_absent else "vision_error")
                                 clip_res["visual_describe_status"] = classification
+                                clip_res["visual_describe_error_type"] = error_type
+                                clip_res["vision_model"] = vision_model
                                 clip_res["error"] = (clip_res["error"] or "") + f" vision_model_error: {err_s}"
                                 self._clip_states[idx]["visual_describe_state"] = classification
+                                self._clip_states[idx]["visual_describe_error_type"] = error_type
                                 has_partial_error = True
                                 self.log_signal.emit(
                                     job_id,
-                                    f"   ⚠️ Mô hình thị giác '{vision_model}' không khả dụng ({classification}): {err_s}"
+                                    f"   ⚠️ Mô hình thị giác '{vision_model}' không khả dụng ({classification} - {error_type}): {err_s}"
                                 )
                                 model_info = None
 
