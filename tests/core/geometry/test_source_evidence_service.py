@@ -80,6 +80,33 @@ def _create_single_frame_video(file_path: Path) -> None:
     subprocess.run(cmd, check=True, capture_output=True)
 
 
+def test_header_and_frame_scan_clean_packaged_libraries(tmp_path, monkeypatch):
+    video = tmp_path / "packaged_probe.mp4"
+    _create_audio_first_bframe_video(video, video_dur_sec=0.5, audio_dur_sec=1.0, fps=30)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/resolveflow-assistant/_internal:/opt/resolve/libs")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/opt/resolve/libs:/usr/lib")
+    parent_env = dict(os.environ)
+    original_spawn = subprocess.Popen
+    calls = []
+
+    def spawn(cmd, **kwargs):
+        calls.append(kwargs.get("env"))
+        return original_spawn(cmd, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", spawn)
+    request = SourceEvidenceBatchRequest(items=(
+        SourceEvidenceItemRequest(
+            clip_id="packaged_clip", manifest_id="probe_test", file_path=str(video),
+        ),
+    ))
+    result = SourceEvidenceService().acquire_evidence_for_batch(request)
+
+    assert result.evidence_by_clip["packaged_clip"].complete_scan
+    assert len(calls) == 2
+    assert all(env is not None and env.get("LD_LIBRARY_PATH") == "/usr/lib" for env in calls)
+    assert dict(os.environ) == parent_env
+
+
 class TestSourceEvidenceServiceMatrix:
     """Kiểm thử ma trận T01–T09 cho SourceEvidenceService."""
 

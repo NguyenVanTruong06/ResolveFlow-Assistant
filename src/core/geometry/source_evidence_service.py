@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, 
 import types
 
 from src.core.cache_manager import compute_full_file_sha256, is_canonical_sha256_hex
+from src.utils.subprocess_utils import clean_media_subprocess_env, no_window_kwargs
 from src.core.contracts.time_contracts import RationalFPS
 from src.core.geometry.frame_geometry_contracts import validate_fps_instance
 from src.core.geometry.local_metadata_acquisition import (
@@ -424,6 +425,8 @@ def _scan_decoded_frames_uniform_ticks(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=clean_media_subprocess_env(),
+            **no_window_kwargs(),
         )
     except Exception as exc:
         return (

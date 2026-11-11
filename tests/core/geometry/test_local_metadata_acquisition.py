@@ -177,6 +177,26 @@ def make_valid_ffprobe_payload(
 # Group 1: Valid Execution & Header Parsing
 # ==============================================================================
 
+def test_header_probe_cleans_packaged_libraries_without_changing_parent(sample_video_file, monkeypatch):
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/resolveflow-assistant/_internal:/opt/resolve/libs")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/opt/resolve/libs:/usr/lib")
+    parent_env = dict(os.environ)
+    calls = []
+
+    def spawn(cmd, **kwargs):
+        calls.append(kwargs)
+        return FakePopen(stdout_data=json.dumps(make_valid_ffprobe_payload()).encode("utf-8"))
+
+    monkeypatch.setattr("shutil.which", lambda _: "/usr/bin/ffprobe")
+    monkeypatch.setattr("subprocess.Popen", spawn)
+    acquire_local_video_header(sample_video_file)
+
+    assert calls[0]["env"]["LD_LIBRARY_PATH"] == "/usr/lib"
+    assert "LD_LIBRARY_PATH_ORIG" not in calls[0]["env"]
+    assert calls[0]["env"]["PATH"] == parent_env["PATH"]
+    assert dict(os.environ) == parent_env
+
+
 def test_acquire_header_nominal_ntsc_success(sample_video_file: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Kiểm tra đường chạy danh định: video NTSC 30000/1001, format duration 10.01, DTO bất biến, không suy diễn CFR."""
     payload = make_valid_ffprobe_payload(

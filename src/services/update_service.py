@@ -21,7 +21,7 @@ from PySide6.QtCore import QObject, QThread, Signal, QSettings
 
 logger = logging.getLogger("ChunDVC.UpdateService")
 
-CURRENT_VERSION = "1.0.25"
+CURRENT_VERSION = "1.0.26"
 GITHUB_REPO = "NguyenVanTruong06/ResolveFlow-Assistant"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 

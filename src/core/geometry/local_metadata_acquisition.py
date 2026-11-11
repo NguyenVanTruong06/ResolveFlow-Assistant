@@ -28,6 +28,7 @@ import threading
 import time
 from typing import Any, Callable, IO, Optional, Union
 
+from src.utils.subprocess_utils import clean_media_subprocess_env
 from src.core.geometry.source_frame_evidence_contracts import VideoStreamHeader
 from src.core.geometry.source_frame_evidence_parser import (
     _check_bounded_text,
@@ -503,6 +504,7 @@ def acquire_local_video_header(
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
         "shell": False,
+        "env": clean_media_subprocess_env(),
     }
     if sys.platform == "win32":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)

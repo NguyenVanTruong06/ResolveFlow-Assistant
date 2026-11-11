@@ -18,7 +18,7 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 APP_NAME = "ResolveFlow-Assistant"
-APP_VERSION = "1.0.25"
+APP_VERSION = "1.0.26"
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 ENTRY_POINT = os.path.join("src", "main.py")
 

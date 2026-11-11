@@ -44,6 +44,10 @@ jobs:
       run: |
         python -m pytest tests/test_cloud_item_cache.py tests/test_pack_manager.py tests/test_tab_assets_packs_and_collections.py tests/test_asset_hub_e2e.py tests/test_lux_effects.py tests/test_floating_bubble.py tests/test_auto_update_system.py tests/test_installed_badge_and_storage.py tests/test_studio_window.py -v
 
+    - name: Verify FFprobe library isolation
+      run: |
+        python -m pytest tests/core/geometry/test_local_metadata_acquisition.py tests/core/geometry/test_source_evidence_service.py tests/core/test_audio_env_sanitization.py -v
+
     - name: Verify Standalone Imports
       run: |
         python build_standalone.py --verify-imports
