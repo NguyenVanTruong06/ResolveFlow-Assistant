@@ -48,6 +48,10 @@ jobs:
       run: |
         python -m pytest tests/core/geometry/test_local_metadata_acquisition.py tests/core/geometry/test_source_evidence_service.py tests/core/test_audio_env_sanitization.py -v
 
+    - name: Verify Director prompt bounds and JSON routing
+      run: |
+        python -m pytest tests/core/test_prompt_authority_consumption.py tests/core/test_story_copilot_creative_binding.py tests/core/test_proposal_builder.py tests/ui/test_director.py -v
+
     - name: Verify Standalone Imports
       run: |
         python build_standalone.py --verify-imports

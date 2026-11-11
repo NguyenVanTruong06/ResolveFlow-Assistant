@@ -9,6 +9,7 @@ Kiểm thử toàn diện hệ thống ChunDVC Director (Bước 6):
 - Tích hợp Palette command & EdgeDock
 """
 
+import json
 import pytest
 from PySide6.QtWidgets import QApplication
 from src.ui.director.director_state import (
@@ -143,6 +144,63 @@ def test_parse_web_prompt_json(qapp):
     assert ok2 is True
     assert data2["type"] == "kinetic_plan"
 
+
+
+def test_generated_kinetic_json_routes_to_slot2_with_page_count():
+    from src.core.kinetic.kinetic_engine import generate_kinetic_prompt
+    words = [{"word": f"word{i}", "start": i * 0.5, "end": (i + 1) * 0.5} for i in range(5)]
+    prompt = generate_kinetic_prompt(words)
+    raw = prompt.split("```json\n", 1)[1].split("\n```", 1)[0]
+    ok, _, parsed = parse_web_prompt_json(raw)
+    assert ok
+    assert parsed["type"] == "kinetic_plan"
+    assert parsed["count"] == 2
+    assert parsed["data"]["presets"]["hormozi"]["font"] == "Montserrat"
+
+
+@pytest.mark.parametrize("data,slot", [
+    ({"timeline_segments": [{"clip_id": "C01", "start_sec": 0, "end_sec": 10}]}, "slot2"),
+    ({"presets": {"basic": {"font": "Montserrat"}}, "pages": [{"word_range": [0, 1], "preset": "basic"}]}, "slot1"),
+])
+def test_known_json_plan_cannot_be_forced_into_the_opposite_slot(data, slot):
+    ok, msg, parsed = parse_web_prompt_json(json.dumps(data), target_slot=slot)
+    assert not ok
+    assert parsed is None
+    assert "V1" in msg and "V2" in msg
+
+
+def test_explicit_slot_selects_matching_plan_from_combined_json():
+    video = {"timeline_segments": [{"clip_id": "C01", "start_sec": 0, "end_sec": 10}]}
+    kinetic = {"presets": {"basic": {"font": "Montserrat"}}, "pages": [{"word_range": [0, 1], "preset": "basic"}]}
+    for raw in (json.dumps(video) + "\n" + json.dumps(kinetic), json.dumps({"video_plan": video, "kinetic_plan": kinetic})):
+        ok, _, parsed = parse_web_prompt_json(raw, target_slot="slot2")
+        assert ok
+        assert parsed["type"] == "kinetic_plan"
+        assert parsed["data"] == kinetic
+        assert parsed["count"] == 1
+
+
+def test_kinetic_pages_paste_keeps_video_plan_and_rejects_wrong_slot(qapp):
+    from src.ui.director.pages.review_page import ReviewPage
+    page = ReviewPage()
+    video = {"timeline_segments": [{"clip_id": "C01", "start_sec": 0, "end_sec": 10}]}
+    kinetic = {"presets": {"basic": {"font": "Montserrat"}}, "pages": [{"word_range": [0, 1], "preset": "basic"}]}
+    page._video_plan_data = video
+    clipboard = QApplication.clipboard()
+    old_text = clipboard.text()
+    try:
+        clipboard.setText(json.dumps(kinetic))
+        page._paste_to_slot("slot2")
+        assert page._kinetic_plan_data == kinetic
+        assert page._video_plan_data is video
+        clipboard.setText(json.dumps(video))
+        page._paste_to_slot("slot2")
+        assert page._kinetic_plan_data == kinetic
+        assert page._video_plan_data is video
+        assert "Không thể nạp" in page.lbl_json_hint.text()
+    finally:
+        clipboard.setText(old_text)
+        page.close()
 
 
 def test_director_stepper_widget(qapp):
@@ -338,13 +396,12 @@ def test_review_page_three_modes_and_two_prompts(qapp):
     page.btn_copy_video_prompt.click()
     assert "video" not in copied_signals  # Chưa có tệp video, bị reject an toàn
 
-    # Luồng 2: Prompt Chữ Kinetic (V2) - Gated an toàn trong slice này
+    # Luồng 2: Không có dữ liệu nguồn thì V2 không được tạo prompt giả.
     kinetic_prompt = page.get_kinetic_prompt(aspect="9:16")
     assert kinetic_prompt == ""  # Gated, không chạy DEMO_WORDS hay legacy I/O
 
     page.btn_copy_kinetic_prompt.click()
     assert "kinetic" not in copied_signals  # Không ghi đè clipboard, 0 signal
-    assert "chưa khả dụng" in page.btn_copy_kinetic_prompt.toolTip() or "nâng cấp" in page.btn_copy_kinetic_prompt.toolTip()
 
 
 def test_review_page_json_apply_and_persistence(qapp):

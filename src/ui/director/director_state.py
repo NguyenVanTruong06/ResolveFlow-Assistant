@@ -424,7 +424,7 @@ def _is_video_plan_dict(data: Dict[str, Any]) -> bool:
 def _is_kinetic_plan_dict(data: Dict[str, Any]) -> bool:
     if not isinstance(data, dict):
         return False
-    return any(k in data for k in [
+    return ("presets" in data and "pages" in data) or any(k in data for k in [
         "subtitles", "kinetic", "words", "kinetic_plan"
     ])
 
@@ -476,7 +476,7 @@ def _summarize_video_plan(data: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
 
 
 def _summarize_kinetic_plan(data: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-    subs = data.get("subtitles") or data.get("kinetic") or data.get("words") or []
+    subs = data.get("pages") or data.get("subtitles") or data.get("kinetic") or data.get("words") or []
     count = len(subs)
     summary = f"✨ Đã nhận diện: Kinetic Plan (V2) · {count} phụ đề hoạt ảnh nghệ thuật"
     return summary, {
@@ -515,16 +515,26 @@ def parse_web_prompt_json(raw_text: str, target_slot: Optional[str] = None) -> T
         return False, BATCH_DRAFT_REJECT_MSG, None
 
     # 2. Nếu target_slot được chỉ định rõ:
-    if target_slot == "slot1":
-        if extracted_objs:
-            data = extracted_objs[0]
-            summary, res = _summarize_video_plan(data)
-            return True, summary, res
-    elif target_slot == "slot2":
-        if extracted_objs:
-            data = extracted_objs[0]
-            summary, res = _summarize_kinetic_plan(data)
-            return True, summary, res
+    if target_slot in ("slot1", "slot2") and extracted_objs:
+        is_video = target_slot == "slot1"
+        matches = _is_video_plan_dict if is_video else _is_kinetic_plan_dict
+        opposite = _is_kinetic_plan_dict if is_video else _is_video_plan_dict
+        summarize = _summarize_video_plan if is_video else _summarize_kinetic_plan
+        wrapper_key = "video_plan" if is_video else "kinetic_plan"
+        for obj in extracted_objs:
+            candidate = obj.get(wrapper_key, obj)
+            if isinstance(candidate, dict) and matches(candidate):
+                summary, res = summarize(candidate)
+                return True, summary, res
+        if any(opposite(obj) for obj in extracted_objs):
+            return False, (
+                "JSON không đúng slot: Video Plan (V1) dành cho Slot 1; "
+                "kiểu chữ cần Kinetic Plan (V2) ở Slot 2. "
+                "Dùng Prompt Chữ Kinetic (V2) hoặc Tự tạo để tạo kế hoạch chữ."
+            ), None
+        # Preserve explicit routing for legacy, unclassified custom plans.
+        summary, res = summarize(extracted_objs[0])
+        return True, summary, res
 
     # 3. Kiểm tra trường hợp DUAL PLAN (cả 2 kịch bản cùng xuất hiện)
     # 3a. Nhiều block JSON riêng biệt (ví dụ 2 khối markdown code)

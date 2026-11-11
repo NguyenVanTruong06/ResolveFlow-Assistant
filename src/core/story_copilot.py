@@ -417,7 +417,7 @@ class StoryCopilot:
         valid_clips = []
         known_durations = []
         for c in clips_data:
-            dur = float(c.get("duration", c.get("duration_sec", 0.0)))
+            dur = float(c.get("duration_sec", c.get("duration", 0.0)))
             dur_known = bool(c.get("duration_known", True))
             if dur_known and (0.0 < dur < 1.0):
                 continue
@@ -571,6 +571,12 @@ class StoryCopilot:
             "👉 Dùng clip_id chính xác từ danh mục cho global_hook và từng timeline_segments. "
             "Chọn start_sec và end_sec trong thời lượng của clip tương ứng. "
             "Nếu không clip nào đủ dài cho hook yêu cầu, đặt global_hook là null.",
+            "👉 Thời lượng trong danh mục là giới hạn nguồn chính xác (giây). "
+            "Không làm tròn tăng end_sec; đoạn giữ đến cuối nguồn phải dùng đúng giá trị này. "
+            "Các mốc MM:SS chỉ để đọc; dùng start_sec/end_sec chi tiết khi chọn điểm cắt.",
+            "👉 Đây là JSON Video Plan (V1), chỉ điều khiển cắt dựng. "
+            "Kiểu chữ, font và hiệu ứng phụ đề thuộc JSON Kinetic Plan (V2) riêng, "
+            "được tạo bằng nút Prompt Chữ Kinetic (V2) hoặc Tự tạo tại Slot 2 trong ứng dụng.",
             "👉 Hãy phân tích thật kỹ toàn bộ danh sách clip trên và xuất bản khối JSON tối ưu nhất!"
         ]
 
@@ -604,9 +610,9 @@ class StoryCopilot:
                 c_id = _sanitize_prompt_text(clip.get("clip_id") or f"C{idx+1:02d}")
                 c_name = _sanitize_prompt_text(clip.get("name", clip.get("clip_name", f"Clip_{idx+1}")))
                 c_chap = _sanitize_prompt_text(clip.get("chapter", "Chung"))
-                dur = float(clip.get("duration", clip.get("duration_sec", 0.0)))
+                dur = float(clip.get("duration_sec", clip.get("duration", 0.0)))
                 dur_known = bool(clip.get("duration_known", True))
-                dur_str = f"{dur:.1f}s" if (dur_known and dur > 0) else "chưa rõ"
+                dur_str = f"{dur}s" if (dur_known and dur > 0) else "chưa rõ"
 
                 c_source = clip.get("source_availability", "available")
                 is_source_ok = (c_source == "available")
@@ -702,9 +708,9 @@ class StoryCopilot:
             for idx, clip in enumerate(valid_clips):
                 c_id = _sanitize_prompt_text(clip.get("clip_id") or f"C{idx+1:02d}")
                 c_name = _sanitize_prompt_text(clip.get("name", clip.get("clip_name", f"Clip_{idx+1}")))
-                dur = float(clip.get("duration", clip.get("duration_sec", 0.0)))
+                dur = float(clip.get("duration_sec", clip.get("duration", 0.0)))
                 dur_known = bool(clip.get("duration_known", True))
-                dur_label = f"{dur:.1f}s" if (dur_known and dur > 0) else "chưa rõ thời lượng"
+                dur_label = f"{dur}s" if (dur_known and dur > 0) else "chưa rõ thời lượng"
 
                 lines.append(f"- **Clip {c_id}** (`{c_name}` - {dur_label}):")
 
@@ -757,7 +763,10 @@ class StoryCopilot:
                             s_st = float(s.get("start", 0.0))
                             s_en = float(s.get("end", 0.0))
                             s_txt = _sanitize_prompt_text(s.get("text", ""))
-                            lines.append(f'  * [{_fmt_tc(s_st)} - {_fmt_tc(s_en)}] "{s_txt}"')
+                            lines.append(
+                                f'  * [{_fmt_tc(s_st)} - {_fmt_tc(s_en)}] '
+                                f'(start_sec={s_st}, end_sec={s_en}) "{s_txt}"'
+                            )
                         if len(intervals) > max_intervals:
                             omitted_speech = len(intervals) - max_intervals
                             total_prompt_omitted_speech += omitted_speech
@@ -856,12 +865,17 @@ class StoryCopilot:
             lines.extend(footer_lines)
             return "\n".join(lines)
 
+        # Try the complete evidence before reducing details to meet a byte budget.
+        full_intervals = max((len(c.get("dialogue_intervals") or c.get("speech_intervals") or []) for c in valid_clips), default=0)
+        full_visual_details = max((len(c.get("visual_segments") or []) for c in valid_clips), default=0)
+        full_content = (3, full_intervals, full_visual_details, 120)
+
         # 1. Unbounded mode (max_prompt_bytes is None)
         if max_prompt_bytes is None:
             return _assemble_prompt(
                 max_visual_summary=3,
-                max_intervals=12,
-                max_visual_details=8,
+                max_intervals=full_intervals,
+                max_visual_details=full_visual_details,
                 snippet_char_limit=120,
                 asset_level=2
             )
@@ -880,6 +894,12 @@ class StoryCopilot:
             raise ValueError(
                 f"Dung lượng tối đa {max_prompt_bytes} bytes không đủ chứa khung xương kịch bản tối thiểu ({min_bytes} bytes)."
             )
+
+        # Keep all evidence if it fits, reducing optional asset summaries first.
+        for a_lvl in (2, 1, 0):
+            candidate = _assemble_prompt(*full_content, asset_level=a_lvl)
+            if len(candidate.encode("utf-8")) <= max_prompt_bytes:
+                return candidate
 
         # Bậc thang phân bổ ngân sách
         content_levels = [

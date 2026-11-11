@@ -467,6 +467,37 @@ def test_formatter_self_defense_direct_stale_input():
 # 5. TEST BOUNDED PROMPT FORMATTER (STORY COPILOT UTF-8 BYTES BUDGET)
 # =============================================================================
 
+def test_prompt_preserves_exact_source_bounds_over_rounded_display_duration():
+    clip = {
+        "clip_id": "C01", "name": "Cisco.mp4", "duration": 349.3,
+        "duration_sec": 349.274558, "duration_known": True,
+        "dialogue_intervals": [{"start": 345.125, "end": 349.274558, "text": "Câu cuối"}],
+    }
+    prompt = StoryCopilot.generate_copilot_prompt("Bounds", [clip], max_prompt_bytes=32768)
+    inventory = next(line for line in prompt.splitlines() if line.startswith("| C01 |"))
+    assert "349.274558s" in inventory
+    assert "349.3s" not in prompt
+    assert "start_sec=345.125" in prompt
+    assert "end_sec=349.274558" in prompt
+
+
+@pytest.mark.parametrize("budget", [None, 32768])
+def test_prompt_keeps_all_87_dialogue_lines_when_they_fit(budget):
+    clip = {
+        "clip_id": "C01", "name": "Cisco.mp4", "duration_sec": 349.274558,
+        "duration_known": True,
+        "dialogue_intervals": [
+            {"start": i * 4.0, "end": i * 4.0 + 3.5, "text": f"CISCO_SENTENCE_{i:02d}: Giải thích VLAN."}
+            for i in range(87)
+        ],
+    }
+    prompt = StoryCopilot.generate_copilot_prompt("Coverage", [clip], max_prompt_bytes=budget)
+    assert all(f"CISCO_SENTENCE_{i:02d}:" in prompt for i in range(87))
+    assert "lược bỏ 75 câu thoại" not in prompt
+    if budget is not None:
+        assert len(prompt.encode("utf-8")) <= budget
+
+
 def test_bounded_prompt_utf8_bytes_enforcement_50_clips():
     """Kiểm tra C2a-B:
     - 50 clip với tiếng Việt, emoji, CJK và tên tệp dài.

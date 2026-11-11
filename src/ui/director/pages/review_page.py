@@ -831,7 +831,7 @@ class ReviewPage(QWidget):
 
         self.btn_copy_kinetic_prompt = QPushButton("✨ 3. Prompt Chữ Kinetic (V2)")
         self.btn_copy_kinetic_prompt.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_copy_kinetic_prompt.setToolTip("Tính năng đang nâng cấp V2 Kinetic (chuẩn bị bất đồng bộ).")
+        self.btn_copy_kinetic_prompt.setToolTip("Copy prompt riêng để AI trả JSON kiểu chữ: font, màu và hiệu ứng. Dán kết quả vào Slot 2.")
         self.btn_copy_kinetic_prompt.setStyleSheet("""
             QPushButton {
                 background-color: #d97706;
@@ -850,6 +850,14 @@ class ReviewPage(QWidget):
         row_copy_btns.addWidget(self.btn_copy_kinetic_prompt, 1, 0, 1, 2)
 
         web_layout.addLayout(row_copy_btns)
+
+        self.lbl_plan_workflow = QLabel(
+            "V1: JSON cắt dựng → Slot 1. Muốn có kiểu chữ: copy Prompt Chữ Kinetic (V2), "
+            "dán JSON AI trả về vào Slot 2; hoặc bấm Tự tạo (0đ Token)."
+        )
+        self.lbl_plan_workflow.setWordWrap(True)
+        self.lbl_plan_workflow.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        web_layout.addWidget(self.lbl_plan_workflow)
 
         # Additive Section cho Batch Planner (G06-06A3-I)
         self.frame_batch_section = QFrame()

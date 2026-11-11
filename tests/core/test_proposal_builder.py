@@ -509,6 +509,22 @@ def test_probe_b1_primary_cut_exceeds_loaded_duration():
         )
 
 
+def test_cisco_fractional_end_keeps_strict_source_bounds():
+    manifest = ClipManifest(project_name="Cisco", manifest_id="e1a4b04c", clips=[
+        ClipEntry.from_dict({"clip_id": "C01", "file_name": "Cisco.mp4", "current_path": "/tmp/Cisco.mp4", "duration_sec": 349.274558})
+    ])
+    plan = {
+        "manifest_id": "e1a4b04c",
+        "global_hook": {"clip_id": "C01", "start_sec": 0.0, "end_sec": 40.0},
+        "timeline_segments": [{"clip_id": "C01", "start_sec": 40.0, "end_sec": 349.3, "action": "keep"}],
+    }
+    with pytest.raises(ValueError, match="ERR_PRIMARY_CUT_EXCEEDS_DURATION"):
+        build_edit_plan_proposal(proposal_id="cisco", manifest=manifest, video_plan=plan, creative_context={})
+    plan["timeline_segments"][0]["end_sec"] = 349.274558
+    proposal = build_edit_plan_proposal(proposal_id="cisco", manifest=manifest, video_plan=plan, creative_context={})
+    assert proposal.proposal_id == "cisco"
+
+
 def test_probe_b1_manifest_duration_bigint_overflow():
     """B1: Thời lượng clip kiểu bigint khổng lồ (10**400) bị bắt an toàn bằng ValueError."""
     manifest = {
