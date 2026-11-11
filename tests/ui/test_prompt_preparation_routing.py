@@ -512,6 +512,39 @@ def test_copy_prompt_provenance_and_error_preserves_clipboard(tmp_path, qapp):
     assert len(copied_signals) == 0
 
 
+def test_web_copy_button_explains_missing_analysis_and_copies_once_ready(tmp_path, qapp):
+    review = ReviewPage()
+    path = str(tmp_path / "clip.mp4")
+    identity = _create_dummy_video(path)
+    review.set_context_supplier(
+        lambda: {"video_paths": [path], "whisper_model": "small", "whisper_language": "vi"}
+    )
+    review._cache_mgr = ScanCacheManager(cache_dir=str(tmp_path / "cache"))
+    review._manifest_cache_dir = str(tmp_path / "manifests")
+    QApplication.clipboard().setText("Clipboard before analysis")
+
+    review.btn_copy_video_prompt.click()
+    _wait_for_review_page(review)
+
+    assert "Bước 1" in review.lbl_script_progress.text()
+    assert QApplication.clipboard().text() == "Clipboard before analysis"
+
+    review._cache_mgr.save_scan_result(
+        file_path=path,
+        scan_data={"clip_dur": 10.0, "raw_subtitles": [{"start": 0, "end": 2, "text": "Thoại đã quét"}]},
+        model_size="small",
+        language="vi",
+        verified_identity=identity,
+    )
+    review.btn_copy_video_prompt.click()
+    _wait_for_review_page(review)
+
+    assert "Đã sao chép" in review.lbl_script_progress.text()
+    assert "Thoại đã quét" in QApplication.clipboard().text()
+    assert QApplication.clipboard().text() == review.get_video_prompt()
+    assert not review._script_progress_timer.isActive()
+
+
 # =============================================================================
 # 5. TEST DIRECTOR RUN AI SINGLE DISPATCH & CANCEL / SUPERSEDE
 # =============================================================================

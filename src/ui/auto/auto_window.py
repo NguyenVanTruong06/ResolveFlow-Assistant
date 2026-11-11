@@ -63,7 +63,6 @@ from src.ui.theme import (
     ThemeColors, ThemeFonts, TOOLTIPS, MODULE_DESCRIPTIONS,
     get_application_stylesheet, get_badge_style, get_card_style, get_button_style
 )
-from src.ui.tabs import TabAssets
 from src.ui.icons import create_vector_icon, get_vector_icon
 from src.ui.widgets.mini_timeline import MiniTimelineWidget
 
@@ -3435,6 +3434,9 @@ class AutoWindow(QMainWindow):
         # =========================================================================
         # TƯƠNG THÍCH BACKEND (Giữ nguyên các tab ẩn và dummies)
         # =========================================================================
+        # TabAssets imports the Director through src.ui.lux. Load it only when building this UI.
+        from src.ui.tabs import TabAssets
+
         self.tab_widget = QTabWidget()
         self.tab_copilot = TabCopilot()
         self.tab_autocut = TabAutoCut()

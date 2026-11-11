@@ -24,8 +24,9 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QLineEdit, QComboBox, QButtonGroup,
     QMessageBox, QSplitter, QTableView, QHeaderView, QCheckBox
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QThread, QSettings, QAbstractTableModel, QModelIndex
+from PySide6.QtCore import Qt, Signal, QTimer, QElapsedTimer, QThread, QSettings, QAbstractTableModel, QModelIndex
 from PySide6.QtGui import QKeyEvent, QColor
+from src.ui.widgets.flow_layout import FlowLayout
 from src.core.review_state import ReviewState
 from src.ui.director.director_state import (
     BATCH_DRAFT_REJECT_MSG,
@@ -456,6 +457,15 @@ class ReviewPage(QWidget):
         self._whisper_model: str = "small"
         self._whisper_lang: str = "vi"
         self._ping_worker: Optional[OllamaPingWorker] = None
+        self._review_close_pending = False
+        self._script_progress_clock = QElapsedTimer()
+        self._script_progress_timer = QTimer(self)
+        self._script_progress_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._script_progress_timer.setInterval(1000)
+        self._script_progress_timer.timeout.connect(self._refresh_script_progress)
+        self._script_progress_stage = ""
+        self._script_progress_request_id: Optional[str] = None
+        self._script_ai_mode: Optional[int] = None
 
         # Trạng thái nạp metadata phân tích nguồn bất đồng bộ (G05-05C1)
         self._analysis_generation: int = 0
@@ -719,6 +729,12 @@ class ReviewPage(QWidget):
         mode_btn_layout.addWidget(self.btn_mode_ollama)
         v_right.addLayout(mode_btn_layout)
 
+        self.lbl_script_progress = QLabel()
+        self.lbl_script_progress.setWordWrap(True)
+        self.lbl_script_progress.setTextFormat(Qt.TextFormat.PlainText)
+        self.lbl_script_progress.hide()
+        v_right.addWidget(self.lbl_script_progress)
+
         # Card container cho Stacked Pages
         ai_card = QFrame(col_right)
         ai_card.setObjectName("ai_box_frame")
@@ -739,6 +755,11 @@ class ReviewPage(QWidget):
         # ---------------------------------------------------------
         # Page 0: Prompt Web (0đ)
         # ---------------------------------------------------------
+        web_page = QWidget()
+        web_layout = QVBoxLayout(web_page)
+        web_layout.setContentsMargins(0, 0, 0, 0)
+        web_layout.setSpacing(8)
+
         self.scroll_web = QScrollArea()
         self.scroll_web.setWidgetResizable(True)
         self.scroll_web.setFrameShape(QFrame.Shape.NoFrame)
@@ -758,14 +779,18 @@ class ReviewPage(QWidget):
         pw_lay.setContentsMargins(0, 0, 4, 0)
         pw_lay.setSpacing(8)
 
-        lbl_step1 = QLabel("1. Chọn copy Prompt gửi cho ChatGPT / Claude (Miễn phí 0đ):")
+        lbl_step1 = QLabel("Sao chép prompt để dán vào ChatGPT hoặc Claude.")
         lbl_step1.setStyleSheet("color: #a1a1aa; font-size: 11.5px;")
-        pw_lay.addWidget(lbl_step1)
+        lbl_step1.setWordWrap(True)
+        web_layout.addWidget(lbl_step1)
 
         row_copy_btns = QGridLayout()
         row_copy_btns.setSpacing(6)
 
         self.btn_copy_video_prompt = QPushButton("📋 1. Prompt Dựng Video (V1)")
+        self.btn_copy_video_prompt.setToolTip(
+            "Tạo prompt từ dữ liệu đã phân tích ở Bước 1 và sao chép ngay."
+        )
         self.btn_copy_video_prompt.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_copy_video_prompt.setStyleSheet("""
             QPushButton {
@@ -824,7 +849,7 @@ class ReviewPage(QWidget):
         self.btn_copy_kinetic_prompt.clicked.connect(self._copy_kinetic_prompt)
         row_copy_btns.addWidget(self.btn_copy_kinetic_prompt, 1, 0, 1, 2)
 
-        pw_lay.addLayout(row_copy_btns)
+        web_layout.addLayout(row_copy_btns)
 
         # Additive Section cho Batch Planner (G06-06A3-I)
         self.frame_batch_section = QFrame()
@@ -908,6 +933,7 @@ class ReviewPage(QWidget):
         lay_batch.addLayout(h_batch_top)
 
         self.lbl_batch_summary = QLabel("Chưa lập kế hoạch phân lô.")
+        self.lbl_batch_summary.setWordWrap(True)
         self.lbl_batch_summary.setStyleSheet("color: #a1a1aa; font-size: 10px;")
         lay_batch.addWidget(self.lbl_batch_summary)
 
@@ -932,10 +958,11 @@ class ReviewPage(QWidget):
         lay_intake.setSpacing(3)
 
         lbl_intake_title = QLabel("📥 Tiếp Nhận Bản Thảo Lô (Batch Draft Intake) - Chỉ lưu trong phiên:")
+        lbl_intake_title.setWordWrap(True)
         lbl_intake_title.setStyleSheet("color: #a1a1aa; font-size: 10px; font-weight: 500;")
         lay_intake.addWidget(lbl_intake_title)
 
-        h_intake = QHBoxLayout()
+        h_intake = QVBoxLayout()
         h_intake.setSpacing(6)
 
         self.txt_batch_draft_input = QPlainTextEdit()
@@ -1002,13 +1029,14 @@ class ReviewPage(QWidget):
         lay_intake.addLayout(h_intake)
 
         self.lbl_batch_draft_status = QLabel("")
+        self.lbl_batch_draft_status.setWordWrap(True)
         self.lbl_batch_draft_status.setStyleSheet("color: #a1a1aa; font-size: 10px;")
         lay_intake.addWidget(self.lbl_batch_draft_status)
 
         lay_batch.addLayout(lay_intake)
 
         # Project Overview Section (G06-06A4c2b-I)
-        h_overview = QHBoxLayout()
+        h_overview = QVBoxLayout()
         h_overview.setSpacing(6)
         self.btn_copy_project_overview = QPushButton("📋 Sao Chép Tổng Quan Dự Án")
         self.btn_copy_project_overview.setEnabled(False)
@@ -1035,6 +1063,7 @@ class ReviewPage(QWidget):
         h_overview.addWidget(self.btn_copy_project_overview)
 
         self.lbl_overview_status = QLabel("")
+        self.lbl_overview_status.setWordWrap(True)
         self.lbl_overview_status.setStyleSheet("color: #a1a1aa; font-size: 10px;")
         h_overview.addWidget(self.lbl_overview_status, stretch=1)
 
@@ -1047,10 +1076,11 @@ class ReviewPage(QWidget):
 
         # Thẻ trạng thái 2 Kế hoạch độc lập (Dual Plan Slots V1 & V2)
         lbl_slots_head = QLabel("Trạng thái nạp 2 kịch bản (Độc lập không bị đè mất):")
+        lbl_slots_head.setWordWrap(True)
         lbl_slots_head.setStyleSheet("color: #a1a1aa; font-size: 11px; margin-top: 4px; font-weight: 500;")
         pw_lay.addWidget(lbl_slots_head)
 
-        plan_status_layout = QHBoxLayout()
+        plan_status_layout = QVBoxLayout()
         plan_status_layout.setSpacing(8)
 
         self.card_slot_video = QFrame()
@@ -1066,11 +1096,10 @@ class ReviewPage(QWidget):
         v_slot_vid.setContentsMargins(4, 2, 4, 2)
         v_slot_vid.setSpacing(3)
 
-        h_slot_vid_top = QHBoxLayout()
+        h_slot_vid_top = FlowLayout()
         self.lbl_slot_vid_title = QLabel("🎬 1. Video Plan (V1)")
         self.lbl_slot_vid_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #38bdf8;")
         h_slot_vid_top.addWidget(self.lbl_slot_vid_title)
-        h_slot_vid_top.addStretch(1)
 
         self.btn_paste_slot1 = QPushButton("📋 Dán vào Slot 1")
         self.btn_paste_slot1.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1150,16 +1179,19 @@ class ReviewPage(QWidget):
         v_slot_vid.addLayout(h_slot_vid_top)
 
         self.lbl_slot_vid_status = QLabel("Chưa nạp (Dùng cắt thô)")
+        self.lbl_slot_vid_status.setWordWrap(True)
         self.lbl_slot_vid_status.setStyleSheet("color: #71717a; font-size: 10px;")
         v_slot_vid.addWidget(self.lbl_slot_vid_status)
 
         self.lbl_matching_status = QLabel("")
         self.lbl_matching_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.lbl_matching_status.setWordWrap(True)
         self.lbl_matching_status.setStyleSheet("color: #71717a; font-size: 10px;")
         v_slot_vid.addWidget(self.lbl_matching_status)
 
         self.lbl_source_evidence_status = QLabel("⚪ Chưa thu thập bằng chứng nguồn")
         self.lbl_source_evidence_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.lbl_source_evidence_status.setWordWrap(True)
         self.lbl_source_evidence_status.setStyleSheet("color: #71717a; font-size: 10px;")
         v_slot_vid.addWidget(self.lbl_source_evidence_status)
         plan_status_layout.addWidget(self.card_slot_video, stretch=1)
@@ -1177,11 +1209,10 @@ class ReviewPage(QWidget):
         v_slot_kin.setContentsMargins(4, 2, 4, 2)
         v_slot_kin.setSpacing(3)
 
-        h_slot_kin_top = QHBoxLayout()
+        h_slot_kin_top = FlowLayout()
         self.lbl_slot_kin_title = QLabel("✨ 2. Kinetic Plan (V2)")
         self.lbl_slot_kin_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #f59e0b;")
         h_slot_kin_top.addWidget(self.lbl_slot_kin_title)
-        h_slot_kin_top.addStretch(1)
 
         self.btn_auto_kinetic = QPushButton("⚡ Tự tạo (0đ Token)")
         self.btn_auto_kinetic.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1227,6 +1258,7 @@ class ReviewPage(QWidget):
         v_slot_kin.addLayout(h_slot_kin_top)
 
         self.lbl_slot_kin_status = QLabel("Chưa nạp (Dùng phụ đề)")
+        self.lbl_slot_kin_status.setWordWrap(True)
         self.lbl_slot_kin_status.setStyleSheet("color: #71717a; font-size: 10px;")
         v_slot_kin.addWidget(self.lbl_slot_kin_status)
         plan_status_layout.addWidget(self.card_slot_kinetic, stretch=1)
@@ -1238,13 +1270,13 @@ class ReviewPage(QWidget):
         pw_lay.addWidget(self.asset_advisory_drawer)
 
         # Header bước 2 + Bộ chọn Slot mục tiêu
-        row_step2_header = QHBoxLayout()
+        row_step2_header = FlowLayout()
         row_step2_header.setSpacing(6)
 
         lbl_step2 = QLabel("2. Dán mã JSON (Dán lần lượt hoặc dán cả 2 cùng lúc):")
+        lbl_step2.setWordWrap(True)
         lbl_step2.setStyleSheet("color: #a1a1aa; font-size: 11px; margin-top: 2px;")
         row_step2_header.addWidget(lbl_step2)
-        row_step2_header.addStretch(1)
 
         self.btn_target_auto = QPushButton("🤖 Tự động")
         self.btn_target_slot1 = QPushButton("🎬 Slot 1")
@@ -1361,7 +1393,8 @@ class ReviewPage(QWidget):
         pw_lay.addWidget(self.common_review_widget)
 
         self.scroll_web.setWidget(p_web)
-        self.ai_stack.addWidget(self.scroll_web)
+        web_layout.addWidget(self.scroll_web, 1)
+        self.ai_stack.addWidget(web_page)
 
         # ---------------------------------------------------------
         # Page 1: Cloud API (Gemini / DeepSeek / Claude / OpenAI)
@@ -1430,7 +1463,7 @@ class ReviewPage(QWidget):
         self.lbl_cloud_status.setWordWrap(True)
         pc_lay.addWidget(self.lbl_cloud_status)
 
-        self.btn_run_cloud = QPushButton("⚡ 1-Click: Cloud AI Tự Động Lên Kịch Bản && Dựng")
+        self.btn_run_cloud = QPushButton("⚡ Tạo kịch bản bằng Cloud AI")
         self.btn_run_cloud.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_run_cloud.setStyleSheet("""
             QPushButton {
@@ -1532,7 +1565,7 @@ class ReviewPage(QWidget):
         self.lbl_ollama_status.setWordWrap(True)
         po_lay.addWidget(self.lbl_ollama_status)
 
-        self.btn_run_ollama = QPushButton("💻 1-Click: Local AI Tự Động Lên Kịch Bản && Dựng")
+        self.btn_run_ollama = QPushButton("💻 Tạo kịch bản bằng Ollama")
         self.btn_run_ollama.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_run_ollama.setStyleSheet("""
             QPushButton {
@@ -2095,6 +2128,17 @@ class ReviewPage(QWidget):
         except Exception:
             pass
 
+        if req_id == self._script_progress_request_id:
+            self._script_progress_request_id = None
+            if not self._review_close_pending:
+                message = self.lbl_json_hint.text()
+                if req_id != self._active_prompt_request_id or message.startswith("Đang"):
+                    message = "Dữ liệu nguồn hoặc cấu hình đã thay đổi. Hãy thử lại."
+                if self._script_ai_mode is not None:
+                    self.set_ai_result(False, message)
+                else:
+                    self._finish_script_progress(message, message.startswith("✓"))
+
         # Tính busy aggregate hiện tại của toàn registry
         if self._prompt_workers_registry:
             # Nếu registry vẫn còn worker đang chạy trong nền: nút giữ khóa
@@ -2388,6 +2432,11 @@ class ReviewPage(QWidget):
     def shutdown_analysis_workers(self) -> bool:
         """Yêu cầu hủy cooperative toàn bộ worker nạp siêu dữ liệu, prompt V1, kinetic V2, matching và preapproval đang chạy."""
         self._review_close_pending = True
+        if self._script_progress_request_id is not None:
+            self._finish_script_progress("Đã hủy chuẩn bị prompt.", False)
+            self._script_ai_mode = None
+            self.btn_run_ollama.setEnabled(True)
+            self.btn_run_cloud.setEnabled(True)
         self._analysis_generation += 1
         self._prompt_generation += 1
         self._kinetic_generation += 1
@@ -4652,7 +4701,10 @@ class ReviewPage(QWidget):
                     self.lbl_json_hint.setText(f"⚠ {err_msg}")
                     self.lbl_json_hint.setStyleSheet("color: #f59e0b; font-size: 10.5px;")
                 elif message == "budget_error":
-                    self.lbl_json_hint.setText(f"⚠ Giới hạn dung lượng: {err_msg}")
+                    hint = f"⚠ Giới hạn dung lượng: {err_msg}"
+                    if self._active_prompt_intent == "copy_video":
+                        hint += " Hãy bấm Phân Lô Kịch Bản rồi chọn lô để sao chép."
+                    self.lbl_json_hint.setText(hint)
                     self.lbl_json_hint.setStyleSheet("color: #ef4444; font-size: 10.5px;")
                 elif message in ("source_missing", "source_changed", "source_error"):
                     self.lbl_json_hint.setText(f"⚠ Lỗi tệp nguồn: {err_msg}")
@@ -5993,7 +6045,23 @@ class ReviewPage(QWidget):
 
     def _copy_video_prompt(self):
         """Kích hoạt chuẩn bị Prompt V1 bất đồng bộ và sao chép vào clipboard khi hoàn tất."""
-        self.request_prompt_preparation(intent="copy_video")
+        self._start_web_prompt_action("copy_video", "Đang chuẩn bị Prompt V1 từ dữ liệu nguồn")
+
+    def _start_web_prompt_action(
+        self, intent: str, stage: str, selected_batch_index: Optional[int] = None
+    ):
+        if self._review_close_pending:
+            return
+        req_id = self.request_prompt_preparation(
+            intent=intent, selected_batch_index=selected_batch_index
+        )
+        if self._script_ai_mode is not None:
+            return
+        if req_id is None:
+            self._finish_script_progress(self.lbl_json_hint.text(), False)
+            return
+        self._script_progress_request_id = req_id
+        self._start_script_progress(stage)
 
     def get_batch_prompt(self, batch_index: int = 0) -> str:
         """Lấy toàn văn chuỗi prompt của lô đã chuẩn bị in-memory nếu còn hiệu lực."""
@@ -6039,7 +6107,7 @@ class ReviewPage(QWidget):
 
     def _on_prepare_batches_clicked(self):
         """Kích hoạt phân lô kịch bản an toàn theo dung lượng tối đa."""
-        self.request_prompt_preparation(intent="prepare_batches")
+        self._start_web_prompt_action("prepare_batches", "Đang phân lô kịch bản")
 
     def _on_copy_selected_batch_clicked(self):
         """Sao chép kịch bản của lô đang chọn vào Clipboard sau khi recheck nguồn."""
@@ -6050,7 +6118,9 @@ class ReviewPage(QWidget):
         sel_idx = self.cbo_batch_selector.currentIndex()
         if sel_idx < 0:
             return
-        self.request_prompt_preparation(intent="copy_batch", selected_batch_index=sel_idx)
+        self._start_web_prompt_action(
+            "copy_batch", f"Đang kiểm tra nguồn cho Lô {sel_idx + 1}", selected_batch_index=sel_idx
+        )
 
     def _on_batch_selection_changed(self, index: int):
         """Cập nhật preview và hiển thị trạng thái bản thảo khi chuyển đổi lô trên selector."""
@@ -6421,31 +6491,102 @@ class ReviewPage(QWidget):
         self.json_applied.emit(data, summary)
         if getattr(self, "_manifest", None) and getattr(self, "_video_plan_data", None):
             try:
-                self._rebuild_and_present_proposal()
+                error = self._rebuild_and_present_proposal()
+                if error:
+                    self.lbl_json_hint.setText(f"✕ Kịch bản chưa thể đưa vào duyệt: {error}")
+                    self.lbl_json_hint.setStyleSheet("color: #ef4444; font-size: 10.5px;")
             except Exception as pe:
                 logger.debug("Auto-rebuild proposal after json apply: %s", pe)
 
     def _on_run_cloud_clicked(self):
-        self.lbl_cloud_status.setText("Đang gửi transcript sang Cloud AI...")
-        self.lbl_cloud_status.setStyleSheet("color: #a78bfa; font-size: 11px;")
-        self.ai_run_requested.emit()
+        self._request_ai_script(1)
 
     def _on_run_ollama_clicked(self):
-        self.lbl_ollama_status.setText("Đang gọi Local Ollama xử lý kịch bản...")
-        self.lbl_ollama_status.setStyleSheet("color: #a78bfa; font-size: 11px;")
+        self._request_ai_script(2)
+
+    def _request_ai_script(self, mode: int):
+        if self._script_ai_mode is not None or self._review_close_pending:
+            return
+        self._script_ai_mode = mode
+        self._script_progress_request_id = None
+        self.btn_run_ollama.setEnabled(False)
+        self.btn_run_cloud.setEnabled(False)
+        self._start_script_progress("Bước 1/2 · Chuẩn bị prompt từ dữ liệu nguồn")
         self.ai_run_requested.emit()
 
+    def track_ai_prompt_request(self, req_id: str):
+        if self._script_ai_mode is not None:
+            self._script_progress_request_id = req_id
+
+    def show_ai_generation_progress(self, model: str = ""):
+        if self._script_ai_mode is None:
+            return
+        self._script_progress_request_id = None
+        if self._script_ai_mode == 2:
+            target = f"Ollama ({model})" if model else "Ollama"
+        else:
+            target = "Cloud AI"
+        self._script_progress_stage = f"Bước 2/2 · Đang chờ {target} tạo kịch bản"
+        self._refresh_script_progress()
+
+    def _start_script_progress(self, stage: str):
+        self._script_progress_stage = stage
+        self._script_progress_clock.start()
+        self._script_progress_timer.start()
+        self.lbl_script_progress.setStyleSheet("color: #38bdf8; font-size: 12px;")
+        self.lbl_script_progress.show()
+        self._refresh_script_progress()
+
+    def _script_elapsed(self) -> str:
+        seconds = self._script_progress_clock.elapsed() // 1000
+        minutes, seconds = divmod(seconds, 60)
+        return f"{minutes}:{seconds:02d}"
+
+    def _refresh_script_progress(self):
+        self.lbl_script_progress.setText(
+            f"{self._script_progress_stage} · Đã chạy {self._script_elapsed()}"
+        )
+
+    def _finish_script_progress(self, message: str, success: bool):
+        if self._script_progress_timer.isActive():
+            message = f"{message} · {self._script_elapsed()}"
+        self._script_progress_timer.stop()
+        self._script_progress_request_id = None
+        color = "#4ade80" if success else "#fbbf24"
+        self.lbl_script_progress.setStyleSheet(f"color: {color}; font-size: 12px;")
+        self.lbl_script_progress.setText(message)
+        self.lbl_script_progress.show()
+
     def set_ai_result(self, ok: bool, message: str, raw_json: str = ""):
-        target_lbl = self.lbl_ollama_status if self.ai_stack.currentIndex() == 2 else self.lbl_cloud_status
+        mode = self._script_ai_mode if self._script_ai_mode is not None else self.ai_stack.currentIndex()
+        self._script_ai_mode = None
+        self.btn_run_ollama.setEnabled(True)
+        self.btn_run_cloud.setEnabled(True)
+        if self._review_close_pending:
+            self._script_progress_timer.stop()
+            return
+        target_lbl = self.lbl_ollama_status if mode == 2 else self.lbl_cloud_status
         if ok:
-            target_lbl.setText(message or "✓ Kịch bản AI đã hoàn thành!")
+            result_message = "✓ Đã nhận kịch bản AI."
             target_lbl.setStyleSheet("color: #4ade80; font-size: 11px; font-weight: bold;")
             if raw_json and raw_json.strip():
-                self.txt_json_input.setPlainText(raw_json)
-                self._apply_json_script()
+                try:
+                    self.txt_json_input.setPlainText(raw_json)
+                    self._apply_json_script()
+                    hint = self.lbl_json_hint.text()
+                    if hint.startswith(("✕", "⚠")):
+                        ok = False
+                        result_message = hint
+                except Exception:
+                    logger.exception("Không thể nạp kịch bản AI vào trang duyệt.")
+                    ok = False
+                    result_message = "Đã nhận phản hồi AI nhưng không thể nạp kịch bản."
         else:
-            target_lbl.setText(f"Lỗi: {message}")
+            result_message = f"Lỗi: {message}"
+        if not ok:
             target_lbl.setStyleSheet("color: #ef4444; font-size: 11px;")
+        target_lbl.setText(result_message)
+        self._finish_script_progress(result_message, ok)
 
     def _on_row_toggled(self, idx: int):
         if 0 <= idx < len(self._review_rows):
@@ -6787,7 +6928,7 @@ class ReviewPage(QWidget):
         canonical_json = json.dumps(fp, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
-    def _rebuild_and_present_proposal(self) -> None:
+    def _rebuild_and_present_proposal(self) -> Optional[str]:
         """Thực hiện chu trình lắp ráp và hiển thị kịch bản đề xuất toàn bản lên CommonProposalReviewWidget."""
         manifest = getattr(self, "_manifest", None)
 
@@ -6849,7 +6990,7 @@ class ReviewPage(QWidget):
             if hasattr(self, "common_review_widget") and self.common_review_widget:
                 self.common_review_widget.set_error(str(exc))
                 self.common_review_widget.set_stale(True)
-            return
+            return str(exc)
 
         video_plan = getattr(self, "_video_plan_data", None)
         manifest = getattr(self, "_manifest", None)
@@ -6894,7 +7035,7 @@ class ReviewPage(QWidget):
             if hasattr(self, "common_review_widget") and self.common_review_widget:
                 self.common_review_widget.set_error(str(exc))
                 self.common_review_widget.set_stale(True)
-            return
+            return str(exc)
 
         # Thẩm định hình học khung hình (SourceFrameEvidence nếu có cung cấp explicit snapshot)
         geom_result = None

@@ -13,9 +13,9 @@ import os
 from typing import Optional, List, Dict, Any
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QFrame
+    QLabel, QPushButton, QFrame, QMenu
 )
-from PySide6.QtCore import Qt, QSize, Signal as pyqtSignal, QRunnable, QThreadPool, QObject, QTimer
+from PySide6.QtCore import Qt, QSize, Signal as pyqtSignal, QRunnable, QThreadPool, QObject
 from PySide6.QtGui import QIcon, QPainter, QColor, QPen, QBrush, QPainterPath
 
 from src.ui.theme import ThemeColors, ThemeFonts, get_application_stylesheet
@@ -201,13 +201,6 @@ class StudioWindow(QMainWindow):
         self._multi_screen_service.screens_changed.connect(lambda _: self._update_screen_button_label())
         self._update_screen_button_label()
 
-        # Timer ngầm làm mới tài nguyên phần cứng mỗi 5s
-        self._stats_timer = QTimer(self)
-        self._stats_timer.setInterval(5000)
-        self._stats_timer.timeout.connect(self._fetch_hardware_stats)
-        self._stats_timer.start()
-        QTimer.singleShot(500, self._fetch_hardware_stats)
-
     def _init_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
@@ -231,173 +224,82 @@ class StudioWindow(QMainWindow):
         h_layout.setContentsMargins(8, 0, 8, 0)
         h_layout.setSpacing(5)
 
-        # 1. Logo Vector + Tiêu đề
-        lbl_logo = QLabel()
-        lbl_logo.setFixedSize(26, 26)
-        lbl_logo.setStyleSheet("""
-            background-color: #d94f3d;
-            border: 1px solid #e86352;
-            border-radius: 4px;
-            color: #ffffff;
-            font-weight: bold;
-        """)
-        lbl_logo.setAlignment(Qt.AlignCenter)
-        lbl_logo.setText("RF")
-        h_layout.addWidget(lbl_logo)
-
-        lbl_title = QLabel("<b>CHUNDVC STUDIO</b>")
-        lbl_title.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY}; font-size: 13px; font-weight: 700; letter-spacing: 0.6px;")
-        lbl_title.setToolTip(STUDIO_WINDOW_TITLE)
+        lbl_title = QLabel("CHUNDVC · Kho đạo cụ")
+        lbl_title.setStyleSheet("color: #ededf0; font-size: 13px; font-weight: 700;")
         h_layout.addWidget(lbl_title)
-
         h_layout.addStretch(1)
 
-        # Style cho các nút quản lý kho (Chuẩn NLE Studio Toolbar)
-        btn_mgmt_style = """
+        button_style = """
             QPushButton {
-                background-color: #23252a;
-                color: #e6e8ec;
-                border: 1px solid #353942;
-                padding: 4px 9px;
-                border-radius: 4px;
-                font-size: 11px;
-                font-weight: 600;
+                background: #23252a; color: #e6e8ec; border: 1px solid #353942;
+                padding: 5px 10px; border-radius: 5px; font-size: 11px;
             }
-            QPushButton:hover {
-                background-color: #2c2f36;
-                border-color: #4b505c;
-                color: #ffffff;
-            }
-            QPushButton:pressed {
-                background-color: #151619;
-            }
+            QPushButton:hover { background: #303238; border-color: #686d76; }
         """
+        self.btn_import_source = QPushButton("＋ Nạp nguồn")
+        self.btn_import_source.setStyleSheet(button_style)
+        self.btn_import_source.setToolTip("Nạp thư mục hoặc thêm tệp vào thư viện")
+        source_menu = QMenu(self.btn_import_source)
+        source_menu.addAction("Nạp thư mục…", self._on_import_folder_clicked)
+        source_menu.addAction("Thêm tệp…", self._on_import_file_clicked)
+        self.btn_import_source.setMenu(source_menu)
+        h_layout.addWidget(self.btn_import_source)
 
-        # 2. Bộ nút tác vụ quản lý cấp cao (High-Level Management Actions)
-        self.btn_import_folder = QPushButton("📁 Nạp Thư Mục")
-        self.btn_import_folder.setCursor(Qt.PointingHandCursor)
-        self.btn_import_folder.setToolTip("Quét nạp cả thư mục SFX, Meme, Footage, LUTs từ máy tính vào kho")
-        self.btn_import_folder.setStyleSheet(btn_mgmt_style)
+        # Existing actions remain callable through the secondary menu.
+        self.btn_import_folder = QPushButton(self)
+        self.btn_import_folder.hide()
         self.btn_import_folder.clicked.connect(self._on_import_folder_clicked)
-        h_layout.addWidget(self.btn_import_folder)
-
-        self.btn_import_file = QPushButton("📥 Thêm Tệp")
-        self.btn_import_file.setCursor(Qt.PointingHandCursor)
-        self.btn_import_file.setToolTip("Nhập tệp mẫu đơn lẻ (.setting, .mp4, .mov, .wav, .cube, .png)")
-        self.btn_import_file.setStyleSheet(btn_mgmt_style)
+        self.btn_import_file = QPushButton(self)
+        self.btn_import_file.hide()
         self.btn_import_file.clicked.connect(self._on_import_file_clicked)
-        h_layout.addWidget(self.btn_import_file)
-
-        self.btn_sync_dock = QPushButton("🔄 Đồng Bộ Dock")
-        self.btn_sync_dock.setCursor(Qt.PointingHandCursor)
-        self.btn_sync_dock.setToolTip("Làm mới và đồng bộ tức thì toàn bộ tài nguyên sang Thanh Dock")
-        self.btn_sync_dock.setStyleSheet(btn_mgmt_style)
+        self.btn_sync_dock = QPushButton(self)
+        self.btn_sync_dock.hide()
         self.btn_sync_dock.clicked.connect(self._on_sync_dock_clicked)
-        h_layout.addWidget(self.btn_sync_dock)
-
-        # Nút chuyển nhanh sang Cửa sổ AI Director
-        self.btn_switch_auto = QPushButton("⚡ AI Director")
+        self.btn_switch_auto = QPushButton(self)
         self.btn_switch_auto.setProperty("role", "nav-switch")
-        self.btn_switch_auto.setCursor(Qt.PointingHandCursor)
-        self.btn_switch_auto.setToolTip("Chuyển sang Cửa sổ AI Director (Auto Cut, Kịch Bản, Phụ đề)")
+        self.btn_switch_auto.hide()
         self.btn_switch_auto.clicked.connect(self.open_auto_requested.emit)
-        self.btn_switch_auto.setStyleSheet(btn_mgmt_style)
-        h_layout.addWidget(self.btn_switch_auto)
-
-        # Nút chuyển sang Thanh Dock dán mép để bắt đầu dựng phim
-        self.btn_switch_dock = QPushButton("⚡ Dựng Với Thanh Dock")
-        self.btn_switch_dock.setCursor(Qt.PointingHandCursor)
-        self.btn_switch_dock.setToolTip("Thu nhỏ cửa sổ Kho và chuyển sang Thanh Dock dán sát mép DaVinci Resolve")
-        self.btn_switch_dock.setStyleSheet("""
-            QPushButton {
-                background-color: #d94f3d;
-                color: #ffffff;
-                border: 1px solid #e86352;
-                padding: 4px 9px;
-                border-radius: 4px;
-                font-size: 11px;
-                font-weight: 700;
-            }
-            QPushButton:hover {
-                background-color: #e86352;
-            }
-        """)
+        self.btn_switch_dock = QPushButton(self)
+        self.btn_switch_dock.hide()
         self.btn_switch_dock.clicked.connect(self.return_to_dock_requested.emit)
-        h_layout.addWidget(self.btn_switch_dock)
-
-        # Nút chuyển đổi màn hình (Dual-Monitor Switch)
-        self.btn_switch_screen = QPushButton("🖥️ Sang Màn 2")
-        self.btn_switch_screen.setCursor(Qt.PointingHandCursor)
-        self.btn_switch_screen.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_switch_screen.setToolTip("Chuyển cửa sổ Kho Đạo Cụ sang màn hình phụ hoặc màn hình chính")
-        self.btn_switch_screen.setStyleSheet(btn_mgmt_style)
+        self.btn_switch_screen = QPushButton(self)
+        self.btn_switch_screen.hide()
         self.btn_switch_screen.clicked.connect(self._on_switch_screen_clicked)
-        h_layout.addWidget(self.btn_switch_screen)
-
-        # 3. Thống kê phần cứng (.stats)
-        stats_frame = QFrame()
-        stats_frame.setStyleSheet(f"""
-            color: {ThemeColors.TEXT_MUTED};
-            font-size: 11px;
-        """)
-        s_layout = QHBoxLayout(stats_frame)
-        s_layout.setContentsMargins(0, 0, 0, 0)
-        s_layout.setSpacing(5)
-
-        self.lbl_cpu = QLabel("CPU <b style='color:#ededf0'>--</b>")
-        self.lbl_gpu = QLabel("GPU <b style='color:#ededf0'>--</b>")
-        self.lbl_ram = QLabel("RAM <b style='color:#ededf0'>--</b>")
-        s_layout.addWidget(self.lbl_cpu)
-        s_layout.addWidget(self.lbl_gpu)
-        s_layout.addWidget(self.lbl_ram)
-        h_layout.addWidget(stats_frame)
-
-        # 4. Trạng thái Playhead DaVinci Resolve (.pill)
-        self.pill_playhead = QLabel("● Playhead V1 · 14:49")
-        self.pill_playhead.setStyleSheet(f"""
-            background-color: {ThemeColors.BG_CARD};
-            border: 1px solid {ThemeColors.BORDER_DEFAULT};
-            border-radius: 6px;
-            color: {ThemeColors.GREEN};
-            font-size: 11px;
-            font-weight: 500;
-            padding: 3px 8px;
-        """)
-        h_layout.addWidget(self.pill_playhead)
-
-        # 5. Nút Ghim Luôn trên cùng (#pinBtn)
-        self.btn_pin = QPushButton("📌")
-        self.btn_pin.setToolTip("Ghim cửa sổ luôn trên cùng")
+        self.btn_pin = QPushButton(self)
         self.btn_pin.setCheckable(True)
-        self.btn_pin.setCursor(Qt.PointingHandCursor)
+        self.btn_pin.hide()
         self.btn_pin.clicked.connect(self._toggle_always_on_top)
-        self.btn_pin.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {ThemeColors.TEXT_MUTED};
-                border: 1px solid {ThemeColors.BORDER_DEFAULT};
-                padding: 4px 8px;
-                border-radius: 6px;
-                font-size: 11px;
-            }}
-            QPushButton:hover {{
-                border-color: {ThemeColors.BORDER_HOVER};
-                color: {ThemeColors.TEXT_PRIMARY};
-            }}
-            QPushButton:checked {{
-                color: #f59e0b;
-                border-color: {ThemeColors.PRIMARY};
-                background-color: {ThemeColors.VIOLET_LO};
-                font-weight: bold;
-            }}
-        """)
-        h_layout.addWidget(self.btn_pin)
 
-        # 6. Cụm phiên bản & nút cài đặt góc trên bên phải
+        self.btn_more = QPushButton("⋯")
+        self.btn_more.setAccessibleName("Tác vụ thư viện")
+        self.btn_more.setToolTip("Đồng bộ Dock, chuyển màn hình và ghim cửa sổ")
+        self.btn_more.setStyleSheet(button_style)
+        self.more_menu = QMenu(self.btn_more)
+        self.more_menu.addAction("Đồng bộ Thanh Dock", self.btn_sync_dock.click)
+        self.action_screen = self.more_menu.addAction("Chuyển màn hình", self.btn_switch_screen.click)
+        self.action_pin = self.more_menu.addAction("Ghim cửa sổ")
+        self.action_pin.setCheckable(True)
+        self.action_pin.triggered.connect(self.btn_pin.click)
+        self.btn_pin.toggled.connect(self.action_pin.setChecked)
+        self.more_menu.addSeparator()
+        self.action_stats = self.more_menu.addAction("Tài nguyên hệ thống")
+        self.action_stats.setEnabled(False)
+        self.lbl_cpu = QLabel("CPU --", self)
+        self.lbl_gpu = QLabel("GPU --", self)
+        self.lbl_ram = QLabel("RAM --", self)
+        for label in (self.lbl_cpu, self.lbl_gpu, self.lbl_ram):
+            label.hide()
+        self.more_menu.aboutToShow.connect(self._fetch_hardware_stats)
+        self.btn_more.setMenu(self.more_menu)
+        h_layout.addWidget(self.btn_more)
+
         from src.ui.widgets.app_header_actions import AppHeaderActions
         self.header_actions = AppHeaderActions(parent=header, show_version=True)
         self.header_actions.settings_requested.connect(self.settings_requested.emit)
-        self.header_actions.ai_setup_requested.connect(self.open_auto_requested.emit)
+        self.header_actions.ai_setup_requested.connect(self.ai_setup_requested.emit)
+        self.header_actions.studio_requested.connect(self.raise_)
+        self.header_actions.director_requested.connect(self.open_auto_requested.emit)
+        self.header_actions.dock_requested.connect(self.return_to_dock_requested.emit)
         h_layout.addWidget(self.header_actions)
 
         main_layout.addWidget(header)
@@ -406,7 +308,7 @@ class StudioWindow(QMainWindow):
         # WORKFLOW BANNER (Thanh định vị mục đích sử dụng)
         # =====================================================================
         self.workflow_banner = QFrame()
-        self.workflow_banner.setFixedHeight(34)
+        self.workflow_banner.setMinimumHeight(32)
         self.workflow_banner.setStyleSheet("""
             QFrame {
                 background-color: #16171a;
@@ -417,33 +319,10 @@ class StudioWindow(QMainWindow):
         wb_layout.setContentsMargins(14, 0, 14, 0)
         wb_layout.setSpacing(10)
 
-        lbl_hint = QLabel(
-            "💡 <b style='color:#f59e0b;'>Phân định vai trò:</b> "
-            "Dùng <b>Thanh Dock (dán mép)</b> để tìm nhanh & chèn playhead trong 1s khi đang dựng. "
-            "Mở <b>Kho Đạo Cụ</b> này khi cần: Nạp thư mục từ máy tính · Quản lý thư viện · Gom nhóm bộ sưu tập · Chế tác mẫu."
-        )
+        lbl_hint = QLabel("Thư viện tài nguyên · Nạp nguồn, quản lý danh mục và bộ sưu tập")
+        lbl_hint.setWordWrap(True)
         lbl_hint.setStyleSheet("font-size: 11px; color: #9da3ae;")
         wb_layout.addWidget(lbl_hint, stretch=1)
-
-        btn_banner_dock = QPushButton("⚡ Sang Thanh Dock")
-        btn_banner_dock.setCursor(Qt.PointingHandCursor)
-        btn_banner_dock.setStyleSheet("""
-            QPushButton {
-                background: rgba(217, 79, 61, 0.16);
-                color: #f8b4a8;
-                border: 1px solid #d94f3d;
-                border-radius: 4px;
-                padding: 2px 10px;
-                font-size: 11px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background: #d94f3d;
-                color: #ffffff;
-            }
-        """)
-        btn_banner_dock.clicked.connect(self.return_to_dock_requested.emit)
-        wb_layout.addWidget(btn_banner_dock)
 
         main_layout.addWidget(self.workflow_banner)
 
@@ -465,6 +344,10 @@ class StudioWindow(QMainWindow):
             self.lbl_gpu.setText(gpu_html)
         if hasattr(self, "lbl_ram"):
             self.lbl_ram.setText(ram_html)
+        from PySide6.QtGui import QTextDocument
+        stats = QTextDocument()
+        stats.setHtml(f"{cpu_html} · {gpu_html} · {ram_html}")
+        self.action_stats.setText(stats.toPlainText())
 
     def _toggle_always_on_top(self):
         is_on_top = self.btn_pin.isChecked()
@@ -539,11 +422,10 @@ class StudioWindow(QMainWindow):
             self.btn_switch_screen.setText(f"🖥️ Sang Màn {target_idx + 1}")
             self.btn_switch_screen.setToolTip(f"Đang ở Màn {curr_idx + 1}. Bấm để chuyển tức thì sang Màn {target_idx + 1}")
 
+        if hasattr(self, "action_screen"):
+            self.action_screen.setText(self.btn_switch_screen.text())
+            self.action_screen.setEnabled(self.btn_switch_screen.isEnabled())
+
     def showEvent(self, event):
         super().showEvent(event)
         self._update_screen_button_label()
-
-    def closeEvent(self, event):
-        if hasattr(self, "_stats_timer") and self._stats_timer.isActive():
-            self._stats_timer.stop()
-        super().closeEvent(event)

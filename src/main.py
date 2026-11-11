@@ -201,6 +201,7 @@ class _StudioSyncCoordinator:
             self.studio_window.assets_updated.connect(self._on_studio_assets_updated)
             self.studio_window.open_auto_requested.connect(self.dock.open_director)
             self.studio_window.settings_requested.connect(self.dock.open_settings)
+            self.studio_window.ai_setup_requested.connect(self.dock.open_ai_setup)
 
             # Lần đầu mở Studio: chủ động nạp snapshot mới nhất từ StorageManager
             try:

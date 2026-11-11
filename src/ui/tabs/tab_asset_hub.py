@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QProgressBar, QScrollArea, QFrame, QFileDialog,
     QMessageBox, QGridLayout, QSizePolicy
 )
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import Qt, Signal, QSize, QEvent
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 
 from src.core.pack_manager import PackManager, PackManifest, COMMUNITY_PACKS_CATALOG
@@ -23,6 +23,7 @@ from src.core.asset_indexer import AssetIndexer
 from src.ui.tabs.cloud_pack_worker import CloudPackInstallWorker
 from src.ui.icons import get_vector_icon
 from src.ui.theme import ThemeColors
+from src.ui.widgets.flow_layout import FlowLayout
 
 
 class RfPackDropZone(QFrame):
@@ -57,6 +58,7 @@ class RfPackDropZone(QFrame):
 
         self.lbl_text = QLabel("Kéo thả tệp .rfpack hoặc .zip vào đây để cài đặt tự động")
         self.lbl_text.setStyleSheet(f"color: {ThemeColors.TEXT_SECONDARY}; font-size: 12.5px; font-weight: 500;")
+        self.lbl_text.setWordWrap(True)
         self.lbl_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.lbl_text)
 
@@ -110,7 +112,6 @@ class CloudPackCard(QFrame):
                 background-color: {ThemeColors.BG_CARD};
                 border: 1px solid {ThemeColors.BORDER_DEFAULT};
                 border-radius: 8px;
-                padding: 10px;
             }}
             CloudPackCard:hover {{
                 border-color: {ThemeColors.BORDER_HOVER};
@@ -126,10 +127,12 @@ class CloudPackCard(QFrame):
         self.is_installed = PackManager.is_pack_installed(manifest.id)
 
         # Header: Tên gói & tác giả
-        h_row = QHBoxLayout()
+        h_row = QVBoxLayout()
+        h_meta = FlowLayout()
         lbl_title = QLabel(f"📦 {manifest.name}")
         lbl_title.setStyleSheet("color: #f4f4f5; font-size: 13px; font-weight: bold;")
-        h_row.addWidget(lbl_title, stretch=1)
+        lbl_title.setWordWrap(True)
+        h_row.addWidget(lbl_title)
 
         self.lbl_installed_badge = QLabel("✔ ĐÃ CÀI ĐẶT")
         self.lbl_installed_badge.setStyleSheet("""
@@ -141,14 +144,15 @@ class CloudPackCard(QFrame):
             border-radius: 4px;
             border: 1px solid #10b981;
         """)
-        h_row.addWidget(self.lbl_installed_badge)
+        h_meta.addWidget(self.lbl_installed_badge)
         if not self.is_installed:
             self.lbl_installed_badge.hide()
 
         size_str = f"{manifest.size_mb:.1f} MB" if manifest.size_mb else "Cloud"
         lbl_size = QLabel(f"{size_str} · {manifest.item_count} items")
         lbl_size.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11px;")
-        h_row.addWidget(lbl_size)
+        h_meta.addWidget(lbl_size)
+        h_row.addLayout(h_meta)
         layout.addLayout(h_row)
 
         # Mô tả
@@ -176,16 +180,18 @@ class CloudPackCard(QFrame):
         layout.addWidget(self.prog_bar)
 
         self.lbl_status = QLabel("")
+        self.lbl_status.setWordWrap(True)
         self.lbl_status.setStyleSheet("color: #f59e0b; font-size: 11px;")
         self.lbl_status.hide()
         layout.addWidget(self.lbl_status)
 
         # Action row
-        act_row = QHBoxLayout()
+        act_row = FlowLayout()
         act_row.setSpacing(6)
         lbl_author = QLabel(f"Bởi: {manifest.author}")
         lbl_author.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 10.5px;")
-        act_row.addWidget(lbl_author, stretch=1)
+        lbl_author.setWordWrap(True)
+        layout.addWidget(lbl_author)
 
         self.btn_download = QPushButton()
         self.btn_download.setFixedHeight(28)
@@ -339,6 +345,8 @@ class AssetHubWidget(QWidget):
 
         # Scroll area bao bọc toàn bộ nội dung
         scroll = QScrollArea()
+        self.scroll = scroll
+        scroll.viewport().installEventFilter(self)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setStyleSheet("background: transparent;")
@@ -353,6 +361,7 @@ class AssetHubWidget(QWidget):
         # ==========================================
         sec1_header = QHBoxLayout()
         lbl_sec1 = QLabel("☁️ Kho Gói Đạo Cụ Đám Mây Tuyển Chọn (Tải 1-Click)")
+        lbl_sec1.setWordWrap(True)
         lbl_sec1.setStyleSheet("color: #f4f4f5; font-size: 14px; font-weight: bold;")
         sec1_header.addWidget(lbl_sec1)
         sec1_header.addStretch(1)
@@ -361,15 +370,15 @@ class AssetHubWidget(QWidget):
         # Grid hiển thị các gói starter pack
         grid_packs = QGridLayout()
         grid_packs.setSpacing(12)
+        self._pack_grid = grid_packs
+        self._pack_columns = 0
 
         for idx, manifest in enumerate(COMMUNITY_PACKS_CATALOG):
             card = CloudPackCard(manifest)
             card.install_requested.connect(self._on_install_pack_requested)
             card.uninstall_requested.connect(self._on_uninstall_pack_requested)
             self._pack_cards[manifest.id] = card
-            row = idx // 2
-            col = idx % 2
-            grid_packs.addWidget(card, row, col)
+            grid_packs.addWidget(card, idx, 0)
 
         layout.addLayout(grid_packs)
 
@@ -383,7 +392,7 @@ class AssetHubWidget(QWidget):
                 padding: 6px;
             }}
         """)
-        drive_layout = QHBoxLayout(drive_box)
+        drive_layout = QVBoxLayout(drive_box)
         drive_layout.setContentsMargins(10, 8, 10, 8)
         drive_layout.setSpacing(10)
 
@@ -433,11 +442,11 @@ class AssetHubWidget(QWidget):
         # ==========================================
         # PHẦN 2: THƯ MỤC MÁY TÍNH ĐÃ NỐI (LINKED FOLDERS)
         # ==========================================
-        sec2_header = QHBoxLayout()
+        sec2_header = QVBoxLayout()
         lbl_sec2 = QLabel("📁 Thư Mục Ổ Cứng Ngoài (Không tốn thêm 1MB dung lượng)")
+        lbl_sec2.setWordWrap(True)
         lbl_sec2.setStyleSheet("color: #f4f4f5; font-size: 14px; font-weight: bold;")
         sec2_header.addWidget(lbl_sec2)
-        sec2_header.addStretch(1)
 
         btn_add_folder = QPushButton(" ➕ Thêm Thư Mục Máy Tính...")
         btn_add_folder.setIcon(get_vector_icon("folder", "#fbbf24", 14))
@@ -480,6 +489,7 @@ class AssetHubWidget(QWidget):
         # ==========================================
         sec3_header = QHBoxLayout()
         lbl_sec3 = QLabel("📦 Cài Đặt & Chia Sẻ Gói Định Dạng ResolveFlow (.rfpack)")
+        lbl_sec3.setWordWrap(True)
         lbl_sec3.setStyleSheet("color: #f4f4f5; font-size: 14px; font-weight: bold;")
         sec3_header.addWidget(lbl_sec3)
         sec3_header.addStretch(1)
@@ -491,7 +501,7 @@ class AssetHubWidget(QWidget):
         layout.addWidget(self.drop_zone)
 
         # Buttons row: Cài đặt file thủ công hoặc xuất pack
-        rf_btn_row = QHBoxLayout()
+        rf_btn_row = FlowLayout()
         btn_pick_file = QPushButton(" 📥 Chọn Tệp .rfpack / .zip Từ Máy...")
         btn_pick_file.setIcon(get_vector_icon("download", "#ffffff", 14))
         btn_pick_file.setFixedHeight(32)
@@ -507,12 +517,28 @@ class AssetHubWidget(QWidget):
         btn_export_pack.clicked.connect(self._on_export_pack_clicked)
         rf_btn_row.addWidget(btn_export_pack)
 
-        rf_btn_row.addStretch(1)
         layout.addLayout(rf_btn_row)
 
         layout.addStretch(1)
         scroll.setWidget(container)
         main_layout.addWidget(scroll)
+
+    def eventFilter(self, watched, event):
+        if watched is self.scroll.viewport() and event.type() == QEvent.Type.Resize:
+            self._reflow_pack_grid(event.size().width())
+        return super().eventFilter(watched, event)
+
+    def _reflow_pack_grid(self, width):
+        columns = 2 if width >= 760 else 1
+        if columns == self._pack_columns:
+            return
+        self._pack_columns = columns
+        while self._pack_grid.count():
+            self._pack_grid.takeAt(0)
+        for column in (0, 1):
+            self._pack_grid.setColumnStretch(column, int(column < columns))
+        for index, card in enumerate(self._pack_cards.values()):
+            self._pack_grid.addWidget(card, index // columns, index % columns)
 
     def _render_linked_folders(self):
         """Vẽ danh sách các thư mục ổ cứng ngoài đang kết nối."""
@@ -526,6 +552,7 @@ class AssetHubWidget(QWidget):
         folders = list(dict.fromkeys(self.indexer.get_linked_folders() + [link["path"] for link in managed_links]))
         if not folders:
             lbl_empty = QLabel("Chưa liên kết thư mục ngoài nào. Bấm 'Thêm Thư Mục Máy Tính' để nạp kho meme/SFX có sẵn của bạn.")
+            lbl_empty.setWordWrap(True)
             lbl_empty.setStyleSheet(f"color: {ThemeColors.TEXT_MUTED}; font-size: 11.5px; font-style: italic; padding: 6px;")
             self.folder_list_container.addWidget(lbl_empty)
             return
@@ -548,6 +575,9 @@ class AssetHubWidget(QWidget):
             r_layout.addWidget(lbl_ficon)
 
             lbl_p = QLabel(folder_path)
+            lbl_p.setToolTip(folder_path)
+            lbl_p.setWordWrap(True)
+            lbl_p.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             lbl_p.setStyleSheet("color: #ededf0; font-size: 12px; font-family: monospace;")
             r_layout.addWidget(lbl_p, stretch=1)
 

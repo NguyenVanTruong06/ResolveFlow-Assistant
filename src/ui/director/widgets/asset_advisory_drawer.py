@@ -180,15 +180,17 @@ class AssetAdvisoryDrawer(QFrame):
         layout.setSpacing(4)
 
         # Thanh tiêu đề và điều khiển thu gọn
-        h_top = QHBoxLayout()
+        h_top = QVBoxLayout()
         h_top.setSpacing(6)
 
         self.lbl_title = QLabel("💡 Bảng Cố Vấn Tài Nguyên Ngoại Tuyến")
+        self.lbl_title.setWordWrap(True)
         self.lbl_title.setTextFormat(Qt.TextFormat.PlainText)
         self.lbl_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #38bdf8;")
         h_top.addWidget(self.lbl_title)
 
         self.lbl_stale_banner = QLabel("⚠ Kết quả cũ — bấm Gợi ý để cập nhật")
+        self.lbl_stale_banner.setWordWrap(True)
         self.lbl_stale_banner.setTextFormat(Qt.TextFormat.PlainText)
         self.lbl_stale_banner.setStyleSheet("""
             background: rgba(234, 179, 8, 0.15);
@@ -202,7 +204,6 @@ class AssetAdvisoryDrawer(QFrame):
         self.lbl_stale_banner.setVisible(False)
         h_top.addWidget(self.lbl_stale_banner)
 
-        h_top.addStretch(1)
 
         self.btn_toggle = QPushButton("▲ Thu gọn")
         self.btn_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -232,16 +233,19 @@ class AssetAdvisoryDrawer(QFrame):
         v_info.setSpacing(2)
 
         self.lbl_summary = QLabel("Chưa có kết quả gợi ý tài nguyên.")
+        self.lbl_summary.setWordWrap(True)
         self.lbl_summary.setTextFormat(Qt.TextFormat.PlainText)
         self.lbl_summary.setStyleSheet("color: #a1a1aa; font-size: 10px;")
         v_info.addWidget(self.lbl_summary)
 
         self.lbl_storage_info = QLabel("Kho media: Chưa xác định")
+        self.lbl_storage_info.setWordWrap(True)
         self.lbl_storage_info.setTextFormat(Qt.TextFormat.PlainText)
         self.lbl_storage_info.setStyleSheet("color: #71717a; font-size: 9.5px;")
         v_info.addWidget(self.lbl_storage_info)
 
         self.lbl_error_banner = QLabel("")
+        self.lbl_error_banner.setWordWrap(True)
         self.lbl_error_banner.setTextFormat(Qt.TextFormat.PlainText)
         self.lbl_error_banner.setStyleSheet("""
             background: rgba(239, 68, 68, 0.15);

@@ -203,19 +203,18 @@ class DockHeaderWidget(QWidget):
         self.btn_settings.clicked.connect(self.settings_clicked.emit)
         layout.addWidget(self.btn_settings)
 
-        # 2.6.1 Overflow button (shown when w < 410 to access Director, Studio, Settings)
-        self.btn_overflow = QPushButton()
-        self.btn_overflow.setIcon(get_vector_icon("more", "#a1a1aa", 16))
-        self.btn_overflow.setIconSize(QSize(16, 16))
-        self.btn_overflow.setFixedSize(24, 28)
-        self.btn_overflow.setAccessibleName("Tùy chọn khác và Cài đặt")
-        self.btn_overflow.setToolTip("Tùy chọn khác (Director, Studio, Cài đặt)")
-        self.btn_overflow.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_overflow.setCursor(Qt.PointingHandCursor)
-        self.btn_overflow.setStyleSheet(self._button_style(active=False))
-        self.btn_overflow.clicked.connect(self._show_overflow_menu)
-        self.btn_overflow.hide()
-        layout.addWidget(self.btn_overflow)
+        from src.ui.widgets.app_header_actions import AppHeaderActions
+        self.header_actions = AppHeaderActions(self, show_version=False)
+        self.header_actions.director_requested.connect(self.director_clicked.emit)
+        self.header_actions.studio_requested.connect(self.restore_standard_window_clicked.emit)
+        self.header_actions.ai_setup_requested.connect(self.ai_setup_clicked.emit)
+        self.header_actions.settings_requested.connect(self.settings_clicked.emit)
+        self.header_actions.action_dock.setEnabled(False)
+        self.btn_overflow = self.header_actions.btn_launcher
+        layout.addWidget(self.header_actions)
+        self.btn_director.hide()
+        self.btn_studio.hide()
+        self.btn_settings.hide()
 
         # 2.7. Hover Audio toggle button (Âm thanh xem trước Meme/SFX khi lướt chuột)
         self.btn_audio = QPushButton()
@@ -335,16 +334,10 @@ class DockHeaderWidget(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         w = self.width()
-        if w < 410:
-            self.btn_director.hide()
-            self.btn_studio.hide()
-            self.btn_settings.hide()
-            self.btn_overflow.show()
-        else:
-            self.btn_director.show()
-            self.btn_studio.show()
-            self.btn_settings.show()
-            self.btn_overflow.hide()
+        self.btn_director.hide()
+        self.btn_studio.hide()
+        self.btn_settings.hide()
+        self.header_actions.show()
         if w < 340:
             self.btn_instant_autocut.hide()
             self.btn_page_chip.setText("●")
@@ -354,37 +347,7 @@ class DockHeaderWidget(QWidget):
             self.btn_page_chip.setText(f"● {self._current_page}{lock_str}")
 
     def _show_overflow_menu(self):
-        from PySide6.QtWidgets import QMenu
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background: #18181b;
-                color: #f4f4f5;
-                border: 1px solid #27272a;
-                border-radius: 8px;
-                padding: 4px;
-                font-size: 11.5px;
-            }
-            QMenu::item {
-                padding: 6px 14px;
-                border-radius: 4px;
-            }
-            QMenu::item:selected {
-                background: #27272a;
-                color: #ffffff;
-            }
-        """)
-        act_dir = menu.addAction("🤖 ChunDVC Director")
-        act_dir.triggered.connect(self.director_clicked.emit)
-        act_ai = menu.addAction("🧠 Thiết lập AI (Local AI)")
-        act_ai.triggered.connect(self.ai_setup_clicked.emit)
-        act_studio = menu.addAction("🏛️ ChunDVC Studio")
-        act_studio.triggered.connect(self.restore_standard_window_clicked.emit)
-        act_settings = menu.addAction("⚙️ Cài đặt Dock")
-        act_settings.triggered.connect(self.settings_clicked.emit)
-
-        pos = self.btn_overflow.mapToGlobal(self.btn_overflow.rect().bottomLeft())
-        menu.exec(pos)
+        self.header_actions._on_settings_button_clicked()
 
     def set_pinned(self, pinned: bool):
         self.btn_pin.setStyleSheet(self._button_style(active=pinned))

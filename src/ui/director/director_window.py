@@ -41,6 +41,8 @@ class DirectorWindow(QMainWindow):
     closed = Signal()
     analysis_and_preflight_idle = Signal()
     settings_requested = Signal()
+    open_studio_requested = Signal()
+    open_dock_requested = Signal()
 
     def __init__(self, controller: Optional[DirectorController] = None, parent=None):
         super().__init__(parent)
@@ -237,6 +239,9 @@ class DirectorWindow(QMainWindow):
         # Cụm tiêu đề góc trên bên phải: Phiên bản chuẩn và Nút Cài đặt (⚙)
         from src.ui.widgets.app_header_actions import AppHeaderActions
         self.header_actions = AppHeaderActions(parent=self.header_frame, show_version=True)
+        self.header_actions.studio_requested.connect(self.open_studio_requested.emit)
+        self.header_actions.dock_requested.connect(self.open_dock_requested.emit)
+        self.header_actions.director_requested.connect(self.raise_)
         self.header_actions.settings_requested.connect(self._on_settings_requested)
         self.header_actions.ai_setup_requested.connect(self._on_open_ai_setup)
         h_layout.addWidget(self.header_actions)
@@ -1507,10 +1512,12 @@ class DirectorWindow(QMainWindow):
     def _on_run_ai_script(self):
         if not self._sync_all_pages_to_config():
             logger.warning("Không thể khởi động Run AI: lưu cấu hình thất bại (StylePage draft không hợp lệ).")
+            self.page_review.set_ai_result(False, "Kiểm tra lại cấu hình ở Bước 2 · Kiểu dựng.")
             return
         ctx = self._get_current_director_context()
         if not ctx:
             logger.warning("Không thể khởi động Run AI: context rỗng hoặc không hợp lệ.")
+            self.page_review.set_ai_result(False, "Kiểm tra video nguồn ở Bước 1 rồi thử lại.")
             return
         cache_mgr = getattr(self, "_cache_mgr", None) or getattr(self.page_review, "_cache_mgr", None)
         vis_index = getattr(self, "_visual_index", None) or getattr(self.page_review, "_visual_index", None)
@@ -1524,8 +1531,10 @@ class DirectorWindow(QMainWindow):
         )
         if req_id is None:
             logger.warning("Không thể khởi động chuẩn bị Prompt cho Run AI (danh sách tệp rỗng hoặc context không hợp lệ).")
+            self.page_review.set_ai_result(False, self.page_review.lbl_json_hint.text())
         else:
             self._pending_run_ai_request_id = req_id
+            self.page_review.track_ai_prompt_request(req_id)
 
     @Slot(str, str)
     def _on_prompt_ready_for_run(self, req_id: str, prompt_text: str):
@@ -1553,6 +1562,8 @@ class DirectorWindow(QMainWindow):
         prepared = self.page_review.get_video_prompt()
         if not prepared or prepared != prompt_text:
             logger.warning("Ngữ cảnh đã thay đổi hoặc prompt không khớp snapshot, hủy dispatch Run AI.")
+            self._pending_run_ai_request_id = None
+            self.page_review.set_ai_result(False, "Dữ liệu nguồn hoặc cấu hình đã thay đổi. Hãy thử lại.")
             return
 
         # CONSUME ID TRƯỚC KHI GỌI CONTROLLER
@@ -1560,6 +1571,7 @@ class DirectorWindow(QMainWindow):
         self._pending_run_ai_request_id = None
 
         # Single dispatch duy nhất tới controller
+        self.page_review.show_ai_generation_progress(self.config.ollama_model)
         self.controller.run_ai_script(prompt_text)
 
     def _on_browse_bgm(self):

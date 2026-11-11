@@ -26,6 +26,27 @@ from src.core.contracts.edit_plan_contracts import (
 from src.core.story_copilot import StoryCopilot
 
 
+def test_video_prompt_example_requires_manifest_clip_ids(sample_clips_data):
+    prompt = StoryCopilot.generate_copilot_prompt(
+        "Demo", sample_clips_data, manifest_id="manifest_test"
+    )
+    example = json.loads(prompt.split("```json\n", 1)[1].split("\n```", 1)[0])
+
+    assert example["manifest_id"] == "manifest_test"
+    assert example["global_hook"]["clip_id"]
+    assert example["timeline_segments"][0]["clip_id"]
+
+
+def test_video_prompt_example_fits_a_short_source_clip(sample_clips_data):
+    short_clip = {**sample_clips_data[0], "duration": 2.5}
+    prompt = StoryCopilot.generate_copilot_prompt("Demo", [short_clip], hook_duration="30_60s")
+    example = json.loads(prompt.split("```json\n", 1)[1].split("\n```", 1)[0])
+    segment = example["timeline_segments"][0]
+
+    assert 0 <= segment["start_sec"] < segment["end_sec"] <= 2.5
+    assert example["global_hook"] is None
+
+
 @pytest.fixture
 def sample_clips_data():
     return [

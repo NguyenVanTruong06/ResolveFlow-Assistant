@@ -1101,6 +1101,8 @@ class EdgeDockWindow(QWidget):
             from src.ui.director import DirectorWindow
             self._director_window = DirectorWindow()
             self._director_window.settings_requested.connect(self.open_settings)
+            self._director_window.open_studio_requested.connect(self.restore_standard_window_requested.emit)
+            self._director_window.open_dock_requested.connect(self.open_dock)
         self._director_window.show()
         self._director_window.raise_()
         self._director_window.activateWindow()

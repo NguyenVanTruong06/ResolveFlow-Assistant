@@ -2,6 +2,7 @@ import os
 import re
 import json
 import logging
+import math
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -414,12 +415,37 @@ class StoryCopilot:
 
         # Lọc bỏ clip có thời lượng < 1.0s khỏi danh sách kịch bản (chỉ khi thời lượng xác định > 0)
         valid_clips = []
+        known_durations = []
         for c in clips_data:
             dur = float(c.get("duration", c.get("duration_sec", 0.0)))
             dur_known = bool(c.get("duration_known", True))
             if dur_known and (0.0 < dur < 1.0):
                 continue
             valid_clips.append(c)
+            if (
+                dur_known and math.isfinite(dur) and dur > 0
+                and c.get("source_availability", "available") == "available"
+            ):
+                known_durations.append(dur)
+
+        example_end = min(3.0, min(known_durations)) if known_durations else None
+        hook_ranges = {"30_60s": (30, 60), "15_30s": (15, 30), "3_5s": (3, 5)}
+        hook_min, hook_max = hook_ranges.get(hook_duration, (0, 0))
+        example_hook_end = min(hook_max, max(known_durations, default=0.0))
+        hook_example = ['  "global_hook": null,']
+        if hook_min and example_hook_end >= hook_min:
+            hook_example = [
+                '  "global_hook": {',
+                '    "clip_id": "<clip_id từ danh mục>",',
+                '    "clip_index": 1,',
+                '    "clip_name": "Tên clip được chọn làm hook",',
+                '    "start_sec": 0.0,',
+                f'    "end_sec": {example_hook_end},',
+                '    "hook_title": "🔥 [TEASER HOOK] Tóm tắt đoạn mở đầu",',
+                '    "reason": "Lý do chọn đoạn mở đầu",',
+                '    "punch_in": true',
+                "  },",
+            ]
 
         # Xây dựng phần Base Header (chưa kèm Assets để có thể điều chỉnh linh hoạt theo ngân sách)
         base_header_lines = [
@@ -437,7 +463,7 @@ class StoryCopilot:
             base_header_lines.extend([
                 "",
                 "## 🔥 YÊU CẦU ĐẶC BIỆT VỀ ĐOẠN HOOK MỞ ĐẦU (30s - 60s CHO VLOG):",
-                "- Đối với định dạng Vlog/Storytelling, đoạn `global_hook` BẮT BUỘC DÀI TỪ 30 ĐẾN 60 GIÂY (`end_sec - start_sec` trong khoảng 30.0s đến 60.0s).",
+                "- Nếu có clip đủ dài, đoạn `global_hook` cần dài từ 30 đến 60 giây (`end_sec - start_sec` từ 30.0s đến 60.0s).",
                 "- Hãy chọn một phân đoạn cao trào, gay cấn, hài hước hoặc một câu chuyện dạo đầu kịch tính kéo dài 30s - 60s để cuốn hút người xem ngay từ đầu.",
                 "- Đặt tên `hook_title` bắt đầu bằng `🔥 [TEASER HOOK]` kèm thời lượng và tóm tắt (Ví dụ: `🔥 [TEASER HOOK 45s] CÚ TWIST BẤT NGỜ`) để trên DaVinci Resolve hiển thị rõ ràng, dễ nhận biết và tách sửa."
             ])
@@ -445,14 +471,14 @@ class StoryCopilot:
             base_header_lines.extend([
                 "",
                 "## 🔥 YÊU CẦU ĐẶC BIỆT VỀ ĐOẠN HOOK MỞ ĐẦU (15s - 30s):",
-                "- Đoạn `global_hook` cần dài từ 15 đến 30 giây (`end_sec - start_sec` từ 15.0s đến 30.0s).",
+                "- Nếu có clip đủ dài, đoạn `global_hook` cần dài từ 15 đến 30 giây (`end_sec - start_sec` từ 15.0s đến 30.0s).",
                 "- Đặt tên `hook_title` bắt đầu bằng `🔥 [TEASER HOOK]` để dễ nhận diện trên timeline DaVinci Resolve."
             ])
         elif hook_duration == "3_5s":
             base_header_lines.extend([
                 "",
                 "## 🔥 YÊU CẦU ĐẶC BIỆT VỀ ĐOẠN HOOK MỞ ĐẦU (3s - 5s SHORTS):",
-                "- Đoạn `global_hook` dài từ 3 đến 5 giây, giật tít tức thì cho video ngắn."
+                "- Nếu có clip đủ dài, đoạn `global_hook` cần dài từ 3 đến 5 giây."
             ])
         elif hook_duration == "none":
             base_header_lines.extend([
@@ -499,22 +525,15 @@ class StoryCopilot:
             f'  "manifest_id": "{mid or "..."}",',
             '  "strategy_summary": "Giải thích ngắn gọn lý do chọn Hook và cách sắp xếp mạch chuyện",',
             '  "target_platform": "YouTube Vlog / Shorts",',
-            '  "global_hook": {',
-            '    "clip_index": 1,',
-            '    "clip_name": "Tên clip được chọn làm hook",',
-            '    "start_sec": 10.0,',
-            '    "end_sec": 50.0,',
-            '    "hook_title": "🔥 [TEASER HOOK 40s] CÂU CHUYỆN BẤT NGỜ MỞ ĐẦU",',
-            '    "reason": "Đoạn cao trào gay cấn dài 40s mở đầu kích thích người xem xem hết vlog",',
-            '    "punch_in": true',
-            "  },",
+            *hook_example,
             '  "timeline_segments": [',
             "    {",
+            '      "clip_id": "<clip_id từ danh mục>",',
             '      "clip_index": 1,',
             '      "clip_name": "Tên clip",',
             '      "chapter_name": "01_Mở đầu",',
             '      "start_sec": 0.0,',
-            '      "end_sec": 12.5,',
+            f'      "end_sec": {json.dumps(example_end)},',
             '      "action": "keep",',
             '      "speed": 1.0,',
             '      "role": "intro",',
@@ -549,6 +568,9 @@ class StoryCopilot:
             "```",
             "",
             "👉 BẮT BUỘC giữ nguyên 'manifest_id' trong khối JSON kết quả nếu có!",
+            "👉 Dùng clip_id chính xác từ danh mục cho global_hook và từng timeline_segments. "
+            "Chọn start_sec và end_sec trong thời lượng của clip tương ứng. "
+            "Nếu không clip nào đủ dài cho hook yêu cầu, đặt global_hook là null.",
             "👉 Hãy phân tích thật kỹ toàn bộ danh sách clip trên và xuất bản khối JSON tối ưu nhất!"
         ]
 

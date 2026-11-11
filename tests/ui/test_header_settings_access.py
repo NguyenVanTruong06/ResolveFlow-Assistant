@@ -35,7 +35,7 @@ def test_app_header_actions_widget_standalone(qapp):
 
     assert widget.lbl_version is not None
     assert widget.lbl_version.text() == str(APP_VERSION)
-    assert widget.btn_settings.accessibleName() == "Cài đặt"
+    assert widget.btn_settings.accessibleName().startswith("Mở nhanh")
 
     settings_received = []
     ai_received = []
@@ -60,7 +60,7 @@ def test_director_window_persistent_header_and_version(qapp):
     assert hasattr(win, "header_actions")
     assert win.header_actions.lbl_version.text() == str(APP_VERSION)
     assert not win.header_actions.btn_settings.isHidden()
-    assert win.header_actions.btn_settings.accessibleName() == "Cài đặt"
+    assert win.header_actions.btn_settings.accessibleName().startswith("Mở nhanh")
 
     # 2. Kiểm tra header tồn tại xuyên suốt qua các bước 1 -> 2 -> 3 -> 4
     for step in [1, 2, 3, 4]:
@@ -103,15 +103,13 @@ def test_dock_header_settings_accessibility_in_narrow_mode(qapp):
     header.show()
     qapp.processEvents()
 
-    # 1. Chiều rộng thông thường (420px): nút settings trực tiếp hiển thị
     header.resize(420, 44)
     qapp.processEvents()
-    assert not header.btn_settings.isHidden()
-    assert header.btn_settings.accessibleName() == "Cài đặt"
+    assert not header.btn_overflow.isHidden()
 
     settings_emitted = []
     header.settings_clicked.connect(lambda: settings_emitted.append(True))
-    header.btn_settings.click()
+    header.header_actions.action_settings.trigger()
     assert len(settings_emitted) == 1
 
     # 2. Chiều rộng hẹp (320px): nút overflow hiển thị và thay thế để mở settings

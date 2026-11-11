@@ -37,6 +37,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.ui.widgets.flow_layout import FlowLayout
+
 from src.core.contracts.edit_plan_approval_contracts import (
     AppOwnedApprovalRecord,
     verify_proposal_approval_binding,
@@ -380,16 +382,18 @@ class CommonProposalReviewWidget(QFrame):
         layout.setSpacing(8)
 
         # 1. Header Bar: Tiêu đề & Thông tin kịch bản
-        header_row = QHBoxLayout()
+        header_row = QVBoxLayout()
         header_row.setSpacing(8)
 
         self.lbl_title = QLabel("📋 ĐỀ XUẤT KỊCH BẢN TOÀN BẢN (COMMON REVIEW)")
+        self.lbl_title.setWordWrap(True)
         self.lbl_title.setStyleSheet("color: #f4f4f6; font-size: 12px; font-weight: 700; letter-spacing: 0.3px;")
         header_row.addWidget(self.lbl_title)
 
-        header_row.addStretch(1)
 
         self.lbl_proposal_meta = QLabel("Chưa có đề xuất nào được nạp")
+        self.lbl_proposal_meta.setWordWrap(True)
+        self.lbl_proposal_meta.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.lbl_proposal_meta.setStyleSheet("color: #9ca3af; font-size: 10.5px; font-weight: 500;")
         header_row.addWidget(self.lbl_proposal_meta)
 
@@ -405,7 +409,7 @@ class CommonProposalReviewWidget(QFrame):
                 padding: 4px;
             }
         """)
-        h_preflight = QHBoxLayout(preflight_box)
+        h_preflight = FlowLayout(preflight_box)
         h_preflight.setContentsMargins(8, 4, 8, 4)
         h_preflight.setSpacing(12)
 
@@ -429,7 +433,6 @@ class CommonProposalReviewWidget(QFrame):
         self.badge_approval.setStyleSheet("color: #a1a1aa; font-size: 10px; font-weight: 600; border: none;")
         h_preflight.addWidget(self.badge_approval)
 
-        h_preflight.addStretch(1)
         layout.addWidget(preflight_box)
 
         # 3. Tab Widget chứa 3 bảng dữ liệu (Chuẩn NLE Studio Table)
@@ -532,7 +535,7 @@ class CommonProposalReviewWidget(QFrame):
         v_assign.addWidget(self.tbl_assignments)
 
         # Thanh công cụ phụ dưới bảng gán: Cho phép đổi ứng viên hoặc lược bỏ mục
-        bar_assign_tools = QHBoxLayout()
+        bar_assign_tools = FlowLayout()
         bar_assign_tools.setContentsMargins(4, 2, 4, 2)
         bar_assign_tools.setSpacing(6)
 
@@ -552,6 +555,8 @@ class CommonProposalReviewWidget(QFrame):
                 min-width: 140px;
             }
         """)
+        self.combo_assign_candidate.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.combo_assign_candidate.setMinimumContentsLength(14)
         self.combo_assign_candidate.setEnabled(False)
         bar_assign_tools.addWidget(self.combo_assign_candidate)
 
@@ -595,7 +600,6 @@ class CommonProposalReviewWidget(QFrame):
         self.btn_omit_selected.setEnabled(False)
         self.btn_omit_selected.clicked.connect(self._on_omit_selected_clicked)
         bar_assign_tools.addWidget(self.btn_omit_selected)
-        bar_assign_tools.addStretch(1)
         v_assign.addLayout(bar_assign_tools)
 
         self.tbl_assignments.selectionModel().selectionChanged.connect(self._on_assignment_selection_changed)
@@ -623,7 +627,7 @@ class CommonProposalReviewWidget(QFrame):
         self.tbl_omissions.setMinimumHeight(100)
         v_omit.addWidget(self.tbl_omissions)
 
-        bar_omit_tools = QHBoxLayout()
+        bar_omit_tools = FlowLayout()
         bar_omit_tools.setContentsMargins(4, 2, 4, 2)
         bar_omit_tools.setSpacing(6)
 
@@ -643,6 +647,8 @@ class CommonProposalReviewWidget(QFrame):
                 min-width: 140px;
             }
         """)
+        self.combo_restore_candidate.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.combo_restore_candidate.setMinimumContentsLength(14)
         self.combo_restore_candidate.setEnabled(False)
         bar_omit_tools.addWidget(self.combo_restore_candidate)
 
@@ -663,7 +669,6 @@ class CommonProposalReviewWidget(QFrame):
         self.btn_restore_selected.setEnabled(False)
         self.btn_restore_selected.clicked.connect(self._on_restore_selected_clicked)
         bar_omit_tools.addWidget(self.btn_restore_selected)
-        bar_omit_tools.addStretch(1)
         v_omit.addLayout(bar_omit_tools)
 
         self.tbl_omissions.selectionModel().selectionChanged.connect(self._on_omission_selection_changed)
@@ -679,7 +684,7 @@ class CommonProposalReviewWidget(QFrame):
         layout.addWidget(self.banner_omissions)
 
         # 5. Thanh Điều khiển Phê duyệt & Cảnh báo Pháp lý
-        action_row = QHBoxLayout()
+        action_row = QVBoxLayout()
         action_row.setSpacing(10)
 
         # Cảnh báo ranh giới pháp lý bắt buộc (Strict Warning)

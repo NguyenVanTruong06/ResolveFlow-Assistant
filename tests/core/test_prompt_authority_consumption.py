@@ -633,20 +633,19 @@ def test_budget_ladder_forces_zero_details_preserves_warnings_and_omissions():
         "manifest_id": "M_ZERO_TEST",
     }
 
-    # Tìm trần ngân sách thích hợp ép ladder rơi vào mức 0 details mà không hardcode exact bytes
-    target_budget = None
-    prompt = ""
-    for b in range(7810, 7950, 10):
+    # Find the lowest accepted budget without depending on the wording of the template.
+    lower = 1
+    upper = len(StoryCopilot.generate_copilot_prompt("Probe", [clip]).encode("utf-8"))
+    while lower < upper:
+        budget = (lower + upper) // 2
         try:
-            candidate = StoryCopilot.generate_copilot_prompt("Probe", [clip], max_prompt_bytes=b)
-            if "lược bỏ 20 câu thoại do giới hạn dung lượng prompt" in candidate:
-                target_budget = b
-                prompt = candidate
-                break
+            StoryCopilot.generate_copilot_prompt("Probe", [clip], max_prompt_bytes=budget)
         except ValueError:
-            continue
-
-    assert target_budget is not None, "Phải tìm được mức budget ép 0 details thành công!"
+            lower = budget + 1
+        else:
+            upper = budget
+    target_budget = lower
+    prompt = StoryCopilot.generate_copilot_prompt("Probe", [clip], max_prompt_bytes=target_budget)
     prompt_bytes = len(prompt.encode("utf-8"))
     assert prompt_bytes <= target_budget
     assert "| C01 |" in prompt
