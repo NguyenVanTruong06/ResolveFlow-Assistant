@@ -21,7 +21,7 @@ from PySide6.QtCore import QObject, QThread, Signal, QSettings
 
 logger = logging.getLogger("ChunDVC.UpdateService")
 
-CURRENT_VERSION = "1.0.27"
+CURRENT_VERSION = "1.0.28"
 GITHUB_REPO = "NguyenVanTruong06/ResolveFlow-Assistant"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -41,10 +41,106 @@ def parse_version_tuple(ver_str: str) -> Tuple[int, ...]:
     return tuple(numeric) if numeric else (0, 0, 0)
 
 
+def _build_assets_info(assets_list: list) -> Dict[str, Any]:
+    """Chuẩn hóa danh sách asset từ GitHub API hoặc web fallback."""
+    assets_info: Dict[str, Any] = {}
+    for asset in assets_list:
+        raw_name = asset.get("name") or ""
+        name = raw_name.lower()
+        api_url = asset.get("url", "")
+        browser_url = asset.get("browser_download_url", "")
+        # Ưu tiên api_url vì chuyển hướng trực tiếp (302) sang Azure Blob Storage
+        # Tránh hoàn toàn lỗi HTTP 504 Gateway Time-out trên CDN GitHub web router
+        url = api_url if api_url else browser_url
+        size = asset.get("size", 0)
+        if name.endswith(".deb"):
+            assets_info["deb"] = url
+            assets_info["deb_browser"] = browser_url
+            assets_info["deb_name"] = raw_name
+            assets_info["deb_size"] = size
+        elif name.endswith(".tar.gz") and "linux" in name:
+            assets_info["linux_tar"] = url
+            assets_info["tar_browser"] = browser_url
+            assets_info["tar_name"] = raw_name
+            assets_info["tar_size"] = size
+        elif name.endswith(".zip") and "windows" in name:
+            assets_info["windows_zip"] = url
+            assets_info["zip_browser"] = browser_url
+            assets_info["zip_name"] = raw_name
+            assets_info["zip_size"] = size
+    return assets_info
+
+
+def _build_update_payload(tag_name: str, release_name: str, html_url: str, body: str, published_at: str, assets_info: Dict[str, Any], tarball_url: Optional[str] = None, zipball_url: Optional[str] = None) -> Dict[str, Any]:
+    remote_ver = parse_version_tuple(tag_name)
+    local_ver = parse_version_tuple(CURRENT_VERSION)
+    return {
+        "has_update": remote_ver > local_ver,
+        "current_version": CURRENT_VERSION,
+        "latest_version": tag_name.lstrip("vV"),
+        "tag_name": tag_name,
+        "release_name": release_name or tag_name,
+        "html_url": html_url or f"https://github.com/{GITHUB_REPO}/releases/tag/{tag_name}",
+        "body": body.strip(),
+        "published_at": published_at,
+        "assets": assets_info,
+        "tarball_url": tarball_url,
+        "zipball_url": zipball_url,
+    }
+
+
+def _check_updates_via_web_fallback(timeout: int = 6) -> Optional[Dict[str, Any]]:
+    """
+    Fallback không bị giới hạn rate limit 60 req/h của api.github.com:
+    gọi trực tiếp github.com/.../releases/latest (Accept: application/json)
+    và github.com/.../releases/expanded_assets/<tag> để lấy link tải.
+    """
+    headers = {"User-Agent": f"ChunDVC-ResolveFlow/{CURRENT_VERSION}", "Accept": "application/json"}
+    latest_web_url = f"https://github.com/{GITHUB_REPO}/releases/latest"
+    req = urllib.request.Request(latest_web_url, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        if resp.status != 200:
+            return None
+        meta = json.loads(resp.read().decode("utf-8"))
+
+    tag_name = (meta.get("tag_name") or "").strip()
+    if not tag_name:
+        return None
+
+    assets_list = []
+    try:
+        expanded_url = f"https://github.com/{GITHUB_REPO}/releases/expanded_assets/{tag_name}"
+        exp_req = urllib.request.Request(expanded_url, headers={"User-Agent": headers["User-Agent"]})
+        with urllib.request.urlopen(exp_req, timeout=timeout) as exp_resp:
+            if exp_resp.status == 200:
+                html = exp_resp.read().decode("utf-8", errors="ignore")
+                pattern = rf'/{re.escape(GITHUB_REPO)}/releases/download/{re.escape(tag_name)}/([^"\'<> ?#]+)'
+                seen = set()
+                for fname in re.findall(pattern, html):
+                    if fname not in seen:
+                        seen.add(fname)
+                        assets_list.append({
+                            "name": fname,
+                            "browser_download_url": f"https://github.com/{GITHUB_REPO}/releases/download/{tag_name}/{fname}",
+                            "size": 0,
+                        })
+    except Exception as exp_exc:
+        logger.debug("Fallback expanded_assets lỗi: %s", exp_exc)
+
+    return _build_update_payload(
+        tag_name=tag_name,
+        release_name=f"ChunDVC {tag_name}",
+        html_url=f"https://github.com/{GITHUB_REPO}/releases/tag/{tag_name}",
+        body="",
+        published_at="",
+        assets_info=_build_assets_info(assets_list),
+    )
+
+
 def check_for_updates_sync(timeout: int = 6) -> Optional[Dict[str, Any]]:
     """
     Kiểm tra đồng bộ xem có phiên bản mới hơn trên GitHub Releases hay không.
-    Trả về dict thông tin nếu có bản mới, hoặc None nếu đã là bản mới nhất / mất mạng.
+    Trả về dict thông tin nếu có bản mới, hoặc None nếu mất mạng / lỗi hoàn toàn.
     """
     try:
         req = urllib.request.Request(
@@ -56,56 +152,26 @@ def check_for_updates_sync(timeout: int = 6) -> Optional[Dict[str, Any]]:
         )
         with urllib.request.urlopen(req, timeout=timeout) as response:
             if response.status != 200:
-                return None
+                raise urllib.error.HTTPError(LATEST_RELEASE_API, response.status, "Unexpected status", hdrs=None, fp=None)
             data = json.loads(response.read().decode("utf-8"))
 
-        tag_name = data.get("tag_name", "")
-        remote_ver = parse_version_tuple(tag_name)
-        local_ver = parse_version_tuple(CURRENT_VERSION)
-
-        has_update = remote_ver > local_ver
-
-        assets_info = {}
-        for asset in data.get("assets", []):
-            name = asset.get("name", "").lower()
-            api_url = asset.get("url", "")
-            browser_url = asset.get("browser_download_url", "")
-            # Ưu tiên api_url vì chuyển hướng trực tiếp (302) sang Azure Blob Storage
-            # Tránh hoàn toàn lỗi HTTP 504 Gateway Time-out trên CDN GitHub web router
-            url = api_url if api_url else browser_url
-            size = asset.get("size", 0)
-            if name.endswith(".deb"):
-                assets_info["deb"] = url
-                assets_info["deb_browser"] = browser_url
-                assets_info["deb_name"] = asset.get("name")
-                assets_info["deb_size"] = size
-            elif name.endswith(".tar.gz") and "linux" in name:
-                assets_info["linux_tar"] = url
-                assets_info["tar_browser"] = browser_url
-                assets_info["tar_name"] = asset.get("name")
-                assets_info["tar_size"] = size
-            elif name.endswith(".zip") and "windows" in name:
-                assets_info["windows_zip"] = url
-                assets_info["zip_browser"] = browser_url
-                assets_info["zip_name"] = asset.get("name")
-                assets_info["zip_size"] = size
-
-        return {
-            "has_update": has_update,
-            "current_version": CURRENT_VERSION,
-            "latest_version": tag_name.lstrip("vV"),
-            "tag_name": tag_name,
-            "release_name": data.get("name") or tag_name,
-            "html_url": data.get("html_url") or f"https://github.com/{GITHUB_REPO}/releases/tag/{tag_name}",
-            "body": data.get("body", "").strip(),
-            "published_at": data.get("published_at", ""),
-            "assets": assets_info,
-            "tarball_url": data.get("tarball_url"),
-            "zipball_url": data.get("zipball_url")
-        }
+        return _build_update_payload(
+            tag_name=data.get("tag_name", ""),
+            release_name=data.get("name") or data.get("tag_name", ""),
+            html_url=data.get("html_url", ""),
+            body=data.get("body", ""),
+            published_at=data.get("published_at", ""),
+            assets_info=_build_assets_info(data.get("assets", [])),
+            tarball_url=data.get("tarball_url"),
+            zipball_url=data.get("zipball_url"),
+        )
     except Exception as exc:
-        logger.debug("Lỗi khi kiểm tra cập nhật từ GitHub: %s", exc)
-        return None
+        logger.debug("GitHub API lỗi (%s), chuyển sang web fallback...", exc)
+        try:
+            return _check_updates_via_web_fallback(timeout=timeout)
+        except Exception as fb_exc:
+            logger.debug("Lỗi khi kiểm tra cập nhật từ GitHub (cả web fallback): %s", fb_exc)
+            return None
 
 
 class UpdateCheckWorker(QThread):
@@ -505,7 +571,7 @@ def restart_app():
         clean_env["LD_LIBRARY_PATH"] = clean_env.pop("LD_LIBRARY_PATH_ORIG")
     elif "LD_LIBRARY_PATH" in clean_env:
         orig_ld = clean_env["LD_LIBRARY_PATH"]
-        parts = [p for p in orig_ld.split(os.pathsep) if p and "_internal" not in p and "_MEI" not in p]
+        parts = [p for p in re.split(r"[:;]", orig_ld) if p and "_internal" not in p and "_MEI" not in p]
         if parts:
             clean_env["LD_LIBRARY_PATH"] = os.pathsep.join(parts)
         else:

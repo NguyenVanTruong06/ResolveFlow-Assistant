@@ -100,11 +100,11 @@ def test_update_toast_widget_ui(qapp):
     toast.close()
 
 
-def test_current_version_v1_0_27():
-    """Xác nhận phiên bản hệ thống đã nâng đồng bộ lên v1.0.27."""
+def test_current_version_v1_0_28():
+    """Xác nhận phiên bản hệ thống đã nâng đồng bộ lên v1.0.28."""
     from src.core.branding import APP_VERSION
-    assert CURRENT_VERSION == "1.0.27"
-    assert APP_VERSION == "v1.0.27"
+    assert CURRENT_VERSION == "1.0.28"
+    assert APP_VERSION == "v1.0.28"
 
 
 def test_restart_app_clean_env_and_guard(qapp, monkeypatch):
@@ -287,6 +287,55 @@ def test_download_file_rejects_json_response(qapp, tmp_path, monkeypatch):
 
     with pytest.raises(IOError, match="JSON"):
         worker._download_file("https://api.github.com/repos/assets/123", dest, expected_size=100_000_000, max_retries=1)
+
+
+def test_check_for_updates_sync_falls_back_to_web_on_403_rate_limit():
+    """
+    Khi api.github.com trả về HTTP 403 (rate limit exceeded), check_for_updates_sync()
+    PHẢI tự động fallback sang github.com/.../releases/latest và expanded_assets
+    để người dùng vẫn kiểm tra & tải được bản cập nhật.
+    """
+    import urllib.error
+
+    def fake_urlopen(req, timeout=8):
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        if "api.github.com" in url:
+            raise urllib.error.HTTPError(url, 403, "rate limit exceeded", hdrs=None, fp=None)
+        resp = MagicMock()
+        resp.status = 200
+        resp.__enter__.return_value = resp
+        if url.endswith("/releases/latest"):
+            resp.read.return_value = json.dumps({"tag_name": "v9.9.9"}).encode("utf-8")
+            return resp
+        if "/releases/expanded_assets/v9.9.9" in url:
+            html = (
+                '<a href="/NguyenVanTruong06/ResolveFlow-Assistant/releases/download/v9.9.9/ResolveFlow-Assistant-v9.9.9-windows-x64.zip">win</a>'
+                '<a href="/NguyenVanTruong06/ResolveFlow-Assistant/releases/download/v9.9.9/resolveflow-assistant_9.9.9_amd64.deb">deb</a>'
+                '<a href="/NguyenVanTruong06/ResolveFlow-Assistant/releases/download/v9.9.9/ResolveFlow-Assistant-v9.9.9-linux-x64.tar.gz">tar</a>'
+            )
+            resp.read.return_value = html.encode("utf-8")
+            return resp
+        raise AssertionError(f"Unexpected URL requested: {url}")
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        info = check_for_updates_sync()
+
+    assert info is not None
+    assert info["has_update"] is True
+    assert info["tag_name"] == "v9.9.9"
+    assert info["latest_version"] == "9.9.9"
+    assert info["assets"]["windows_zip"] == (
+        "https://github.com/NguyenVanTruong06/ResolveFlow-Assistant/releases/download/v9.9.9/"
+        "ResolveFlow-Assistant-v9.9.9-windows-x64.zip"
+    )
+    assert info["assets"]["deb"] == (
+        "https://github.com/NguyenVanTruong06/ResolveFlow-Assistant/releases/download/v9.9.9/"
+        "resolveflow-assistant_9.9.9_amd64.deb"
+    )
+    assert info["assets"]["linux_tar"] == (
+        "https://github.com/NguyenVanTruong06/ResolveFlow-Assistant/releases/download/v9.9.9/"
+        "ResolveFlow-Assistant-v9.9.9-linux-x64.tar.gz"
+    )
 
 
 
